@@ -1,0 +1,128 @@
+import { useState } from 'react'
+import { Link, NavLink, useNavigate, Outlet } from 'react-router-dom'
+import { useAuth } from '../auth/AuthContext'
+import { ChatIcon, DocChartIcon, FolderIcon, GridIcon, PlusIcon, SearchIcon, ShieldIcon } from './Icons'
+
+const NAV = [
+  { to: '/dashboard', label: 'Dashboard', icon: GridIcon },
+  { to: '/projects', label: 'Projects', icon: FolderIcon },
+  { to: '/projects/new', label: 'New Project', icon: PlusIcon },
+  { to: '/coding', label: 'Coding', icon: ChatIcon },
+  { to: '/admin', label: 'Admin', icon: ShieldIcon },
+]
+
+export default function Shell() {
+  const navigate = useNavigate()
+  const { user, logout } = useAuth()
+  const [query, setQuery] = useState('')
+  const [showUserMenu, setShowUserMenu] = useState(false)
+
+  const onSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    navigate(`/projects?q=${encodeURIComponent(query)}`)
+  }
+
+  const handleLogout = () => {
+    logout()
+  }
+
+  const userInitials = user?.name
+    .split(' ')
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase() || 'U'
+
+  return (
+    <div className="min-h-screen bg-slate-100">
+      {/* Top bar */}
+      <header className="fixed top-0 inset-x-0 h-14 bg-primary-500 z-40 flex items-center px-4 gap-6 shadow">
+        <Link to="/dashboard" className="flex items-center gap-2.5 shrink-0">
+          <div className="w-8 h-8 rounded bg-white/10 flex items-center justify-center">
+            <DocChartIcon className="w-5 h-5 text-white" />
+          </div>
+          <div className="leading-tight">
+            <span className="text-white font-semibold text-[15px] tracking-tight">DVV Research Cloud</span>
+          </div>
+        </Link>
+
+        <form onSubmit={onSearch} className="flex-1 max-w-xl">
+          <div className="relative">
+            <SearchIcon className="w-4 h-4 text-white/50 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search projects…"
+              className="w-full h-9 pl-9 pr-3 rounded-md bg-white/10 text-white placeholder-white/50 text-sm border border-white/10 focus:bg-white focus:text-slate-900 focus:placeholder-slate-400 focus:outline-none transition-colors"
+            />
+          </div>
+        </form>
+
+        <div className="flex items-center gap-4 ml-auto shrink-0">
+          <span className="text-[11px] font-medium text-white/70 border border-white/20 rounded px-2 py-0.5 uppercase tracking-wider">
+            MVP
+          </span>
+          <div className="relative">
+            <button
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              className="w-8 h-8 rounded-full bg-sky-600 text-white text-sm font-semibold flex items-center justify-center hover:bg-sky-700 transition-colors"
+              title={user?.name}
+            >
+              {userInitials}
+            </button>
+
+            {/* User menu */}
+            {showUserMenu && (
+              <div className="absolute right-0 top-full mt-2 w-48 rounded-md bg-white border border-slate-200 shadow-lg z-50 py-1">
+                <div className="px-3 py-2 border-b border-slate-100">
+                  <p className="text-sm font-medium text-slate-900">{user?.name}</p>
+                  <p className="text-xs text-slate-500">{user?.email}</p>
+                  <p className="text-xs text-slate-400 mt-1 capitalize">{user?.role}</p>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Left rail */}
+      <aside className="fixed left-0 top-14 bottom-0 w-56 bg-white border-r border-slate-200 z-30">
+        <nav className="p-3 space-y-0.5">
+          {NAV.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === '/projects'}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'bg-primary-50 text-primary-500'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`
+              }
+            >
+              <Icon className="w-[18px] h-[18px]" />
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="absolute bottom-0 inset-x-0 p-4 border-t border-slate-100">
+          <p className="text-[11px] text-slate-400">DVV Research Cloud v0.2</p>
+          <p className="text-[11px] text-slate-400">Data resident: local</p>
+        </div>
+      </aside>
+
+      {/* Content */}
+      <main className="pl-56 pt-14">
+        <div className="p-8 max-w-[1400px]">
+          <Outlet />
+        </div>
+      </main>
+    </div>
+  )
+}

@@ -1,0 +1,157 @@
+"""Pydantic models for API requests/responses."""
+
+from pydantic import BaseModel, EmailStr
+
+
+class StudyMetadata(BaseModel):
+    """Study metadata."""
+
+    classification_confidence: float | None = None
+    qc_passed: bool | None = None
+    qc_issues: list[str] = []
+    qc_warnings: list[str] = []
+    error: str | None = None
+
+
+class ApprovalRecord(BaseModel):
+    """One approval in the chain."""
+
+    gate: str
+    approved_by: str
+    approved_at: str
+
+
+class StudyResponse(BaseModel):
+    """Study detail response."""
+
+    id: str
+    client_name: str
+    status: str
+    created_at: str
+    updated_at: str
+    metadata: StudyMetadata
+    approval_chain: list[ApprovalRecord]
+    excel_path: str | None = None
+    pptx_path: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class StudyListResponse(BaseModel):
+    """List of studies."""
+
+    studies: list[StudyResponse]
+    total: int
+    page: int
+    limit: int
+
+
+class UploadResponse(BaseModel):
+    """Upload file response."""
+
+    study_id: str
+    status: str
+    message: str
+
+
+class ApprovalRequest(BaseModel):
+    """Approval request body."""
+
+    approved_by: str = "manual"
+    notes: str | None = None
+
+
+class DownloadResponse(BaseModel):
+    """Download response."""
+
+    download_url: str
+    filename: str
+    format: str  # "excel", "pptx", or "both"
+
+
+# Auth models
+class UserResponse(BaseModel):
+    """User response."""
+
+    id: str
+    email: str
+    name: str
+    role: str
+    created_at: str
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+class LoginResponse(BaseModel):
+    """Login response."""
+
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
+class CreateUserRequest(BaseModel):
+    """Create user request."""
+
+    email: EmailStr
+    name: str
+    role: str = "analyst"
+    password: str
+
+
+class ShareLinkResponse(BaseModel):
+    """Share link response."""
+
+    token: str
+    study_id: str
+    created_by: str
+    created_at: str
+    revoked: bool
+
+    class Config:
+        from_attributes = True
+
+
+class PublicStudyResponse(BaseModel):
+    """Public study response (thin payload for share links)."""
+
+    client_name: str
+    status: str
+    created_at: str
+    excel_available: bool
+    pptx_available: bool
+
+
+# Chat models
+class ChatToolCall(BaseModel):
+    """A tool call from the AI assistant."""
+
+    tool: str  # query_data, show_chart, compare_variables, navigate_to
+    params: dict
+
+
+class ChatMessage(BaseModel):
+    """One chat message in the conversation."""
+
+    id: str
+    role: str  # user or assistant
+    content: str
+    tools: list[ChatToolCall] | None = None
+    created_at: str
+
+
+class ChatRequest(BaseModel):
+    """User chat request."""
+
+    message: str
+
+
+class ChatResponse(BaseModel):
+    """Assistant chat response."""
+
+    message: ChatMessage
+    tool_results: list[dict] | None = None
+    conversation_id: str

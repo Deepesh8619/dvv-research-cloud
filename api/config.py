@@ -1,0 +1,55 @@
+"""API configuration."""
+
+import os
+import secrets
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).parent.parent
+
+# Database
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dvv_research.db")
+DATABASE_PATH = Path(os.getenv("DATABASE_PATH", PROJECT_ROOT / "dvv_research.db"))
+
+# Storage
+STUDIES_DIR = Path(os.getenv("STUDIES_DIR", PROJECT_ROOT / "studies"))
+STUDIES_DIR.mkdir(parents=True, exist_ok=True)
+
+# API
+API_TITLE = "DVV Research Cloud"
+API_VERSION = "0.1.0"
+CORS_ORIGINS = ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"]
+
+# Orchestration
+MIN_CODING_CONFIDENCE = float(os.getenv("MIN_CODING_CONFIDENCE", "0.8"))
+AUTO_APPROVE_CLASSIFY = os.getenv("AUTO_APPROVE_CLASSIFY", "true").lower() == "true"
+AUTO_APPROVE_QC = os.getenv("AUTO_APPROVE_QC", "true").lower() == "true"
+REQUIRE_DELIVERY_APPROVAL = os.getenv("REQUIRE_DELIVERY_APPROVAL", "true").lower() == "true"
+
+# Logging
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# JWT Authentication
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_HOURS = int(os.getenv("JWT_EXPIRY_HOURS", "168"))  # 7 days
+
+# JWT_SECRET: read from env if set, otherwise persist to .jwt_secret file
+_jwt_secret_file = PROJECT_ROOT / ".jwt_secret"
+if env_secret := os.getenv("JWT_SECRET"):
+    JWT_SECRET = env_secret
+elif _jwt_secret_file.exists():
+    JWT_SECRET = _jwt_secret_file.read_text().strip()
+else:
+    # Generate once and persist — so reload doesn't invalidate sessions
+    JWT_SECRET = secrets.token_urlsafe(32)
+    _jwt_secret_file.write_text(JWT_SECRET)
+    print(f"Generated JWT_SECRET and saved to {_jwt_secret_file}")
+
+# Admin bootstrap (first startup)
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "deepsharma616@gmail.com")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "changeme123")
+ADMIN_NAME = os.getenv("ADMIN_NAME", "Deepesh Sharma")
+
+# Public share links base URL
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:3000")
+
+print(f"DVV API Config: DB={DATABASE_PATH}, Studies={STUDIES_DIR}")

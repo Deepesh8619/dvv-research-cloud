@@ -1,0 +1,25 @@
+title: Demo tracker — synthetic study (1M respondents)
+weight: weight
+confidence: 0.95
+min_base_for_test: 30
+banner: [gender, age, region]
+tables:
+  - stub: q1
+    nets: auto
+    mean: true
+  - stub: q2
+    nets: auto
+    mean: true
+  - stub: q3
+    nets:
+      - label: "NET: Any agreement"
+        codes: [1, 2]
+      - label: "NET: Any disagreement"
+        codes: [4, 5]
+    mean: true
+  - stub: q4
+    nets: auto
+    mean: true
+    filter: {region: [1, 2]}
+  - stub: q5
+    nets: auto

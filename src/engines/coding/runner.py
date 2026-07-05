@@ -1,0 +1,89 @@
+"""Orchestrator for verbatim coding workflow: sample → codeframe → batch → review."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import polars as pl
+
+from src.engines.coding.codeframe import CodeFrame
+from src.engines.coding.coder import batch_code_verbatims, generate_codeframe_from_sample
+
+
+@dataclass
+class CodingRun:
+    """Result of a complete coding job."""
+
+    question_var: str
+    codeframe: CodeFrame
+    df_coded: pl.DataFrame  # original df + coding_* columns
+    n_auto_coded: int
+    n_needs_review: int
+    confidence_mean: float
+
+
+def run_coding_job(
+    df: pl.DataFrame,
+    text_column: str,
+    respondent_id_column: str,
+    question_text: str,
+    n_samples: int = 50,
+    min_confidence: float = 0.8,
+) -> CodingRun:
+    """End-to-end: generate codeframe from sample, code all verbatims, return review queue."""
+
+    # Sample for codeframe generation
+    sample_rows = df.sample(n=min(n_samples, df.height), seed=42)
+    sample_verbatims = [
+        str(v).strip()
+        for v in sample_rows[text_column].to_list()
+        if v and (not isinstance(v, float) or v == v)
+    ][:n_samples]
+
+    if not sample_verbatims:
+        raise ValueError("no valid verbatims to sample from")
+
+    codeframe = generate_codeframe_from_sample(question_text, sample_verbatims)
+    df_coded = batch_code_verbatims(
+        df, text_column, respondent_id_column, codeframe, min_confidence
+    )
+
+    n_auto_coded = (~df_coded["needs_coding_review"]).sum()
+    n_needs_review = df_coded["needs_coding_review"].sum()
+    confidence_mean = df_coded["coding_confidence"].mean()
+
+    return CodingRun(
+        question_var=text_column,
+        codeframe=codeframe,
+        df_coded=df_coded,
+        n_auto_coded=int(n_auto_coded),
+        n_needs_review=int(n_needs_review),
+        confidence_mean=float(confidence_mean),
+    )
+
+
+@dataclass
+class ReviewQueueItem:
+    """One verbatim awaiting human review."""
+
+    respondent_id: int
+    verbatim: str
+    suggested_codes: list[str]
+    confidence: float
+    reasoning: str
+
+
+def extract_review_queue(run: CodingRun) -> list[ReviewQueueItem]:
+    """Extract verbatims that need human review, sorted by low confidence first."""
+    review_df = run.df_coded.filter(pl.col("needs_coding_review")).sort_by("coding_confidence")
+
+    queue = []
+    for row in review_df.iter_rows(named=True):
+        queue.append(ReviewQueueItem(
+            respondent_id=int(row["respondent_id"]),
+            verbatim=row["text"],
+            suggested_codes=row["codes"] or [],
+            confidence=float(row["coding_confidence"]),
+            reasoning=row["coding_reasoning"],
+        ))
+    return queue

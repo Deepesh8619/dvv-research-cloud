@@ -1,0 +1,37 @@
+title: "Pharma OTC Market Research Study - MVP Demo"
+weight: null
+confidence: 0.95
+min_base_for_test: 30
+banner:
+  - age_group
+  - gender
+  - income
+
+tables:
+  - stub: awareness_aspirin
+    nets: auto
+    mean: true
+
+  - stub: awareness_tylenol
+    nets: auto
+    mean: true
+
+  - stub: awareness_ibuprofen
+    nets: auto
+    mean: true
+
+  - stub: purchase_intent_aspirin
+    nets: auto
+    mean: true
+
+  - stub: purchase_intent_tylenol
+    nets: auto
+    mean: true
+
+  - stub: satisfaction_current
+    nets: auto
+    mean: true
+
+  - stub: recommendation_willingness
+    nets: auto
+    mean: true
