@@ -194,21 +194,25 @@ def _build_context(study, datamap: DataMap | None, deck: dict, question: str = "
     lines = [f"Project: {study.client_name} (status: {study.status})"]
 
     if deck:
+        # Just a one-line pointer, not the full table list. The dataframe is the
+        # source of truth (per the system prompt); the model should query it, not
+        # lean on precomputed summaries. Listing 30 table titles here cost ~600
+        # tokens re-sent every turn — the compare_tables tool can fetch any of
+        # them by id (t1..tN) on demand if the user asks about the deck.
+        n = len(deck.get("tables", []))
+        weight = f"weighted by {deck['weight']}" if deck.get("weight") else "unweighted"
         lines.append(
-            f"Deck: {deck.get('title')} — {len(deck.get('tables', []))} computed tables, "
-            f"{'weighted by ' + deck['weight'] if deck.get('weight') else 'unweighted'}, "
-            f"{deck.get('confidence', 0.95):.0%} confidence."
+            f"A deck of {n} precomputed crosstabs exists ({weight}, "
+            f"{deck.get('confidence', 0.95):.0%} confidence), ids t1..t{n}; "
+            "fetch one with compare_tables only if the user asks about the deck."
         )
-        lines.append("Computed tables (id: title):")
-        for t in deck.get("tables", []):
-            lines.append(f"  {t['id']}: {t['title']}")
 
     if datamap:
         detailed = _rank_variables(datamap, question, NAV_DETAIL_VARS)
 
         lines.append(
-            f"Datamap: {len(datamap.variables)} variables. Detail for the "
-            "most relevant (name [type] label | code=label):"
+            f"Data has {len(datamap.variables)} columns. Most relevant to this "
+            "question (name [type] label | code=label):"
         )
         for v in detailed:
             entry = f"  {v.name} [{v.type}] {v.label or ''}"
@@ -219,14 +223,12 @@ def _build_context(study, datamap: DataMap | None, deck: dict, question: str = "
                     entry += " …"
             lines.append(entry)
 
-        # Deliberately NO full variable roster here — for a 400+ variable study
-        # it's ~700 tokens re-sent every agent turn and blows the free-tier
-        # budget. The deck-table index above plus relevance matching cover the
-        # common questions; for anything else the model can run query_data
-        # (`SELECT * ... LIMIT 0` discovers columns) or name a variable directly.
+        # No full column roster — for a 400+ column study it's ~700 tokens per
+        # turn. Relevance matching covers named variables; query_data discovers
+        # the rest (`SELECT * FROM data LIMIT 0`).
         plan = auto_tab_plan(datamap)
         if plan:
-            lines.append(f"Default banner variables: {', '.join(plan.banner)}")
+            lines.append(f"Default banner (columns) for crosstabs: {', '.join(plan.banner)}")
     else:
         lines.append(
             "Datamap unavailable for this study (processed before datamap persistence "

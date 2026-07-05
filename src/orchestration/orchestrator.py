@@ -65,13 +65,27 @@ def _is_system_variable(name: str) -> bool:
     return bool(_CAMEL_SYSTEM_RE.match(name))
 
 
+def _is_binary_flag(v) -> bool:
+    """True for 0/1 (or 1/2) dummy variables with no real value labels.
+
+    Multi-punch questions explode into one 0/1 sub-flag per option
+    (C2br1, C2br2, …). These have exactly two codes and labels that are just
+    the codes as strings ("0", "1") — meaningless as a banner ("0 (A) 1 (B)").
+    A real demographic banner has descriptive labels ("Male"/"Female"), so
+    require at least one non-numeric label to qualify.
+    """
+    labels = list(v.values.values())
+    return all(str(label).strip().lstrip("-").isdigit() for label in labels if label != "")
+
+
 def auto_tab_plan(datamap: DataMap, title: str = "Topline Tables") -> TabPlan | None:
     """Build a default tab plan from the datamap when the client sent no tab spec.
 
-    Banner: up to 3 question variables with 2-6 short-labelled categories
-    (demographic-like). Stubs: every other question variable with 2+ codes,
-    with auto T2B/B2B nets and means on 5+ point scales. System/paradata
-    columns are excluded entirely.
+    Banner: up to 3 question variables with 2-6 real (descriptively-labelled)
+    categories — demographic-like. Binary 0/1 multi-punch flags are excluded so
+    tables break by meaningful cuts (gender/region), not by "0 (A) 1 (B)" dummy
+    columns. Stubs: every other question variable with 2+ codes, with auto
+    T2B/B2B nets and means on 5+ point scales. System/paradata columns excluded.
     """
     singles = [
         v
@@ -86,6 +100,7 @@ def auto_tab_plan(datamap: DataMap, title: str = "Topline Tables") -> TabPlan | 
         for v in singles
         if 2 <= len(v.valid_codes()) <= 6
         and max(len(label) for label in v.values.values()) <= 24
+        and not _is_binary_flag(v)
     ][:3]
     stubs = [v for v in singles if v.name not in banner]
     if not banner or not stubs:
