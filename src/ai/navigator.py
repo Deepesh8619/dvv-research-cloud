@@ -176,20 +176,24 @@ _RETRY_AFTER_RE = re.compile(r"try again in ([\d.]+)s")
 GROQ_MAX_RETRY_WAIT = 12.0
 
 
-def _groq_chat(messages: list[dict], timeout: int) -> dict:
-    """One Groq chat-completions call, with a single rate-limit retry."""
+def _groq_chat(messages: list[dict], timeout: int, with_tools: bool = True) -> dict:
+    """One Groq chat-completions call, with a single rate-limit retry.
+
+    with_tools=False forces a plain text answer (no function calling) — used for
+    the final "now summarize what you found" turn so the loop always yields text.
+    """
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         raise BackendUnavailable("GROQ_API_KEY not set")
-    payload = json.dumps(
-        {
-            "model": GROQ_MODEL,
-            "max_tokens": 1500,
-            "temperature": 0,
-            "messages": messages,
-            "tools": _groq_tools(),
-        }
-    ).encode()
+    body_obj = {
+        "model": GROQ_MODEL,
+        "max_tokens": 1500,
+        "temperature": 0,
+        "messages": messages,
+    }
+    if with_tools:
+        body_obj["tools"] = _groq_tools()
+    payload = json.dumps(body_obj).encode()
     request = urllib.request.Request(
         "https://api.groq.com/openai/v1/chat/completions",
         data=payload,
@@ -253,6 +257,29 @@ def navigate_groq(
             messages.append(
                 {"role": "tool", "tool_call_id": call["id"], "content": _compact(result)}
             )
+
+    if not reply.strip():
+        # The model spent every turn calling tools and never wrote an answer
+        # (common when a requested crossbreak comes back thin/empty and it keeps
+        # retrying). Force one final text-only turn so the user always gets a
+        # real reply grounded in whatever the tools returned, instead of the
+        # loop silently failing over to the weak local model.
+        if tool_results:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Based on the tool results above, answer the original "
+                        "question now in plain text. If a requested crossbreak "
+                        "returned no usable columns, say so and suggest a better "
+                        "variable to cross by."
+                    ),
+                }
+            )
+            final = _groq_chat(messages, timeout, with_tools=False)
+            choices = final.get("choices", [])
+            if choices and choices[0]["message"].get("content"):
+                reply = choices[0]["message"]["content"]
 
     if not reply.strip():
         raise ModelOutputError("Groq navigator returned no reply text")
