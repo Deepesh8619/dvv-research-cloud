@@ -115,12 +115,47 @@ MAX_VALUE_LABELS = 10
 BASIC_MAX_VARS = 25
 
 
+def _question_keywords(question: str, datamap: DataMap) -> set[str]:
+    """Keywords for relevance scoring.
+
+    Keep general words >2 chars, PLUS any token that exactly matches a variable
+    name regardless of length. Survey variable names are short (`S2`, `C2`,
+    `Q5`) and tokenize to ≤2 chars — a plain `len>2` filter silently drops them,
+    so a question explicitly naming `S2` never pulls S2 into context and the
+    model wrongly reports it "not defined." Matching real names fixes that
+    without admitting noise words like "of"/"is".
+    """
+    tokens = re.findall(r"[a-z0-9]+", question.lower())
+    varnames = {v.name.lower() for v in datamap.variables}
+    return {t for t in tokens if len(t) > 2 or t in varnames}
+
+
+def _rank_variables(datamap: DataMap, question: str, limit: int) -> list:
+    """Variables most relevant to the question, padded with leading vars.
+
+    Exact variable-name matches are weighted heavily so a directly-named
+    variable is never crowded out of the top `limit` by incidental label hits.
+    """
+    words = _question_keywords(question, datamap)
+
+    def score(v) -> int:
+        name_hit = 10 if v.name.lower() in words else 0
+        hay = f"{v.label or ''} {' '.join(v.values.values())}".lower()
+        return name_hit + sum(1 for w in words if w in hay)
+
+    ranked = sorted(datamap.variables, key=score, reverse=True)
+    chosen = [v for v in ranked if score(v) > 0][:limit]
+    if len(chosen) < limit:
+        seen = {v.name for v in chosen}
+        chosen += [v for v in datamap.variables if v.name not in seen][: limit - len(chosen)]
+    return chosen
+
+
 def _basic_context(study, datamap: DataMap | None, deck: dict, question: str) -> str:
     """Compact context for the local 3B fallback model.
 
     A 150-variable context drowns a small model, so keep only the variables
-    whose name/label/value-labels overlap the question's words (plus the
-    first few as anchors when nothing matches).
+    relevant to the question (plus leading vars as anchors when nothing matches).
     """
     lines = [f"Project: {study.client_name}."]
     if deck:
@@ -130,21 +165,8 @@ def _basic_context(study, datamap: DataMap | None, deck: dict, question: str) ->
         )
 
     if datamap:
-        words = {w for w in re.findall(r"[a-z0-9]+", question.lower()) if len(w) > 2}
-
-        def score(v) -> int:
-            hay = f"{v.name} {v.label or ''} {' '.join(v.values.values())}".lower()
-            return sum(1 for w in words if w in hay)
-
-        ranked = sorted(datamap.variables, key=score, reverse=True)
-        chosen = [v for v in ranked if score(v) > 0][:BASIC_MAX_VARS]
-        if len(chosen) < BASIC_MAX_VARS:
-            seen = {v.name for v in chosen}
-            chosen += [v for v in datamap.variables if v.name not in seen][
-                : BASIC_MAX_VARS - len(chosen)
-            ]
         lines.append("Variables (name [type] label | code=label):")
-        for v in chosen:
+        for v in _rank_variables(datamap, question, BASIC_MAX_VARS):
             entry = f"  {v.name} [{v.type}] {v.label or ''}"
             if v.values:
                 entry += " | " + " ".join(
@@ -164,9 +186,10 @@ def _build_context(study, datamap: DataMap | None, deck: dict, question: str = "
     The agent loop re-sends this on every turn, so dumping all 150+ variables
     (≈3k tokens) blew the 12k-tokens/minute free limit on a single question.
     Instead: send the full deck-table index (cheap, and it's what "top-level
-    findings"-style questions need), full detail only for variables relevant to
-    the question, and a bare-name roster of everything else so the model still
-    knows every variable exists and can query_data / show_table on any of them.
+    findings"-style questions need) plus full detail only for variables relevant
+    to the question (via _rank_variables, which weights exact variable-name
+    matches so a directly-named var like S2 is always included). For anything
+    else the model uses query_data / show_table by name.
     """
     lines = [f"Project: {study.client_name} (status: {study.status})"]
 
@@ -181,27 +204,13 @@ def _build_context(study, datamap: DataMap | None, deck: dict, question: str = "
             lines.append(f"  {t['id']}: {t['title']}")
 
     if datamap:
-        words = {w for w in re.findall(r"[a-z0-9]+", question.lower()) if len(w) > 2}
-
-        def score(v) -> int:
-            hay = f"{v.name} {v.label or ''} {' '.join(v.values.values())}".lower()
-            return sum(1 for w in words if w in hay)
-
-        ranked = sorted(datamap.variables, key=score, reverse=True)
-        detailed = [v for v in ranked if score(v) > 0][:NAV_DETAIL_VARS]
-        if len(detailed) < NAV_DETAIL_VARS:
-            seen = {v.name for v in detailed}
-            detailed += [v for v in datamap.variables if v.name not in seen][
-                : NAV_DETAIL_VARS - len(detailed)
-            ]
+        detailed = _rank_variables(datamap, question, NAV_DETAIL_VARS)
 
         lines.append(
             f"Datamap: {len(datamap.variables)} variables. Detail for the "
             "most relevant (name [type] label | code=label):"
         )
-        detailed_names = set()
         for v in detailed:
-            detailed_names.add(v.name)
             entry = f"  {v.name} [{v.type}] {v.label or ''}"
             if v.values:
                 shown = list(v.values.items())[:MAX_VALUE_LABELS]

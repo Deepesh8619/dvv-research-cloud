@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -161,8 +163,17 @@ def _groq_tools() -> list[dict]:
     ]
 
 
+# On the free tier a burst of questions can exhaust the per-minute token
+# budget; Groq's 429 tells us how long to wait ("try again in 6.045s"). One
+# short retry keeps the user on the good 70B model instead of dropping to the
+# weak local fallback, which gives visibly worse answers. Capped so a genuinely
+# long backoff still falls through rather than hanging the request.
+_RETRY_AFTER_RE = re.compile(r"try again in ([\d.]+)s")
+GROQ_MAX_RETRY_WAIT = 12.0
+
+
 def _groq_chat(messages: list[dict], timeout: int) -> dict:
-    """One Groq chat-completions call. messages already include the system role."""
+    """One Groq chat-completions call, with a single rate-limit retry."""
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         raise BackendUnavailable("GROQ_API_KEY not set")
@@ -184,10 +195,15 @@ def _groq_chat(messages: list[dict], timeout: int) -> dict:
             "User-Agent": USER_AGENT,
         },
     )
-    try:
-        return http_json(request, timeout)
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise BackendUnavailable(f"Groq API unreachable: {exc}") from exc
+    for attempt in (1, 2):
+        try:
+            return http_json(request, timeout)
+        except (urllib.error.URLError, TimeoutError) as exc:
+            wait = _RETRY_AFTER_RE.search(str(exc))
+            if attempt == 1 and wait and float(wait.group(1)) <= GROQ_MAX_RETRY_WAIT:
+                time.sleep(float(wait.group(1)) + 0.5)
+                continue
+            raise BackendUnavailable(f"Groq API unreachable: {exc}") from exc
 
 
 def navigate_groq(
