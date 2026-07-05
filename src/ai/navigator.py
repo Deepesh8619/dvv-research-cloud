@@ -24,7 +24,11 @@ NAVIGATOR_MODEL = os.environ.get("NAVIGATOR_MODEL", "claude-haiku-4-5-20251001")
 # Groq's Llama-3.3-70B is the default cloud navigator: free tier, tuned for
 # tool use, cloud-fast. Overridable if the account is on a different model.
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-MAX_AGENT_TURNS = 4
+# Each turn re-sends context + tools + accumulated tool results, so turns are
+# the dominant cost against Groq's free 12k-tokens/min. 3 is enough for the
+# normal pattern (call a tool, read the result, answer) while capping runaway
+# loops that would blow the budget mid-question.
+MAX_AGENT_TURNS = 3
 
 SYSTEM_PROMPT = """You are the data navigator for one survey research study on the \
 DVV Research Cloud platform. You help the analyst see, understand, and work with \
@@ -255,7 +259,7 @@ def navigate_groq(
     return reply.strip(), tool_results
 
 
-def _compact(result: dict, limit: int = 4000) -> str:
+def _compact(result: dict, limit: int = 1500) -> str:
     """Tool result as JSON for the model, truncated to keep turns cheap."""
     text = json.dumps(result, ensure_ascii=False, default=str)
     return text[:limit] + ("…(truncated)" if len(text) > limit else "")
