@@ -154,10 +154,21 @@ def _basic_context(study, datamap: DataMap | None, deck: dict, question: str) ->
     return "\n".join(lines)
 
 
-def _build_context(study, datamap: DataMap | None, deck: dict) -> str:
-    lines = [
-        f"Project: {study.client_name} (status: {study.status})",
-    ]
+NAV_DETAIL_VARS = 35
+
+
+def _build_context(study, datamap: DataMap | None, deck: dict, question: str = "") -> str:
+    """Context for the cloud (Groq) navigator, kept lean enough to survive the
+    free tier's per-minute token budget.
+
+    The agent loop re-sends this on every turn, so dumping all 150+ variables
+    (≈3k tokens) blew the 12k-tokens/minute free limit on a single question.
+    Instead: send the full deck-table index (cheap, and it's what "top-level
+    findings"-style questions need), full detail only for variables relevant to
+    the question, and a bare-name roster of everything else so the model still
+    knows every variable exists and can query_data / show_table on any of them.
+    """
+    lines = [f"Project: {study.client_name} (status: {study.status})"]
 
     if deck:
         lines.append(
@@ -170,12 +181,27 @@ def _build_context(study, datamap: DataMap | None, deck: dict) -> str:
             lines.append(f"  {t['id']}: {t['title']}")
 
     if datamap:
-        n_shown = min(len(datamap.variables), MAX_CONTEXT_VARS)
+        words = {w for w in re.findall(r"[a-z0-9]+", question.lower()) if len(w) > 2}
+
+        def score(v) -> int:
+            hay = f"{v.name} {v.label or ''} {' '.join(v.values.values())}".lower()
+            return sum(1 for w in words if w in hay)
+
+        ranked = sorted(datamap.variables, key=score, reverse=True)
+        detailed = [v for v in ranked if score(v) > 0][:NAV_DETAIL_VARS]
+        if len(detailed) < NAV_DETAIL_VARS:
+            seen = {v.name for v in detailed}
+            detailed += [v for v in datamap.variables if v.name not in seen][
+                : NAV_DETAIL_VARS - len(detailed)
+            ]
+
         lines.append(
-            f"Datamap ({len(datamap.variables)} variables, first {n_shown} shown) — "
-            "format: name [type] label | code=label…"
+            f"Datamap: {len(datamap.variables)} variables. Detail for the "
+            "most relevant (name [type] label | code=label):"
         )
-        for v in datamap.variables[:MAX_CONTEXT_VARS]:
+        detailed_names = set()
+        for v in detailed:
+            detailed_names.add(v.name)
             entry = f"  {v.name} [{v.type}] {v.label or ''}"
             if v.values:
                 shown = list(v.values.items())[:MAX_VALUE_LABELS]
@@ -183,6 +209,12 @@ def _build_context(study, datamap: DataMap | None, deck: dict) -> str:
                 if len(v.values) > MAX_VALUE_LABELS:
                     entry += " …"
             lines.append(entry)
+
+        # Deliberately NO full variable roster here — for a 400+ variable study
+        # it's ~700 tokens re-sent every agent turn and blows the free-tier
+        # budget. The deck-table index above plus relevance matching cover the
+        # common questions; for anything else the model can run query_data
+        # (`SELECT * ... LIMIT 0` discovers columns) or name a variable directly.
         plan = auto_tab_plan(datamap)
         if plan:
             lines.append(f"Default banner variables: {', '.join(plan.banner)}")
@@ -282,7 +314,7 @@ async def chat_with_study(
     study_dir = _study_dir(study)
     datamap = _load_datamap(study_dir)
     deck = _load_deck(study_dir)
-    context = _build_context(study, datamap, deck)
+    context = _build_context(study, datamap, deck, request.message)
     executor = _make_executor(study_dir, datamap, deck)
 
     user_msg = create_chat_message(db, study_id, "user", request.message)

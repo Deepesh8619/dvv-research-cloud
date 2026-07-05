@@ -20,6 +20,13 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+# Groq's Cloudflare front rejects urllib's default "Python-urllib/3.x" User-Agent
+# with a 403 (Cloudflare error 1010, generic bot-signature block) — reproduced by
+# swapping in curl's UA and getting 200. Anthropic hasn't been observed to block
+# it, but there's no reason to leave any external AI call looking like a bot
+# scraper, so every non-local request sends this.
+USER_AGENT = "dvv-research-cloud/1.0"
+
 
 def _ssl_context() -> ssl.SSLContext | None:
     """SSL context with certifi's CA bundle when available.
@@ -186,6 +193,7 @@ def _claude_generate(model: str, prompt: str, schema: dict, timeout: int) -> dic
             "Content-Type": "application/json",
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
+            "User-Agent": USER_AGENT,
         },
     )
     try:

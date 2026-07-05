@@ -54,15 +54,28 @@ Defined in `src/core/models.py`. Three things:
 ### 3.1 SPSS adapter (`src/adapters/spss.py`)
 `read_sav()` uses pyreadstat, which gives real embedded value labels and variable types — this is the gold-standard path. `write_sav()` renders back to `.sav` for interchange.
 
-### 3.2 CSV/Excel adapter (`src/adapters/tabular.py`) — and its real limitation
-Decipher/Qualtrics datafeed exports (CSV/XLSX) carry **no embedded metadata** — a column of `1,2,3,4,98` has no idea "98" means "prefer not to say." So `tabular.py` **infers** structure:
+### 3.2 CSV/Excel adapter (`src/adapters/tabular.py`) — companion datamap sheet (built 2026-07-05)
+Decipher/Qualtrics datafeed exports (CSV/XLSX) carry **no embedded metadata** in the data sheet itself — a column of `1,2,3,4,98` has no idea "98" means "prefer not to say." Two paths now exist:
+
+**Path A — companion Datamap sheet (preferred, real labels, no guessing):** many real exports (confirmed against an actual 2987-respondent client file) ship as a 2-sheet workbook: raw data on one sheet, a codebook on a sheet named `Datamap`/`Data Map`/`Codebook`/`Labels` on the other. `src/adapters/datamap_sheet.py`'s `find_datamap_sheet()` detects this (only fires for the unambiguous 2-sheet case — 1 data sheet + 1 recognizably-named sheet — else falls through to Path B, no guessing on ambiguous workbooks) and `parse_datamap_sheet()` parses the block format:
+```
+[varname]: Variable label
+Open numeric response          <- OR: Open text response
+                                <- OR: "Values: <range>" then (code, label) rows
+                                   until the next blank row or [varname] header
+```
+`read_tabular()` merges these onto matching data columns by exact name — real question text and real value labels, same quality as an SPSS import, for every variable the codebook documents (on the test file: 179 of 467 columns matched; the other 288 — mostly undocumented system/paradata fields — fall through to Path B). **Gotcha hit while building this:** pandas 2.x's `.astype(str)` does NOT convert `NaN` to the string `"nan"` (older-pandas assumption) — it leaves real `NaN` as `NaN`. Blank-row detection must use `pd.isna()`, not a string comparison, or the parser throws `TypeError: expected string or bytes-like object, got 'float'` on the first blank separator row.
+
+**Path B — inference (fallback, same as before):** for columns the codebook doesn't cover, or workbooks with no recognizable companion sheet:
 - Numeric column, ≤15 distinct integer values → `SINGLE` (categorical), labels = the numbers themselves as strings.
 - Numeric column, more/non-integer values → `NUMERIC`.
 - String column, ≤25 distinct values → `SINGLE`, re-encoded to integer codes with the original strings as labels.
 - String column, more distinct values → `TEXT` (open-end).
 - All-empty columns are dropped.
 
-**Honest gap:** because there's no real label source, Excel-import tables show raw codes (`1`, `2`, `98`) instead of human labels (`"Strongly agree"`, `"Don't know"`). The fix is a **datamap-merge feature**: let the user also upload the project's datamap/codebook document, and merge real labels onto the inferred variables before rendering. **This is the top of the backlog — not yet built.** Don't assume it exists.
+**Remaining honest gap:** if the client's real datamap is a *separate file* (not a sheet in the same workbook) — e.g. a standalone Word/PDF questionnaire or a distinct codebook spreadsheet uploaded separately — nothing merges it yet. That would need a second upload slot + a way to associate it with a study before/during processing. Not built; lower priority now that the common single-workbook case works.
+
+**Separate, newly-visible bug this surfaced (not yet fixed):** `auto_tab_plan()`'s banner-selection heuristic (§4.1) picks *any* short-labelled 2–6-category variable as a banner column, with no check for whether it's actually a meaningful demographic split — on the real test file it picked binary multi-punch sub-flags (`C2br1`-style Yes/No dummy columns) as the default banner, showing as bare `0`/`1` columns instead of a real cut like age/gender/region. `auto_nets()` similarly has no ordinality check — it applied Top-2-Box/Bottom-2-Box grouping to a *nominal* variable (gender: Female/Male/Non-binary/...), producing a nonsensical "Top 2 Box (Female + Male)" net. Before this fix these were invisible because everything showed raw codes anyway; now that real labels exist, they're visible and worth fixing — likely by excluding binary 0/1 flags from banner candidacy and gating `auto_nets()` on the variable actually being an ordered 1..N scale (e.g. label pattern or monotonic-looking value labels), not just "5+ codes."
 
 ### 3.3 System/paradata filtering
 Real platform exports are 400–600 columns wide, and most of that is plumbing: `uuid`, `markers`, `HidDevices`, `hCFDeviceWidth`, `Hid_INCOME_Quota`, `DUMMYUSSTATE`, `dTrack`, `*Flag` columns, etc. `orchestrator.py`'s `_is_system_variable()` filters these out by name pattern (exact matches, prefixes like `hid`/`h_`/`dummy`/`noanswer`, and a `[dvh][A-Z]` camelCase regex for things like `dTrack`/`vUserAgent`) before auto-generating tables. If a real client file starts producing garbage tables again, this filter is the first place to look — it's a pattern list, not a real schema, so new platforms/exports may need new patterns added.

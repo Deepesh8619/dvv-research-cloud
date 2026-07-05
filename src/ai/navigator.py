@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
-from src.ai.router import BackendUnavailable, ModelOutputError, http_json, run_task
+from src.ai.router import USER_AGENT, BackendUnavailable, ModelOutputError, http_json, run_task
 
 NAVIGATOR_MODEL = os.environ.get("NAVIGATOR_MODEL", "claude-haiku-4-5-20251001")
 # Groq's Llama-3.3-70B is the default cloud navigator: free tier, tuned for
@@ -137,6 +137,7 @@ def _claude_messages(messages: list[dict], system: str, timeout: int) -> dict:
             "Content-Type": "application/json",
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
+            "User-Agent": USER_AGENT,
         },
     )
     try:
@@ -177,7 +178,11 @@ def _groq_chat(messages: list[dict], timeout: int) -> dict:
     request = urllib.request.Request(
         "https://api.groq.com/openai/v1/chat/completions",
         data=payload,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": USER_AGENT,
+        },
     )
     try:
         return http_json(request, timeout)

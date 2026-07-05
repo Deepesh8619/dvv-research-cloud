@@ -3,9 +3,11 @@
 Real-world inputs here are Decipher/Qualtrics-style datafeed exports: one row
 per respondent, hundreds of columns mixing system fields (uuid, markers),
 categorical codes, numerics, and open-end text. Unlike SPSS there is no
-embedded metadata, so variable types and value labels are inferred from the
-data itself (architecture §adapters: every format maps into the canonical
-model; engines never see the source format).
+embedded metadata, so variable types and value labels are usually *inferred*
+from the data itself (architecture §adapters: every format maps into the
+canonical model; engines never see the source format) — UNLESS the workbook
+ships a companion "Datamap" sheet (see datamap_sheet.py), in which case real
+labels are parsed from it instead of guessed.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.adapters.datamap_sheet import find_datamap_sheet, parse_datamap_sheet
 from src.core.models import DataMap, Variable, VarType
 
 # A numeric column whose distinct values are all integers and few in number is
@@ -45,19 +48,29 @@ def _is_integral(series: pd.Series) -> bool:
 
 
 def read_tabular(path: str | Path) -> tuple[pd.DataFrame, DataMap]:
-    """Read a CSV/XLSX export into a DataFrame plus an inferred DataMap.
+    """Read a CSV/XLSX export into a DataFrame plus a DataMap.
 
     String categoricals are re-encoded to integer codes (with the original
     strings kept as value labels) so the DuckDB crosstab engine can treat
-    every categorical identically to an SPSS import.
+    every categorical identically to an SPSS import. If the workbook has a
+    companion "Datamap"/"Codebook" sheet, real labels are parsed from it
+    (datamap_sheet.py) instead of guessed from the raw codes.
     """
     path = Path(path)
     suffix = path.suffix.lower()
+    parsed_vars: dict[str, Variable] = {}
     if suffix == ".csv":
         df = pd.read_csv(path, low_memory=False)
         provenance = "csv_import"
     elif suffix in (".xlsx", ".xls"):
-        df = pd.read_excel(path)
+        sheet_names = pd.ExcelFile(path).sheet_names
+        datamap_sheet = find_datamap_sheet(sheet_names)
+        if datamap_sheet:
+            data_sheet = next(s for s in sheet_names if s != datamap_sheet)
+            df = pd.read_excel(path, sheet_name=data_sheet)
+            parsed_vars = {v.name: v for v in parse_datamap_sheet(path, datamap_sheet).variables}
+        else:
+            df = pd.read_excel(path)
         provenance = "excel_import"
     else:
         raise ValueError(f"not a tabular file: {path.name}")
@@ -75,6 +88,21 @@ def read_tabular(path: str | Path) -> tuple[pd.DataFrame, DataMap]:
         renames[col] = name
         label = str(col)
         series = df[col]
+
+        parsed = parsed_vars.get(str(col))
+        if parsed is not None:
+            # A real codebook entry beats inference — same labels an SPSS
+            # import would have carried natively.
+            datamap.add(
+                Variable(
+                    name=name,
+                    label=parsed.label or label,
+                    type=parsed.type,
+                    values=dict(parsed.values),
+                    provenance="datamap_sheet",
+                )
+            )
+            continue
 
         if pd.api.types.is_datetime64_any_dtype(series):
             datamap.add(Variable(name=name, label=label, type=VarType.DATE, provenance=provenance))
