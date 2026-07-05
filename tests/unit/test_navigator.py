@@ -202,3 +202,17 @@ def test_navigate_groq_agent_loop():
     assert tool_results[0]["tool"] == "query_data"
     # The tool result must be fed back as an OpenAI 'tool' role message
     assert any(m.get("role") == "tool" for m in calls[1])
+
+
+def test_parse_text_tool_calls_recovers_llama_markup():
+    """llama-on-Groq sometimes writes tool calls as text; we must recover them."""
+    from src.ai.navigator import _parse_text_tool_calls
+
+    a = _parse_text_tool_calls('<function(show_table){"stub":"S1","banner":[]}')
+    assert a and a[0]["function"]["name"] == "show_table"
+
+    b = _parse_text_tool_calls('<function=query_data>{"sql": "SELECT 1"}</function>')
+    assert b and b[0]["function"]["name"] == "query_data"
+
+    assert _parse_text_tool_calls("just a normal answer, no call") == []
+    assert _parse_text_tool_calls('<function(unknown_tool){}') == []  # not a real tool

@@ -160,6 +160,31 @@ def _claude_messages(messages: list[dict], system: str, timeout: int) -> dict:
         raise BackendUnavailable(f"claude API unreachable: {exc}") from exc
 
 
+_KNOWN_TOOLS = {t["name"] for t in TOOLS}
+# Matches the tool-call-as-text formats llama emits on Groq, e.g.
+#   <function=show_table>{"stub": "S1"}</function>
+#   <function(show_table){"stub": "S1", "banner": []}
+# Capture the tool name and the first {...} JSON object after it.
+_TEXT_TOOLCALL_RE = re.compile(r"<function[=(]\s*([A-Za-z_]\w*)\s*[)>]?\s*(\{.*?\})", re.DOTALL)
+
+
+def _parse_text_tool_calls(content: str) -> list[dict]:
+    """Recover tool calls the model wrote as text into structured-call dicts."""
+    calls = []
+    for i, m in enumerate(_TEXT_TOOLCALL_RE.finditer(content or "")):
+        name, raw_args = m.group(1), m.group(2)
+        if name not in _KNOWN_TOOLS:
+            continue
+        try:
+            json.loads(raw_args)  # validate; keep as string for the executor path
+        except json.JSONDecodeError:
+            continue
+        calls.append(
+            {"id": f"text_call_{i}", "function": {"name": name, "arguments": raw_args}}
+        )
+    return calls
+
+
 def _groq_tools() -> list[dict]:
     """TOOLS in OpenAI/Groq function-calling shape (Anthropic uses input_schema)."""
     return [
@@ -244,9 +269,21 @@ def navigate_groq(
         if not choices:
             raise ModelOutputError("Groq returned no choices")
         msg = choices[0]["message"]
+        content = msg.get("content") or ""
         calls = msg.get("tool_calls") or []
-        if msg.get("content"):
-            reply = msg["content"]
+
+        # llama-3.x on Groq sometimes emits a tool call as literal text
+        # (`<function=name>{json}</function>`) in content instead of the
+        # structured tool_calls field. Recover those so the call still executes
+        # rather than leaking raw markup to the user.
+        if not calls:
+            recovered = _parse_text_tool_calls(content)
+            if recovered:
+                calls = recovered
+                content = ""  # the markup wasn't a real answer
+
+        if content:
+            reply = content
 
         if not calls:
             break
