@@ -12,7 +12,14 @@ from api.config import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# check_same_thread=False is a SQLite-only pysqlite argument (needed because
+# FastAPI's request-per-thread model would otherwise reject a connection
+# created on a different thread). Passing it to psycopg2 (Postgres) raises
+# TypeError: connect() got an unexpected keyword argument — so it's applied
+# only when DATABASE_URL is actually SQLite, letting the same code run against
+# either backend (SQLite locally, Postgres once deployed).
+_connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, connect_args=_connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

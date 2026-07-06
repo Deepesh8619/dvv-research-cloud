@@ -1,0 +1,22 @@
+# Local dev state that must never ship in the image — some of this is
+# actual secrets (.env, .jwt_secret) or per-machine data (the SQLite file,
+# uploaded studies), not just bloat.
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+.env
+.env.local
+.jwt_secret
+dvv_research.db
+studies/
+
+web/node_modules/
+web/dist/
+
+.git/
+docs/
+*.docx

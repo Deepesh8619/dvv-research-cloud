@@ -17,7 +17,10 @@ STUDIES_DIR.mkdir(parents=True, exist_ok=True)
 # API
 API_TITLE = "DVV Research Cloud"
 API_VERSION = "0.1.0"
-CORS_ORIGINS = ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"]
+_DEFAULT_CORS = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000"
+# Comma-separated so the deployed frontend's origin (e.g. a Vercel URL) can be
+# added via one env var without a code change or redeploy of this service.
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", _DEFAULT_CORS).split(",") if o.strip()]
 
 # Orchestration
 MIN_CODING_CONFIDENCE = float(os.getenv("MIN_CODING_CONFIDENCE", "0.8"))
