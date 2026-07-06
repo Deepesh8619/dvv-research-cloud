@@ -44,13 +44,9 @@ services:
         sync: false
       - key: PUBLIC_BASE_URL
         sync: false
-    # Persistent disk for uploaded studies (data.parquet, crosstabs.json,
-    # rendered decks, chart PNGs) — REQUIRES A PAID PLAN. On the free plan,
-    # remove this block; /app/studies then lives on the container's ephemeral
-    # filesystem and every upload is lost on the next deploy or restart. Fine
-    # for a one-off demo (upload fresh, show it, done); not fine for
-    # anything meant to persist between sessions.
-    disk:
-      name: studies-data
-      mountPath: /app/studies
-      sizeGB: 1
+    # No persistent disk on the free plan (Render rejects `disk:` on free
+    # services). /app/studies lives on the container's ephemeral filesystem —
+    # every uploaded study is lost on the next deploy or restart. Fine for a
+    # one-off demo (upload fresh, show it, done); not fine for anything meant
+    # to persist between sessions. Re-add a `disk:` block (name, mountPath:
+    # /app/studies, sizeGB) once on a paid plan.
