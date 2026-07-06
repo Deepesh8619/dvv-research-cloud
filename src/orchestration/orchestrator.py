@@ -52,15 +52,45 @@ _SYSTEM_EXACT = {
     "record", "uuid", "date", "markers", "status", "vendorid", "zip",
     "daytime", "realstart", "laststart",
 }
-_SYSTEM_PREFIXES = ("hid", "h_", "hcf", "dummy", "noanswer", "tt_", "geoinfor", "respinfor")
+# Prefixes with no legitimate demographic meaning under any convention —
+# excluded everywhere (stub candidacy AND banner candidacy).
+_ALWAYS_JUNK_PREFIXES = ("noanswer", "geoinfor", "respinfor")
+# Decipher-style exports also use hid_/h_/dummy_/tt_ for hand-recoded,
+# analyst-cleaned demographics (e.g. Hid_S1 = a 3-category Female/Male/Other
+# recode of a messier raw question, TT_AGE_RANGES = clean 18-24/25-34/... age
+# bands, Hid_INCOME_Quota = income bands) — often the BEST banner candidates
+# in a file, since they're pre-cleaned. The prefix alone can't distinguish
+# these from true paradata, so it only excludes STUB candidacy (a "Hid_"
+# stub table is usually a redundant recode of a question that's already its
+# own stub); banner candidacy is judged by label quality instead (see
+# _is_paradata_variable and the label-length check in auto_tab_plan).
+_STUB_ONLY_PREFIXES = ("hid", "h_", "hcf", "dummy")
 _CAMEL_SYSTEM_RE = re.compile(r"^[dvh][A-Z]")  # dTrack, vUserAgent, hSample
 
 
 def _is_system_variable(name: str) -> bool:
+    """Excludes a variable from STUB candidacy: paradata plus recode-style
+    prefixes that would otherwise duplicate their source question as a table.
+    """
     low = name.lower()
     if low in _SYSTEM_EXACT or low.endswith("flag"):
         return True
-    if low.startswith(_SYSTEM_PREFIXES):
+    if low.startswith(_ALWAYS_JUNK_PREFIXES + _STUB_ONLY_PREFIXES):
+        return True
+    return bool(_CAMEL_SYSTEM_RE.match(name))
+
+
+def _is_paradata_variable(name: str) -> bool:
+    """Excludes a variable from BANNER candidacy: only what's unambiguously
+    junk regardless of naming convention (true system bookkeeping, device
+    fingerprints). Deliberately narrower than _is_system_variable — a
+    hid_/dummy_/tt_-prefixed recode can be an excellent banner even though
+    it's skipped as a stub.
+    """
+    low = name.lower()
+    if low in _SYSTEM_EXACT or low.endswith("flag"):
+        return True
+    if low.startswith(_ALWAYS_JUNK_PREFIXES):
         return True
     return bool(_CAMEL_SYSTEM_RE.match(name))
 
@@ -78,14 +108,53 @@ def _is_binary_flag(v) -> bool:
     return all(str(label).strip().lstrip("-").isdigit() for label in labels if label != "")
 
 
+MAX_BANNER_LABEL_LEN = 30
+
+
+def suggest_banner_candidates(datamap: DataMap, limit: int = 3) -> list[str]:
+    """Variables that WOULD make a good banner, for a human to choose from.
+
+    Not auto-applied anywhere — a file-order guess reliably surfaces
+    operational/QA variables (device type, OS, bot-detection flags) ahead of
+    real demographics simply because they appear earlier in the export, and
+    forcing an unrelated default banner onto every question the analyst asks
+    about is confusing (e.g. a Country crosstab getting Vehicle-Purchase-
+    Intent columns stapled on because that's what happened to auto-select).
+    Exposed for a future "pick your banner" UI/API rather than guessed here.
+
+    Candidacy is drawn from a wider pool than stub candidacy (see
+    _is_paradata_variable): hand-recoded demographics — often the cleanest
+    banners in the file — commonly carry a hid_/dummy_/tt_ prefix in
+    Decipher-style exports, the same prefix true system paradata uses, so
+    the prefix alone can't gate this; label quality (length, non-numeric)
+    does instead. Binary 0/1 multi-punch flags are excluded ("0 (A) 1 (B)"
+    is meaningless as a banner) regardless of prefix.
+    """
+    candidates = [
+        v
+        for v in datamap.variables
+        if v.type == VarType.SINGLE
+        and v.values
+        and len(v.valid_codes()) >= 2
+        and not _is_paradata_variable(v.name)
+        and 2 <= len(v.valid_codes()) <= 6
+        and max(len(label) for label in v.values.values()) <= MAX_BANNER_LABEL_LEN
+        and not _is_binary_flag(v)
+    ]
+    return [v.name for v in candidates][:limit]
+
+
 def auto_tab_plan(datamap: DataMap, title: str = "Topline Tables") -> TabPlan | None:
     """Build a default tab plan from the datamap when the client sent no tab spec.
 
-    Banner: up to 3 question variables with 2-6 real (descriptively-labelled)
-    categories — demographic-like. Binary 0/1 multi-punch flags are excluded so
-    tables break by meaningful cuts (gender/region), not by "0 (A) 1 (B)" dummy
-    columns. Stubs: every other question variable with 2+ codes, with auto
-    T2B/B2B nets and means on 5+ point scales. System/paradata columns excluded.
+    No default banner: every stub table is Total-only unless a banner is
+    explicitly given (a manual tab_plan.yaml, or the chat navigator's
+    show_table specifying one because the analyst's question named a
+    comparison group). See suggest_banner_candidates for surfacing good
+    banner options to a human rather than silently guessing one.
+
+    Stubs: every question variable with 2+ codes, with auto T2B/B2B nets and
+    means on 5+ point scales. System/paradata columns excluded.
     """
     singles = [
         v
@@ -95,22 +164,14 @@ def auto_tab_plan(datamap: DataMap, title: str = "Topline Tables") -> TabPlan | 
         and len(v.valid_codes()) >= 2
         and not _is_system_variable(v.name)
     ]
-    banner = [
-        v.name
-        for v in singles
-        if 2 <= len(v.valid_codes()) <= 6
-        and max(len(label) for label in v.values.values()) <= 24
-        and not _is_binary_flag(v)
-    ][:3]
-    stubs = [v for v in singles if v.name not in banner]
-    if not banner or not stubs:
+    if not singles:
         return None
 
     tables = [
         TableSpec(stub=v.name, nets=auto_nets(v), mean=len(v.valid_codes()) >= 5)
-        for v in stubs[:MAX_AUTO_TABLES]
+        for v in singles[:MAX_AUTO_TABLES]
     ]
-    return TabPlan(title=title, banner=banner, tables=tables)
+    return TabPlan(title=title, banner=[], tables=tables)
 
 
 class StudyOrchestrator:

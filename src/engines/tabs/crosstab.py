@@ -152,6 +152,14 @@ def crosstab(
     (within the same banner variable) it is significantly higher than. The mean
     row uses a large-sample z on within-column variance over effective bases.
     """
+    # De-dup, preserving order: callers (chiefly the navigator LLM's show_table
+    # tool call) aren't guaranteed to pass distinct names. datamap.add() blocks
+    # a variable being registered twice, but nothing stops a `banner` list from
+    # naming the same variable twice — without this, the column-building loop
+    # below would emit that variable's categories twice, verbatim (same
+    # aggregation looked up twice from per_banner_cells), producing a table
+    # with repeated columns showing identical numbers under each repeat.
+    banner = list(dict.fromkeys(banner))
     con = duckdb.connect()
     source = f"read_parquet('{Path(parquet_path)}')"
     stub_var = datamap[stub]

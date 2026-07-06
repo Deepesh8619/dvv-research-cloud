@@ -27,14 +27,19 @@ from api.db import (
     get_study,
     list_chat_messages,
 )
+from api.intent_router import build_routed_context
 from api.models import ChatMessage, ChatRequest, ChatResponse, ChatToolCall
 from src.ai.navigator import navigate_basic, navigate_groq
 from src.ai.router import BackendUnavailable, ModelOutputError
+from src.ai.specialists import specialist_for_intent
 from src.core.models import DataMap
+from src.engines.analysis.charts import generate_chart
+from src.engines.analysis.codegen import generate_code
+from src.engines.analysis.pivot import generate_pivot
+from src.engines.analysis.quality import data_quality
 from src.engines.tabs.crosstab import crosstab
 from src.engines.tabs.runner import table_to_dict
 from src.engines.tabs.spec import auto_nets
-from src.orchestration.orchestrator import auto_tab_plan
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -176,74 +181,38 @@ def _basic_context(study, datamap: DataMap | None, deck: dict, question: str) ->
     return "\n".join(lines)
 
 
-NAV_DETAIL_VARS = 35
-
-
-def _build_context(study, datamap: DataMap | None, deck: dict, question: str = "") -> str:
-    """Context for the cloud (Groq) navigator, kept lean enough to survive the
-    free tier's per-minute token budget.
-
-    The agent loop re-sends this on every turn, so dumping all 150+ variables
-    (≈3k tokens) blew the 12k-tokens/minute free limit on a single question.
-    Instead: send the full deck-table index (cheap, and it's what "top-level
-    findings"-style questions need) plus full detail only for variables relevant
-    to the question (via _rank_variables, which weights exact variable-name
-    matches so a directly-named var like S2 is always included). For anything
-    else the model uses query_data / show_table by name.
-    """
-    lines = [f"Project: {study.client_name} (status: {study.status})"]
-
-    if deck:
-        # Just a one-line pointer, not the full table list. The dataframe is the
-        # source of truth (per the system prompt); the model should query it, not
-        # lean on precomputed summaries. Listing 30 table titles here cost ~600
-        # tokens re-sent every turn — the compare_tables tool can fetch any of
-        # them by id (t1..tN) on demand if the user asks about the deck.
-        n = len(deck.get("tables", []))
-        weight = f"weighted by {deck['weight']}" if deck.get("weight") else "unweighted"
-        lines.append(
-            f"A deck of {n} precomputed crosstabs exists ({weight}, "
-            f"{deck.get('confidence', 0.95):.0%} confidence), ids t1..t{n}; "
-            "fetch one with compare_tables only if the user asks about the deck."
-        )
-
-    if datamap:
-        detailed = _rank_variables(datamap, question, NAV_DETAIL_VARS)
-
-        lines.append(
-            f"Data has {len(datamap.variables)} columns. Most relevant to this "
-            "question (name [type] label | code=label):"
-        )
-        for v in detailed:
-            entry = f"  {v.name} [{v.type}] {v.label or ''}"
-            if v.values:
-                shown = list(v.values.items())[:MAX_VALUE_LABELS]
-                entry += " | " + " ".join(f"{c}={label}" for c, label in shown)
-                if len(v.values) > MAX_VALUE_LABELS:
-                    entry += " …"
-            lines.append(entry)
-
-        # No full column roster — for a 400+ column study it's ~700 tokens per
-        # turn. Relevance matching covers named variables; query_data discovers
-        # the rest (`SELECT * FROM data LIMIT 0`).
-        plan = auto_tab_plan(datamap)
-        if plan:
-            lines.append(f"Default banner (columns) for crosstabs: {', '.join(plan.banner)}")
-    else:
-        lines.append(
-            "Datamap unavailable for this study (processed before datamap persistence "
-            "existed) — rely on query_data; SQL columns match the original file's headers."
-        )
-
-    return "\n".join(lines)
 
 
 # --- Tool execution ---
 
 
-def _make_executor(study_dir: Path, datamap: DataMap | None, deck: dict):
+def _parse_filter(
+    filter_: dict | None, datamap: DataMap
+) -> tuple[dict[str, list[int]] | None, str | None]:
+    """Validate + coerce a {var: [codes]} filter dict. Returns (filter, error)."""
+    if not filter_:
+        return None, None
+    try:
+        coerced = {var: [int(c) for c in codes] for var, codes in filter_.items()}
+    except (TypeError, ValueError):
+        return None, "Filter codes must be integers"
+    bad = [v for v in coerced if v not in datamap]
+    if bad:
+        return None, f"Unknown filter variable(s): {bad}"
+    return coerced, None
+
+
+def _make_executor(
+    study_dir: Path, datamap: DataMap | None, deck: dict, study_id: str | None = None
+):
+    """study_id is optional (defaults to None, kept for existing test call sites
+    that construct an executor directly from a study_dir without a DB-backed
+    study) — only used to stamp generate_chart results with the id the frontend
+    needs to build the chart's serving URL (/studies/{study_id}/charts/{filename}).
+    study_dir's own name is NOT a substitute: it's the orchestrator's run_id
+    (STUDIES_DIR/study_{date}_{hex}), not the upload-time study_id.
+    """
     parquet = study_dir / "data.parquet"
-    default_plan = auto_tab_plan(datamap) if datamap else None
 
     def _live_table(params: dict) -> dict:
         if datamap is None:
@@ -251,19 +220,19 @@ def _make_executor(study_dir: Path, datamap: DataMap | None, deck: dict):
         stub = params.get("stub", "")
         if stub not in datamap:
             return {"success": False, "error": f"Unknown variable: {stub}"}
-        banner = params.get("banner") or (default_plan.banner if default_plan else [])
+        # No default banner (product decision): a table is Total-only unless
+        # the analyst's question named a comparison group, so the model
+        # supplied one explicitly. Silently substituting a study-wide default
+        # here used to staple irrelevant columns onto unrelated questions —
+        # e.g. a Country crosstab getting Vehicle-Purchase-Intent columns
+        # because that's what auto_tab_plan happened to guess.
+        banner = params.get("banner") or []
         bad = [b for b in banner if b not in datamap]
         if bad:
             return {"success": False, "error": f"Unknown banner variable(s): {bad}"}
-        filter_ = params.get("filter") or None
-        if filter_:
-            try:
-                filter_ = {var: [int(c) for c in codes] for var, codes in filter_.items()}
-            except (TypeError, ValueError):
-                return {"success": False, "error": "Filter codes must be integers"}
-            bad = [v for v in filter_ if v not in datamap]
-            if bad:
-                return {"success": False, "error": f"Unknown filter variable(s): {bad}"}
+        filter_, err = _parse_filter(params.get("filter"), datamap)
+        if err:
+            return {"success": False, "error": err}
         try:
             result = crosstab(
                 parquet,
@@ -277,6 +246,53 @@ def _make_executor(study_dir: Path, datamap: DataMap | None, deck: dict):
         except Exception as exc:
             return {"success": False, "error": str(exc)}
         return {"success": True, "table": table_to_dict(result, "live")}
+
+    def _chart(params: dict) -> dict:
+        if datamap is None:
+            return {"success": False, "error": "Datamap unavailable — cannot compute chart"}
+        stub = params.get("stub", "")
+        if stub not in datamap:
+            return {"success": False, "error": f"Unknown variable: {stub}"}
+        filter_, err = _parse_filter(params.get("filter"), datamap)
+        if err:
+            return {"success": False, "error": err}
+        result = generate_chart(
+            study_dir,
+            datamap,
+            stub=stub,
+            banner=params.get("banner") or [],
+            chart_type=params.get("chart_type", "bar"),
+            filter_=filter_,
+        )
+        # Frontend builds the chart's serving URL from study_id (see
+        # api/routes/studies.py get_chart) — generate_chart itself has no
+        # notion of study_id, so stamp it on here where it's available.
+        if result.get("success") and study_id:
+            result["study_id"] = study_id
+        return result
+
+    def _pivot(params: dict) -> dict:
+        return generate_pivot(
+            parquet,
+            rows=params.get("rows", ""),
+            columns=params.get("columns", ""),
+            values=params.get("values"),
+            aggfunc=params.get("aggfunc", "count"),
+        )
+
+    def _codegen(params: dict) -> dict:
+        sql = params.get("sql")
+        run_sql = (lambda q: _run_sql(parquet, q)) if sql else None
+        return generate_code(
+            datamap,
+            language=params.get("language", ""),
+            question=params.get("question", ""),
+            sql=sql,
+            run_sql=run_sql,
+        )
+
+    def _quality(params: dict) -> dict:
+        return data_quality(parquet, variables=params.get("variables"))
 
     def execute(name: str, params: dict) -> dict:
         if name == "show_table":
@@ -302,6 +318,18 @@ def _make_executor(study_dir: Path, datamap: DataMap | None, deck: dict):
         if name == "navigate_to":
             return {"success": True, "params": params}
 
+        if name == "generate_chart":
+            return _chart(params)
+
+        if name == "generate_pivot":
+            return _pivot(params)
+
+        if name == "generate_code":
+            return _codegen(params)
+
+        if name == "data_quality":
+            return _quality(params)
+
         return {"success": False, "error": f"Unknown tool: {name}"}
 
     return execute
@@ -325,8 +353,10 @@ async def chat_with_study(
     study_dir = _study_dir(study)
     datamap = _load_datamap(study_dir)
     deck = _load_deck(study_dir)
-    context = _build_context(study, datamap, deck, request.message)
-    executor = _make_executor(study_dir, datamap, deck)
+    context, intent = build_routed_context(study, datamap, deck, request.message)
+    specialist = specialist_for_intent(intent)
+    logger.info(f"[{study_id}] Intent routed to: {intent} (specialist: {specialist})")
+    executor = _make_executor(study_dir, datamap, deck, study_id=study_id)
 
     user_msg = create_chat_message(db, study_id, "user", request.message)
 
@@ -338,7 +368,9 @@ async def chat_with_study(
     ]
 
     try:
-        reply, tool_results = navigate_groq(request.message, context, executor, history=history)
+        reply, tool_results = navigate_groq(
+            request.message, context, executor, history=history, intent=intent
+        )
     except (BackendUnavailable, ModelOutputError) as exc:
         # Degrade to the local single-shot model: slower and simpler, but the
         # demo keeps answering with zero API credits and data never leaves
@@ -349,6 +381,7 @@ async def chat_with_study(
                 request.message,
                 _basic_context(study, datamap, deck, request.message),
                 executor,
+                intent=intent,
             )
             reply += "\n\n_(basic local mode)_"
         except (BackendUnavailable, ModelOutputError) as basic_exc:

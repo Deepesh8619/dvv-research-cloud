@@ -57,6 +57,20 @@ def test_columns_sum_to_100(study):
     assert np.allclose(sums, 100.0)
 
 
+def test_duplicate_banner_name_does_not_duplicate_columns(study):
+    """Regression: the navigator LLM's show_table tool call isn't guaranteed to
+    pass distinct banner names. A caller passing the same variable twice used
+    to render it twice (identical numbers repeated verbatim, e.g. "New/Used"
+    columns appearing twice with the exact same figures) instead of being
+    silently de-duplicated.
+    """
+    path, datamap = study
+    result = crosstab(path, stub="q1", banner=["gender", "gender"], datamap=datamap)
+    labels = [c.label for c in result.columns]
+    assert labels == ["Total", "Male", "Female"]  # not Male, Female, Male, Female
+    assert result.col_pct.shape == (2, 3)
+
+
 def test_sig_letters_on_large_synthetic(tmp_path):
     # 2000 respondents; males 60% yes, females 40% yes -> male column must beat B
     rng = np.random.default_rng(7)

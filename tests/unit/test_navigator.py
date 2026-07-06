@@ -155,13 +155,73 @@ def test_navigate_basic_executes_single_tool(study_dir):
     assert tool_results[0]["table"]["title"] == "Satisfaction"
 
 
+def test_navigate_basic_passes_through_requested_banner(study_dir):
+    """Regression: basic mode used to have no `banner` field in its schema at
+    all, so "For banner gender show crosstabs for satisfaction" silently
+    dropped the banner and always rendered Total-only, regardless of what was
+    asked. The local model must be able to name a banner and have it reach
+    the crosstab engine.
+    """
+    path, datamap = study_dir
+    from api.routes.chat import _make_executor
+
+    execute = _make_executor(path, datamap, deck={})
+
+    class FakeResult:
+        content = {
+            "answer": "Here is satisfaction by gender.",
+            "tool": "show_table",
+            "stub": "satisfaction",
+            "banner": ["gender"],
+        }
+        backend = "ollama"
+        model = "test"
+
+    with patch("src.ai.navigator.run_task", return_value=FakeResult()):
+        from src.ai.navigator import navigate_basic
+
+        reply, tool_results = navigate_basic("for banner gender show satisfaction", "ctx", execute)
+
+    assert tool_results[0]["success"]
+    columns = [c["label"] for c in tool_results[0]["table"]["columns"]]
+    assert columns == ["Total", "Male", "Female"]
+
+
+def test_navigate_basic_ignores_malformed_banner(study_dir):
+    """A malformed banner field (not a list of strings) must not crash the
+    executor — fall back to Total-only rather than passing junk through."""
+    path, datamap = study_dir
+    from api.routes.chat import _make_executor
+
+    execute = _make_executor(path, datamap, deck={})
+
+    class FakeResult:
+        content = {
+            "answer": "Here is satisfaction.",
+            "tool": "show_table",
+            "stub": "satisfaction",
+            "banner": "gender",  # not a list — malformed
+        }
+        backend = "ollama"
+        model = "test"
+
+    with patch("src.ai.navigator.run_task", return_value=FakeResult()):
+        from src.ai.navigator import navigate_basic
+
+        reply, tool_results = navigate_basic("show satisfaction", "ctx", execute)
+
+    assert tool_results[0]["success"]
+    columns = [c["label"] for c in tool_results[0]["table"]["columns"]]
+    assert columns == ["Total"]
+
+
 def test_navigate_groq_agent_loop():
     """Groq path: OpenAI-shaped tool_calls drive the same tool executor."""
     from unittest.mock import patch as _patch
 
     calls = []
 
-    def fake_groq(messages, timeout):
+    def fake_groq(messages, timeout, **kwargs):
         calls.append(messages)
         if len(calls) == 1:
             return {
