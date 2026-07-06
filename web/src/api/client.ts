@@ -1,8 +1,13 @@
 import axios from 'axios'
 import type { TabTable } from '../components/CrosstabTable'
 
+// '/api' works via vite's dev proxy (see vite.config.ts) when frontend and
+// backend run on the same origin locally. Once deployed separately (e.g.
+// frontend on Vercel, backend on Render), there's no dev proxy, so
+// VITE_API_URL must point at the backend's real URL — set at build time,
+// baked into the static bundle (standard Vite env var convention).
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api',
 })
 
 // Request interceptor: attach JWT token
@@ -53,6 +58,29 @@ export interface StudyListResponse {
   total: number
   page: number
   limit: number
+}
+
+export interface ProfileVariable {
+  name: string
+  label: string
+  type: string
+  missing_pct: number
+  distinct_count: number
+  min?: number | string | null
+  max?: number | string | null
+  top_values?: Array<{ value: unknown; count: number }>
+}
+
+export interface StudyProfile {
+  ready: boolean
+  variables: ProfileVariable[]
+  summary: {
+    n_variables: number
+    n_respondents: number
+    n_high_missing: number
+    n_constant: number
+    n_likely_duplicate_id: number
+  }
 }
 
 export interface CrosstabsPayload {
@@ -184,6 +212,10 @@ export const studiesApi = {
 
   crosstabs: async (id: string) => {
     return api.get<CrosstabsPayload>(`/studies/${id}/crosstabs`)
+  },
+
+  profile: async (id: string) => {
+    return api.get<StudyProfile>(`/studies/${id}/profile`)
   },
 
   approve: async (id: string, gate: string) => {

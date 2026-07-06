@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { CrosstabsPayload, Study, studiesApi, shareApi, ShareLink } from '../api/client'
+import { ProfileVariable, Study, studiesApi, shareApi, ShareLink, StudyProfile } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import ChatBot from '../components/ChatBot'
-import CrosstabTable from '../components/CrosstabTable'
 import { CheckIcon, DownloadIcon, LinkIcon } from '../components/Icons'
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatusPill from '../components/StatusPill'
@@ -28,7 +27,11 @@ const STAGE_PROGRESS: Record<string, number> = {
   error: 0,
 }
 
-const TABS = ['Overview', 'Tables', 'Reports', 'Activity'] as const
+// Crosstabs no longer auto-display as a nav tab — the Overview tab's Data
+// Profile card is the default view instead. Crosstabs stay fully available
+// on demand via the chat navigator's show_table tool (rendered inline in
+// ChatBot), and CrosstabTable/studiesApi.crosstabs remain wired for that.
+const TABS = ['Overview', 'Reports', 'Activity'] as const
 type Tab = (typeof TABS)[number]
 
 export default function ProjectPage() {
@@ -38,7 +41,6 @@ export default function ProjectPage() {
   const { user } = useAuth()
 
   const [study, setStudy] = useState<Study | null>(null)
-  const [tabs, setTabs] = useState<CrosstabsPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [approving, setApproving] = useState(false)
   const [shareLink, setShareLink] = useState<ShareLink | null>(null)
@@ -64,15 +66,6 @@ export default function ProjectPage() {
     const t = setInterval(load, 2500)
     return () => clearInterval(t)
   }, [study?.status, load])
-
-  // Load table data when available
-  useEffect(() => {
-    if (!id || !study?.excel_path || tabs) return
-    studiesApi
-      .crosstabs(id)
-      .then((r) => setTabs(r.data))
-      .catch(() => {})
-  }, [id, study?.excel_path, tabs])
 
   const setTab = (t: Tab) => setParams({ tab: t }, { replace: true })
 
@@ -110,19 +103,14 @@ export default function ProjectPage() {
     }
   }
 
-  const handleNavigate = useCallback((targetTab: string, tableId?: string) => {
+  const handleNavigate = useCallback((targetTab: string) => {
+    // tableId (crosstab selection) is no longer routed through a Tables tab —
+    // the chat navigator renders the requested crosstab inline via show_table,
+    // so navigate_to only needs to switch between the remaining tabs now.
     if (TABS.includes(targetTab as Tab)) {
       setTab(targetTab as Tab)
     }
-    if (tableId && tabs) {
-      // Find and select the table by ID
-      const idx = tabs.tables.findIndex((t) => t.id === tableId)
-      if (idx >= 0) {
-        // We would need to pass a setter to TablesTab, but for now just switch tabs
-        // The user can manually select the table
-      }
-    }
-  }, [tabs])
+  }, [])
 
   if (loading) return <LoadingSpinner />
   if (!study) {
@@ -204,14 +192,12 @@ export default function ProjectPage() {
               }`}
             >
               {t}
-              {t === 'Tables' && tabs ? ` (${tabs.tables.length})` : ''}
             </button>
           ))}
         </nav>
       </div>
 
       {tab === 'Overview' && <OverviewTab study={study} progress={progress} />}
-      {tab === 'Tables' && <TablesTab tabs={tabs} ready={!!study.excel_path} />}
       {tab === 'Reports' && <ReportsTab study={study} />}
       {tab === 'Activity' && <ActivityTab study={study} />}
 
@@ -344,6 +330,11 @@ function OverviewTab({ study, progress }: { study: Study; progress: number }) {
             <p className="text-sm text-red-600 mt-2 font-mono bg-red-50 rounded p-3">{study.metadata.error}</p>
           )}
         </div>
+
+        {/* Data profile — replaces auto-displayed crosstabs as the default
+            view. Ask the chat navigator for a crosstab/chart on any specific
+            variable to see it rendered inline instead. */}
+        <DataProfileCard studyId={study.id} ready={!!study.excel_path} />
       </div>
 
       {/* Meta sidebar */}
@@ -380,81 +371,131 @@ function OverviewTab({ study, progress }: { study: Study; progress: number }) {
   )
 }
 
-function TablesTab({ tabs, ready }: { tabs: CrosstabsPayload | null; ready: boolean }) {
-  const [selected, setSelected] = useState(0)
-  const [search, setSearch] = useState('')
-  const [showBases, setShowBases] = useState(true)
-
-  const filtered = useMemo(() => {
-    if (!tabs) return []
-    const q = search.trim().toLowerCase()
-    return tabs.tables
-      .map((t, i) => ({ ...t, index: i }))
-      .filter((t) => !q || t.title.toLowerCase().includes(q) || t.stub.toLowerCase().includes(q))
-  }, [tabs, search])
-
-  if (!ready) {
-    return (
-      <div className="bg-white rounded-lg border border-slate-200 p-12 text-center text-slate-500">
-        Tables will appear here once processing completes.
+function MissingBar({ pct }: { pct: number }) {
+  const color = pct > 50 ? 'bg-red-400' : pct > 20 ? 'bg-amber-400' : 'bg-slate-300'
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-slate-600 w-12 text-right">{pct.toFixed(1)}%</span>
+      <div className="h-1.5 w-16 rounded-full bg-slate-100 overflow-hidden">
+        <div className={`h-full ${color}`} style={{ width: `${Math.min(pct, 100)}%` }} />
       </div>
-    )
-  }
-  if (!tabs) return <LoadingSpinner />
+    </div>
+  )
+}
 
-  const table = tabs.tables[selected]
+function describeValues(v: ProfileVariable): string {
+  if (v.top_values && v.top_values.length > 0) {
+    return v.top_values.map((tv) => `${tv.value}=${tv.count}`).join(', ')
+  }
+  if (v.min != null || v.max != null) {
+    return `${v.min ?? '—'} – ${v.max ?? '—'}`
+  }
+  return '—'
+}
+
+type ProfileSortKey = 'missing_desc' | 'missing_asc' | 'name' | 'distinct_desc'
+
+const PROFILE_SORTS: Record<ProfileSortKey, { label: string; cmp: (a: ProfileVariable, b: ProfileVariable) => number }> = {
+  missing_desc: { label: 'Missing % (worst first)', cmp: (a, b) => b.missing_pct - a.missing_pct },
+  missing_asc: { label: 'Missing % (best first)', cmp: (a, b) => a.missing_pct - b.missing_pct },
+  name: { label: 'Variable name', cmp: (a, b) => a.name.localeCompare(b.name) },
+  distinct_desc: { label: 'Distinct count', cmp: (a, b) => b.distinct_count - a.distinct_count },
+}
+
+function DataProfileCard({ studyId, ready }: { studyId: string; ready: boolean }) {
+  const [profile, setProfile] = useState<StudyProfile | null>(null)
+  const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<ProfileSortKey>('missing_desc')
+
+  useEffect(() => {
+    if (!ready) return
+    studiesApi
+      .profile(studyId)
+      .then((r) => setProfile(r.data))
+      .catch(() => {})
+  }, [studyId, ready])
+
+  const rows = useMemo(() => {
+    if (!profile) return []
+    const q = search.trim().toLowerCase()
+    return profile.variables
+      .filter((v) => !q || v.name.toLowerCase().includes(q) || v.label.toLowerCase().includes(q))
+      .sort(PROFILE_SORTS[sort].cmp)
+  }, [profile, search, sort])
 
   return (
-    <div className="flex gap-6">
-      {/* Table list */}
-      <div className="w-72 shrink-0">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Filter tables…"
-          className="w-full h-9 px-3 mb-2 rounded-md bg-white border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-        />
-        <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100 max-h-[560px] overflow-y-auto">
-          {filtered.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setSelected(t.index)}
-              className={`block w-full text-left px-4 py-3 text-sm transition-colors ${
-                t.index === selected ? 'bg-primary-50 text-primary-500 font-medium' : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <span className="text-xs text-slate-400 font-mono mr-2">{t.id.toUpperCase()}</span>
-              {t.title}
-            </button>
-          ))}
-        </div>
+    <div className="bg-white rounded-lg border border-slate-200 p-6">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="font-semibold text-slate-900">Data profile</h2>
       </div>
 
-      {/* Table display */}
-      <div className="flex-1 min-w-0">
-        <div className="bg-white rounded-lg border border-slate-200 p-6">
-          <div className="flex items-start justify-between mb-5">
-            <div>
-              <h2 className="font-semibold text-slate-900">{table.title}</h2>
-              <p className="text-xs text-slate-500 mt-1">
-                {tabs.weight ? `Weighted by ${tabs.weight}` : 'Unweighted'} · {(tabs.confidence * 100).toFixed(0)}%
-                confidence · letters mark columns significantly beaten
-                {table.filter && ` · Filtered: ${table.filter}`}
-              </p>
-            </div>
-            <label className="flex items-center gap-2 text-xs text-slate-600 select-none cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showBases}
-                onChange={(e) => setShowBases(e.target.checked)}
-                className="rounded border-slate-300"
-              />
-              Show bases
-            </label>
-          </div>
-          <CrosstabTable table={table} minBase={tabs.min_base_for_test} showBases={showBases} />
+      {!ready ? (
+        <p className="text-sm text-slate-500 mt-3">Profile will appear once processing completes.</p>
+      ) : !profile ? (
+        <div className="mt-3">
+          <LoadingSpinner />
         </div>
-      </div>
+      ) : !profile.ready ? (
+        <p className="text-sm text-slate-500 mt-3">Profile will appear once processing completes.</p>
+      ) : (
+        <>
+          <p className="text-sm text-slate-500 mb-4">
+            {profile.summary.n_variables} variables · {profile.summary.n_respondents} respondents ·{' '}
+            {profile.summary.n_high_missing} high-missing · {profile.summary.n_constant} constant
+            {profile.summary.n_likely_duplicate_id > 0 &&
+              ` · ${profile.summary.n_likely_duplicate_id} likely-duplicate ID column${profile.summary.n_likely_duplicate_id > 1 ? 's' : ''}`}
+          </p>
+          <div className="flex items-center gap-2 mb-3">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Filter variables…"
+              className="flex-1 h-9 px-3 rounded-md bg-white border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+            />
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as ProfileSortKey)}
+              className="h-9 px-2 rounded-md bg-white border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+            >
+              {Object.entries(PROFILE_SORTS).map(([key, { label }]) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="max-h-[420px] overflow-y-auto border border-slate-100 rounded-md">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 sticky top-0">
+                <tr className="text-left text-xs text-slate-500 uppercase tracking-wide">
+                  <th className="px-3 py-2">Variable</th>
+                  <th className="px-3 py-2">Label</th>
+                  <th className="px-3 py-2">Type</th>
+                  <th className="px-3 py-2">Missing</th>
+                  <th className="px-3 py-2">Distinct</th>
+                  <th className="px-3 py-2">Top values / range</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {rows.map((v) => (
+                  <tr key={v.name} className="hover:bg-slate-50">
+                    <td className="px-3 py-2 font-mono text-xs text-slate-700">{v.name}</td>
+                    <td className="px-3 py-2 text-slate-700">{v.label || '—'}</td>
+                    <td className="px-3 py-2 text-slate-500 text-xs">{v.type}</td>
+                    <td className="px-3 py-2">
+                      <MissingBar pct={v.missing_pct} />
+                    </td>
+                    <td className="px-3 py-2 text-slate-600">{v.distinct_count}</td>
+                    <td className="px-3 py-2 text-slate-600 text-xs max-w-xs truncate" title={describeValues(v)}>
+                      {describeValues(v)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { chatApi, type ChatMessage } from '../api/client'
+import api, { chatApi, type ChatMessage } from '../api/client'
+import { downloadBlob, toCSV, toMarkdownTable } from '../lib/exportUtils'
 import { ChatIcon } from './Icons'
 
 interface Props {
@@ -194,6 +195,7 @@ export default function ChatBot({ studyId, clientName, onNavigate }: Props) {
               <MessageBubble
                 key={msg.id || i}
                 message={msg}
+                studyId={studyId}
                 onNavigate={onNavigate}
               />
             ))}
@@ -251,9 +253,11 @@ const SUGGESTED_QUESTIONS = [
 
 function MessageBubble({
   message,
+  studyId,
   onNavigate,
 }: {
   message: MessageWithTools
+  studyId: string
   onNavigate?: (tab: string, tableId?: string) => void
 }) {
   const isUser = message.role === 'user'
@@ -271,10 +275,17 @@ function MessageBubble({
         }`}
       >
         <div className="whitespace-pre-wrap">{message.content}</div>
+        {!isUser && message.content && (
+          // The LLM writes code/formulas/analysis directly into this text
+          // (generate_code returns schema only, never code — see that case
+          // below), so this is the only copy affordance for anything the
+          // model authored in prose rather than returning as a tool result.
+          <MessageCopyButton text={message.content} />
+        )}
         {!isUser && message.tool_results && message.tool_results.length > 0 && (
           <div className="mt-2 space-y-2">
             {message.tool_results.map((result, i) => (
-              <ToolResultRenderer key={i} result={result} onNavigate={onNavigate} />
+              <ToolResultRenderer key={i} result={result} studyId={studyId} onNavigate={onNavigate} />
             ))}
           </div>
         )}
@@ -283,11 +294,117 @@ function MessageBubble({
   )
 }
 
+/** Tiny copy-to-clipboard link under an assistant message's own text. */
+function MessageCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1200)
+      }}
+      className="mt-1 text-[10px] text-slate-400 hover:text-slate-700 transition-colors"
+    >
+      {copied ? 'Copied!' : 'Copy'}
+    </button>
+  )
+}
+
+// Small inline Copy/Export toolbar, reused under every renderable tool result.
+// copyLabel/exportLabel let callers say "Copy" vs "Copy image URL" etc. without
+// duplicating the button markup for every tool-result case.
+function ResultToolbar({
+  onCopy,
+  onExport,
+  copyLabel = 'Copy',
+  exportLabel = 'Export',
+}: {
+  onCopy?: () => void
+  onExport?: () => void
+  copyLabel?: string
+  exportLabel?: string
+}) {
+  const [copied, setCopied] = useState(false)
+  if (!onCopy && !onExport) return null
+
+  const handleCopy = () => {
+    onCopy?.()
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1200)
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1 border-t border-slate-100 bg-slate-50">
+      {onCopy && (
+        <button
+          onClick={handleCopy}
+          className="text-[10px] text-slate-500 hover:text-slate-800 px-1.5 py-0.5 rounded hover:bg-slate-200 transition-colors"
+        >
+          {copied ? 'Copied!' : copyLabel}
+        </button>
+      )}
+      {onExport && (
+        <button
+          onClick={onExport}
+          className="text-[10px] text-slate-500 hover:text-slate-800 px-1.5 py-0.5 rounded hover:bg-slate-200 transition-colors"
+        >
+          {exportLabel}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Fetches the chart PNG through the authenticated axios instance (a plain
+// <img src="/api/..."> tag can't attach the bearer token, so it 401s) and
+// renders it as a blob object URL. Same client the rest of the app uses for
+// every API call (see web/src/api/client.ts).
+function ChartResult({ path, filename, title }: { path: string; filename: string; title: string }) {
+  const [blob, setBlob] = useState<Blob | null>(null)
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    let url: string | null = null
+    api
+      .get(path, { responseType: 'blob' })
+      .then((res) => {
+        if (!active) return
+        const b = res.data as Blob
+        url = URL.createObjectURL(b)
+        setBlob(b)
+        setBlobUrl(url)
+      })
+      .catch(() => active && setFailed(true))
+    return () => {
+      active = false
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [path])
+
+  return (
+    <div className="bg-white rounded border border-slate-200 overflow-hidden text-xs">
+      <div className="bg-primary-50 px-2 py-1.5 text-xs font-medium text-primary-700">Chart: {title}</div>
+      {failed && <div className="p-3 text-red-600">Couldn't load the chart image.</div>}
+      {!failed && !blobUrl && <div className="p-3 text-slate-500">Loading chart…</div>}
+      {blobUrl && <img src={blobUrl} alt={title} className="w-full" />}
+      <ResultToolbar
+        onExport={blob ? () => downloadBlob(filename, blob, 'image/png') : undefined}
+        exportLabel="Download PNG"
+      />
+    </div>
+  )
+}
+
 function ToolResultRenderer({
   result,
+  studyId,
   onNavigate,
 }: {
   result: ToolResult
+  studyId: string
   onNavigate?: (tab: string, tableId?: string) => void
 }) {
   if (!result.success) {
@@ -332,6 +449,14 @@ function ToolResultRenderer({
               </tbody>
             </table>
           </div>
+          <ResultToolbar
+            onCopy={() =>
+              navigator.clipboard.writeText(
+                toMarkdownTable(cols, rows.map((r) => cols.map((c) => String(r[c] ?? '')))),
+              )
+            }
+            onExport={() => downloadBlob('query_result.csv', toCSV(cols, rows), 'text/csv')}
+          />
         </div>
       )
     }
@@ -342,6 +467,21 @@ function ToolResultRenderer({
       const columns = (table.columns as Array<{ label: string; letter: string | null; base: number }>) || []
       const rows = (table.rows as Array<{ label: string; pct: number[]; sig: string[]; kind: string }>) || []
       const means = table.means as number[] | null
+      const csvColumns = ['', ...columns.map((c) => c.label)]
+      const csvRows: Record<string, unknown>[] = rows.map((row) => {
+        const entry: Record<string, unknown> = { '': row.label }
+        columns.forEach((c, j) => {
+          entry[c.label] = row.pct[j]?.toFixed(1) ?? ''
+        })
+        return entry
+      })
+      if (means) {
+        const meanRow: Record<string, unknown> = { '': 'Mean' }
+        columns.forEach((c, j) => {
+          meanRow[c.label] = means[j]?.toFixed(2) ?? ''
+        })
+        csvRows.push(meanRow)
+      }
       return (
         <div className="bg-white rounded border border-slate-200 overflow-hidden text-xs">
           <div className="bg-primary-50 px-2 py-1.5 text-xs font-medium text-primary-700">
@@ -385,6 +525,14 @@ function ToolResultRenderer({
               </tbody>
             </table>
           </div>
+          <ResultToolbar
+            onCopy={() =>
+              navigator.clipboard.writeText(
+                toMarkdownTable(csvColumns, csvRows.map((r) => csvColumns.map((c) => String(r[c] ?? '')))),
+              )
+            }
+            onExport={() => downloadBlob(`${String(table.stub || 'table')}.csv`, toCSV(csvColumns, csvRows), 'text/csv')}
+          />
         </div>
       )
     }
@@ -410,9 +558,145 @@ function ToolResultRenderer({
       )
     }
 
+    case 'generate_chart': {
+      const chartFilename = result.chart_filename as string | undefined
+      const title = String(result.title || 'chart')
+      if (!chartFilename) return null
+      // Chart PNGs are served from the study-scoped chart route
+      // (api/routes/studies.py get_chart), which requires the same bearer
+      // auth as every other API call — studyId comes from the ChatBot prop
+      // (this panel is always scoped to one study), not the tool result.
+      const path = `/studies/${studyId}/charts/${chartFilename}`
+      return <ChartResult path={path} filename={chartFilename} title={title} />
+    }
+
+    case 'generate_pivot': {
+      const cols = (result.columns as string[]) || []
+      const rows = (result.rows as Record<string, unknown>[]) || []
+      const rowsVar = String(result.rows_variable || 'row')
+      const allCols = [rowsVar, ...cols]
+      if (cols.length === 0) return null
+      return (
+        <div className="bg-white rounded border border-slate-200 overflow-hidden text-xs">
+          <div className="bg-slate-50 px-2 py-1 text-[10px] text-slate-500 font-medium uppercase tracking-wide">
+            Pivot ({String(result.aggfunc || 'count')})
+          </div>
+          <div className="overflow-x-auto max-h-[200px]">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  {allCols.map((c) => (
+                    <th key={c} className="px-2 py-1 text-left font-medium text-slate-600 whitespace-nowrap">
+                      {c}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => (
+                  <tr key={i} className="border-b border-slate-50 hover:bg-slate-50">
+                    <td className="px-2 py-1 text-slate-700 whitespace-nowrap font-medium">
+                      {String(row.row ?? '')}
+                    </td>
+                    {cols.map((c) => (
+                      <td key={c} className="px-2 py-1 text-slate-700 whitespace-nowrap tabular-nums">
+                        {String(row[c] ?? '')}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <ResultToolbar
+            onCopy={() =>
+              navigator.clipboard.writeText(
+                toMarkdownTable(
+                  allCols,
+                  rows.map((r) => [String(r.row ?? ''), ...cols.map((c) => String(r[c] ?? ''))]),
+                ),
+              )
+            }
+            onExport={() => {
+              const csvRows = rows.map((r) => ({ [rowsVar]: r.row, ...r }))
+              downloadBlob('pivot.csv', toCSV(allCols, csvRows), 'text/csv')
+            }}
+          />
+        </div>
+      )
+    }
+
+    case 'generate_code': {
+      // generate_code returns schema only (see src/engines/analysis/codegen.py) —
+      // the LLM writes the actual SQL/Python/formula in its reply text, not here.
+      // executed_result (present when the model already ran a SQL draft via the
+      // sandbox) is the closest thing to "generated code output" this tool
+      // result carries, so that's what Copy/Export operate on.
+      const language = String(result.language || 'text')
+      const schema = (result.schema as Array<{ name: string; type: string; label: string }>) || []
+      const executed = result.executed_result as
+        | { success?: boolean; columns?: string[]; rows?: Record<string, unknown>[] }
+        | null
+      const hasRows = executed?.success && executed.columns && executed.rows
+      const text = hasRows
+        ? toMarkdownTable(executed!.columns!, executed!.rows!.map((r) => executed!.columns!.map((c) => String(r[c] ?? ''))))
+        : schema.map((s) => `${s.name} (${s.type})${s.label ? ` — ${s.label}` : ''}`).join('\n')
+      const ext = language === 'python' ? 'py' : language === 'sql' ? 'sql' : 'txt'
+      if (!text) return null
+      return (
+        <div className="bg-white rounded border border-slate-200 overflow-hidden text-xs">
+          <div className="bg-slate-50 px-2 py-1 text-[10px] text-slate-500 font-medium uppercase tracking-wide">
+            Schema ({language}) — {schema.length} columns{hasRows ? ', query executed' : ''}
+          </div>
+          <ResultToolbar
+            onCopy={() => navigator.clipboard.writeText(text)}
+            onExport={() =>
+              downloadBlob(hasRows ? 'query_result.csv' : `schema.${ext}`, hasRows ? toCSV(executed!.columns!, executed!.rows!) : text, hasRows ? 'text/csv' : 'text/plain')
+            }
+          />
+        </div>
+      )
+    }
+
+    case 'data_quality': {
+      const columns = (result.columns as Record<string, Record<string, unknown>>) || {}
+      const flags = (result.flags as Record<string, string[]>) || {}
+      const names = Object.keys(columns)
+      if (names.length === 0) return null
+      const text = JSON.stringify({ row_count: result.row_count, columns, flags }, null, 2)
+      return (
+        <div className="bg-white rounded border border-slate-200 overflow-hidden text-xs">
+          <div className="bg-slate-50 px-2 py-1 text-[10px] text-slate-500 font-medium uppercase tracking-wide">
+            Data quality ({names.length} columns, {String(result.row_count)} rows)
+          </div>
+          <div className="p-2 space-y-1 max-h-[200px] overflow-y-auto">
+            {names.slice(0, 10).map((name) => (
+              <div key={name} className="flex items-center justify-between text-slate-700">
+                <span className="font-mono">{name}</span>
+                <span className="tabular-nums text-slate-500">
+                  {Number(columns[name].missing_pct ?? 0).toFixed(1)}% missing
+                </span>
+              </div>
+            ))}
+          </div>
+          {(flags.high_missing_columns?.length || flags.constant_columns?.length) && (
+            <div className="px-2 pb-2 text-[10px] text-amber-600">
+              {flags.high_missing_columns?.length ? `${flags.high_missing_columns.length} high-missing` : ''}
+              {flags.high_missing_columns?.length && flags.constant_columns?.length ? ' · ' : ''}
+              {flags.constant_columns?.length ? `${flags.constant_columns.length} constant` : ''}
+            </div>
+          )}
+          <ResultToolbar
+            onCopy={() => navigator.clipboard.writeText(text)}
+            onExport={() => downloadBlob('data_quality.txt', text, 'text/plain')}
+          />
+        </div>
+      )
+    }
+
     case 'navigate_to': {
       const params = (result.params as Record<string, string>) || {}
-      const tab = params.tab || 'Tables'
+      const tab = params.tab || 'Overview'
       const tableId = params.table_id
       return (
         <div className="flex items-center gap-2">
