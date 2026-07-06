@@ -9,12 +9,14 @@ from pathlib import Path
 from src.core.models import DataMap
 from src.engines.tabs.crosstab import CrosstabResult, crosstab
 from src.engines.tabs.spec import TabPlan
+from src.engines.tabs.stats import CrosstabGuardrail, compute_crosstab_guardrails
 
 
 @dataclass
 class DeckRun:
     plan: TabPlan
     results: list[CrosstabResult]
+    guardrails: list[CrosstabGuardrail] = None  # Statistical guardrails per result
 
 
 def table_to_dict(r: CrosstabResult, table_id: str) -> dict:
@@ -80,19 +82,29 @@ def deck_to_json(run: DeckRun, path: str | Path) -> Path:
 
 def run_tab_plan(parquet_path: str | Path, plan: TabPlan, datamap: DataMap) -> DeckRun:
     results = []
+    guardrails = []
     for table in plan.tables:
-        results.append(
-            crosstab(
-                parquet_path,
-                stub=table.stub,
-                banner=plan.banner,
-                datamap=datamap,
-                weight=plan.weight,
-                confidence=plan.confidence,
-                min_base_for_test=plan.min_base_for_test,
-                nets=table.nets or None,
-                show_mean=table.mean,
-                filter_=table.filter,
-            )
+        result = crosstab(
+            parquet_path,
+            stub=table.stub,
+            banner=plan.banner,
+            datamap=datamap,
+            weight=plan.weight,
+            confidence=plan.confidence,
+            min_base_for_test=plan.min_base_for_test,
+            nets=table.nets or None,
+            show_mean=table.mean,
+            filter_=table.filter,
         )
-    return DeckRun(plan=plan, results=results)
+        results.append(result)
+
+        # Compute statistical guardrails to prevent LLM hallucination
+        guardrail = compute_crosstab_guardrails(
+            contingency_table=result.counts,
+            row_labels=result.row_labels,
+            col_labels=[col.label for col in result.columns],
+            col_unweighted_bases=[col.unweighted_base for col in result.columns],
+        )
+        guardrails.append(guardrail)
+
+    return DeckRun(plan=plan, results=results, guardrails=guardrails)
