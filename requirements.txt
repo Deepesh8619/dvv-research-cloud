@@ -22,3 +22,5 @@ uvicorn>=0.27
 sqlalchemy>=2.0
 python-multipart>=0.0.9
 psycopg2-binary>=2.9  # Postgres driver — required once DATABASE_URL is postgresql://
+python-docx>=1.0  # Read .docx questionnaires (paragraphs, runs, tables) at intake
+PyMuPDF>=1.24  # Read PDF questionnaires with block/position-aware reading order
