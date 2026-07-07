@@ -166,3 +166,47 @@ class ChatResponse(BaseModel):
     message: ChatMessage
     tool_results: list[dict] | None = None
     conversation_id: str
+
+
+# Questionnaire models
+class QuestionnaireUploadResponse(BaseModel):
+    """Response to a questionnaire upload — returns immediately while the
+    extraction pipeline runs in the background."""
+
+    questionnaire_id: str
+    study_id: str
+    status: str
+    message: str
+
+
+class QuestionnaireStatusResponse(BaseModel):
+    """Questionnaire status + extraction summary for the review dashboard."""
+
+    id: str
+    study_id: str
+    status: str
+    source_filename: str
+    version: int
+    created_at: str
+    updated_at: str
+    title: str | None = None
+    n_questions: int = 0
+    n_approved: int = 0
+    validation_errors: list[str] = []
+    extraction_summary: dict = {}
+
+
+class QuestionUpdateRequest(BaseModel):
+    """Partial update to one extracted question. Any omitted field is left
+    unchanged; provided fields overwrite. Routing fields accept the same nested
+    dict shape Expression.to_dict()/from_dict() use (or null to clear)."""
+
+    text: str | None = None
+    type: str | None = None
+    options: list[dict] | None = None
+    show_if: dict | None = None
+    terminate_if: dict | None = None
+
+    # "Clear this field" (explicit null) vs. "leave unchanged" (omitted) are
+    # distinguished by the route via `model_fields_set`, since both surface here
+    # as None.

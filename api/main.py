@@ -58,7 +58,7 @@ async def root():
 
 # Import routes
 try:
-    from api.routes import auth, chat, public, studies
+    from api.routes import auth, chat, public, questionnaire, studies
 
     app.include_router(auth.router, prefix="/api")
     logger.info("✅ Auth routes loaded")
@@ -68,6 +68,9 @@ try:
 
     app.include_router(chat.router, prefix="/api")
     logger.info("✅ Chat routes loaded")
+
+    app.include_router(questionnaire.router, prefix="/api")
+    logger.info("✅ Questionnaire routes loaded")
 
     app.include_router(public.router, prefix="/api")
     logger.info("✅ Public routes loaded")

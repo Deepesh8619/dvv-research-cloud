@@ -4,7 +4,7 @@ import logging
 import secrets
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, Column, String, create_engine
+from sqlalchemy import JSON, Boolean, Column, Integer, String, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -77,6 +77,41 @@ class ChatMessageDB(Base):
     content = Column(String)
     tools = Column(JSON, default=None)  # structured tool calls
     created_at = Column(String)
+
+
+class QuestionnaireDB(Base):
+    """Metadata + review state for one extracted questionnaire.
+
+    The full nested `SurveyDefinition` lives as JSON on disk (in the study's
+    directory, at `definition_path`), matching the datamap.json / crosstabs.json
+    convention in api/routes/chat.py — the DataMap and computed deck are
+    likewise structured JSON on disk with a DB row tracking only metadata. The
+    SurveyDefinition dataclass (src/core/survey_definition.py) is the source of
+    truth for its own nested structure; re-modelling it as SQL columns would
+    fork that schema. So this row carries only what a listing / review dashboard
+    queries by: status, source file, version, timestamps, the on-disk path, and
+    the set of per-question approvals.
+
+    `study_id` is a plain string reference (not a DB-level FK constraint),
+    matching how ShareLinkDB / ChatMessageDB reference studies in this codebase.
+    """
+
+    __tablename__ = "questionnaires"
+
+    id = Column(String, primary_key=True, index=True)
+    study_id = Column(String, index=True)
+    status = Column(String, default="processing", index=True)  # processing|draft|in_review|approved
+    source_filename = Column(String)
+    version = Column(Integer, default=1)
+    definition_path = Column(String, nullable=True)  # on-disk SurveyDefinition JSON
+    # Per-question approval is tracked here (API-layer review state) rather than
+    # on the Question dataclass: adding a field to src/core/survey_definition.py
+    # would touch that module's existing tests, and approval is a review-workflow
+    # concern that belongs alongside the questionnaire's status, not baked into
+    # the persisted instrument. A list of approved qids keeps it additive.
+    approved_qids = Column(JSON, default=list)
+    created_at = Column(String)
+    updated_at = Column(String)
 
 
 def init_db():
@@ -280,6 +315,82 @@ def create_chat_message(
     db.commit()
     db.refresh(msg)
     return msg
+
+
+def create_questionnaire(
+    db: Session,
+    study_id: str,
+    source_filename: str,
+    version: int = 1,
+) -> QuestionnaireDB:
+    """Create a questionnaire row in the initial 'processing' state."""
+    from uuid import uuid4
+
+    questionnaire = QuestionnaireDB(
+        id=f"quest_{uuid4().hex[:8]}",
+        study_id=study_id,
+        status="processing",
+        source_filename=source_filename,
+        version=version,
+        definition_path=None,
+        approved_qids=[],
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat(),
+    )
+    db.add(questionnaire)
+    db.commit()
+    db.refresh(questionnaire)
+    return questionnaire
+
+
+def get_questionnaire(db: Session, questionnaire_id: str) -> QuestionnaireDB:
+    """Get a questionnaire by ID."""
+    return db.query(QuestionnaireDB).filter(QuestionnaireDB.id == questionnaire_id).first()
+
+
+def list_questionnaires_for_study(db: Session, study_id: str) -> list[QuestionnaireDB]:
+    """List questionnaires for a study, most recent first."""
+    from sqlalchemy import desc
+
+    return (
+        db.query(QuestionnaireDB)
+        .filter(QuestionnaireDB.study_id == study_id)
+        .order_by(desc(QuestionnaireDB.created_at))
+        .all()
+    )
+
+
+def update_questionnaire_status(
+    db: Session,
+    questionnaire_id: str,
+    status: str,
+    definition_path: str = None,
+) -> QuestionnaireDB:
+    """Update a questionnaire's status and, optionally, its on-disk path."""
+    questionnaire = get_questionnaire(db, questionnaire_id)
+    if questionnaire:
+        questionnaire.status = status
+        if definition_path is not None:
+            questionnaire.definition_path = definition_path
+        questionnaire.updated_at = datetime.now().isoformat()
+        db.commit()
+        db.refresh(questionnaire)
+    return questionnaire
+
+
+def set_questionnaire_approved_qids(
+    db: Session, questionnaire_id: str, approved_qids: list[str]
+) -> QuestionnaireDB:
+    """Replace the set of approved qids (JSON column needs whole-value reassign)."""
+    questionnaire = get_questionnaire(db, questionnaire_id)
+    if questionnaire:
+        # SQLAlchemy only persists a JSON column on new-object assignment, not
+        # in-place mutation — assign a fresh list (mirrors approve_gate above).
+        questionnaire.approved_qids = list(approved_qids)
+        questionnaire.updated_at = datetime.now().isoformat()
+        db.commit()
+        db.refresh(questionnaire)
+    return questionnaire
 
 
 def seed_admin_user():
