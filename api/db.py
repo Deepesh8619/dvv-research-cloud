@@ -283,14 +283,36 @@ def create_chat_message(
 
 
 def seed_admin_user():
+    """Ensure ADMIN_EMAIL exists with ADMIN_PASSWORD's current hash.
+
+    Deliberately an upsert, not create-once: on a persistent database
+    (Postgres in production), a user created on the container's first boot
+    survives every later redeploy. If ADMIN_PASSWORD is only read at
+    creation time, changing it in the hosting dashboard and redeploying
+    silently does nothing — the login still checks the original hash, and
+    "I typed the right password" is genuinely true while still failing.
+    Env vars are meant to be the source of truth for admin credentials, so
+    every startup re-syncs the existing admin's password/name to match them
+    rather than assuming the first boot got it right.
+    """
     from api.auth import hash_password
     from api.config import ADMIN_EMAIL, ADMIN_NAME, ADMIN_PASSWORD
 
     db = SessionLocal()
     try:
-        # Check if any users exist
-        if db.query(UserDB).first():
+        existing = db.query(UserDB).filter(UserDB.email == ADMIN_EMAIL).first()
+        if existing:
+            existing.password_hash = hash_password(ADMIN_PASSWORD)
+            existing.name = ADMIN_NAME
+            db.commit()
+            logger.info(f"Admin user {ADMIN_EMAIL} password synced to current ADMIN_PASSWORD")
             return
+
+        if db.query(UserDB).first():
+            # Other users already exist (e.g. invited by the admin) but not
+            # one at ADMIN_EMAIL — create it alongside them rather than
+            # skipping, so changing ADMIN_EMAIL still produces a working login.
+            pass
 
         # Create admin user
         admin = create_user(
