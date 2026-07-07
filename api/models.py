@@ -194,6 +194,10 @@ class QuestionnaireStatusResponse(BaseModel):
     n_approved: int = 0
     validation_errors: list[str] = []
     extraction_summary: dict = {}
+    # Set only when status == "error": the human-readable failure reason (e.g. a
+    # missing ANTHROPIC_API_KEY surfaced by the extractor circuit breaker). None
+    # otherwise, so a healthy questionnaire carries no stale error text.
+    error_detail: str | None = None
 
 
 class QuestionUpdateRequest(BaseModel):

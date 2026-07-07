@@ -84,7 +84,19 @@ DEFAULT_ROUTES: dict[str, dict[str, str]] = {
 
 
 class BackendUnavailable(RuntimeError):
-    """Raised when a backend can't serve the request (offline, no key, no model)."""
+    """Raised when a backend can't serve the request (offline, no key, no model).
+
+    `config_error` distinguishes *actionable-once* config faults (a missing API
+    key — one fix in one place fixes every request) from genuinely *transient*
+    outages (unreachable host, timeout — retryable, may clear on its own). The
+    questionnaire extractor's circuit breaker and flag taxonomy key off this
+    boolean rather than string-sniffing the message, so the two failure classes
+    stay distinguishable even if a message's wording changes.
+    """
+
+    def __init__(self, *args: object, config_error: bool = False) -> None:
+        super().__init__(*args)
+        self.config_error = config_error
 
 
 class ModelOutputError(RuntimeError):
@@ -175,7 +187,7 @@ def _ollama_generate(model: str, prompt: str, schema: dict, timeout: int) -> dic
 def _claude_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        raise BackendUnavailable("ANTHROPIC_API_KEY not set")
+        raise BackendUnavailable("ANTHROPIC_API_KEY not set", config_error=True)
     payload = json.dumps(
         {
             "model": model,
@@ -209,6 +221,25 @@ def _claude_generate(model: str, prompt: str, schema: dict, timeout: int) -> dic
         if block.get("type") == "tool_use":
             return _validate(block["input"], schema)
     raise ModelOutputError("claude returned no structured output")
+
+
+# Env vars that gate the cloud AI backends. Reported as presence booleans by the
+# health/startup preflight so a missing key is caught at deploy — not at the
+# first client upload (the production incident this preflight exists to prevent).
+_LLM_KEY_ENV_VARS = ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+
+
+def llm_key_presence() -> dict[str, bool]:
+    """Which LLM API keys are set in the environment — booleans only.
+
+    NEVER returns key values, lengths, or prefixes: a boolean is all a preflight
+    needs and anything more leaks secret material into logs/health payloads. A
+    key present but empty/whitespace counts as absent (the same check the
+    backends themselves apply).
+    """
+    return {
+        name: bool(os.environ.get(name, "").strip()) for name in _LLM_KEY_ENV_VARS
+    }
 
 
 def run_task(

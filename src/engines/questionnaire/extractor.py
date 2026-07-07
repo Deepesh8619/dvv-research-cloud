@@ -66,6 +66,21 @@ _ROUTING_CONFIDENCE_FLOOR = 0.5
 # `validation` metadata dict rather than being lost.
 _ROUTING_VERBATIM_KEY = "routing_verbatim"
 
+# Where per-chunk failure diagnostics are stashed on Question.validation, mirroring
+# the routing_verbatim pattern above. `extraction_error` for a failed extract
+# pass, `verification_error` for a failed verify pass — each is
+# {"error_type": <exc class name>, "error_detail": <str(exc)>}. Preserved so a
+# reviewer (and the T8 navigator) sees the real root cause instead of an opaque
+# flag; str(BackendUnavailable("ANTHROPIC_API_KEY not set")) names it exactly.
+_EXTRACTION_ERROR_KEY = "extraction_error"
+_VERIFICATION_ERROR_KEY = "verification_error"
+
+# The circuit breaker aborts the whole run once this many of the first processed
+# chunks have ALL failed with BackendUnavailable — an N/N failure is one root
+# cause (a missing key / dead backend), not N review items, and shouldn't cost
+# 2*N doomed LLM attempts to discover.
+_CIRCUIT_BREAKER_CHUNKS = 3
+
 
 @dataclass
 class ExtractionResult:
@@ -222,21 +237,68 @@ def _validate_question(result: ExtractionResult, routing: dict) -> None:
         result.add_flag(schema.FLAG_AMBIGUOUS_ROUTING)
 
 
+def _stash_error(question: Question, key: str, exc: Exception) -> None:
+    """Record a failure's type + detail on Question.validation under `key`.
+
+    Follows the routing_verbatim stash convention: Question has no dedicated field
+    for a failure diagnostic, so it lives in the otherwise-unused-at-extraction
+    `validation` metadata dict rather than being discarded (the exact bug this
+    task fixes). str(exc) for a config fault literally names the root cause.
+    """
+    if question.validation is None:
+        question.validation = {}
+    question.validation[key] = {
+        "error_type": type(exc).__name__,
+        "error_detail": str(exc),
+    }
+
+
+def _extraction_flag_for(exc: Exception) -> str:
+    """Pick the extraction flag that matches this failure's actionability.
+
+    - BackendUnavailable with `config_error` (missing key) -> CONFIG_ERROR:
+      one fix in one place. Detected via the structured attribute on
+      BackendUnavailable, not by string-sniffing the message.
+    - other BackendUnavailable (unreachable/timeout) -> UNAVAILABLE: transient.
+    - ModelOutputError (schema-rejected output) -> MODEL_ERROR: a real
+      document/extraction problem for this chunk.
+    - KeyError (no route configured) -> CONFIG_ERROR: also a deploy-time
+      misconfiguration a human fixes once.
+    """
+    if isinstance(exc, BackendUnavailable):
+        return (
+            schema.FLAG_EXTRACTION_CONFIG_ERROR
+            if getattr(exc, "config_error", False)
+            else schema.FLAG_EXTRACTION_UNAVAILABLE
+        )
+    if isinstance(exc, ModelOutputError):
+        return schema.FLAG_EXTRACTION_MODEL_ERROR
+    # KeyError: no route configured for the task — a config fault.
+    return schema.FLAG_EXTRACTION_CONFIG_ERROR
+
+
 def extract_question(chunk: QuestionChunk) -> ExtractionResult:
     """Extract one chunk into a structured Question + confidence + flags.
 
     Never raises on a backend/model failure: a failed chunk comes back flagged
-    `EXTRACTION_UNAVAILABLE` with a minimal placeholder Question so the caller
-    can keep processing the rest of the document and report which chunks failed.
+    (CONFIG_ERROR / UNAVAILABLE / MODEL_ERROR by actionability) with a minimal
+    placeholder Question AND the exception's type+detail preserved in
+    `question.validation["extraction_error"]`, so the caller can keep processing
+    the rest of the document and a reviewer can see the real root cause.
+
+    The document-level circuit breaker in `extract_survey_definition` inspects
+    the flag/error on the returned result to decide whether to abort — see
+    `_is_backend_unavailable_result`.
     """
     prompt = schema.build_extraction_prompt(chunk.chunk_text, chunk.candidate_qid)
     try:
         response: AIResponse = run_task(
             "questionnaire.extract", prompt, schema.EXTRACTION_SCHEMA
         )
-    except (BackendUnavailable, ModelOutputError, KeyError):
+    except (BackendUnavailable, ModelOutputError, KeyError) as exc:
         result = ExtractionResult(question=_empty_question(chunk))
-        result.add_flag(schema.FLAG_EXTRACTION_UNAVAILABLE)
+        result.add_flag(_extraction_flag_for(exc))
+        _stash_error(result.question, _EXTRACTION_ERROR_KEY, exc)
         return result
 
     question, routing = _question_from_raw(response.content, chunk)
@@ -263,8 +325,9 @@ def verify_question(chunk: QuestionChunk, result: ExtractionResult) -> Extractio
     prompt = schema.build_verification_prompt(chunk.chunk_text, result.question.to_dict())
     try:
         response = run_task("questionnaire.verify", prompt, schema.VERIFICATION_SCHEMA)
-    except (BackendUnavailable, ModelOutputError, KeyError):
+    except (BackendUnavailable, ModelOutputError, KeyError) as exc:
         result.add_flag(schema.FLAG_VERIFICATION_UNAVAILABLE)
+        _stash_error(result.question, _VERIFICATION_ERROR_KEY, exc)
         return result
 
     result.verified = True
@@ -348,20 +411,45 @@ def _resolve_cross_chunk_routing(
                 setattr(q, kind, None)
 
 
+def _is_backend_unavailable_result(result: ExtractionResult) -> bool:
+    """True if this chunk's EXTRACT pass failed with a BackendUnavailable.
+
+    The circuit breaker counts these: both a transient outage
+    (EXTRACTION_UNAVAILABLE) and a config fault (EXTRACTION_CONFIG_ERROR) map to
+    BackendUnavailable and mean "the backend can't serve ANY chunk". A per-chunk
+    MODEL_ERROR (schema-rejected output) does NOT count — that's this document's
+    problem, not the backend's, so it accumulates a flag without aborting.
+    """
+    validation = result.question.validation or {}
+    err = validation.get(_EXTRACTION_ERROR_KEY)
+    if not err:
+        return False
+    return err.get("error_type") == BackendUnavailable.__name__
+
+
 def _extraction_summary(results: list[ExtractionResult]) -> dict[str, Any]:
-    """Reviewer-facing counts: totals, per-flag counts, average confidence."""
+    """Reviewer-facing counts: totals, per-flag counts, avg confidence,
+    plus a `failure_reasons` counter keyed by the preserved error_type."""
     flag_counts: dict[str, int] = {}
+    failure_reasons: dict[str, int] = {}
     conf_sum = 0.0
     conf_n = 0
     for result in results:
         for flag in result.flags:
             flag_counts[flag] = flag_counts.get(flag, 0) + 1
+        validation = result.question.validation or {}
+        for key in (_EXTRACTION_ERROR_KEY, _VERIFICATION_ERROR_KEY):
+            err = validation.get(key)
+            if err:
+                etype = err.get("error_type", "Unknown")
+                failure_reasons[etype] = failure_reasons.get(etype, 0) + 1
         for value in result.confidence.values():
             conf_sum += float(value)
             conf_n += 1
     return {
         "total_chunks": len(results),
         "flag_counts": flag_counts,
+        "failure_reasons": failure_reasons,
         "average_confidence": round(conf_sum / conf_n, 4) if conf_n else 0.0,
         "verified_chunks": sum(1 for r in results if r.verified),
     }
@@ -378,8 +466,40 @@ def extract_survey_definition(
     here to keep the first version simple and its failure modes obvious.
     """
     results: list[ExtractionResult] = []
+    consecutive_backend_failures = 0
     for chunk in chunks:
         result = extract_question(chunk)
+
+        if _is_backend_unavailable_result(result):
+            consecutive_backend_failures += 1
+            # Circuit breaker: if the FIRST N processed chunks ALL failed with a
+            # BackendUnavailable, the backend can serve nothing — abort now
+            # instead of burning the remaining ~2*(len-N) doomed LLM calls. The
+            # raise propagates to api/routes/questionnaire.py::_run_extraction's
+            # except-path, flipping the row to 'error' with this detail. We skip
+            # the verify call for a failed-extract chunk regardless, so each
+            # doomed chunk costs one attempt, not two.
+            results.append(result)
+            if (
+                len(results) == consecutive_backend_failures
+                and consecutive_backend_failures >= _CIRCUIT_BREAKER_CHUNKS
+            ):
+                err = (result.question.validation or {}).get(_EXTRACTION_ERROR_KEY, {})
+                detail = err.get("error_detail", "backend unavailable")
+                raise BackendUnavailable(
+                    f"extraction aborted after {consecutive_backend_failures} consecutive "
+                    f"backend failures (circuit breaker): {detail}",
+                    config_error=bool(
+                        err.get("error_type") == BackendUnavailable.__name__
+                        and schema.FLAG_EXTRACTION_CONFIG_ERROR in result.flags
+                    ),
+                )
+            continue
+
+        # Extraction succeeded (or failed in a non-backend way, e.g. MODEL_ERROR):
+        # the backend is reachable, so reset the consecutive-failure streak and
+        # run the grounded verify pass as normal.
+        consecutive_backend_failures = 0
         result = verify_question(chunk, result)
         results.append(result)
 

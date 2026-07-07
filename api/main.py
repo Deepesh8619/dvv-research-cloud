@@ -42,8 +42,20 @@ app.add_middleware(
 # Health check
 @app.get("/api/health")
 async def health():
-    """Health check endpoint."""
-    return {"status": "ok", "service": "dvv-research-api"}
+    """Health check endpoint.
+
+    Reports which LLM API keys are present in the environment (booleans only,
+    never the values/lengths/prefixes) so a missing key — the root cause of the
+    production incident where all 80 questions failed extraction — is caught at
+    deploy via the health check, not at the first client upload (T16 preflight).
+    """
+    from src.ai.router import llm_key_presence
+
+    return {
+        "status": "ok",
+        "service": "dvv-research-api",
+        "llm_keys": llm_key_presence(),
+    }
 
 
 # Root redirect
@@ -89,6 +101,15 @@ if web_build_path.exists():
 async def startup():
     """Run on startup."""
     logger.info("🚀 DVV Research Cloud API started")
+    # Preflight: log which LLM keys are configured (booleans only, never values)
+    # so a missing key is visible in the deploy log immediately (T16).
+    from src.ai.router import llm_key_presence
+
+    presence = llm_key_presence()
+    missing = [name for name, present in presence.items() if not present]
+    if missing:
+        logger.warning(f"⚠️  LLM key preflight — MISSING: {', '.join(missing)}")
+    logger.info(f"LLM key preflight: {presence}")
 
 
 if __name__ == "__main__":

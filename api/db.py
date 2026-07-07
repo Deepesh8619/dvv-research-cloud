@@ -4,7 +4,7 @@ import logging
 import secrets
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, Column, Integer, String, create_engine
+from sqlalchemy import JSON, Boolean, Column, Integer, String, Text, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -82,15 +82,23 @@ class ChatMessageDB(Base):
 class QuestionnaireDB(Base):
     """Metadata + review state for one extracted questionnaire.
 
-    The full nested `SurveyDefinition` lives as JSON on disk (in the study's
-    directory, at `definition_path`), matching the datamap.json / crosstabs.json
-    convention in api/routes/chat.py — the DataMap and computed deck are
-    likewise structured JSON on disk with a DB row tracking only metadata. The
-    SurveyDefinition dataclass (src/core/survey_definition.py) is the source of
-    truth for its own nested structure; re-modelling it as SQL columns would
-    fork that schema. So this row carries only what a listing / review dashboard
-    queries by: status, source file, version, timestamps, the on-disk path, and
-    the set of per-question approvals.
+    The full nested `SurveyDefinition` is persisted as a JSON *string* in the
+    `definition_json` TEXT column (T17) — durable across deploys/restarts, since
+    Render's free tier wipes the on-disk `/app/studies` where it previously
+    lived. An approved 80-question questionnaire embodies hours of human review
+    labor, which must survive a restart; a DB column is the durable home.
+
+    Column type is TEXT, not SQLAlchemy JSON: `SurveyDefinition.to_json()`/
+    `from_json()` already own the (de)serialization contract as string-in/
+    string-out, and TEXT behaves identically on SQLite (tests) and Postgres
+    (prod). SQLAlchemy's JSON type would double-parse and can differ subtly
+    between the two backends — TEXT keeps the dataclass the single source of
+    truth for its own nested structure without re-modelling it as SQL columns.
+
+    `definition_path` is kept but is now vestigial/optional local-dev metadata
+    (the ephemeral on-disk copy), no longer authoritative. On read, if
+    `definition_json` is empty but a still-present file exists at
+    `definition_path`, the column is backfilled from it (see routes helper).
 
     `study_id` is a plain string reference (not a DB-level FK constraint),
     matching how ShareLinkDB / ChatMessageDB reference studies in this codebase.
@@ -103,7 +111,12 @@ class QuestionnaireDB(Base):
     status = Column(String, default="processing", index=True)  # processing|draft|in_review|approved
     source_filename = Column(String)
     version = Column(Integer, default=1)
-    definition_path = Column(String, nullable=True)  # on-disk SurveyDefinition JSON
+    definition_json = Column(Text, nullable=True)  # authoritative SurveyDefinition JSON string
+    definition_path = Column(String, nullable=True)  # vestigial: ephemeral on-disk copy
+    # Human-readable reason set when status flips to 'error' (e.g. the extractor's
+    # circuit-breaker message naming a missing ANTHROPIC_API_KEY). Surfaced by the
+    # status endpoint so a reviewer sees the root cause, not a bare 'error' (T16).
+    error_detail = Column(String, nullable=True)
     # Per-question approval is tracked here (API-layer review state) rather than
     # on the Question dataclass: adding a field to src/core/survey_definition.py
     # would touch that module's existing tests, and approval is a review-workflow
@@ -332,6 +345,7 @@ def create_questionnaire(
         status="processing",
         source_filename=source_filename,
         version=version,
+        definition_json=None,
         definition_path=None,
         approved_qids=[],
         created_at=datetime.now().isoformat(),
@@ -364,14 +378,45 @@ def update_questionnaire_status(
     db: Session,
     questionnaire_id: str,
     status: str,
+    definition_json: str = None,
     definition_path: str = None,
+    error_detail: str = None,
 ) -> QuestionnaireDB:
-    """Update a questionnaire's status and, optionally, its on-disk path."""
+    """Update a questionnaire's status and, optionally, its definition/error.
+
+    `definition_json` is the authoritative persisted SurveyDefinition (TEXT,
+    durable across restarts). `definition_path` is kept for the optional
+    ephemeral on-disk copy (vestigial local-dev metadata). `error_detail` stores
+    the human-readable failure reason when `status == "error"` (T16) so the
+    status endpoint can name the root cause; it is cleared on any non-error
+    status so a stale reason never lingers after a successful re-run.
+    """
     questionnaire = get_questionnaire(db, questionnaire_id)
     if questionnaire:
         questionnaire.status = status
+        if definition_json is not None:
+            questionnaire.definition_json = definition_json
         if definition_path is not None:
             questionnaire.definition_path = definition_path
+        # Store the reason on error; clear it otherwise so it can't go stale.
+        questionnaire.error_detail = error_detail if status == "error" else None
+        questionnaire.updated_at = datetime.now().isoformat()
+        db.commit()
+        db.refresh(questionnaire)
+    return questionnaire
+
+
+def set_questionnaire_definition(
+    db: Session, questionnaire_id: str, definition_json: str
+) -> QuestionnaireDB:
+    """Persist the authoritative SurveyDefinition JSON string on the row.
+
+    Used by both edit/approve writes and the on-read backfill from a still-
+    present ephemeral file (T17 backward-compat migration).
+    """
+    questionnaire = get_questionnaire(db, questionnaire_id)
+    if questionnaire:
+        questionnaire.definition_json = definition_json
         questionnaire.updated_at = datetime.now().isoformat()
         db.commit()
         db.refresh(questionnaire)

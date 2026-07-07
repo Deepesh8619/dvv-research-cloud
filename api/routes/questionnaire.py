@@ -4,11 +4,16 @@ Wires the deterministic loader (src/intake/questionnaire_loader.py) and the LLM
 extractor (src/engines/questionnaire/extractor.py) behind an upload endpoint,
 then exposes the resulting `SurveyDefinition` for human review and correction.
 
-Storage convention (matches api/routes/chat.py's datamap.json / crosstabs.json
-handling): the full nested SurveyDefinition is persisted as JSON on disk under
-the study's directory; the QuestionnaireDB row tracks only metadata + review
-status + the on-disk path. The dataclass in src/core/survey_definition.py is the
-source of truth for the instrument's structure — it is never re-modelled as SQL.
+Storage convention (T17): the full nested SurveyDefinition is persisted as a
+JSON string in the `definition_json` TEXT column on the QuestionnaireDB row —
+durable across Render deploys/restarts (its free tier wipes /app/studies, where
+this JSON previously lived). The dataclass in src/core/survey_definition.py is
+the source of truth for the instrument's structure — it is never re-modelled as
+SQL. `definition_path` is now optional/vestigial: an ephemeral on-disk copy is
+still written for local-dev convenience, but the column is authoritative. On
+read, a row whose column is empty but whose `definition_path` file still exists
+is backfilled from that file (so questionnaires already in flight at deploy time
+are not lost).
 
 Roles (api/auth.py): owner/analyst may upload and edit; reviewer is read-only
 (GET allowed; upload/PATCH/approve rejected with 403).
@@ -33,6 +38,7 @@ from api.db import (
     get_study,
     list_questionnaires_for_study,
     set_questionnaire_approved_qids,
+    set_questionnaire_definition,
     update_questionnaire_status,
 )
 from api.models import (
@@ -55,7 +61,15 @@ router = APIRouter()
 # approved as a whole — these mark routing/extraction the pipeline could not
 # resolve on its own and that a human must have looked at.
 _BLOCKING_FLAGS = frozenset(
-    {"AMBIGUOUS_ROUTING", "UNRESOLVED_ROUTING_QID", "EXTRACTION_UNAVAILABLE"}
+    {
+        "AMBIGUOUS_ROUTING",
+        "UNRESOLVED_ROUTING_QID",
+        "EXTRACTION_UNAVAILABLE",
+        # T16: a config- or model-failed extraction is an unreviewed placeholder
+        # question and must block whole-questionnaire approval too.
+        "EXTRACTION_CONFIG_ERROR",
+        "EXTRACTION_MODEL_ERROR",
+    }
 )
 
 
@@ -78,25 +92,54 @@ def _definition_path(study_id: str, questionnaire_id: str) -> Path:
     return _questionnaire_dir(study_id) / f"{questionnaire_id}.json"
 
 
-def _load_definition(questionnaire) -> SurveyDefinition:
-    """Load the on-disk SurveyDefinition for a questionnaire row, or 409/404.
+def _read_definition_json(db: Session, questionnaire) -> str | None:
+    """Return the authoritative SurveyDefinition JSON string, or None.
 
-    404 while still processing (nothing on disk yet); a corrupt/missing file on
-    a supposedly-ready questionnaire is a 500-worthy server fault.
+    Reads the durable `definition_json` column. Backward-compat migration
+    (T17): if the column is empty but `definition_path` still points at a file
+    on disk (e.g. right after this deploys, before a restart wipes /app/studies),
+    read the file and backfill the column on this read so in-flight review labor
+    is not lost. `definition_path` is otherwise vestigial.
     """
-    if not questionnaire.definition_path:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Questionnaire is still {questionnaire.status}; no definition yet",
-        )
-    path = Path(questionnaire.definition_path)
-    if not path.exists():
-        raise HTTPException(status_code=500, detail="Questionnaire definition file missing")
-    return SurveyDefinition.from_json(path.read_text())
+    if questionnaire.definition_json:
+        return questionnaire.definition_json
+    if questionnaire.definition_path:
+        path = Path(questionnaire.definition_path)
+        if path.exists():
+            payload = path.read_text()
+            set_questionnaire_definition(db, questionnaire.id, payload)
+            return payload
+    return None
 
 
-def _save_definition(questionnaire, survey: SurveyDefinition) -> None:
-    Path(questionnaire.definition_path).write_text(survey.to_json())
+def _load_definition(db: Session, questionnaire) -> SurveyDefinition:
+    """Load the SurveyDefinition for a questionnaire row, or 409/500.
+
+    409 while still processing (nothing persisted yet); a row that reports a
+    ready status but has neither a column value nor a backfillable file is a
+    500-worthy server fault.
+    """
+    payload = _read_definition_json(db, questionnaire)
+    if payload is None:
+        if not questionnaire.definition_path and not questionnaire.definition_json:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Questionnaire is still {questionnaire.status}; no definition yet",
+            )
+        raise HTTPException(status_code=500, detail="Questionnaire definition missing")
+    return SurveyDefinition.from_json(payload)
+
+
+def _save_definition(db: Session, questionnaire, survey: SurveyDefinition) -> None:
+    """Persist the SurveyDefinition to the durable column (authoritative).
+
+    Also refreshes the ephemeral on-disk copy when a path is set, purely as
+    local-dev convenience — the column is the source of truth.
+    """
+    payload = survey.to_json()
+    set_questionnaire_definition(db, questionnaire.id, payload)
+    if questionnaire.definition_path:
+        Path(questionnaire.definition_path).write_text(payload)
 
 
 # --- Serialization helpers --------------------------------------------------
@@ -118,14 +161,26 @@ def _status_response(questionnaire, survey: SurveyDefinition | None) -> Question
         n_approved=len(questionnaire.approved_qids or []),
         validation_errors=metadata.get("validation_errors", []),
         extraction_summary=metadata.get("extraction_summary", {}),
+        # Only meaningful when status == 'error'; None otherwise. Names the root
+        # cause (missing key, circuit-breaker abort) instead of a bare 'error'.
+        error_detail=questionnaire.error_detail if questionnaire.status == "error" else None,
     )
 
 
 def _question_payload(question, approved_qids: set[str]) -> dict:
     """Full per-question payload for the review UI — every field a reviewer
-    needs (source_text, confidence, flags) is included, nothing trimmed."""
+    needs (source_text, confidence, flags) is included, nothing trimmed.
+
+    Surfaces the per-chunk failure diagnostic (T16): `extraction_error` /
+    `verification_error`, each {"error_type", "error_detail"}, are stashed on
+    Question.validation by the extractor and already ride along in to_dict()'s
+    `validation`. Also lifted to the top level as `extraction_error` /
+    `verification_error` so the review UI doesn't have to dig into validation."""
     data = question.to_dict()
     data["approved"] = question.qid in approved_qids
+    validation = question.validation or {}
+    data["extraction_error"] = validation.get("extraction_error")
+    data["verification_error"] = validation.get("verification_error")
     return data
 
 
@@ -163,9 +218,22 @@ def _run_extraction(
         # renamed to the questionnaire id to avoid collisions).
         survey.title = Path(source_filename).stem
 
-        definition_path.write_text(survey.to_json())
+        payload = survey.to_json()
+        # definition_json is authoritative + durable; the on-disk copy is an
+        # ephemeral local-dev convenience (wiped on Render free-tier restarts).
+        try:
+            definition_path.write_text(payload)
+        except OSError as write_exc:
+            logger.warning(
+                f"[{study_id}] Could not write ephemeral definition file "
+                f"{definition_path}: {write_exc}"
+            )
         update_questionnaire_status(
-            job_db, questionnaire_id, "draft", definition_path=str(definition_path)
+            job_db,
+            questionnaire_id,
+            "draft",
+            definition_json=payload,
+            definition_path=str(definition_path),
         )
         logger.info(
             f"[{study_id}] Questionnaire {questionnaire_id} extracted: "
@@ -176,7 +244,12 @@ def _run_extraction(
             f"[{study_id}] Questionnaire {questionnaire_id} extraction failed: {exc}",
             exc_info=True,
         )
-        update_questionnaire_status(job_db, questionnaire_id, "error")
+        # Preserve the exception detail (e.g. the extractor circuit-breaker's
+        # message naming a missing ANTHROPIC_API_KEY) on the row so the status
+        # endpoint reports the real root cause instead of an opaque 'error' (T16).
+        update_questionnaire_status(
+            job_db, questionnaire_id, "error", error_detail=str(exc)
+        )
     finally:
         job_db.close()
 
@@ -255,8 +328,9 @@ async def get_questionnaire_status(
     """Current questionnaire status + extraction summary. (Authenticated)"""
     questionnaire = _latest_questionnaire(db, study_id)
     survey = None
-    if questionnaire.definition_path and Path(questionnaire.definition_path).exists():
-        survey = SurveyDefinition.from_json(Path(questionnaire.definition_path).read_text())
+    payload = _read_definition_json(db, questionnaire)
+    if payload is not None:
+        survey = SurveyDefinition.from_json(payload)
     return _status_response(questionnaire, survey)
 
 
@@ -268,7 +342,7 @@ async def list_questions(
 ):
     """Full list of extracted questions with provenance/confidence/flags."""
     questionnaire = _latest_questionnaire(db, study_id)
-    survey = _load_definition(questionnaire)
+    survey = _load_definition(db, questionnaire)
     approved = set(questionnaire.approved_qids or [])
     return {
         "questionnaire_id": questionnaire.id,
@@ -287,7 +361,7 @@ async def get_question(
 ):
     """Single question detail."""
     questionnaire = _latest_questionnaire(db, study_id)
-    survey = _load_definition(questionnaire)
+    survey = _load_definition(db, questionnaire)
     if qid not in survey:
         raise HTTPException(status_code=404, detail=f"Question {qid} not found")
     approved = set(questionnaire.approved_qids or [])
@@ -336,7 +410,7 @@ async def update_question(
     after the edit; rejects (422) if the edit would break `.validate()`.
     (Owner/Analyst)"""
     questionnaire = _latest_questionnaire(db, study_id)
-    survey = _load_definition(questionnaire)
+    survey = _load_definition(db, questionnaire)
     if qid not in survey:
         raise HTTPException(status_code=404, detail=f"Question {qid} not found")
 
@@ -353,7 +427,7 @@ async def update_question(
         )
 
     survey.metadata["validation_errors"] = problems  # now empty
-    _save_definition(questionnaire, survey)
+    _save_definition(db, questionnaire, survey)
     update_questionnaire_status(db, questionnaire.id, "in_review")
     approved = set(questionnaire.approved_qids or [])
     return _question_payload(survey[qid], approved)
@@ -368,7 +442,7 @@ async def approve_question(
 ):
     """Mark one question as reviewer-approved. (Owner/Analyst)"""
     questionnaire = _latest_questionnaire(db, study_id)
-    survey = _load_definition(questionnaire)
+    survey = _load_definition(db, questionnaire)
     if qid not in survey:
         raise HTTPException(status_code=404, detail=f"Question {qid} not found")
 
@@ -390,7 +464,7 @@ async def approve_all(
     approved AND carries no unresolved routing/extraction flag. Returns a clear
     error listing unresolved qids if the gate fails. (Owner/Analyst)"""
     questionnaire = _latest_questionnaire(db, study_id)
-    survey = _load_definition(questionnaire)
+    survey = _load_definition(db, questionnaire)
     approved = set(questionnaire.approved_qids or [])
 
     unresolved: list[dict] = []
@@ -414,7 +488,7 @@ async def approve_all(
         )
 
     survey.status = "approved"
-    _save_definition(questionnaire, survey)
+    _save_definition(db, questionnaire, survey)
     update_questionnaire_status(db, questionnaire.id, "approved")
     logger.info(f"[{study_id}] Questionnaire {questionnaire.id} approved by {user.name}")
     return {"questionnaire_id": questionnaire.id, "status": "approved"}

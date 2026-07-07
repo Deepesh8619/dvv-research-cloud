@@ -98,6 +98,17 @@ def get_question_details(
         "qid": qid,
         "question": question.to_dict(),
     }
+    # Surface the T16 extraction/verification failure diagnostic at the top level
+    # so an analyst asking the navigator "why did this question fail?" gets the
+    # real root cause (e.g. "ANTHROPIC_API_KEY not set"), not just a flag. Each is
+    # {"error_type", "error_detail"} stashed on Question.validation, or None.
+    validation = question.validation or {}
+    extraction_error = validation.get("extraction_error")
+    verification_error = validation.get("verification_error")
+    if extraction_error is not None:
+        result["extraction_error"] = extraction_error
+    if verification_error is not None:
+        result["verification_error"] = verification_error
     linked = question_variable_links(qid, links)
     if linked is not None:
         result["datamap_variables"] = linked

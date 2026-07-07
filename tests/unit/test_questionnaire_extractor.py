@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from src.ai.router import AIResponse, BackendUnavailable
+import pytest
+
+from src.ai.router import AIResponse, BackendUnavailable, ModelOutputError
 from src.core.survey_definition import QuestionType
 from src.engines.questionnaire import schema
 from src.engines.questionnaire.extractor import (
@@ -284,3 +286,125 @@ def test_unresolved_routing_qid_flagged_and_nulled():
     assert schema.FLAG_UNRESOLVED_ROUTING_QID in survey.metadata[
         "extraction_summary"
     ]["flag_counts"]
+
+
+# --- T16: failure diagnostics + flag taxonomy ------------------------------
+
+
+def test_config_error_flag_and_detail_preserved():
+    """A missing-key BackendUnavailable (config_error=True) -> CONFIG_ERROR flag,
+    NOT the transient UNAVAILABLE flag, with type + detail preserved verbatim."""
+    exc = BackendUnavailable("ANTHROPIC_API_KEY not set", config_error=True)
+    with patch(_EXTRACT, side_effect=exc):
+        result = extract_question(_chunk("Q9"))
+
+    assert schema.FLAG_EXTRACTION_CONFIG_ERROR in result.flags
+    assert schema.FLAG_EXTRACTION_UNAVAILABLE not in result.flags
+    err = result.question.validation["extraction_error"]
+    assert err["error_type"] == "BackendUnavailable"
+    assert err["error_detail"] == "ANTHROPIC_API_KEY not set"
+
+
+def test_transient_backend_error_uses_unavailable_flag():
+    """A BackendUnavailable without config_error (unreachable/timeout) stays on
+    the transient UNAVAILABLE flag, distinct from the config case."""
+    with patch(_EXTRACT, side_effect=BackendUnavailable("claude API unreachable: timeout")):
+        result = extract_question(_chunk("Q9"))
+
+    assert schema.FLAG_EXTRACTION_UNAVAILABLE in result.flags
+    assert schema.FLAG_EXTRACTION_CONFIG_ERROR not in result.flags
+    err = result.question.validation["extraction_error"]
+    assert err["error_type"] == "BackendUnavailable"
+
+
+def test_model_output_error_flagged_distinctly():
+    """A ModelOutputError (schema-rejected output) is a per-chunk MODEL_ERROR,
+    distinct from both backend flags, with its detail preserved."""
+    with patch(_EXTRACT, side_effect=ModelOutputError("model output missing required keys")):
+        result = extract_question(_chunk("Q9"))
+
+    assert schema.FLAG_EXTRACTION_MODEL_ERROR in result.flags
+    assert schema.FLAG_EXTRACTION_CONFIG_ERROR not in result.flags
+    assert schema.FLAG_EXTRACTION_UNAVAILABLE not in result.flags
+    err = result.question.validation["extraction_error"]
+    assert err["error_type"] == "ModelOutputError"
+
+
+def test_verification_error_preserved_on_question():
+    """A failed verify pass stashes verification_error (distinct key) + flags."""
+    result = _clean_result()
+    exc = BackendUnavailable("ANTHROPIC_API_KEY not set", config_error=True)
+    with patch(_EXTRACT, side_effect=exc):
+        result = verify_question(_chunk(), result)
+
+    assert schema.FLAG_VERIFICATION_UNAVAILABLE in result.flags
+    err = result.question.validation["verification_error"]
+    assert err["error_type"] == "BackendUnavailable"
+    assert err["error_detail"] == "ANTHROPIC_API_KEY not set"
+
+
+# --- T16: document-level circuit breaker -----------------------------------
+
+
+def test_circuit_break_after_three_backend_failures():
+    """First 3 chunks all fail with BackendUnavailable -> abort and raise, and
+    run_task is NOT called for chunks 4+ (proves the breaker stops EARLY, not
+    just that it eventually errors). Extract-only per doomed chunk: 3 calls."""
+    chunks = [_chunk(f"Q{i}", f"Q{i}. Question {i}?") for i in range(1, 9)]  # 8 chunks
+
+    with patch(
+        _EXTRACT,
+        side_effect=BackendUnavailable("ANTHROPIC_API_KEY not set", config_error=True),
+    ) as mock_run:
+        with pytest.raises(BackendUnavailable) as excinfo:
+            extract_survey_definition(chunks, study_id="study-down")
+
+    # Circuit breaker fired: exactly 3 extract attempts, verify never reached,
+    # chunks 4-8 never touched.
+    assert mock_run.call_count == 3
+    # The raised error names the root cause (propagates to the route's error flip).
+    assert "ANTHROPIC_API_KEY not set" in str(excinfo.value)
+    assert excinfo.value.config_error is True
+
+
+def test_model_output_error_does_not_circuit_break():
+    """A ModelOutputError on every chunk is a per-document problem, not a backend
+    outage — it accumulates per-chunk flags and does NOT trigger the breaker, so
+    the whole document is processed (all chunks attempted)."""
+    chunks = [_chunk(f"Q{i}", f"Q{i}. Question {i}?") for i in range(1, 6)]  # 5 chunks
+
+    def fake_run(task, prompt, schema_arg, *args, **kwargs):
+        # Extraction always fails schema; verify (reached because backend is up)
+        # returns faithful so we can confirm the pipeline kept going.
+        if task == "questionnaire.verify":
+            return _response({"faithful": True, "discrepancies": []})
+        raise ModelOutputError("model output missing required keys")
+
+    with patch(_EXTRACT, side_effect=fake_run):
+        survey = extract_survey_definition(chunks, study_id="study-badmodel")
+
+    # No raise: all 5 chunks produced (placeholder) questions.
+    assert len(survey.questions) == 5
+    summary = survey.metadata["extraction_summary"]
+    assert summary["flag_counts"][schema.FLAG_EXTRACTION_MODEL_ERROR] == 5
+    # failure_reasons counter keyed by error_type is populated.
+    assert summary["failure_reasons"]["ModelOutputError"] == 5
+
+
+def test_no_circuit_break_when_one_chunk_succeeds_first():
+    """The breaker only fires if the FIRST N chunks ALL fail. A success in the
+    first 3 resets the streak, so a later backend failure never aborts the run."""
+    chunks = [_chunk(f"Q{i}", f"Q{i}. Question {i}?") for i in range(1, 6)]
+
+    def fake_run(task, prompt, schema_arg, *args, **kwargs):
+        if task == "questionnaire.verify":
+            return _response({"faithful": True, "discrepancies": []})
+        if "Q1" in prompt:  # first chunk succeeds
+            return _response(_extraction_content(qid="Q1"))
+        raise BackendUnavailable("ANTHROPIC_API_KEY not set", config_error=True)
+
+    with patch(_EXTRACT, side_effect=fake_run):
+        survey = extract_survey_definition(chunks, study_id="study-mixed")
+
+    # No raise — one early success means the streak never reaches 3-from-start.
+    assert len(survey.questions) == 5

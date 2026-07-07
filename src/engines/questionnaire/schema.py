@@ -39,6 +39,15 @@ FLAG_EMPTY_OPTIONS = "EMPTY_OPTIONS"
 FLAG_VERIFICATION_DISCREPANCY = "VERIFICATION_DISCREPANCY"
 FLAG_VERIFICATION_UNAVAILABLE = "VERIFICATION_UNAVAILABLE"
 FLAG_EXTRACTION_UNAVAILABLE = "EXTRACTION_UNAVAILABLE"
+# Config-shaped extraction failure (e.g. a missing/unset API key): one root
+# cause, fixable in one place — distinct from a transient EXTRACTION_UNAVAILABLE
+# outage and from a model-rejected-input EXTRACTION_MODEL_ERROR, so a reviewer
+# can tell "the deploy is missing a key" from "this document is unparseable".
+FLAG_EXTRACTION_CONFIG_ERROR = "EXTRACTION_CONFIG_ERROR"
+# The model responded but its output didn't match the schema (ModelOutputError):
+# a real document/extraction problem for this chunk, not an outage — never
+# triggers the circuit breaker.
+FLAG_EXTRACTION_MODEL_ERROR = "EXTRACTION_MODEL_ERROR"
 
 
 # --- Extraction schema ------------------------------------------------------

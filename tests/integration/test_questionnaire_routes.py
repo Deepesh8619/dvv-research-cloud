@@ -370,3 +370,105 @@ def test_no_questionnaire_404(client):
     test_client, session_factory, _ = client
     _make_study(session_factory)
     assert test_client.get("/api/studies/study_q1/questionnaire").status_code == 404
+
+
+def _wait_error(test_client, study_id="study_q1"):
+    """Poll status until it leaves 'processing'; return the status body."""
+    import time
+
+    for _ in range(50):
+        body = test_client.get(f"/api/studies/{study_id}/questionnaire").json()
+        if body["status"] != "processing":
+            return body
+        time.sleep(0.02)
+    raise AssertionError("questionnaire never left 'processing'")
+
+
+def test_extraction_failure_surfaces_error_detail(client, monkeypatch):
+    """T16: when extraction raises (e.g. circuit-broken on a missing key), the
+    row flips to 'error' and the status endpoint reports the root-cause detail —
+    not a bare 'error'."""
+    from src.ai.router import BackendUnavailable
+
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+
+    def boom(chunks, study_id):
+        raise BackendUnavailable(
+            "extraction aborted after 3 consecutive backend failures "
+            "(circuit breaker): ANTHROPIC_API_KEY not set",
+            config_error=True,
+        )
+
+    monkeypatch.setattr(qroutes, "extract_survey_definition", boom)
+
+    _upload(test_client)
+    status = _wait_error(test_client)
+    assert status["status"] == "error"
+    assert status["error_detail"] is not None
+    assert "ANTHROPIC_API_KEY not set" in status["error_detail"]
+
+
+def test_health_reports_llm_key_presence_booleans(client, monkeypatch):
+    """T16 preflight: /api/health reports each LLM key as a presence boolean —
+    never the value, length, or prefix."""
+    test_client, _, _ = client
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-super-secret-value-1234567890")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    body = test_client.get("/api/health").json()
+    keys = body["llm_keys"]
+    assert keys["ANTHROPIC_API_KEY"] is True
+    assert keys["GROQ_API_KEY"] is False
+    # The actual secret must never leak into the payload (value/length/prefix).
+    serialized = str(body)
+    assert "sk-super-secret" not in serialized
+    assert "super-secret-value" not in serialized
+
+
+def test_backfill_definition_from_file(client, tmp_path):
+    """Backward-compat migration (T17): a row with definition_path pointing at a
+    still-present file but an empty definition_json column is backfilled from the
+    file on read — GET returns the survey AND the column is now populated."""
+    from api.db import QuestionnaireDB
+
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+
+    # Simulate a pre-T17 row: JSON only on disk, column empty (as after a fresh
+    # deploy but before /app/studies is wiped).
+    survey = _sample_survey("study_q1")
+    def_file = tmp_path / "study_q1" / "questionnaires" / "quest_legacy.json"
+    def_file.parent.mkdir(parents=True, exist_ok=True)
+    def_file.write_text(survey.to_json())
+
+    db = session_factory()
+    db.add(
+        QuestionnaireDB(
+            id="quest_legacy",
+            study_id="study_q1",
+            status="draft",
+            source_filename="legacy.docx",
+            version=1,
+            definition_json=None,  # empty column — must be backfilled
+            definition_path=str(def_file),
+            approved_qids=[],
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat(),
+        )
+    )
+    db.commit()
+    db.close()
+
+    # GET reads the definition (via the file), returns correct data.
+    resp = test_client.get("/api/studies/study_q1/questionnaire/questions")
+    assert resp.status_code == 200
+    qids = {q["qid"] for q in resp.json()["questions"]}
+    assert qids == {"Q1", "Q2"}
+
+    # The column was backfilled on that read — it is now populated.
+    db = session_factory()
+    row = db.query(QuestionnaireDB).filter(QuestionnaireDB.id == "quest_legacy").first()
+    assert row.definition_json
+    assert SurveyDefinition.from_json(row.definition_json)["Q1"].qid == "Q1"
+    db.close()
