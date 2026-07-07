@@ -408,3 +408,34 @@ def test_no_circuit_break_when_one_chunk_succeeds_first():
 
     # No raise — one early success means the streak never reaches 3-from-start.
     assert len(survey.questions) == 5
+
+
+# --- end-to-end route resolution (unpatched run_task) -----------------------
+
+
+def test_extract_question_resolves_to_openai_with_only_openai_key(monkeypatch):
+    """Smoke test the real routing path: run_task is NOT patched here. With only
+    OPENAI_API_KEY set, `questionnaire.extract`'s "auto" backend must resolve to
+    OpenAI and drive extraction end-to-end. Only the network boundary
+    (router.http_json) is stubbed, so this proves the route wiring, backend
+    dispatch, and result assembly all agree — the user's actual production
+    state (OpenAI key, no Anthropic key)."""
+    from src.ai import router as _router
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
+
+    content = _extraction_content(qid="Q1")
+
+    def fake_http_json(request, timeout):
+        assert "api.openai.com" in request.full_url  # routed to OpenAI, not Claude
+        arguments = __import__("json").dumps(content)
+        call = {"function": {"name": "emit", "arguments": arguments}}
+        return {"choices": [{"message": {"tool_calls": [call]}}]}
+
+    monkeypatch.setattr(_router, "http_json", fake_http_json)
+
+    result = extract_question(_chunk("Q1"))
+
+    assert result.question.qid == "Q1"
+    assert result.question.type == QuestionType.SINGLE

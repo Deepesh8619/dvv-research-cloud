@@ -69,10 +69,14 @@ DEFAULT_ROUTES: dict[str, dict[str, str]] = {
     "coding.codeframe": {"backend": "claude", "model": "claude-fable-5"},
     "extract.questionnaire": {"backend": "claude", "model": "claude-fable-5"},
     # Two-pass questionnaire extraction (src/engines/questionnaire/extractor.py).
-    # Judgment-heavy, hallucination-sensitive structured extraction — routed to
-    # Claude, matching the sibling extract.questionnaire / coding.codeframe tasks.
-    "questionnaire.extract": {"backend": "claude", "model": "claude-fable-5"},
-    "questionnaire.verify": {"backend": "claude", "model": "claude-fable-5"},
+    # Judgment-heavy, hallucination-sensitive structured extraction. Unlike the
+    # sibling tasks above these are NOT hardcoded to a provider: run_task resolves
+    # them via _default_extraction_route() against whichever LLM key is actually
+    # configured (Claude preferred, else OpenAI), because production runs with an
+    # OPENAI_API_KEY and no ANTHROPIC_API_KEY. Sentinel backend "auto" marks that
+    # deferral; the concrete backend/model is chosen per request.
+    "questionnaire.extract": {"backend": "auto", "model": ""},
+    "questionnaire.verify": {"backend": "auto", "model": ""},
     "report.narrative": {"backend": "claude", "model": "claude-fable-5"},
     # study.chat routes through src/ai/navigator.py (multi-tool agent loop on
     # Claude Haiku) rather than run_task — kept here so the task inventory in
@@ -223,6 +227,63 @@ def _claude_generate(model: str, prompt: str, schema: dict, timeout: int) -> dic
     raise ModelOutputError("claude returned no structured output")
 
 
+def _openai_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
+    """Structured extraction via OpenAI chat-completions function calling.
+
+    Mirrors _claude_generate's contract (forced schema-valid tool call, same
+    error taxonomy) but in OpenAI's request/response shape — the same shape
+    navigator.py already uses (chat/completions, Bearer auth, function tools
+    with a `parameters` JSON Schema). The one wrapper difference from Claude:
+    OpenAI wants `tools=[{"type":"function","function":{name, parameters}}]`
+    with `tool_choice` naming the function, and returns the arguments as a JSON
+    *string* under choices[0].message.tool_calls, versus Claude's `input_schema`
+    + parsed `tool_use` block.
+    """
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise BackendUnavailable("OPENAI_API_KEY not set", config_error=True)
+    payload = json.dumps(
+        {
+            "model": model,
+            "max_tokens": 4096,
+            "temperature": 0,
+            "messages": [{"role": "user", "content": prompt}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "emit",
+                        "description": "Emit the structured result",
+                        "parameters": schema,
+                    },
+                }
+            ],
+            "tool_choice": {"type": "function", "function": {"name": "emit"}},
+        }
+    ).encode()
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": USER_AGENT,
+        },
+    )
+    try:
+        body = http_json(request, timeout)
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise BackendUnavailable(f"OpenAI API unreachable: {exc}") from exc
+    choices = body.get("choices", [])
+    if not choices:
+        raise ModelOutputError("openai returned no choices")
+    tool_calls = choices[0].get("message", {}).get("tool_calls") or []
+    if not tool_calls:
+        raise ModelOutputError("openai returned no structured output")
+    arguments = tool_calls[0].get("function", {}).get("arguments", "")
+    return _validate(_parse_json_output(arguments), schema)
+
+
 # Env vars that gate the cloud AI backends. Reported as presence booleans by the
 # health/startup preflight so a missing key is caught at deploy — not at the
 # first client upload (the production incident this preflight exists to prevent).
@@ -242,6 +303,40 @@ def llm_key_presence() -> dict[str, bool]:
     }
 
 
+# Cloud model per provider for judgment-heavy structured extraction. Claude
+# (Fable) stays the preferred choice when an Anthropic key is present; OpenAI's
+# gpt-4o is the fallback when only OPENAI_API_KEY is configured — the codebase's
+# actual production state. gpt-4o (not the navigator's cheap gpt-4o-mini
+# fallback) because questionnaire extraction is hallucination-sensitive and
+# warrants the stronger model.
+_EXTRACTION_MODELS = {
+    "claude": "claude-fable-5",
+    "openai": "gpt-4o",
+}
+
+
+def _default_extraction_route() -> dict[str, str]:
+    """Pick the extraction backend from whichever LLM key is actually configured.
+
+    Prefers Claude when ANTHROPIC_API_KEY is present (its Fable model is what the
+    questionnaire pipeline was tuned against), else OpenAI when OPENAI_API_KEY is
+    present. Raises BackendUnavailable(config_error=True) if neither is set, so a
+    missing-key deploy fails with one actionable message rather than dispatching
+    to a backend that will only fail later. Resolved per call (not import-time)
+    so tests and runtime pick up the current environment.
+    """
+    keys = llm_key_presence()
+    if keys.get("ANTHROPIC_API_KEY"):
+        return {"backend": "claude", "model": _EXTRACTION_MODELS["claude"]}
+    if keys.get("OPENAI_API_KEY"):
+        return {"backend": "openai", "model": _EXTRACTION_MODELS["openai"]}
+    raise BackendUnavailable(
+        "no LLM key configured for questionnaire extraction: set OPENAI_API_KEY "
+        "or ANTHROPIC_API_KEY",
+        config_error=True,
+    )
+
+
 def run_task(
     task: str,
     prompt: str,
@@ -253,11 +348,16 @@ def run_task(
     route = (routes or DEFAULT_ROUTES).get(task)
     if route is None:
         raise KeyError(f"no route configured for task: {task}")
+    # "auto" defers provider choice to whichever LLM key is configured now.
+    if route["backend"] == "auto":
+        route = _default_extraction_route()
     backend, model = route["backend"], route["model"]
     if backend == "ollama":
         content = _ollama_generate(model, prompt, schema, timeout)
     elif backend == "claude":
         content = _claude_generate(model, prompt, schema, timeout)
+    elif backend == "openai":
+        content = _openai_generate(model, prompt, schema, timeout)
     else:
         raise ValueError(f"unknown backend: {backend}")
     return AIResponse(content=content, backend=backend, model=model)
