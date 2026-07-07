@@ -490,6 +490,7 @@ export default function QuestionnairePage() {
   const [approveAllError, setApproveAllError] = useState<UnresolvedQuestion[] | null>(null)
   const [approvingAll, setApprovingAll] = useState(false)
   const [approvedOk, setApprovedOk] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const loadStatus = useCallback(async () => {
     if (!studyId) return
@@ -497,11 +498,18 @@ export default function QuestionnairePage() {
       const res = await questionnaireApi.status(studyId)
       setStatus(res.data)
       setNotFound(false)
+      setLoadError(null)
       return res.data
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.status === 404) {
         setNotFound(true)
         setStatus(null)
+        setLoadError(null)
+      } else {
+        // Any other failure (500, network, auth) must not render a silent
+        // blank page — show it so the user isn't staring at nothing.
+        setStatus(null)
+        setLoadError(errorMessage(err) || 'Could not load the questionnaire. Please try again.')
       }
     } finally {
       setLoading(false)
@@ -597,8 +605,22 @@ export default function QuestionnairePage() {
         )}
       </div>
 
+      {/* Status load failed for a reason other than "no questionnaire yet" */}
+      {loadError && (
+        <div className="bg-red-50 border border-red-200 rounded-md p-4 max-w-xl">
+          <p className="text-sm font-medium text-red-700 mb-1">Couldn&apos;t load questionnaire status</p>
+          <p className="text-sm text-red-600">{loadError}</p>
+          <button
+            onClick={() => { setLoading(true); loadStatus() }}
+            className="mt-3 text-sm font-medium text-red-700 underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* No questionnaire yet OR error → upload */}
-      {(notFound || status?.status === 'error') && (
+      {!loadError && (notFound || status?.status === 'error') && (
         <div className="space-y-4 max-w-xl">
           {status?.status === 'error' && (
             <p className="text-sm text-red-600 bg-red-50 rounded-md p-3">
