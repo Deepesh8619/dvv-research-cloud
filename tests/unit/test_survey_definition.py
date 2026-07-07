@@ -5,6 +5,8 @@ terminate condition and a main block with a grid question — then deliberately
 break it to prove each validation rule fires.
 """
 
+import pytest
+
 from src.core.survey_definition import (
     Block,
     EmbeddedField,
@@ -16,6 +18,7 @@ from src.core.survey_definition import (
     QuestionVariableLink,
     QuotaSheet,
     SurveyDefinition,
+    evaluate,
 )
 
 
@@ -178,6 +181,94 @@ def test_validate_catches_empty_grid_rows():
     survey["Q1"].rows = None
     problems = survey.validate()
     assert any("grid_single requires non-empty rows" in p for p in problems)
+
+
+# --- Expression.evaluate ---------------------------------------------------
+
+
+def test_evaluate_eq_and_ne():
+    assert evaluate(Expression(op="eq", qid="Q", value=1), {"Q": 1}) is True
+    assert evaluate(Expression(op="eq", qid="Q", value=1), {"Q": 2}) is False
+    assert evaluate(Expression(op="ne", qid="Q", value=1), {"Q": 2}) is True
+    assert evaluate(Expression(op="ne", qid="Q", value=1), {"Q": 1}) is False
+
+
+def test_evaluate_gt_and_lt():
+    assert evaluate(Expression(op="gt", qid="A", value=18), {"A": 21}) is True
+    assert evaluate(Expression(op="gt", qid="A", value=18), {"A": 18}) is False
+    assert evaluate(Expression(op="lt", qid="A", value=18), {"A": 17}) is True
+    assert evaluate(Expression(op="lt", qid="A", value=18), {"A": 18}) is False
+
+
+def test_evaluate_in_single_and_multi():
+    expr = Expression(op="in", qid="Q", values=[2, 3])
+    assert evaluate(expr, {"Q": 2}) is True  # single-select scalar
+    assert evaluate(expr, {"Q": 1}) is False
+    assert evaluate(expr, {"Q": [1, 3]}) is True  # multi-select list intersects
+    assert evaluate(expr, {"Q": [1, 4]}) is False
+
+
+def test_evaluate_selected_multi():
+    expr = Expression(op="selected", qid="Q", value=3)
+    assert evaluate(expr, {"Q": [1, 3, 5]}) is True
+    assert evaluate(expr, {"Q": [1, 5]}) is False
+    # `selected` also works against a single-select scalar answer.
+    assert evaluate(expr, {"Q": 3}) is True
+    assert evaluate(expr, {"Q": 2}) is False
+
+
+def test_evaluate_nested_and_or_not():
+    # (S2 == 1) OR (S2 in [2] AND NOT (S1 < 25))
+    expr = Expression(
+        op="or",
+        children=[
+            Expression(op="eq", qid="S2", value=1),
+            Expression(op="and", children=[
+                Expression(op="in", qid="S2", values=[2]),
+                Expression(op="not", children=[Expression(op="lt", qid="S1", value=25)]),
+            ]),
+        ],
+    )
+    assert evaluate(expr, {"S2": 1, "S1": 40}) is True   # first branch
+    assert evaluate(expr, {"S2": 2, "S1": 30}) is True   # second branch, 30 >= 25
+    assert evaluate(expr, {"S2": 2, "S1": 20}) is False  # 20 < 25 fails NOT
+    assert evaluate(expr, {"S2": 3, "S1": 40}) is False  # neither branch
+
+
+def test_evaluate_missing_answer_is_not_satisfied():
+    # Absent qid -> False, never raises (routing degrades on incomplete data).
+    assert evaluate(Expression(op="eq", qid="Q", value=1), {}) is False
+    assert evaluate(Expression(op="gt", qid="Q", value=1), {}) is False
+    assert evaluate(Expression(op="selected", qid="Q", value=1), {}) is False
+    assert evaluate(Expression(op="in", qid="Q", values=[1]), {}) is False
+    # None-valued answer is also treated as unanswered.
+    assert evaluate(Expression(op="eq", qid="Q", value=1), {"Q": None}) is False
+
+
+def test_evaluate_missing_answer_inside_logical_tree():
+    expr = Expression(op="and", children=[
+        Expression(op="eq", qid="A", value=1),
+        Expression(op="eq", qid="B", value=1),  # B unanswered
+    ])
+    assert evaluate(expr, {"A": 1}) is False
+    or_expr = Expression(op="or", children=[
+        Expression(op="eq", qid="A", value=1),
+        Expression(op="eq", qid="B", value=1),  # B unanswered but A satisfies
+    ])
+    assert evaluate(or_expr, {"A": 1}) is True
+
+
+def test_evaluate_unknown_op_raises():
+    with pytest.raises(ValueError):
+        evaluate(Expression(op="bogus", qid="Q", value=1), {"Q": 1})
+
+
+def test_evaluate_matches_survey_show_if():
+    # The real show_if from make_survey() should gate correctly on live answers.
+    survey = make_survey()
+    show_if = survey["Q2"].show_if
+    assert evaluate(show_if, {"S2": 1, "S1": 40}) is True
+    assert evaluate(show_if, {"S2": 2, "S1": 20}) is False
 
 
 def test_question_variable_link_round_trip():

@@ -96,6 +96,77 @@ class Expression:
         )
 
 
+def _as_selected_set(answer: Any) -> set[Any]:
+    """Normalise a stored answer into a set of chosen codes.
+
+    A single-select stores one scalar code; a multi-select stores a list. Both
+    are treated uniformly as "the set of codes this respondent chose" so the
+    ``in``/``selected`` ops work regardless of question type.
+    """
+    if answer is None:
+        return set()
+    if isinstance(answer, (list, tuple, set)):
+        return set(answer)
+    return {answer}
+
+
+def evaluate(expression: Expression, answers: dict[str, Any]) -> bool:
+    """Evaluate a routing ``Expression`` against a respondent's answers.
+
+    Pure function of ``(expression, answers) -> bool``: no I/O, no side effects,
+    no ``eval``. ``answers`` maps ``qid -> value`` where a single-select value is
+    a scalar code and a multi-select value is a list of codes.
+
+    Missing / unanswered qids degrade safely: a leaf op over an absent qid
+    yields ``False`` (the condition is simply "not satisfied") rather than
+    raising, because routing must survive incomplete data — real respondent
+    records have skip-logic gaps by design.
+    """
+    op = expression.op
+
+    if op == "and":
+        return all(evaluate(c, answers) for c in expression.children or [])
+    if op == "or":
+        return any(evaluate(c, answers) for c in expression.children or [])
+    if op == "not":
+        # `not` over an empty child list is vacuously True (nothing to negate);
+        # normally it wraps exactly one child.
+        return not any(evaluate(c, answers) for c in expression.children or [])
+
+    # Leaf ops need an answered qid; treat unanswered as "not satisfied".
+    qid = expression.qid
+    if qid is None or qid not in answers:
+        return False
+    answer = answers[qid]
+    if answer is None:
+        return False
+
+    if op == "selected":
+        return expression.value in _as_selected_set(answer)
+    if op == "in":
+        chosen = _as_selected_set(answer)
+        return any(v in chosen for v in (expression.values or []))
+
+    if op == "eq":
+        return answer == expression.value
+    if op == "ne":
+        return answer != expression.value
+
+    # Numeric comparisons: guard against non-comparable / missing operands.
+    if op in ("gt", "lt"):
+        target = expression.value
+        if target is None:
+            return False
+        try:
+            if op == "gt":
+                return answer > target
+            return answer < target
+        except TypeError:
+            return False
+
+    raise ValueError(f"unknown expression op: {op!r}")
+
+
 @dataclass
 class Option:
     """One answer choice, grid row, or grid column."""
