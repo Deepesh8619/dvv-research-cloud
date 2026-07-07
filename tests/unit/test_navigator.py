@@ -264,6 +264,191 @@ def test_navigate_groq_agent_loop():
     assert any(m.get("role") == "tool" for m in calls[1])
 
 
+def test_repair_malformed_tool_call_recovers_fused_name():
+    """The real-world bug: llama-3.3 on Groq sometimes emits a structured
+    tool_call whose function.name is the tool name with the JSON arguments
+    fused directly onto it — 'query_data{"sql": "..."}' — instead of a bare
+    name with separate arguments."""
+    from src.ai.navigator import _repair_malformed_tool_call
+
+    fixed = _repair_malformed_tool_call({"name": 'query_data{"sql": "SELECT 1"}'})
+    assert fixed == {"name": "query_data", "arguments": '{"sql": "SELECT 1"}'}
+
+
+def test_repair_malformed_tool_call_passes_through_clean_calls():
+    from src.ai.navigator import _repair_malformed_tool_call
+
+    fixed = _repair_malformed_tool_call(
+        {"name": "show_table", "arguments": '{"stub": "S1"}'}
+    )
+    assert fixed == {"name": "show_table", "arguments": '{"stub": "S1"}'}
+
+
+def test_repair_malformed_tool_call_rejects_unknown_tool():
+    from src.ai.navigator import _repair_malformed_tool_call
+
+    assert _repair_malformed_tool_call({"name": 'not_a_real_tool{"x": 1}'}) is None
+    assert _repair_malformed_tool_call({"name": "not_a_real_tool"}) is None
+
+
+def test_repair_malformed_tool_call_rejects_invalid_embedded_json():
+    from src.ai.navigator import _repair_malformed_tool_call
+
+    assert _repair_malformed_tool_call({"name": "query_data{not valid json"}) is None
+
+
+def test_navigate_groq_sanitizes_malformed_name_before_echoing():
+    """Regression: an unrepaired malformed tool name got echoed verbatim into
+    message history, and Groq's own API re-validates the ENTIRE history
+    against the current request's tools schema on every turn — so the
+    malformed name didn't just fail once, it hard-failed every later turn
+    with HTTP 400 'tool call validation failed', even after the bad call.
+    The sanitized echo must carry the repaired (name, arguments), never the
+    original fused string, and turn 2 must succeed instead of erroring.
+    """
+    from unittest.mock import patch as _patch
+
+    calls = []
+
+    def fake_groq(messages, timeout, **kwargs):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": 'query_data{"sql": "SELECT COUNT(*) FROM data"}',
+                                        "arguments": "",
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        return {"choices": [{"message": {"role": "assistant", "content": "40 respondents."}}]}
+
+    executed = []
+
+    def executor(name, params):
+        executed.append((name, params))
+        return {"success": True, "rows": [{"n": 40}]}
+
+    with _patch("src.ai.navigator._groq_chat", side_effect=fake_groq):
+        from src.ai.navigator import navigate_groq
+
+        reply, tool_results = navigate_groq("How many respondents?", "ctx", executor)
+
+    assert reply == "40 respondents."
+    assert executed == [("query_data", {"sql": "SELECT COUNT(*) FROM data"})]
+
+    # The echoed assistant turn (sent back to Groq on turn 2) must carry the
+    # repaired name, never the original fused string — that's what would
+    # trigger Groq's own "not in request.tools" validation error otherwise.
+    echoed_assistant_turn = next(m for m in calls[1] if m.get("role") == "assistant")
+    echoed_name = echoed_assistant_turn["tool_calls"][0]["function"]["name"]
+    assert echoed_name == "query_data"
+
+
+def test_navigate_groq_drops_unrecoverable_call_without_poisoning_history():
+    """If a malformed call can't be repaired at all (unknown tool, or broken
+    JSON), it must be dropped silently rather than echoed — better to lose
+    one tool call than hard-fail the whole conversation on the next turn."""
+    from unittest.mock import patch as _patch
+
+    def fake_groq(messages, timeout, **kwargs):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "totally_unknown_tool", "arguments": "{}"},
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+
+    def executor(name, params):
+        raise AssertionError("should never execute an unrecoverable call")
+
+    with _patch("src.ai.navigator._groq_chat", side_effect=fake_groq):
+        from src.ai.navigator import ModelOutputError, navigate_groq
+
+        with pytest.raises(ModelOutputError):
+            navigate_groq("some question", "ctx", executor)
+
+
+def test_navigate_openai_agent_loop():
+    """OpenAI fallback path: same agent loop as Groq (shared via
+    _run_agent_loop), driving the same tool executor with OpenAI-shaped
+    tool_calls."""
+    from unittest.mock import patch as _patch
+
+    calls = []
+
+    def fake_openai(messages, timeout, **kwargs):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "query_data",
+                                        "arguments": '{"sql": "SELECT COUNT(*) FROM data"}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        return {"choices": [{"message": {"role": "assistant", "content": "40 respondents."}}]}
+
+    executed = []
+
+    def executor(name, params):
+        executed.append((name, params))
+        return {"success": True, "rows": [{"n": 40}]}
+
+    with _patch("src.ai.navigator._openai_chat", side_effect=fake_openai):
+        from src.ai.navigator import navigate_openai
+
+        reply, tool_results = navigate_openai("How many respondents?", "ctx", executor)
+
+    assert reply == "40 respondents."
+    assert executed == [("query_data", {"sql": "SELECT COUNT(*) FROM data"})]
+    assert tool_results[0]["tool"] == "query_data"
+
+
+def test_navigate_openai_requires_api_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from src.ai.navigator import BackendUnavailable, _openai_chat
+
+    with pytest.raises(BackendUnavailable):
+        _openai_chat([{"role": "user", "content": "hi"}], timeout=5)
+
+
 def test_parse_text_tool_calls_recovers_llama_markup():
     """llama-on-Groq sometimes writes tool calls as text; we must recover them."""
     from src.ai.navigator import _parse_text_tool_calls

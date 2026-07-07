@@ -29,7 +29,7 @@ from api.db import (
 )
 from api.intent_router import build_routed_context
 from api.models import ChatMessage, ChatRequest, ChatResponse, ChatToolCall
-from src.ai.navigator import navigate_basic, navigate_groq
+from src.ai.navigator import navigate_basic, navigate_groq, navigate_openai
 from src.ai.router import BackendUnavailable, ModelOutputError
 from src.ai.specialists import specialist_for_intent
 from src.core.models import DataMap
@@ -371,37 +371,51 @@ async def chat_with_study(
         reply, tool_results = navigate_groq(
             request.message, context, executor, history=history, intent=intent
         )
-    except (BackendUnavailable, ModelOutputError) as exc:
-        # Degrade to the local single-shot model: slower and simpler, but the
-        # demo keeps answering with zero API credits and data never leaves
-        # the machine.
-        logger.warning(f"[{study_id}] Cloud navigator unavailable ({exc}); trying basic mode")
+    except (BackendUnavailable, ModelOutputError) as groq_exc:
+        # Fall back to OpenAI before dropping all the way to the weak local
+        # model — gpt-4o-mini's tool-calling is far more reliable than
+        # Llama-3.3's on Groq (this is the actual fix for malformed tool
+        # calls slipping through, not just a safety net), at a per-token
+        # cost that's only incurred when Groq has already failed.
+        logger.warning(f"[{study_id}] Groq unavailable ({groq_exc}); trying OpenAI")
         try:
-            reply, tool_results = navigate_basic(
-                request.message,
-                _basic_context(study, datamap, deck, request.message),
-                executor,
-                intent=intent,
+            reply, tool_results = navigate_openai(
+                request.message, context, executor, history=history, intent=intent
             )
-            reply += "\n\n_(basic local mode)_"
-        except (BackendUnavailable, ModelOutputError) as basic_exc:
-            logger.warning(f"[{study_id}] Basic navigator also unavailable: {basic_exc}")
-            fallback = (
-                "The navigator can't reach any AI backend right now "
-                f"(cloud: {exc} · local: {basic_exc}). "
-                "The Tables tab still has every computed table."
+        except (BackendUnavailable, ModelOutputError) as openai_exc:
+            # Degrade to the local single-shot model: slower and simpler, but
+            # the demo keeps answering with zero API credits and data never
+            # leaves the machine. (Only reachable in local dev — Ollama
+            # can't run on Render, so this branch is a graceful no-op there.)
+            logger.warning(
+                f"[{study_id}] OpenAI also unavailable ({openai_exc}); trying basic mode"
             )
-            assistant_msg = create_chat_message(db, study_id, "assistant", fallback)
-            return ChatResponse(
-                message=ChatMessage(
-                    id=assistant_msg.id,
-                    role="assistant",
-                    content=fallback,
-                    created_at=assistant_msg.created_at,
-                ),
-                tool_results=[],
-                conversation_id=study_id,
-            )
+            try:
+                reply, tool_results = navigate_basic(
+                    request.message,
+                    _basic_context(study, datamap, deck, request.message),
+                    executor,
+                    intent=intent,
+                )
+                reply += "\n\n_(basic local mode)_"
+            except (BackendUnavailable, ModelOutputError) as basic_exc:
+                logger.warning(f"[{study_id}] Basic navigator also unavailable: {basic_exc}")
+                fallback = (
+                    "The navigator can't reach any AI backend right now "
+                    f"(Groq: {groq_exc} · OpenAI: {openai_exc} · local: {basic_exc}). "
+                    "The Tables tab still has every computed table."
+                )
+                assistant_msg = create_chat_message(db, study_id, "assistant", fallback)
+                return ChatResponse(
+                    message=ChatMessage(
+                        id=assistant_msg.id,
+                        role="assistant",
+                        content=fallback,
+                        created_at=assistant_msg.created_at,
+                    ),
+                    tool_results=[],
+                    conversation_id=study_id,
+                )
 
     executed = [
         ChatToolCall(tool=r.get("tool", "unknown"), params={}) for r in tool_results

@@ -30,6 +30,12 @@ NAVIGATOR_MODEL = os.environ.get("NAVIGATOR_MODEL", "claude-haiku-4-5-20251001")
 # Groq's Llama-3.3-70B is the default cloud navigator: free tier, tuned for
 # tool use, cloud-fast. Overridable if the account is on a different model.
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+# Fallback cloud navigator when Groq fails (429 daily budget, or a malformed
+# tool call it can't recover from) — gpt-4o-mini's function-calling is far
+# more reliable than Llama-3.3's, at a per-token cost instead of Groq's free
+# daily budget. Only used as a fallback, so cost stays proportional to how
+# often Groq actually fails, not every question.
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 # Each turn re-sends context + tools + accumulated tool results, so turns are
 # the dominant cost against Groq's free 12k-tokens/min. 3 is enough for the
 # normal pattern (call a tool, read the result, answer) while capping runaway
@@ -308,6 +314,37 @@ def _parse_text_tool_calls(content: str) -> list[dict]:
     return calls
 
 
+def _repair_malformed_tool_call(fn: dict) -> dict | None:
+    """Recover a structured tool call whose name and JSON arguments got fused
+    into one string by the model — observed on llama-3.3/Groq as
+    function.name == 'query_data{"sql": "..."}' instead of a bare tool name
+    with separate arguments.
+
+    Returns a clean {"name", "arguments"} dict, or None if unsalvageable.
+    None must never be echoed back into message history as-is: Groq's own
+    API re-validates the ENTIRE conversation history against the current
+    request's `tools` schema on every turn, so a malformed name here doesn't
+    just fail this one tool call — it hard-fails every later turn with
+    HTTP 400 "tool call validation failed", taking down the whole
+    conversation instead of just one bad call.
+    """
+    name = fn.get("name", "")
+    if name in _KNOWN_TOOLS:
+        return {"name": name, "arguments": fn.get("arguments") or "{}"}
+
+    brace = name.find("{")
+    if brace == -1:
+        return None
+    real_name, embedded_json = name[:brace], name[brace:]
+    if real_name not in _KNOWN_TOOLS:
+        return None
+    try:
+        json.loads(embedded_json)  # validate before trusting it as arguments
+    except json.JSONDecodeError:
+        return None
+    return {"name": real_name, "arguments": embedded_json}
+
+
 def _groq_tools(tool_names: list[str] | None = None) -> list[dict]:
     """TOOLS in OpenAI/Groq function-calling shape (Anthropic uses input_schema).
 
@@ -388,6 +425,44 @@ def _groq_chat(
             raise BackendUnavailable(f"Groq API unreachable: {exc}") from exc
 
 
+def _openai_chat(
+    messages: list[dict],
+    timeout: int,
+    with_tools: bool = True,
+    tools_subset: list[str] | None = None,
+) -> dict:
+    """One OpenAI chat-completions call. Same request/response shape as
+    _groq_chat (Groq's API mimics OpenAI's), reused as the fallback backend
+    when Groq fails — no separate rate-limit retry logic here since this
+    path is only hit when Groq has already failed, not on every question.
+    """
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise BackendUnavailable("OPENAI_API_KEY not set")
+    body_obj = {
+        "model": OPENAI_MODEL,
+        "max_tokens": 1500,
+        "temperature": 0,
+        "messages": messages,
+    }
+    if with_tools:
+        body_obj["tools"] = _groq_tools(tools_subset)
+    payload = json.dumps(body_obj).encode()
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": USER_AGENT,
+        },
+    )
+    try:
+        return http_json(request, timeout)
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise BackendUnavailable(f"OpenAI API unreachable: {exc}") from exc
+
+
 def navigate_groq(
     question: str,
     context: str,
@@ -408,6 +483,54 @@ def navigate_groq(
             existing callers passing only `intent=` keep working and get the
             tool-schema savings for free. Passing neither sends the full tool
             registry, matching pre-specialist behavior.
+    """
+    return _run_agent_loop(
+        _groq_chat, "Groq", question, context, execute_tool, history, timeout, intent, specialist
+    )
+
+
+def navigate_openai(
+    question: str,
+    context: str,
+    execute_tool: Callable[[str, dict], dict],
+    history: list[dict] | None = None,
+    timeout: int = 60,
+    intent: str | None = None,
+    specialist: str | None = None,
+) -> tuple[str, list[dict]]:
+    """Full multi-tool agent loop on OpenAI — same agent loop as navigate_groq
+    (OpenAI's chat completions API is what Groq's mimics), used as a fallback
+    when Groq fails: more reliable tool-calling than Llama-3.3 on Groq, at a
+    per-token cost instead of Groq's free daily budget.
+    """
+    return _run_agent_loop(
+        _openai_chat,
+        "OpenAI",
+        question,
+        context,
+        execute_tool,
+        history,
+        timeout,
+        intent,
+        specialist,
+    )
+
+
+def _run_agent_loop(
+    chat_fn: Callable[..., dict],
+    backend_label: str,
+    question: str,
+    context: str,
+    execute_tool: Callable[[str, dict], dict],
+    history: list[dict] | None,
+    timeout: int,
+    intent: str | None,
+    specialist: str | None,
+) -> tuple[str, list[dict]]:
+    """Shared multi-tool agent loop for any OpenAI-compatible chat backend
+    (Groq, OpenAI). chat_fn must accept (messages, timeout, with_tools=,
+    tools_subset=) and return an OpenAI-shaped {"choices": [...]} dict —
+    true for both today, since Groq's API mimics OpenAI's.
     """
     if specialist is None and intent is not None:
         specialist = specialist_for_intent(intent)
@@ -430,23 +553,40 @@ def navigate_groq(
     reply = ""
 
     for _ in range(MAX_AGENT_TURNS):
-        body = _groq_chat(messages, timeout, tools_subset=tools_subset)
+        body = chat_fn(messages, timeout, tools_subset=tools_subset)
         choices = body.get("choices", [])
         if not choices:
-            raise ModelOutputError("Groq returned no choices")
+            raise ModelOutputError(f"{backend_label} returned no choices")
         msg = choices[0]["message"]
         content = msg.get("content") or ""
-        calls = msg.get("tool_calls") or []
+        raw_calls = msg.get("tool_calls") or []
+        echo_msg = msg
 
         # llama-3.x on Groq sometimes emits a tool call as literal text
         # (`<function=name>{json}</function>`) in content instead of the
         # structured tool_calls field. Recover those so the call still executes
         # rather than leaking raw markup to the user.
-        if not calls:
+        if not raw_calls:
             recovered = _parse_text_tool_calls(content)
             if recovered:
-                calls = recovered
+                raw_calls = recovered
                 content = ""  # the markup wasn't a real answer
+        else:
+            # Structured tool_calls (not the text-recovery path above):
+            # sanitize every call's name/arguments before executing OR
+            # echoing. A dropped/repaired call must not leave the original
+            # malformed name in what gets echoed back — see
+            # _repair_malformed_tool_call's docstring for why that poisons
+            # every later turn, not just this one.
+            sanitized = []
+            for call in raw_calls:
+                fixed = _repair_malformed_tool_call(call.get("function", {}))
+                if fixed is not None:
+                    sanitized.append({**call, "function": fixed})
+            raw_calls = sanitized
+            echo_msg = {**msg, "tool_calls": raw_calls}
+
+        calls = raw_calls
 
         if content:
             reply = content
@@ -454,7 +594,7 @@ def navigate_groq(
         if not calls:
             break
 
-        messages.append(msg)  # assistant turn with tool_calls, echoed back verbatim
+        messages.append(echo_msg)  # assistant turn with tool_calls, echoed back (sanitized)
         for call in calls:
             fn = call["function"]
             try:
@@ -487,13 +627,13 @@ def navigate_groq(
                     ),
                 }
             )
-            final = _groq_chat(messages, timeout, with_tools=False)
+            final = chat_fn(messages, timeout, with_tools=False)
             choices = final.get("choices", [])
             if choices and choices[0]["message"].get("content"):
                 reply = choices[0]["message"]["content"]
 
     if not reply.strip():
-        raise ModelOutputError("Groq navigator returned no reply text")
+        raise ModelOutputError(f"{backend_label} navigator returned no reply text")
     return reply.strip(), tool_results
 
 

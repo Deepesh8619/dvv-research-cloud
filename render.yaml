@@ -34,6 +34,11 @@ services:
       # git history the moment it's committed.
       - key: GROQ_API_KEY
         sync: false
+      # Optional fallback when Groq fails (429 budget, or a malformed tool
+      # call) — without it, any Groq failure drops straight to the weak
+      # local model instead. Leave unset if not using it yet.
+      - key: OPENAI_API_KEY
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: ADMIN_EMAIL

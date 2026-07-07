@@ -55,6 +55,7 @@ schema by the time you're reading this):**
 |---|---|---|
 | `DATABASE_URL` | (auto-filled if using Blueprint/internal connection string) | Postgres connection |
 | `GROQ_API_KEY` | your key | Primary navigator LLM |
+| `OPENAI_API_KEY` | your key (optional but recommended) | Fallback navigator when Groq fails (429 budget, or a malformed tool call) — without it, any Groq failure drops straight to the weak local model instead |
 | `ANTHROPIC_API_KEY` | your key | Narrative generation, Claude fallback |
 | `JWT_SECRET` | a long random string (Blueprint auto-generates this) | **Must** be set explicitly — the code's fallback persists a generated secret to a local file, which is wiped on every container restart on Render, silently logging everyone out each time otherwise |
 | `ADMIN_EMAIL` | your email | First login |
