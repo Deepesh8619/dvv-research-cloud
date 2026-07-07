@@ -90,6 +90,79 @@ def test_seed_admin_user_does_not_touch_other_users(isolated_db, monkeypatch):
     db.close()
 
 
+def test_seed_admin_user_creates_with_synced_flag_true(isolated_db, monkeypatch):
+    """(a) Fresh DB, no admin -> created with password_synced_from_env=True, so
+    the next boot keeps auto-syncing from ADMIN_PASSWORD (original behavior)."""
+    monkeypatch.setattr("api.config.ADMIN_EMAIL", "owner@dvv.test")
+    monkeypatch.setattr("api.config.ADMIN_PASSWORD", "first-boot-password")
+    monkeypatch.setattr("api.config.ADMIN_NAME", "Owner")
+
+    seed_admin_user()
+
+    db = isolated_db()
+    user = db.query(UserDB).filter(UserDB.email == "owner@dvv.test").first()
+    assert user.password_synced_from_env is True
+    db.close()
+
+
+def test_seed_admin_user_does_not_overwrite_manually_set_password(
+    isolated_db, monkeypatch
+):
+    """(c) THE BUG FIX: once the password is set manually (flag=False), a later
+    seed_admin_user() must NOT revert it to ADMIN_PASSWORD, even though they
+    differ — this is the cold-start-after-logout revert the user reported."""
+    monkeypatch.setattr("api.config.ADMIN_EMAIL", "owner@dvv.test")
+    monkeypatch.setattr("api.config.ADMIN_PASSWORD", "env-password")
+    monkeypatch.setattr("api.config.ADMIN_NAME", "Owner")
+    seed_admin_user()  # first boot
+
+    # Simulate an emergency-reset: manual password + flag flipped to False.
+    db = isolated_db()
+    user = db.query(UserDB).filter(UserDB.email == "owner@dvv.test").first()
+    user.password_hash = hash_password("my-deliberate-password")
+    user.password_synced_from_env = False
+    db.commit()
+    db.close()
+
+    seed_admin_user()  # simulated cold start after logout
+
+    db = isolated_db()
+    user = db.query(UserDB).filter(UserDB.email == "owner@dvv.test").first()
+    assert verify_password("my-deliberate-password", user.password_hash)
+    assert not verify_password("env-password", user.password_hash)
+    assert user.password_synced_from_env is False  # stays sticky
+    db.close()
+
+
+def test_seed_admin_user_syncs_legacy_null_flag_row(isolated_db, monkeypatch):
+    """(d) Backward-compat: a legacy row with password_synced_from_env=NULL is
+    treated as True and still auto-synced from ADMIN_PASSWORD."""
+    monkeypatch.setattr("api.config.ADMIN_EMAIL", "owner@dvv.test")
+    monkeypatch.setattr("api.config.ADMIN_PASSWORD", "current-env-password")
+    monkeypatch.setattr("api.config.ADMIN_NAME", "Owner")
+
+    # Create a row explicitly with the flag NULL (a pre-migration legacy row).
+    db = isolated_db()
+    user = create_user(
+        db,
+        email="owner@dvv.test",
+        name="Owner",
+        password_hash=hash_password("stale-old-hash"),
+        role="owner",
+    )
+    user.password_synced_from_env = None
+    db.commit()
+    db.close()
+
+    seed_admin_user()
+
+    db = isolated_db()
+    user = db.query(UserDB).filter(UserDB.email == "owner@dvv.test").first()
+    assert verify_password("current-env-password", user.password_hash)
+    assert not verify_password("stale-old-hash", user.password_hash)
+    db.close()
+
+
 def test_seed_admin_user_creates_alongside_existing_users_if_email_changed(
     isolated_db, monkeypatch
 ):

@@ -109,6 +109,11 @@ async def emergency_reset(
     user = get_user_by_email(db, request.email)
     if user:
         user.password_hash = hash_password(request.new_password)
+        # This is a deliberate, manual password change. Mark it so the next
+        # cold-start seed_admin_user() does NOT re-sync it back to ADMIN_PASSWORD
+        # — the exact bug where a just-set password reverted after the Render
+        # container idled and restarted.
+        user.password_synced_from_env = False
         db.commit()
         logger.warning(f"Admin password reset via emergency-reset endpoint: {request.email}")
     else:
@@ -118,6 +123,9 @@ async def emergency_reset(
             name="Admin",
             password_hash=hash_password(request.new_password),
             role="owner",
+            # Freshly created via an explicit reset — also a deliberate password,
+            # not an env-var sync target, so keep it from being overwritten.
+            password_synced_from_env=False,
         )
         logger.warning(f"Admin user created via emergency-reset endpoint: {request.email}")
 

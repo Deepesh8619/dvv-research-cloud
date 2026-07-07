@@ -60,6 +60,42 @@ def test_reset_updates_existing_admin_password(client):
     db.close()
 
 
+def test_reset_marks_password_not_synced_from_env(client):
+    """The reset must set password_synced_from_env=False so a later cold-start
+    seed_admin_user() doesn't revert the just-set password (the reported bug)."""
+    test_client, session_factory = client
+    db = session_factory()
+    create_user(db, email="owner@example.com", name="Owner", password_hash=hash_password("old-pw"))
+    db.close()
+
+    resp = test_client.post(
+        "/api/auth/emergency-reset",
+        json={"email": "owner@example.com", "token": "test-reset-token", "new_password": "new-pw"},
+    )
+    assert resp.status_code == 200
+
+    db = session_factory()
+    user = db.query(UserDB).filter(UserDB.email == "owner@example.com").first()
+    assert user.password_synced_from_env is False
+    db.close()
+
+
+def test_reset_creates_admin_with_flag_false(client):
+    """When emergency-reset creates a missing admin, the new row is also marked
+    not-synced-from-env (an explicit deliberate password)."""
+    test_client, session_factory = client
+    resp = test_client.post(
+        "/api/auth/emergency-reset",
+        json={"email": "owner@example.com", "token": "test-reset-token", "new_password": "new-pw"},
+    )
+    assert resp.status_code == 200
+
+    db = session_factory()
+    user = db.query(UserDB).filter(UserDB.email == "owner@example.com").first()
+    assert user.password_synced_from_env is False
+    db.close()
+
+
 def test_reset_creates_admin_if_missing(client):
     test_client, session_factory = client
     resp = test_client.post(

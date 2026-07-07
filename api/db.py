@@ -36,6 +36,16 @@ class UserDB(Base):
     role = Column(String, default="analyst")  # owner, analyst, reviewer
     created_at = Column(String)
     is_active = Column(Boolean, default=True)
+    # True while the password_hash is whatever seed_admin_user() last synced
+    # from the ADMIN_PASSWORD env var. Set to False the moment the password is
+    # deliberately changed through the app (emergency-reset), which tells
+    # seed_admin_user() to STOP re-syncing on the next cold start — otherwise
+    # Render's free-tier idle spin-down + restart silently reverts a
+    # just-set password back to the env var value and locks the user out.
+    # Defaults True so pre-existing rows (whose hash genuinely WAS last synced
+    # from the env var) keep the original auto-sync behavior until manually
+    # changed. NULL on a legacy row is treated as True (see seed_admin_user).
+    password_synced_from_env = Column(Boolean, default=True)
 
 
 class ShareLinkDB(Base):
@@ -130,7 +140,69 @@ class QuestionnaireDB(Base):
 def init_db():
     """Initialize database tables."""
     Base.metadata.create_all(bind=engine)
+    _ensure_new_columns()
     seed_admin_user()
+
+
+def _ensure_new_columns():
+    """Add columns that were introduced after their table was first created.
+
+    `Base.metadata.create_all` only creates *missing tables*; it never adds a
+    newly-declared column to a table that already exists. On the already-
+    provisioned Render Postgres instance, `users` and `questionnaires` were
+    both created on earlier deploys — so any model column added after a
+    table's first deploy (`users.password_synced_from_env`;
+    `questionnaires.definition_json` and `.error_detail`, added in later
+    commits on the same day `questionnaires` itself first shipped) is present
+    in the ORM but ABSENT from the real table until physically added. Every
+    query naming a missing column raises UndefinedColumn. There is no
+    Alembic/migration tooling in this codebase, so we add these defensively
+    at startup — table-by-table, so the next column added to either table (or
+    a new one) is a one-line addition here, not a new copy of this function.
+
+    Approach: reflect each live table's columns via SQLAlchemy's inspector and
+    emit a plain `ALTER TABLE ... ADD COLUMN` only when the column is genuinely
+    missing. Plain ADD COLUMN (no `IF NOT EXISTS`) is used deliberately because
+    SQLite does NOT support the `IF NOT EXISTS` clause on ADD COLUMN (Postgres
+    does, but we need one statement that works on both backends) — the
+    existence check makes it idempotent without relying on that clause. A
+    `DEFAULT` in the DDL fragment backfills pre-existing rows in the same
+    statement. Each ALTER is wrapped so a race or an unexpected backend quirk
+    can't block startup — a column that fails to add here just means that
+    specific feature degrades (e.g. definition_json missing -> falls back to
+    the on-disk backfill path) rather than the whole app failing to boot.
+    """
+    from sqlalchemy import inspect, text
+
+    # table name -> {column name -> DDL fragment to append after "ADD COLUMN <name>"}
+    required_by_table = {
+        "users": {
+            "password_synced_from_env": "BOOLEAN DEFAULT TRUE",
+        },
+        "questionnaires": {
+            # Durable SurveyDefinition storage (T17) and failure diagnostics
+            # (T16) — both added after `questionnaires` itself first deployed.
+            "definition_json": "TEXT",
+            "error_detail": "VARCHAR",
+        },
+    }
+    inspector = inspect(engine)
+    for table, required in required_by_table.items():
+        if not inspector.has_table(table):
+            continue  # fresh DB: create_all already made the column with the model
+        existing_cols = {c["name"] for c in inspector.get_columns(table)}
+        with engine.begin() as conn:
+            for col, ddl in required.items():
+                if col in existing_cols:
+                    continue
+                stmt = f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"
+                try:
+                    conn.execute(text(stmt))
+                    logger.info(f"_ensure_new_columns: added {table}.{col}")
+                except Exception as exc:  # pragma: no cover - defensive, backend-specific
+                    logger.warning(
+                        f"_ensure_new_columns: could not add {table}.{col} ({exc})"
+                    )
 
 
 def get_db():
@@ -231,8 +303,15 @@ def create_user(
     name: str,
     password_hash: str,
     role: str = "analyst",
+    password_synced_from_env: bool = True,
 ) -> UserDB:
-    """Create a new user."""
+    """Create a new user.
+
+    `password_synced_from_env` defaults True: a normally-created user's hash was
+    set once and is not an env-var sync target, so the flag is inert for
+    non-admin accounts. seed_admin_user() relies on the True default when it
+    creates the admin on first boot (see that function).
+    """
     from uuid import uuid4
 
     user = UserDB(
@@ -243,6 +322,7 @@ def create_user(
         role=role,
         created_at=datetime.now().isoformat(),
         is_active=True,
+        password_synced_from_env=password_synced_from_env,
     )
     db.add(user)
     db.commit()
@@ -450,6 +530,14 @@ def seed_admin_user():
     Env vars are meant to be the source of truth for admin credentials, so
     every startup re-syncs the existing admin's password/name to match them
     rather than assuming the first boot got it right.
+
+    ONE exception (the fix for the "it forgets my password after logout" bug):
+    if the admin's password was deliberately changed through the app
+    (emergency-reset sets `password_synced_from_env=False`), the sync is
+    SKIPPED so a cold start after logout doesn't silently revert that change
+    back to ADMIN_PASSWORD. `name` is still synced unconditionally — that was
+    never the problem. A legacy row with NULL for the flag is treated as True
+    (we don't know it was manually changed, so keep the original auto-sync).
     """
     from api.auth import hash_password
     from api.config import ADMIN_EMAIL, ADMIN_NAME, ADMIN_PASSWORD
@@ -458,10 +546,24 @@ def seed_admin_user():
     try:
         existing = db.query(UserDB).filter(UserDB.email == ADMIN_EMAIL).first()
         if existing:
-            existing.password_hash = hash_password(ADMIN_PASSWORD)
+            # NULL (legacy row) => treat as True, i.e. keep auto-syncing.
+            synced_from_env = existing.password_synced_from_env is not False
+            if synced_from_env:
+                existing.password_hash = hash_password(ADMIN_PASSWORD)
+                logger.info(
+                    f"Admin user {ADMIN_EMAIL} password synced to current ADMIN_PASSWORD"
+                )
+            else:
+                # Password was set manually via emergency-reset — do NOT clobber
+                # it. If a later ADMIN_PASSWORD change appears not to "take", this
+                # log line is the answer to "why didn't my env var change apply".
+                logger.info(
+                    f"Admin user {ADMIN_EMAIL} password sync SKIPPED — it was set "
+                    f"manually (password_synced_from_env=False); ADMIN_PASSWORD "
+                    f"changes will not apply until an emergency-reset flips it back"
+                )
             existing.name = ADMIN_NAME
             db.commit()
-            logger.info(f"Admin user {ADMIN_EMAIL} password synced to current ADMIN_PASSWORD")
             return
 
         if db.query(UserDB).first():
