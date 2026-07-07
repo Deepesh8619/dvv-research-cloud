@@ -33,10 +33,16 @@ from src.ai.navigator import navigate_basic, navigate_groq, navigate_openai
 from src.ai.router import BackendUnavailable, ModelOutputError
 from src.ai.specialists import specialist_for_intent
 from src.core.models import DataMap
+from src.core.survey_definition import SurveyDefinition
 from src.engines.analysis.charts import generate_chart
 from src.engines.analysis.codegen import generate_code
 from src.engines.analysis.pivot import generate_pivot
 from src.engines.analysis.quality import data_quality
+from src.engines.questionnaire.navigator_tools import (
+    explain_question_base,
+    get_question_details,
+    search_questionnaire,
+)
 from src.engines.tabs.crosstab import crosstab
 from src.engines.tabs.runner import table_to_dict
 from src.engines.tabs.spec import auto_nets
@@ -113,6 +119,43 @@ def _load_deck(study_dir: Path) -> dict:
         return json.loads(path.read_text())
     except Exception:
         return {}
+
+
+def _load_approved_survey(study_id: str | None) -> SurveyDefinition | None:
+    """Load a study's approved questionnaire SurveyDefinition, or None.
+
+    Reuses the questionnaire route's storage convention: the QuestionnaireDB row
+    carries the on-disk path to the SurveyDefinition JSON (via
+    list_questionnaires_for_study). We only surface an APPROVED questionnaire to
+    the navigator — a draft/in-review instrument is still being corrected, so the
+    Steward should treat it as "not available yet" rather than quote unreviewed
+    extractions. Returns None (never raises) for every degraded case — no
+    study_id, no questionnaire, none approved, missing/corrupt file — so the
+    Steward tools can report a clean "not available" instead of a stack trace.
+    """
+    if not study_id:
+        return None
+    from api.db import SessionLocal, list_questionnaires_for_study
+
+    db = SessionLocal()
+    try:
+        questionnaires = list_questionnaires_for_study(db, study_id)
+    except Exception:
+        return None
+    finally:
+        db.close()
+
+    for questionnaire in questionnaires:  # most-recent first
+        if questionnaire.status != "approved" or not questionnaire.definition_path:
+            continue
+        path = Path(questionnaire.definition_path)
+        if not path.exists():
+            continue
+        try:
+            return SurveyDefinition.from_json(path.read_text())
+        except Exception:
+            return None
+    return None
 
 
 MAX_CONTEXT_VARS = 150
@@ -294,6 +337,16 @@ def _make_executor(
     def _quality(params: dict) -> dict:
         return data_quality(parquet, variables=params.get("variables"))
 
+    # Approved questionnaire is loaded lazily and cached for this executor: most
+    # questions never touch it, and a study rarely has one at all, so we avoid a
+    # DB hit + disk read unless a questionnaire tool is actually called.
+    survey_cache: dict[str, SurveyDefinition | None] = {}
+
+    def _survey() -> SurveyDefinition | None:
+        if "survey" not in survey_cache:
+            survey_cache["survey"] = _load_approved_survey(study_id)
+        return survey_cache["survey"]
+
     def execute(name: str, params: dict) -> dict:
         if name == "show_table":
             # Deck-table fetch by id, or live computation from a stub variable
@@ -329,6 +382,15 @@ def _make_executor(
 
         if name == "data_quality":
             return _quality(params)
+
+        if name == "get_question_details":
+            return get_question_details(_survey(), study_id or "", params.get("qid", ""))
+
+        if name == "explain_question_base":
+            return explain_question_base(_survey(), study_id or "", params.get("qid", ""))
+
+        if name == "search_questionnaire":
+            return search_questionnaire(_survey(), study_id or "", params.get("query", ""))
 
         return {"success": False, "error": f"Unknown tool: {name}"}
 

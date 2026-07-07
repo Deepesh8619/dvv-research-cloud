@@ -41,10 +41,21 @@ class Specialist(NamedTuple):
 SPECIALISTS: dict[str, Specialist] = {
     "steward": Specialist(
         name="steward",
-        tools=("data_quality",),
+        tools=(
+            "data_quality",
+            "get_question_details",
+            "explain_question_base",
+            "search_questionnaire",
+        ),
         prompt_fragment=(
-            "You are acting as the Data Steward: focus on data health — "
-            "missing %, constant columns, duplicate-ID flags. Use data_quality()."
+            "You are acting as the Data Steward: focus on data health and the "
+            "survey instrument itself. Use data_quality() for missing %, constant "
+            "columns, and duplicate-ID flags. For questions about the questionnaire "
+            "as designed, use get_question_details(qid) to read a question's "
+            "wording/options/routing, explain_question_base(qid) to say in plain "
+            "English who was asked it, and search_questionnaire(query) to find a "
+            "question by topic when the analyst doesn't know its qid. If a study "
+            "has no approved questionnaire, these tools say so — relay that plainly."
         ),
     ),
     "analyst": Specialist(

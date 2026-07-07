@@ -461,3 +461,183 @@ def test_parse_text_tool_calls_recovers_llama_markup():
 
     assert _parse_text_tool_calls("just a normal answer, no call") == []
     assert _parse_text_tool_calls('<function(unknown_tool){}') == []  # not a real tool
+
+
+# --- Steward questionnaire tools (get_question_details / explain_question_base /
+#     search_questionnaire) --------------------------------------------------
+
+from src.core.survey_definition import (  # noqa: E402
+    Expression,
+    Option,
+    Question,
+    QuestionType,
+    QuestionVariableLink,
+    SurveyDefinition,
+)
+from src.engines.questionnaire.navigator_tools import (  # noqa: E402
+    explain_question_base,
+    get_question_details,
+    search_questionnaire,
+)
+
+
+@pytest.fixture
+def survey() -> SurveyDefinition:
+    """A tiny approved questionnaire: a screener, a conditional follow-up with
+    verbatim routing, and a conditional whose routing has no verbatim text."""
+    q1 = Question(
+        qid="S1",
+        text="Do you own a car?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=1, label="Yes"), Option(code=2, label="No")],
+    )
+    q2 = Question(
+        qid="Q5",
+        text="How satisfied are you with your car?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=1, label="Satisfied"), Option(code=2, label="Not satisfied")],
+        show_if=Expression(
+            op="eq",
+            qid="S1",
+            value=1,
+            verbatim_text="Ask only if S1 = Yes (owns a car)",
+        ),
+        extraction_confidence={"text": 0.98},
+        flags=["AMBIGUOUS_ROUTING"],
+    )
+    q3 = Question(
+        qid="Q6",
+        text="Which brand of car?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=1, label="Brand A")],
+        # show_if with NO verbatim_text -> must fall back to structured description
+        show_if=Expression(op="eq", qid="S1", value=1),
+    )
+    return SurveyDefinition(study_id="study_x", status="approved", questions=[q1, q2, q3])
+
+
+def test_get_question_details_happy_path(survey):
+    result = get_question_details(survey, "study_x", "Q5")
+    assert result["success"] and result["available"]
+    q = result["question"]
+    assert q["text"] == "How satisfied are you with your car?"
+    assert [o["label"] for o in q["options"]] == ["Satisfied", "Not satisfied"]
+    assert q["flags"] == ["AMBIGUOUS_ROUTING"]
+    assert q["show_if"]["verbatim_text"] == "Ask only if S1 = Yes (owns a car)"
+
+
+def test_get_question_details_no_questionnaire():
+    result = get_question_details(None, "study_x", "Q5")
+    assert result["success"] is False
+    assert result["available"] is False
+    assert "No approved questionnaire" in result["message"]
+
+
+def test_get_question_details_unknown_qid(survey):
+    result = get_question_details(survey, "study_x", "ZZZ")
+    assert result["success"] is False
+    assert result["available"] is True  # questionnaire exists, qid doesn't
+    assert "not in this study's approved questionnaire" in result["message"]
+    assert "S1" in result["known_qids"]
+
+
+def test_get_question_details_includes_datamap_links(survey):
+    links = [QuestionVariableLink(qid="Q5", variable_names=["Q5", "Q5x"], match_method="fuzzy")]
+    result = get_question_details(survey, "study_x", "Q5", links=links)
+    assert result["datamap_variables"]["variable_names"] == ["Q5", "Q5x"]
+    # A qid with no link simply omits the field.
+    assert "datamap_variables" not in get_question_details(survey, "study_x", "S1", links=links)
+
+
+def test_explain_question_base_uses_verbatim(survey):
+    result = explain_question_base(survey, "study_x", "Q5")
+    assert result["success"] and result["conditional"] is True
+    assert "Ask only if S1 = Yes (owns a car)" in result["explanation"]
+    assert result["verbatim_routing"] == "Ask only if S1 = Yes (owns a car)"
+
+
+def test_explain_question_base_falls_back_to_structured(survey):
+    """Q6's show_if has no verbatim text -> plain-English from the structured op."""
+    result = explain_question_base(survey, "study_x", "Q6")
+    assert result["conditional"] is True
+    assert result["verbatim_routing"] is None
+    assert "answered 1 to S1" in result["explanation"]
+
+
+def test_explain_question_base_unconditional(survey):
+    result = explain_question_base(survey, "study_x", "S1")
+    assert result["conditional"] is False
+    assert "all respondents" in result["explanation"]
+
+
+def test_explain_question_base_no_questionnaire():
+    result = explain_question_base(None, "study_x", "Q5")
+    assert result["success"] is False and result["available"] is False
+
+
+def test_explain_question_base_unknown_qid(survey):
+    result = explain_question_base(survey, "study_x", "ZZZ")
+    assert result["success"] is False and result["available"] is True
+
+
+def test_search_questionnaire_finds_by_topic(survey):
+    result = search_questionnaire(survey, "study_x", "brand")
+    assert result["success"] and result["n_matches"] == 1
+    assert result["matches"][0]["qid"] == "Q6"
+    assert result["matches"][0]["matched_in"] == "question_text"
+
+
+def test_search_questionnaire_matches_routing_text(survey):
+    result = search_questionnaire(survey, "study_x", "owns a car")
+    qids = {m["qid"] for m in result["matches"]}
+    assert "Q5" in qids  # matched via verbatim routing text
+    assert result["matches"][0]["matched_in"] in ("question_text", "routing_text")
+
+
+def test_search_questionnaire_no_match(survey):
+    result = search_questionnaire(survey, "study_x", "nonexistent topic xyz")
+    assert result["success"] and result["n_matches"] == 0
+
+
+def test_search_questionnaire_empty_query(survey):
+    result = search_questionnaire(survey, "study_x", "   ")
+    assert result["success"] and result["matches"] == []
+
+
+def test_search_questionnaire_no_questionnaire():
+    result = search_questionnaire(None, "study_x", "brand")
+    assert result["success"] is False and result["available"] is False
+
+
+# --- Executor dispatch: the tools reachable through _make_executor's execute()
+#     with the DB/disk lookup mocked -------------------------------------------
+
+
+def test_executor_dispatches_questionnaire_tools(study_dir, survey):
+    """The chat.py executor wires the questionnaire tools; _load_approved_survey
+    is the single DB/disk seam we patch."""
+    path, datamap = study_dir
+    with patch("api.routes.chat._load_approved_survey", return_value=survey):
+        execute = _make_executor(path, datamap, deck={}, study_id="study_x")
+        details = execute("get_question_details", {"qid": "Q5"})
+        assert details["success"] and details["qid"] == "Q5"
+        base = execute("explain_question_base", {"qid": "Q5"})
+        assert "Ask only if S1 = Yes" in base["explanation"]
+        found = execute("search_questionnaire", {"query": "brand"})
+        assert found["matches"][0]["qid"] == "Q6"
+
+
+def test_executor_questionnaire_tools_degrade_without_questionnaire(study_dir):
+    """A study with no approved questionnaire returns a clean 'not available'
+    result, never an exception."""
+    path, datamap = study_dir
+    with patch("api.routes.chat._load_approved_survey", return_value=None):
+        execute = _make_executor(path, datamap, deck={}, study_id="study_x")
+        for name, params in (
+            ("get_question_details", {"qid": "Q5"}),
+            ("explain_question_base", {"qid": "Q5"}),
+            ("search_questionnaire", {"query": "brand"}),
+        ):
+            result = execute(name, params)
+            assert result["success"] is False
+            assert result["available"] is False

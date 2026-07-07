@@ -65,7 +65,12 @@ def test_classify_specialist_matches_intent_mapping():
 
 
 def test_tools_for_specialist_returns_only_owned_tools():
-    assert set(tools_for_specialist("steward")) == {"data_quality"}
+    assert set(tools_for_specialist("steward")) == {
+        "data_quality",
+        "get_question_details",
+        "explain_question_base",
+        "search_questionnaire",
+    }
     assert set(tools_for_specialist("concierge")) == {"generate_code"}
     assert set(tools_for_specialist("analyst")) == {"show_table", "generate_pivot", "query_data"}
 
@@ -76,8 +81,14 @@ def test_tools_for_specialist_compound_adds_showcase_tools():
     e.g. "check data quality then chart the cleanest variable")."""
     plain = set(tools_for_specialist("steward", compound=False))
     compound = set(tools_for_specialist("steward", compound=True))
-    assert plain == {"data_quality"}
-    assert compound == {"data_quality", "generate_chart", "compare_tables", "navigate_to"}
+    steward_tools = {
+        "data_quality",
+        "get_question_details",
+        "explain_question_base",
+        "search_questionnaire",
+    }
+    assert plain == steward_tools
+    assert compound == steward_tools | {"generate_chart", "compare_tables", "navigate_to"}
 
 
 def test_tools_for_specialist_compound_is_noop_for_showcase_itself():

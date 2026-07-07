@@ -60,6 +60,9 @@ Capabilities — any data-related request should be handled with one of these:
 - SQL / Python / Excel-formula code, written by you using the tool's schema \
 (generate_code)
 - Data quality checks: missing %, constants, duplicate IDs (data_quality)
+- Questionnaire lookups when a questionnaire was uploaded: a question's exact \
+wording/options/routing (get_question_details), who was asked it in plain English \
+(explain_question_base), or finding a question by topic (search_questionnaire)
 
 Hard rules:
 - Answer only from THIS study's data + your tool results. No outside knowledge \
@@ -255,6 +258,62 @@ TOOLS = [
                 },
             },
             "required": [],
+        },
+    },
+    {
+        "name": "get_question_details",
+        "description": (
+            "Look up the full extracted questionnaire question for a given qid: "
+            "its wording, type, answer options, routing (with the original "
+            "verbatim text), extraction confidence, flags, and the DataMap "
+            "variable(s) it produced if known. Use when the analyst asks 'what "
+            "exactly did Q5 ask', 'what were the options for X', or 'show me the "
+            "wording of that question'. Needs the study to have an approved "
+            "questionnaire uploaded."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "qid": {"type": "string", "description": "the question id, e.g. 'Q5'"},
+            },
+            "required": ["qid"],
+        },
+    },
+    {
+        "name": "explain_question_base",
+        "description": (
+            "Explain in plain English WHO was asked a given question — its base — "
+            "by translating the question's routing condition (show_if) into "
+            "stakeholder-friendly prose, e.g. 'Asked only of respondents who said "
+            "Yes to Q3'. Use for 'who was asked X', 'what's the base for Q5', 'why "
+            "do fewer people have this question'. Needs an approved questionnaire."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "qid": {"type": "string", "description": "the question id, e.g. 'Q5'"},
+            },
+            "required": ["qid"],
+        },
+    },
+    {
+        "name": "search_questionnaire",
+        "description": (
+            "Free-text search the study's questionnaire to find the qid(s) of "
+            "questions about a topic, when the analyst names a subject rather than "
+            "a qid — e.g. 'which question asked about brand awareness'. Matches "
+            "question wording and routing text; returns matching qids with "
+            "snippets. Needs an approved questionnaire."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "text to search for in question/routing wording",
+                },
+            },
+            "required": ["query"],
         },
     },
 ]
