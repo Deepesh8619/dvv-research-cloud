@@ -1,5 +1,6 @@
 """Authentication endpoints."""
 
+import hmac
 import logging
 import sys
 from pathlib import Path
@@ -18,7 +19,7 @@ from api.auth import (
     require_role,
     verify_password,
 )
-from api.config import JWT_ALGORITHM, JWT_EXPIRY_HOURS, JWT_SECRET
+from api.config import ADMIN_EMAIL, ADMIN_RESET_TOKEN, JWT_ALGORITHM, JWT_EXPIRY_HOURS, JWT_SECRET
 from api.db import (
     UserDB,
     create_user,
@@ -28,6 +29,7 @@ from api.db import (
 )
 from api.models import (
     CreateUserRequest,
+    EmergencyResetRequest,
     LoginResponse,
     UserResponse,
 )
@@ -74,6 +76,52 @@ async def login(
             is_active=user.is_active,
         ),
     )
+
+
+@router.post("/auth/emergency-reset")
+async def emergency_reset(
+    request: EmergencyResetRequest,
+    db: Session = Depends(get_db),
+):
+    """Reset the admin account's password given ADMIN_RESET_TOKEN.
+
+    Deliberately unauthenticated — this exists to recover a locked-out owner
+    account (e.g. seed_admin_user's env-var sync hasn't landed yet, or the
+    wrong value got saved), so it can't require already being logged in.
+    Two things bound the blast radius instead: ADMIN_RESET_TOKEN must be
+    explicitly set (empty by default -> 404, not a standing backdoor), and
+    only ADMIN_EMAIL's account can be reset this way, never an arbitrary
+    email — an attacker who guessed the token still can't take over other
+    users' accounts.
+    """
+    if not ADMIN_RESET_TOKEN:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not hmac.compare_digest(request.token, ADMIN_RESET_TOKEN):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid reset token")
+
+    if request.email != ADMIN_EMAIL:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the configured admin account can be reset this way",
+        )
+
+    user = get_user_by_email(db, request.email)
+    if user:
+        user.password_hash = hash_password(request.new_password)
+        db.commit()
+        logger.warning(f"Admin password reset via emergency-reset endpoint: {request.email}")
+    else:
+        create_user(
+            db,
+            email=request.email,
+            name="Admin",
+            password_hash=hash_password(request.new_password),
+            role="owner",
+        )
+        logger.warning(f"Admin user created via emergency-reset endpoint: {request.email}")
+
+    return {"status": "ok", "message": "Password reset — you can log in now"}
 
 
 @router.get("/auth/me", response_model=UserResponse)

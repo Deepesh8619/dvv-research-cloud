@@ -47,10 +47,18 @@ else:
     _jwt_secret_file.write_text(JWT_SECRET)
     print(f"Generated JWT_SECRET and saved to {_jwt_secret_file}")
 
-# Admin bootstrap (first startup)
+# Admin bootstrap (every startup — see api/db.py:seed_admin_user)
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "deepsharma616@gmail.com")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "changeme123")
 ADMIN_NAME = os.getenv("ADMIN_NAME", "Deepesh Sharma")
+
+# Emergency admin password reset (api/routes/auth.py: POST /auth/emergency-reset).
+# Unset by default — the endpoint 404s if this is empty, so it's not an
+# always-on backdoor. Set this alongside ADMIN_EMAIL/ADMIN_PASSWORD once you
+# actually need it: it lets you reset the admin password immediately via the
+# UI, without waiting on a redeploy cycle (seed_admin_user only re-syncs the
+# password from ADMIN_PASSWORD at container startup).
+ADMIN_RESET_TOKEN = os.getenv("ADMIN_RESET_TOKEN", "")
 
 # Public share links base URL
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:3000")

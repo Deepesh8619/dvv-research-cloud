@@ -11,6 +11,7 @@ import LoginPage from './pages/LoginPage'
 import NewProjectPage from './pages/NewProjectPage'
 import ProjectPage from './pages/ProjectPage'
 import ProjectsPage from './pages/ProjectsPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import SharePage from './pages/SharePage'
 
 function LegacyStudyRedirect() {
@@ -25,6 +26,7 @@ export default function App() {
         <Routes>
           {/* Public routes (no auth required) */}
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/share/:token" element={<SharePage />} />
 
           {/* Protected routes (auth required) */}

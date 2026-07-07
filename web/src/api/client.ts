@@ -157,6 +157,14 @@ export const authApi = {
     return api.get<User>('/auth/me')
   },
 
+  emergencyReset: async (email: string, token: string, newPassword: string) => {
+    return api.post<{ status: string; message: string }>('/auth/emergency-reset', {
+      email,
+      token,
+      new_password: newPassword,
+    })
+  },
+
   listUsers: async () => {
     return api.get<User[]>('/auth/users')
   },

@@ -102,6 +102,17 @@ class CreateUserRequest(BaseModel):
     password: str
 
 
+class EmergencyResetRequest(BaseModel):
+    """Emergency admin password reset request — see ADMIN_RESET_TOKEN in
+    api/config.py. Unauthenticated by design (that's the point: recovering
+    a locked-out owner account), gated by the token instead of a session.
+    """
+
+    email: EmailStr
+    token: str
+    new_password: str
+
+
 class ShareLinkResponse(BaseModel):
     """Share link response."""
 

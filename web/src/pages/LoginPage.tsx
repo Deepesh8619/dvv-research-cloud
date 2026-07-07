@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { DocChartIcon } from '../components/Icons'
 import { useAuth } from '../auth/AuthContext'
 
@@ -102,12 +102,11 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Info message */}
-          <div className="mt-6 p-3 rounded-md bg-blue-50 border border-blue-200">
-            <p className="text-xs text-blue-700">
-              <strong>Demo credentials:</strong> deepsharma616@gmail.com / changeme123
-            </p>
-          </div>
+          <p className="mt-4 text-center text-sm text-slate-500">
+            <Link to="/reset-password" className="text-primary-600 hover:text-primary-700 font-medium">
+              Forgot password?
+            </Link>
+          </p>
         </div>
       </div>
     </div>
