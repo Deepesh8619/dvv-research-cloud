@@ -408,6 +408,18 @@ class SurveyDefinition:
     schema_version: str = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        self._rebuild_index()
+
+    def _rebuild_index(self) -> None:
+        """(Re)build the qid -> Question lookup from the current question list.
+
+        With duplicate qids this is inherently lossy ("last one wins"), which is
+        exactly the silent-corruption bug the review flagged. The index is only a
+        lookup convenience — `validate()` is what surfaces the duplicate — but any
+        mutation that can change qids (a rename, an add/remove) must call this so a
+        later `__getitem__`/`__contains__` in the same request addresses the right
+        question rather than a stale mapping built in `__post_init__`.
+        """
         self._index = {q.qid: q for q in self.questions}
 
     def __getitem__(self, qid: str) -> Question:

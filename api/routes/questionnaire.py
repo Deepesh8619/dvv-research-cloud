@@ -22,6 +22,7 @@ Roles (api/auth.py): owner/analyst may upload and edit; reviewer is read-only
 import logging
 import sys
 import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -71,6 +72,35 @@ _BLOCKING_FLAGS = frozenset(
         "EXTRACTION_MODEL_ERROR",
     }
 )
+
+# How long a questionnaire may sit on 'processing' before the status endpoint
+# reports it as an error (T18 staleness guard). Render's free tier restarts
+# routinely kill the daemon extraction thread mid-run, and the row's `error`
+# flip only fires on an *in-process* exception — a killed thread leaves the row
+# stuck on 'processing' with no feedback forever. 15 minutes is comfortably
+# above a legitimate worst case (even ~80 chunks × 2 sequential LLM calls
+# complete in a few minutes) while still failing fast enough for a reviewer to
+# retry the same session. This is a read-time computation (created_at/updated_at
+# vs. now), not a background sweep — no scheduler, no new infrastructure.
+_PROCESSING_STALE_AFTER = timedelta(minutes=15)
+
+
+def _is_stale_processing(questionnaire) -> bool:
+    """True if a 'processing' row has not advanced within the staleness window.
+
+    Compares the row's `updated_at` (falling back to `created_at`) against now.
+    A malformed/absent timestamp is treated as not-stale — we never want a
+    parse error to mask a genuinely still-running extraction as failed."""
+    if questionnaire.status != "processing":
+        return False
+    stamp = questionnaire.updated_at or questionnaire.created_at
+    if not stamp:
+        return False
+    try:
+        started = datetime.fromisoformat(stamp)
+    except (ValueError, TypeError):
+        return False
+    return datetime.now() - started > _PROCESSING_STALE_AFTER
 
 
 # --- Storage helpers --------------------------------------------------------
@@ -325,13 +355,27 @@ async def get_questionnaire_status(
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
 ):
-    """Current questionnaire status + extraction summary. (Authenticated)"""
+    """Current questionnaire status + extraction summary. (Authenticated)
+
+    A row stuck on 'processing' past the staleness window (its extraction thread
+    was almost certainly killed by a Render restart) is reported as 'error' with
+    an explaining `error_detail`, computed read-time here rather than swept by a
+    background job."""
     questionnaire = _latest_questionnaire(db, study_id)
     survey = None
     payload = _read_definition_json(db, questionnaire)
     if payload is not None:
         survey = SurveyDefinition.from_json(payload)
-    return _status_response(questionnaire, survey)
+    response = _status_response(questionnaire, survey)
+    if _is_stale_processing(questionnaire):
+        response.status = "error"
+        response.error_detail = (
+            "Extraction did not complete within "
+            f"{int(_PROCESSING_STALE_AFTER.total_seconds() // 60)} minutes "
+            "(the background worker was likely killed by a restart). Re-upload "
+            "the questionnaire to try again."
+        )
+    return response
 
 
 @router.get("/studies/{study_id}/questionnaire/questions")
@@ -366,6 +410,49 @@ async def get_question(
         raise HTTPException(status_code=404, detail=f"Question {qid} not found")
     approved = set(questionnaire.approved_qids or [])
     return _question_payload(survey[qid], approved)
+
+
+def _rename_reference(expr, old_qid: str, new_qid: str) -> None:
+    """Rewrite every `old_qid` reference to `new_qid` in an Expression tree.
+
+    Mutates in place. The Expression AST is a plain, fully-owned dataclass tree
+    (no shared/interned nodes, no eval), so in-place rewrite is safe: we walk
+    `children` recursively and reassign `qid` on any leaf that matched. This is
+    preferred over rejecting the rename — a rename that left a dangling reference
+    to the old qid would be silently broken routing, which is unacceptable."""
+    if expr.qid == old_qid:
+        expr.qid = new_qid
+    for child in expr.children or []:
+        _rename_reference(child, old_qid, new_qid)
+
+
+def _rename_qid(
+    survey: SurveyDefinition, old_qid: str, new_qid: str, approved_qids: set[str]
+) -> None:
+    """Rename a question's qid consistently across the whole instrument.
+
+    Updates: the Question.qid itself, every Block.question_ids list containing
+    the old qid, the in-memory `approved_qids` set (caller persists it), and any
+    OTHER question's show_if/terminate_if Expression referencing the old qid.
+    Rebuilds the survey index afterwards so subsequent lookups resolve correctly.
+    Caller must have already validated that `new_qid` is not a duplicate."""
+    survey[old_qid].qid = new_qid
+
+    for block in survey.blocks:
+        block.question_ids = [
+            new_qid if qid == old_qid else qid for qid in block.question_ids
+        ]
+
+    for q in survey.questions:
+        for expr in (q.show_if, q.terminate_if):
+            if expr is not None and old_qid in expr.referenced_qids():
+                _rename_reference(expr, old_qid, new_qid)
+
+    if old_qid in approved_qids:
+        approved_qids.discard(old_qid)
+        approved_qids.add(new_qid)
+
+    survey._rebuild_index()
 
 
 def _apply_update(question, request: QuestionUpdateRequest) -> None:
@@ -406,31 +493,68 @@ async def update_question(
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
 ):
-    """Correct one extracted question. Re-validates the whole SurveyDefinition
-    after the edit; rejects (422) if the edit would break `.validate()`.
-    (Owner/Analyst)"""
+    """Correct one extracted question. (Owner/Analyst)
+
+    Delta validation (T18): the edit is rejected (422) only if it introduces a
+    *new* problem — a problem in `validate()` after the edit that was not present
+    before it. A document with a pre-existing problem (e.g. a real screener's
+    `duplicate qid: S6`) can therefore still be edited: unrelated edits, and even
+    edits to S6 itself, go through as long as they don't make things worse. This
+    is what unblocks repairing a duplicate-qid extraction — the whole-survey
+    re-validation used to 422 on the pre-existing duplicate for every edit.
+
+    A `qid` rename is honoured here (the only way to actually resolve a duplicate
+    qid): block membership, the approved-qids set, and any other question's
+    routing that referenced the old qid are all rewritten consistently."""
     questionnaire = _latest_questionnaire(db, study_id)
     survey = _load_definition(db, questionnaire)
     if qid not in survey:
         raise HTTPException(status_code=404, detail=f"Question {qid} not found")
 
+    problems_before = survey.validate()
+    approved = set(questionnaire.approved_qids or [])
+
+    # qid rename is applied first (and separately) because it mutates the whole
+    # survey, not just this question, and shifts which qid the payload key maps to.
+    provided = request.model_fields_set
+    new_qid = qid
+    if "qid" in provided and request.qid is not None and request.qid != qid:
+        new_qid = request.qid
+        # A rename onto an existing DISTINCT question would collide two questions
+        # under one qid — reject; the reviewer must rename to a free qid.
+        clash = sum(1 for q in survey.questions if q.qid == new_qid)
+        if clash:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "Cannot rename qid — target already in use",
+                    "problems": [f"qid {new_qid} is already used by another question"],
+                },
+            )
+        _rename_qid(survey, qid, new_qid, approved)
+
     try:
-        _apply_update(survey[qid], request)
+        _apply_update(survey[new_qid], request)
     except (ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid update: {exc}") from exc
 
-    problems = survey.validate()
-    if problems:
+    problems_after = survey.validate()
+    new_problems = [p for p in problems_after if p not in problems_before]
+    if new_problems:
         raise HTTPException(
             status_code=422,
-            detail={"error": "Edit would make the questionnaire invalid", "problems": problems},
+            detail={
+                "error": "Edit would introduce new validation problems",
+                "problems": new_problems,
+            },
         )
 
-    survey.metadata["validation_errors"] = problems  # now empty
+    survey.metadata["validation_errors"] = problems_after
     _save_definition(db, questionnaire, survey)
+    if new_qid != qid:
+        set_questionnaire_approved_qids(db, questionnaire.id, sorted(approved))
     update_questionnaire_status(db, questionnaire.id, "in_review")
-    approved = set(questionnaire.approved_qids or [])
-    return _question_payload(survey[qid], approved)
+    return _question_payload(survey[new_qid], approved)
 
 
 @router.post("/studies/{study_id}/questionnaire/questions/{qid}/approve")
@@ -440,18 +564,37 @@ async def approve_question(
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
 ):
-    """Mark one question as reviewer-approved. (Owner/Analyst)"""
+    """Mark one question as reviewer-approved. (Owner/Analyst)
+
+    Individual approval also *clears that question's blocking flags* (T18): a
+    human explicitly confirming the question is now correct is exactly what a
+    blocking flag was waiting for. Without this, a flag like EXTRACTION_UNAVAILABLE
+    or AMBIGUOUS_ROUTING could be hand-fixed and approved yet still block
+    `approve-all` forever, since flags were otherwise never cleared. Non-blocking
+    flags are left intact (they're informational, not gates). The cleared flags
+    are persisted on the definition so the resolution survives a reload."""
     questionnaire = _latest_questionnaire(db, study_id)
     survey = _load_definition(db, questionnaire)
     if qid not in survey:
         raise HTTPException(status_code=404, detail=f"Question {qid} not found")
+
+    question = survey[qid]
+    cleared = [f for f in question.flags if f in _BLOCKING_FLAGS]
+    if cleared:
+        question.flags = [f for f in question.flags if f not in _BLOCKING_FLAGS]
+        _save_definition(db, questionnaire, survey)
 
     approved = set(questionnaire.approved_qids or [])
     approved.add(qid)
     set_questionnaire_approved_qids(db, questionnaire.id, sorted(approved))
     if questionnaire.status == "draft":
         update_questionnaire_status(db, questionnaire.id, "in_review")
-    return {"qid": qid, "approved": True, "n_approved": len(approved)}
+    return {
+        "qid": qid,
+        "approved": True,
+        "n_approved": len(approved),
+        "cleared_flags": cleared,
+    }
 
 
 @router.post("/studies/{study_id}/questionnaire/approve-all")

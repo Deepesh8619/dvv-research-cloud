@@ -9,7 +9,7 @@ hand-built SurveyDefinition, and the loader/segmenter are patched to no-ops so
 the real file-parsing path is never entered.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -284,21 +284,36 @@ def test_approve_all_gate(client):
     assert test_client.get("/api/studies/study_q1/questionnaire").json()["status"] == "approved"
 
 
-def test_approve_all_blocked_by_flags(client):
-    """Even fully approved, a question carrying a blocking flag stops approval."""
+def test_approve_all_blocked_by_flags_until_approved(client):
+    """A blocking flag stops approve-all while the question is un-approved, but
+    individually approving the question CLEARS its blocking flags (T18), so
+    approve-all becomes reachable once every question is hand-reviewed."""
     test_client, session_factory, state = client
     state["survey"] = _sample_survey("study_q1", with_flags=True)
     _make_study(session_factory)
     _upload(test_client)
     _wait_draft(test_client)
 
-    for qid in ("Q1", "Q2"):
-        test_client.post(f"/api/studies/study_q1/questionnaire/questions/{qid}/approve")
-
+    # Approve Q1 only: Q2 still carries AMBIGUOUS_ROUTING and blocks the gate.
+    test_client.post("/api/studies/study_q1/questionnaire/questions/Q1/approve")
     resp = test_client.post("/api/studies/study_q1/questionnaire/approve-all")
     assert resp.status_code == 422
     unresolved = {u["qid"] for u in resp.json()["detail"]["unresolved"]}
-    assert unresolved == {"Q2"}  # Q2 has AMBIGUOUS_ROUTING
+    assert unresolved == {"Q2"}  # not approved + AMBIGUOUS_ROUTING
+
+    # Approving Q2 clears its blocking flag (reported back in the response) ...
+    r = test_client.post("/api/studies/study_q1/questionnaire/questions/Q2/approve")
+    assert r.status_code == 200
+    assert "AMBIGUOUS_ROUTING" in r.json()["cleared_flags"]
+
+    # ... the cleared flag is persisted (survives a reload) ...
+    q2 = test_client.get("/api/studies/study_q1/questionnaire/questions/Q2").json()
+    assert "AMBIGUOUS_ROUTING" not in q2["flags"]
+
+    # ... and now the gate is reachable.
+    resp = test_client.post("/api/studies/study_q1/questionnaire/approve-all")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "approved"
 
 
 def test_reviewer_is_read_only(client):
@@ -364,6 +379,164 @@ def test_patch_clears_routing_with_explicit_null(client):
     )
     assert resp.status_code == 200
     assert resp.json()["show_if"] is None
+
+
+def _dup_qid_survey(study_id: str) -> SurveyDefinition:
+    """A survey mirroring the real client doc: two questions both labelled S6
+    (a genuinely ambiguous screener), plus a Q3 whose show_if references the
+    FIRST S6, plus an unrelated Q1. `validate()` reports `duplicate qid: S6`."""
+    s6a = Question(qid="S6", text="Screener 6a", type=QuestionType.SINGLE,
+                   options=[Option(code=1, label="Yes"), Option(code=2, label="No")])
+    s6b = Question(qid="S6", text="Screener 6b", type=QuestionType.SINGLE,
+                   options=[Option(code=1, label="Yes"), Option(code=2, label="No")])
+    q1 = Question(qid="Q1", text="Unrelated question", type=QuestionType.OPEN_TEXT)
+    q3 = Question(
+        qid="Q3",
+        text="Follow-up",
+        type=QuestionType.OPEN_TEXT,
+        show_if=Expression(op="eq", qid="S6", value=1),
+    )
+    survey = SurveyDefinition(
+        study_id=study_id,
+        title="Dup",
+        source="extracted",
+        status="draft",
+        blocks=[Block(block_id="B1", question_ids=["S6", "S6", "Q1", "Q3"])],
+        questions=[s6a, s6b, q1, q3],
+    )
+    survey.metadata["validation_errors"] = survey.validate()
+    survey.metadata["extraction_summary"] = {"total_chunks": 4}
+    return survey
+
+
+def test_patch_unrelated_question_despite_preexisting_duplicate(client):
+    """T18 delta validation: a doc with a pre-existing `duplicate qid: S6` problem
+    can still be edited elsewhere — the PATCH only rejects NEW problems."""
+    test_client, session_factory, state = client
+    state["survey"] = _dup_qid_survey("study_q1")
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    # Sanity: the pre-existing duplicate is really present.
+    status = test_client.get("/api/studies/study_q1/questionnaire").json()
+    assert "duplicate qid: S6" in status["validation_errors"]
+
+    resp = test_client.patch(
+        "/api/studies/study_q1/questionnaire/questions/Q1",
+        json={"text": "Unrelated question, edited"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "Unrelated question, edited"
+
+
+def test_patch_rename_qid_resolves_duplicate(client):
+    """Renaming one of the duplicate S6 questions removes the `duplicate qid: S6`
+    problem from the document's problem list (T18 qid rename)."""
+    test_client, session_factory, state = client
+    state["survey"] = _dup_qid_survey("study_q1")
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    resp = test_client.patch(
+        "/api/studies/study_q1/questionnaire/questions/S6",
+        json={"qid": "S6b"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["qid"] == "S6b"
+
+    status = test_client.get("/api/studies/study_q1/questionnaire").json()
+    assert "duplicate qid: S6" not in status["validation_errors"]
+
+    # Both distinct qids are now addressable.
+    assert test_client.get(
+        "/api/studies/study_q1/questionnaire/questions/S6b"
+    ).status_code == 200
+    assert test_client.get(
+        "/api/studies/study_q1/questionnaire/questions/S6"
+    ).status_code == 200
+
+
+def test_patch_rename_qid_rewrites_referencing_show_if(client):
+    """Renaming a qid referenced by another question's show_if rewrites that
+    reference — no dangling pointer to the old qid (T18)."""
+    test_client, session_factory, state = client
+    # Use a survey where the referenced qid is unique so the rename is clean.
+    q1 = Question(qid="Q1", text="Age", type=QuestionType.NUMERIC)
+    q2 = Question(
+        qid="Q2", text="Follow-up", type=QuestionType.OPEN_TEXT,
+        show_if=Expression(op="eq", qid="Q1", value=1),
+    )
+    survey = SurveyDefinition(
+        study_id="study_q1", title="Ref", source="extracted", status="draft",
+        blocks=[Block(block_id="B1", question_ids=["Q1", "Q2"])],
+        questions=[q1, q2],
+    )
+    survey.metadata["validation_errors"] = survey.validate()
+    survey.metadata["extraction_summary"] = {}
+    state["survey"] = survey
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    resp = test_client.patch(
+        "/api/studies/study_q1/questionnaire/questions/Q1",
+        json={"qid": "AGE"},
+    )
+    assert resp.status_code == 200
+
+    q2 = test_client.get("/api/studies/study_q1/questionnaire/questions/Q2").json()
+    assert q2["show_if"]["qid"] == "AGE"
+
+
+def test_patch_rename_qid_rejects_collision(client):
+    """A rename onto an already-used distinct qid is rejected (would merge two
+    questions under one qid)."""
+    test_client, session_factory, state = client
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    resp = test_client.patch(
+        "/api/studies/study_q1/questionnaire/questions/Q1",
+        json={"qid": "Q2"},  # Q2 already exists and is a different question
+    )
+    assert resp.status_code == 422
+    assert "already in use" in resp.json()["detail"]["error"]
+
+
+def test_stale_processing_reported_as_error(client):
+    """A questionnaire stuck on 'processing' with an old updated_at is reported
+    as 'error' by the status endpoint (T18 staleness guard)."""
+    from api.db import QuestionnaireDB
+
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+
+    old = (datetime.now() - timedelta(minutes=30)).isoformat()
+    db = session_factory()
+    db.add(
+        QuestionnaireDB(
+            id="quest_stale",
+            study_id="study_q1",
+            status="processing",
+            source_filename="stuck.docx",
+            version=1,
+            definition_json=None,
+            definition_path=None,
+            approved_qids=[],
+            created_at=old,
+            updated_at=old,
+        )
+    )
+    db.commit()
+    db.close()
+
+    body = test_client.get("/api/studies/study_q1/questionnaire").json()
+    assert body["status"] == "error"
+    assert body["error_detail"] is not None
+    assert "did not complete" in body["error_detail"]
 
 
 def test_no_questionnaire_404(client):

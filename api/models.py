@@ -205,6 +205,11 @@ class QuestionUpdateRequest(BaseModel):
     unchanged; provided fields overwrite. Routing fields accept the same nested
     dict shape Expression.to_dict()/from_dict() use (or null to clear)."""
 
+    # A qid rename is the only way to repair a duplicate-qid extraction (T18).
+    # When present and different from the current qid, the route rewrites the
+    # block membership, approved-qids set, and any other question's routing that
+    # referenced the old qid.
+    qid: str | None = None
     text: str | None = None
     type: str | None = None
     options: list[dict] | None = None
