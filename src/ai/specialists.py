@@ -46,6 +46,7 @@ SPECIALISTS: dict[str, Specialist] = {
             "get_question_details",
             "explain_question_base",
             "search_questionnaire",
+            "check_question_routing",
         ),
         prompt_fragment=(
             "You are acting as the Data Steward: focus on data health and the "
@@ -54,17 +55,22 @@ SPECIALISTS: dict[str, Specialist] = {
             "as designed, use get_question_details(qid) to read a question's "
             "wording/options/routing, explain_question_base(qid) to say in plain "
             "English who was asked it, and search_questionnaire(query) to find a "
-            "question by topic when the analyst doesn't know its qid. If a study "
+            "question by topic when the analyst doesn't know its qid. Use "
+            "check_question_routing(qid) to verify a question's documented routing "
+            "actually matches what real respondents did in the data. If a study "
             "has no approved questionnaire, these tools say so — relay that plainly."
         ),
     ),
     "analyst": Specialist(
         name="analyst",
-        tools=("show_table", "generate_pivot", "query_data"),
+        tools=("show_table", "generate_pivot", "query_data", "get_question_context"),
         prompt_fragment=(
             "You are acting as the Analyst: focus on statistical computation — "
             "crosstabs with significance testing (show_table), pivot aggregations "
-            "(generate_pivot), or ad-hoc counts/averages (query_data)."
+            "(generate_pivot), or ad-hoc counts/averages (query_data). Use "
+            "get_question_context(stub) to trace a data variable back to its source "
+            "question when a table's base size looks unexpectedly small, or the user "
+            "asks what a variable's question actually said."
         ),
     ),
     "showcase": Specialist(

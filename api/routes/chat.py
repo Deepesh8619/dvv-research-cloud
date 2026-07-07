@@ -33,13 +33,19 @@ from src.ai.navigator import navigate_basic, navigate_groq, navigate_openai
 from src.ai.router import BackendUnavailable, ModelOutputError
 from src.ai.specialists import specialist_for_intent
 from src.core.models import DataMap
-from src.core.survey_definition import SurveyDefinition
+from src.core.survey_definition import QuestionVariableLink, SurveyDefinition
 from src.engines.analysis.charts import generate_chart
 from src.engines.analysis.codegen import generate_code
 from src.engines.analysis.pivot import generate_pivot
 from src.engines.analysis.quality import data_quality
+from src.engines.questionnaire.linker import (
+    RoutingValidation,
+    cross_validate_routing,
+    link_questions_to_datamap,
+)
 from src.engines.questionnaire.navigator_tools import (
     explain_question_base,
+    get_question_context,
     get_question_details,
     search_questionnaire,
 )
@@ -347,6 +353,92 @@ def _make_executor(
             survey_cache["survey"] = _load_approved_survey(study_id)
         return survey_cache["survey"]
 
+    # Question<->variable links are computed lazily and cached alongside the
+    # survey: linking is pure/deterministic but touches every variable, so we
+    # only pay for it when a questionnaire tool that needs it is actually called.
+    # Guards for a missing survey OR datamap by caching None (never raises).
+    links_cache: dict[str, list[QuestionVariableLink] | None] = {}
+
+    def _links() -> list[QuestionVariableLink] | None:
+        if "links" not in links_cache:
+            survey = _survey()
+            if survey is None or datamap is None:
+                links_cache["links"] = None
+            else:
+                links_cache["links"] = link_questions_to_datamap(survey, datamap).links
+        return links_cache["links"]
+
+    # cross_validate_routing runs a DuckDB query over data.parquet; it computes
+    # the whole survey's routing checks in one pass. Cache that whole-survey list
+    # once per executor so check_question_routing(qid) is a dict lookup, not a
+    # fresh DuckDB query on every call.
+    routing_cache: dict[str, dict[str, RoutingValidation]] = {}
+
+    def _routing_validations() -> dict[str, RoutingValidation]:
+        if "by_qid" not in routing_cache:
+            survey = _survey()
+            links = _links()
+            if survey is None or not links:
+                routing_cache["by_qid"] = {}
+            else:
+                validations = cross_validate_routing(survey, links, parquet)
+                routing_cache["by_qid"] = {v.qid: v for v in validations}
+        return routing_cache["by_qid"]
+
+    def _check_question_routing(params: dict) -> dict:
+        qid = params.get("qid", "")
+        survey = _survey()
+        if survey is None:
+            return {
+                "success": False,
+                "available": False,
+                "tool": "check_question_routing",
+                "study_id": study_id or "",
+                "message": (
+                    "No approved questionnaire is available for this study, so "
+                    "routing cannot be cross-checked against the data."
+                ),
+            }
+        if qid not in survey:
+            return {
+                "success": False,
+                "available": True,
+                "tool": "check_question_routing",
+                "study_id": study_id or "",
+                "qid": qid,
+                "message": f"Question '{qid}' is not in this study's approved questionnaire.",
+                "known_qids": [q.qid for q in survey.questions],
+            }
+        validation = _routing_validations().get(qid)
+        if validation is None:
+            # No show_if, no resolved link, or no respondent data yet — the
+            # question simply wasn't cross-checkable. cross_validate_routing
+            # already skips these; report a clean "not available" for this qid.
+            return {
+                "success": True,
+                "available": True,
+                "checked": False,
+                "tool": "check_question_routing",
+                "study_id": study_id or "",
+                "qid": qid,
+                "message": (
+                    "Routing for this question could not be cross-validated against "
+                    "the data: it has no conditional routing (show_if), no resolved "
+                    "data link, or no respondent data is available yet."
+                ),
+            }
+        return {
+            "success": True,
+            "available": True,
+            "checked": True,
+            "tool": "check_question_routing",
+            "study_id": study_id or "",
+            "qid": qid,
+            "agreement_pct": validation.agreement_pct,
+            "flagged": validation.flagged,
+            "detail": validation.detail,
+        }
+
     def execute(name: str, params: dict) -> dict:
         if name == "show_table":
             # Deck-table fetch by id, or live computation from a stub variable
@@ -384,13 +476,23 @@ def _make_executor(
             return _quality(params)
 
         if name == "get_question_details":
-            return get_question_details(_survey(), study_id or "", params.get("qid", ""))
+            return get_question_details(
+                _survey(), study_id or "", params.get("qid", ""), links=_links()
+            )
 
         if name == "explain_question_base":
             return explain_question_base(_survey(), study_id or "", params.get("qid", ""))
 
         if name == "search_questionnaire":
             return search_questionnaire(_survey(), study_id or "", params.get("query", ""))
+
+        if name == "check_question_routing":
+            return _check_question_routing(params)
+
+        if name == "get_question_context":
+            return get_question_context(
+                _survey(), study_id or "", params.get("stub", ""), links=_links()
+            )
 
         return {"success": False, "error": f"Unknown tool: {name}"}
 

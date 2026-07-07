@@ -316,6 +316,46 @@ TOOLS = [
             "required": ["query"],
         },
     },
+    {
+        "name": "check_question_routing",
+        "description": (
+            "Cross-check a question's documented routing (show_if) against what "
+            "real respondents actually did in the data: returns the % of answered "
+            "rows that satisfy the routing, whether it's flagged, and a plain "
+            "explanation. Use to QC whether the questionnaire's stated skip logic "
+            "matches the fielded data — e.g. 'does Q5's base match its routing', "
+            "'did anyone answer Q5 who shouldn't have'. Needs an approved "
+            "questionnaire and respondent data."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "qid": {"type": "string", "description": "the question id, e.g. 'Q5'"},
+            },
+            "required": ["qid"],
+        },
+    },
+    {
+        "name": "get_question_context",
+        "description": (
+            "Resolve a DATA variable (a column/stub like 'Q5r1') back to the "
+            "questionnaire question that produced it: its wording, type, and a "
+            "plain-English base/routing description. Use when a table's base size "
+            "looks unexpectedly small (was the question routed/skipped?), or the "
+            "user asks what a variable's question actually said. Needs an approved "
+            "questionnaire; system/paradata columns return a clean 'not linked'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "stub": {
+                    "type": "string",
+                    "description": "the data variable/column name, e.g. 'Q5r1'",
+                },
+            },
+            "required": ["stub"],
+        },
+    },
 ]
 
 

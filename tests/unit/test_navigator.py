@@ -476,6 +476,7 @@ from src.core.survey_definition import (  # noqa: E402
 )
 from src.engines.questionnaire.navigator_tools import (  # noqa: E402
     explain_question_base,
+    get_question_context,
     get_question_details,
     search_questionnaire,
 )
@@ -602,6 +603,120 @@ def test_search_questionnaire_no_match(survey):
 def test_search_questionnaire_empty_query(survey):
     result = search_questionnaire(survey, "study_x", "   ")
     assert result["success"] and result["matches"] == []
+
+
+# --- Analyst reverse-lookup tool: get_question_context ----------------------
+
+
+def test_get_question_context_resolves_stub_to_question(survey):
+    links = [QuestionVariableLink(qid="Q5", variable_names=["Q5r1", "Q5r2"])]
+    result = get_question_context(survey, "study_x", "Q5r1", links=links)
+    assert result["success"] and result["available"] and result["linked"] is True
+    assert result["qid"] == "Q5"
+    assert result["text"] == "How satisfied are you with your car?"
+    assert result["conditional"] is True
+    # Reuses explain_question_base's prose (verbatim routing).
+    assert "Ask only if S1 = Yes (owns a car)" in result["base_explanation"]
+
+
+def test_get_question_context_case_insensitive_match(survey):
+    links = [QuestionVariableLink(qid="Q5", variable_names=["Q5R1"])]
+    result = get_question_context(survey, "study_x", "q5r1", links=links)
+    assert result["linked"] is True and result["qid"] == "Q5"
+
+
+def test_get_question_context_no_link_is_graceful(survey):
+    links = [QuestionVariableLink(qid="Q5", variable_names=["Q5r1"])]
+    result = get_question_context(survey, "study_x", "paradata_start_time", links=links)
+    assert result["success"] and result["available"] and result["linked"] is False
+    assert "not linked to any questionnaire question" in result["message"]
+
+
+def test_get_question_context_no_questionnaire():
+    result = get_question_context(None, "study_x", "Q5r1", links=None)
+    assert result["success"] is False and result["available"] is False
+
+
+# --- Executor dispatch wiring: links flow through _make_executor -------------
+
+
+def _link_study(tmp_path: Path, survey: SurveyDefinition) -> tuple[Path, DataMap]:
+    """A study whose data columns link to the `survey` fixture (S1 -> Q5 routing).
+
+    S1==1 for the first 20 respondents (who answered Q5), S1==2 for the rest
+    (who left Q5 null) — so cross_validate_routing sees Q5 answered only by
+    S1==1 rows, i.e. full agreement with its `show_if` (S1 == 1).
+    """
+    s1 = [1] * 20 + [2] * 20
+    q5 = [1, 2, 1, 2] * 5 + [None] * 20
+    pl.DataFrame({"respondent_id": list(range(1, 41)), "S1": s1, "Q5": q5}).write_parquet(
+        str(tmp_path / "data.parquet")
+    )
+    datamap = DataMap()
+    datamap.add(Variable(name="respondent_id", label="ID", type=VarType.NUMERIC))
+    datamap.add(Variable(name="S1", label="Own a car?", type=VarType.SINGLE,
+                         values={1: "Yes", 2: "No"}))
+    datamap.add(Variable(name="Q5", label="Satisfaction", type=VarType.SINGLE,
+                         values={1: "Satisfied", 2: "Not satisfied"}))
+    return tmp_path, datamap
+
+
+def test_executor_get_question_details_populates_datamap_variables(tmp_path, survey):
+    path, datamap = _link_study(tmp_path, survey)
+    with patch("api.routes.chat._load_approved_survey", return_value=survey):
+        execute = _make_executor(path, datamap, deck={}, study_id="study_x")
+        result = execute("get_question_details", {"qid": "Q5"})
+    assert result["success"]
+    # The linker now runs live in the executor: Q5 links to the Q5 data column.
+    assert result["datamap_variables"]["variable_names"] == ["Q5"]
+
+
+def test_executor_check_question_routing_happy_path(tmp_path, survey):
+    path, datamap = _link_study(tmp_path, survey)
+    with patch("api.routes.chat._load_approved_survey", return_value=survey):
+        execute = _make_executor(path, datamap, deck={}, study_id="study_x")
+        result = execute("check_question_routing", {"qid": "Q5"})
+    assert result["success"] and result["checked"] is True
+    assert result["qid"] == "Q5"
+    # Every S1==1 row answered Q5 and satisfies show_if -> full agreement.
+    assert result["agreement_pct"] == 100.0
+    assert result["flagged"] is False
+
+
+def test_executor_check_question_routing_not_checkable(tmp_path, survey):
+    """S1 has no show_if, so it's never cross-validated -> graceful 'not checked'."""
+    path, datamap = _link_study(tmp_path, survey)
+    with patch("api.routes.chat._load_approved_survey", return_value=survey):
+        execute = _make_executor(path, datamap, deck={}, study_id="study_x")
+        result = execute("check_question_routing", {"qid": "S1"})
+    assert result["success"] and result["checked"] is False
+    assert "could not be cross-validated" in result["message"]
+
+
+def test_executor_check_question_routing_no_questionnaire(tmp_path, survey):
+    path, datamap = _link_study(tmp_path, survey)
+    with patch("api.routes.chat._load_approved_survey", return_value=None):
+        execute = _make_executor(path, datamap, deck={}, study_id="study_x")
+        result = execute("check_question_routing", {"qid": "Q5"})
+    assert result["success"] is False and result["available"] is False
+
+
+def test_executor_get_question_context_resolves_via_live_links(tmp_path, survey):
+    path, datamap = _link_study(tmp_path, survey)
+    with patch("api.routes.chat._load_approved_survey", return_value=survey):
+        execute = _make_executor(path, datamap, deck={}, study_id="study_x")
+        result = execute("get_question_context", {"stub": "Q5"})
+    assert result["success"] and result["linked"] is True
+    assert result["qid"] == "Q5"
+    assert "Ask only if S1 = Yes (owns a car)" in result["base_explanation"]
+
+
+def test_executor_get_question_context_unlinked_variable(tmp_path, survey):
+    path, datamap = _link_study(tmp_path, survey)
+    with patch("api.routes.chat._load_approved_survey", return_value=survey):
+        execute = _make_executor(path, datamap, deck={}, study_id="study_x")
+        result = execute("get_question_context", {"stub": "respondent_id"})
+    assert result["success"] and result["linked"] is False
 
 
 def test_search_questionnaire_no_questionnaire():

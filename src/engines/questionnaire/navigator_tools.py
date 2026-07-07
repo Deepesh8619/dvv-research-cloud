@@ -303,6 +303,86 @@ def search_questionnaire(
     }
 
 
+def _qid_for_variable(
+    stub: str, links: list[QuestionVariableLink] | None
+) -> str | None:
+    """Reverse lookup: which question produced a given DataMap variable stub.
+
+    Scans precomputed ``link_questions_to_datamap`` results for the link whose
+    ``variable_names`` includes ``stub`` and returns its qid. Returns None when no
+    link claims the variable — the common case for system/paradata columns that
+    no questionnaire question produced. Match is case-insensitive to tolerate the
+    normalization the linker applies when matching names.
+    """
+    target = (stub or "").strip().upper()
+    if not target:
+        return None
+    for link in links or []:
+        if any((name or "").strip().upper() == target for name in link.variable_names):
+            return link.qid
+    return None
+
+
+def get_question_context(
+    survey: SurveyDefinition | None,
+    study_id: str,
+    stub: str,
+    links: list[QuestionVariableLink] | None = None,
+) -> dict:
+    """Resolve a DataMap variable back to the questionnaire question it came from.
+
+    The Analyst sees only collected data variable stubs/labels; this bridges back
+    to the instrument so a crosstab on ``Q5r1`` can be described as "Q5, 'Which
+    brands are you aware of', asked only of respondents who passed the awareness
+    screener" — explaining, for instance, why a base size is small (routed/skipped,
+    not merely low response).
+
+    Uses the precomputed link data (reverse lookup — which question's
+    ``variable_names`` include this stub) to find the source qid, then reuses
+    ``explain_question_base``'s routing/base prose rather than duplicating it.
+    Degrades gracefully to ``available: False`` / ``linked: False`` when the study
+    has no questionnaire, or the variable isn't linked to any question (paradata,
+    system fields, or an unmatched column).
+    """
+    if survey is None:
+        return _no_questionnaire_result("get_question_context", study_id)
+
+    qid = _qid_for_variable(stub, links)
+    if qid is None or qid not in survey:
+        return {
+            "success": True,
+            "available": True,
+            "linked": False,
+            "tool": "get_question_context",
+            "study_id": study_id,
+            "stub": stub,
+            "message": (
+                f"Variable '{stub}' is not linked to any questionnaire question "
+                "(it may be a system/paradata field, or the study's questionnaire "
+                "doesn't cover it)."
+            ),
+        }
+
+    question = survey[qid]
+    # Reuse explain_question_base for the plain-English routing/base description
+    # instead of re-deriving it — same wording the Steward's base tool produces.
+    base = explain_question_base(survey, study_id, qid)
+    return {
+        "success": True,
+        "available": True,
+        "linked": True,
+        "tool": "get_question_context",
+        "study_id": study_id,
+        "stub": stub,
+        "qid": qid,
+        "text": question.text,
+        "type": question.type.value,
+        "conditional": base.get("conditional"),
+        "base_explanation": base.get("explanation"),
+        "verbatim_routing": base.get("verbatim_routing"),
+    }
+
+
 def question_variable_links(
     qid: str, links: list[QuestionVariableLink] | None
 ) -> dict | None:

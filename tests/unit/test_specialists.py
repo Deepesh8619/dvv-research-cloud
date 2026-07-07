@@ -70,9 +70,15 @@ def test_tools_for_specialist_returns_only_owned_tools():
         "get_question_details",
         "explain_question_base",
         "search_questionnaire",
+        "check_question_routing",
     }
     assert set(tools_for_specialist("concierge")) == {"generate_code"}
-    assert set(tools_for_specialist("analyst")) == {"show_table", "generate_pivot", "query_data"}
+    assert set(tools_for_specialist("analyst")) == {
+        "show_table",
+        "generate_pivot",
+        "query_data",
+        "get_question_context",
+    }
 
 
 def test_tools_for_specialist_compound_adds_showcase_tools():
@@ -86,6 +92,7 @@ def test_tools_for_specialist_compound_adds_showcase_tools():
         "get_question_details",
         "explain_question_base",
         "search_questionnaire",
+        "check_question_routing",
     }
     assert plain == steward_tools
     assert compound == steward_tools | {"generate_chart", "compare_tables", "navigate_to"}
