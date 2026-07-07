@@ -139,6 +139,12 @@ export default function ProjectPage() {
             <StatusPill status={study.status} />
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              to={`/projects/${study.id}/questionnaire`}
+              className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
+            >
+              Questionnaire
+            </Link>
             {study.excel_path && (
               <a
                 href={studiesApi.downloadUrl(study.id, 'excel')}

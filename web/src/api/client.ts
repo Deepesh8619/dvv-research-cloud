@@ -237,6 +237,136 @@ export const studiesApi = {
   downloadUrl: (id: string, fmt: 'excel' | 'pptx') => `/api/studies/${id}/download/${fmt}`,
 }
 
+// --- Questionnaire review types ---------------------------------------------
+// Mirrors src/core/survey_definition.py's Expression/Option/Question shapes and
+// the questionnaire route payloads (api/routes/questionnaire.py).
+
+export type ExprOp = 'eq' | 'ne' | 'in' | 'gt' | 'lt' | 'and' | 'or' | 'not' | 'selected'
+
+export interface Expression {
+  op: ExprOp
+  qid?: string | null
+  value?: unknown
+  values?: unknown[] | null
+  children?: Expression[] | null
+  verbatim_text?: string | null
+}
+
+export interface QuestionOption {
+  code: number
+  label: string
+  exclusive?: boolean
+  anchored?: boolean
+  open_other?: boolean
+}
+
+export interface Question {
+  qid: string
+  text: string
+  type: string
+  options: QuestionOption[]
+  rows: QuestionOption[] | null
+  cols: QuestionOption[] | null
+  required: boolean
+  randomize_options: boolean
+  show_if: Expression | null
+  terminate_if: Expression | null
+  piping_refs: string[]
+  validation: Record<string, unknown> | null
+  source_text: string | null
+  source_location: string | null
+  extraction_confidence: Record<string, number>
+  flags: string[]
+  approved: boolean
+}
+
+export interface QuestionnaireStatus {
+  id: string
+  study_id: string
+  status: string
+  source_filename: string
+  version: number
+  created_at: string
+  updated_at: string
+  title: string | null
+  n_questions: number
+  n_approved: number
+  validation_errors: string[]
+  extraction_summary: Record<string, unknown>
+}
+
+export interface QuestionsListResponse {
+  questionnaire_id: string
+  study_id: string
+  status: string
+  questions: Question[]
+}
+
+export interface QuestionUpdate {
+  text?: string | null
+  type?: string | null
+  options?: Array<Record<string, unknown>> | null
+  show_if?: Record<string, unknown> | null
+  terminate_if?: Record<string, unknown> | null
+}
+
+export interface UnresolvedQuestion {
+  qid: string
+  reasons: string[]
+}
+
+export const QUESTION_TYPES = [
+  'single',
+  'multi',
+  'dropdown',
+  'rank',
+  'grid_single',
+  'numeric',
+  'open_text',
+  'info',
+] as const
+
+export const questionnaireApi = {
+  status: async (studyId: string) =>
+    api.get<QuestionnaireStatus>(`/studies/${studyId}/questionnaire`),
+
+  upload: async (studyId: string, file: File, onProgress?: (pct: number) => void) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<{ questionnaire_id: string; study_id: string; status: string; message: string }>(
+      `/studies/${studyId}/questionnaire/upload`,
+      formData,
+      {
+        onUploadProgress: (e) => {
+          if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100))
+        },
+        timeout: 0,
+      },
+    )
+  },
+
+  questions: async (studyId: string) =>
+    api.get<QuestionsListResponse>(`/studies/${studyId}/questionnaire/questions`),
+
+  question: async (studyId: string, qid: string) =>
+    api.get<Question>(`/studies/${studyId}/questionnaire/questions/${qid}`),
+
+  update: async (studyId: string, qid: string, patch: QuestionUpdate) =>
+    api.patch<Question>(`/studies/${studyId}/questionnaire/questions/${qid}`, patch),
+
+  approve: async (studyId: string, qid: string) =>
+    api.post<{ qid: string; approved: boolean; n_approved: number }>(
+      `/studies/${studyId}/questionnaire/questions/${qid}/approve`,
+      {},
+    ),
+
+  approveAll: async (studyId: string) =>
+    api.post<{ questionnaire_id: string; status: string }>(
+      `/studies/${studyId}/questionnaire/approve-all`,
+      {},
+    ),
+}
+
 export const chatApi = {
   send: async (studyId: string, message: string) => {
     return api.post<ChatResponse>(`/studies/${studyId}/chat`, { message })

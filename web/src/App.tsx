@@ -11,6 +11,7 @@ import LoginPage from './pages/LoginPage'
 import NewProjectPage from './pages/NewProjectPage'
 import ProjectPage from './pages/ProjectPage'
 import ProjectsPage from './pages/ProjectsPage'
+import QuestionnairePage from './pages/QuestionnairePage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import SharePage from './pages/SharePage'
 
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/projects/new" element={<NewProjectPage />} />
             <Route path="/projects/:id" element={<ProjectPage />} />
+            <Route path="/projects/:id/questionnaire" element={<QuestionnairePage />} />
             <Route path="/coding" element={<CodingPage />} />
             <Route path="/admin" element={<AdminPage />} />
             {/* Legacy routes */}
