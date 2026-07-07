@@ -1,0 +1,452 @@
+"""LLM questionnaire extraction: chunks -> structured SurveyDefinition.
+
+This is the second (LLM) stage of questionnaire ingestion. `questionnaire_loader`
+turns a .docx/PDF into deterministic `QuestionChunk`s; this module turns each
+chunk into a structured `Question` via a three-step pipeline:
+
+    1. extract   — one schema-constrained LLM call per chunk (Claude via router)
+    2. validate  — deterministic, no LLM: duplicate codes, empty options,
+                   self-referential / ambiguous routing
+    3. verify    — a second grounded LLM call that audits the extraction against
+                   the source text for hallucinated / dropped content
+
+Every step is failure-tolerant: a backend outage on one chunk flags that chunk
+and lets the rest of the document proceed, because a partial draft a human can
+fix beats a hard crash on question 40 of 60.
+
+Cross-chunk routing resolution (an ``ASK IF Q3=1`` on Q7 needs Q3 to exist) can
+only run once *every* chunk is extracted, so it lives in
+`extract_survey_definition`, not `extract_question` — a single chunk has no view
+of the whole document's qid set. See the note in `_validate_question`.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from dataclasses import dataclass, field
+from typing import Any
+
+from src.ai.router import (
+    AIResponse,
+    BackendUnavailable,
+    ModelOutputError,
+    run_task,
+)
+from src.core.survey_definition import (
+    Block,
+    Expression,
+    Option,
+    Question,
+    QuestionType,
+    SurveyDefinition,
+)
+from src.engines.questionnaire import schema
+from src.intake.questionnaire_loader import QuestionChunk
+
+# Question types whose whole point is a fixed answer list; an empty option list
+# on one of these is almost certainly a dropped/failed extraction, not a design.
+_OPTION_BEARING_TYPES = frozenset(
+    {
+        QuestionType.SINGLE,
+        QuestionType.MULTI,
+        QuestionType.DROPDOWN,
+        QuestionType.GRID_SINGLE,
+    }
+)
+
+# Below this, per-field routing confidence is treated as ambiguous even if the
+# model didn't set routing.ambiguous itself.
+_ROUTING_CONFIDENCE_FLOOR = 0.5
+
+# Where we stash the verbatim routing sentence so it survives even when a
+# structured show_if/terminate_if is later nulled out as unresolvable. The
+# schema's whole design is "preserve verbatim_text regardless" — Question has no
+# dedicated field for it, so it lives in the (otherwise-unused-at-extraction)
+# `validation` metadata dict rather than being lost.
+_ROUTING_VERBATIM_KEY = "routing_verbatim"
+
+
+@dataclass
+class ExtractionResult:
+    """One extracted `Question` plus the metadata a reviewer/linker needs.
+
+    `extract_question` returns this rather than a bare `Question` because the
+    downstream review UI and the question<->variable linker need the raw
+    per-field confidence and the accumulated flags alongside the structured
+    result to decide what to trust and what to surface for human check.
+    """
+
+    question: Question
+    confidence: dict[str, float] = field(default_factory=dict)
+    flags: list[str] = field(default_factory=list)
+    verified: bool = False  # True once the verification pass ran successfully
+
+    def add_flag(self, flag: str) -> None:
+        """Add a flag once (idempotent) and mirror it onto the Question."""
+        if flag not in self.flags:
+            self.flags.append(flag)
+        if flag not in self.question.flags:
+            self.question.flags.append(flag)
+
+
+def _empty_question(chunk: QuestionChunk) -> Question:
+    """A minimal placeholder Question for a chunk whose extraction failed.
+
+    Preserves the source text/location so a human can extract it by hand; typed
+    `info` (display content) so it never masquerades as an answerable question
+    with a bogus empty option list.
+    """
+    return Question(
+        qid=chunk.candidate_qid or "UNKNOWN",
+        text=chunk.chunk_text[:200],
+        type=QuestionType.INFO,
+        options=[],
+        required=False,
+        source_text=chunk.chunk_text,
+        source_location=chunk.provenance,
+    )
+
+
+def _parse_expression(raw: Any, verbatim: str | None) -> Expression | None:
+    """Deserialize a raw routing dict into an Expression, or None.
+
+    Uses the model's own `Expression.from_dict` (never a hand-rolled parser).
+    Attaches the verbatim routing sentence when the expression itself carries
+    none, so the structured form always keeps a line back to the source prose.
+    """
+    if not isinstance(raw, dict) or not raw.get("op"):
+        return None
+    expr = Expression.from_dict(raw)
+    if expr.verbatim_text is None and verbatim:
+        expr.verbatim_text = verbatim
+    return expr
+
+
+def _options_from(raw: Any) -> list[Option]:
+    out: list[Option] = []
+    for item in raw or []:
+        if not isinstance(item, dict) or "code" not in item or "label" not in item:
+            continue
+        out.append(Option(code=int(item["code"]), label=str(item["label"])))
+    return out
+
+
+def _question_from_raw(content: dict, chunk: QuestionChunk) -> tuple[Question, dict]:
+    """Build a Question from a schema-valid extraction dict.
+
+    Returns (question, routing_dict) so the caller can inspect the raw routing
+    block (ambiguous flag, verbatim) during validation without re-reading it.
+    """
+    routing = content.get("routing") or {}
+    verbatim = (routing.get("verbatim_text") or "").strip() or None
+
+    try:
+        qtype = QuestionType(content["type"])
+    except (ValueError, KeyError):
+        # Model returned a type outside the enum — keep the content, don't crash;
+        # default to single and let validation/verify surface the mismatch.
+        qtype = QuestionType.SINGLE
+
+    rows = _options_from(content.get("rows"))
+    cols = _options_from(content.get("cols"))
+
+    validation: dict[str, Any] = {}
+    if verbatim:
+        validation[_ROUTING_VERBATIM_KEY] = verbatim
+
+    question = Question(
+        qid=str(content.get("qid") or chunk.candidate_qid or "UNKNOWN"),
+        text=str(content.get("text", "")),
+        type=qtype,
+        options=_options_from(content.get("options")),
+        rows=rows or None,
+        cols=cols or None,
+        required=bool(content.get("required", True)),
+        show_if=_parse_expression(routing.get("show_if"), verbatim),
+        terminate_if=_parse_expression(routing.get("terminate_if"), verbatim),
+        validation=validation or None,
+        source_text=chunk.chunk_text,
+        source_location=chunk.provenance,
+        extraction_confidence=dict(content.get("confidence") or {}),
+    )
+    return question, routing
+
+
+def _validate_question(result: ExtractionResult, routing: dict) -> None:
+    """Deterministic per-chunk validation. No LLM calls.
+
+    Cross-chunk checks (does a referenced qid exist ANYWHERE in the document?)
+    cannot run here — a chunk is extracted in isolation with no view of the full
+    qid set — so `UNRESOLVED_ROUTING_QID` is deferred to
+    `extract_survey_definition`. What we can catch per-chunk we catch here.
+    """
+    q = result.question
+
+    # Duplicate option codes across options/rows/cols.
+    for group in (q.options, q.rows or [], q.cols or []):
+        codes: set[int] = set()
+        for opt in group:
+            if opt.code in codes:
+                result.add_flag(schema.FLAG_DUPLICATE_OPTION_CODE)
+                break
+            codes.add(opt.code)
+
+    # Empty options on a type that requires an answer list.
+    if q.type in _OPTION_BEARING_TYPES:
+        has_choices = bool(q.options) or bool(q.rows)
+        if not has_choices:
+            result.add_flag(schema.FLAG_EMPTY_OPTIONS)
+
+    # Self-referential show_if/terminate_if. A question cannot gate its own
+    # display on its own (not-yet-given) answer, so a show_if/terminate_if that
+    # references ONLY this qid is almost always an extraction error for these
+    # two fields specifically. NOTE: survey_definition.validate() deliberately
+    # *allows* self-reference (e.g. `terminate_if age < 18` on the age question)
+    # because there a leaf op reads the answer just given on THIS screen. That's
+    # a legitimate terminate pattern, so we do NOT hard-error self-reference; we
+    # only flag it as ambiguous routing worth a human glance, and only when the
+    # expression references nothing BUT itself (a mixed `Q7 and Q3` staying is
+    # fine). This keeps us from fighting the model's own tested fixture while
+    # still surfacing the far-more-common "gated its own display" mistake.
+    for expr in (q.show_if, q.terminate_if):
+        if expr is None:
+            continue
+        refs = expr.referenced_qids()
+        if refs and refs == {q.qid}:
+            result.add_flag(schema.FLAG_AMBIGUOUS_ROUTING)
+
+    # Ambiguous routing from the model, or low routing confidence.
+    routing_conf = float(result.confidence.get("routing", 1.0))
+    if routing.get("ambiguous") or routing_conf < _ROUTING_CONFIDENCE_FLOOR:
+        result.add_flag(schema.FLAG_AMBIGUOUS_ROUTING)
+
+
+def extract_question(chunk: QuestionChunk) -> ExtractionResult:
+    """Extract one chunk into a structured Question + confidence + flags.
+
+    Never raises on a backend/model failure: a failed chunk comes back flagged
+    `EXTRACTION_UNAVAILABLE` with a minimal placeholder Question so the caller
+    can keep processing the rest of the document and report which chunks failed.
+    """
+    prompt = schema.build_extraction_prompt(chunk.chunk_text, chunk.candidate_qid)
+    try:
+        response: AIResponse = run_task(
+            "questionnaire.extract", prompt, schema.EXTRACTION_SCHEMA
+        )
+    except (BackendUnavailable, ModelOutputError, KeyError):
+        result = ExtractionResult(question=_empty_question(chunk))
+        result.add_flag(schema.FLAG_EXTRACTION_UNAVAILABLE)
+        return result
+
+    question, routing = _question_from_raw(response.content, chunk)
+    result = ExtractionResult(
+        question=question,
+        confidence=dict(question.extraction_confidence),
+    )
+    _validate_question(result, routing)
+    return result
+
+
+def verify_question(chunk: QuestionChunk, result: ExtractionResult) -> ExtractionResult:
+    """Grounded second-pass audit of an extraction against its source text.
+
+    On backend/model failure: flag `VERIFICATION_UNAVAILABLE` and return the
+    result otherwise unchanged — a flagged "couldn't verify" is honest and tells
+    a human to hand-check, which is far better than crashing the pipeline over a
+    verification-pass outage.
+
+    When the verifier reports the extraction is NOT faithful, flag
+    `VERIFICATION_DISCREPANCY` and lower the confidence of whichever fields the
+    discrepancy strings implicate (all of them if it's unclear).
+    """
+    prompt = schema.build_verification_prompt(chunk.chunk_text, result.question.to_dict())
+    try:
+        response = run_task("questionnaire.verify", prompt, schema.VERIFICATION_SCHEMA)
+    except (BackendUnavailable, ModelOutputError, KeyError):
+        result.add_flag(schema.FLAG_VERIFICATION_UNAVAILABLE)
+        return result
+
+    result.verified = True
+    faithful = bool(response.content.get("faithful", True))
+    discrepancies = [str(d) for d in response.content.get("discrepancies") or []]
+
+    if not faithful:
+        result.add_flag(schema.FLAG_VERIFICATION_DISCREPANCY)
+        _downgrade_confidence(result, discrepancies)
+
+    return result
+
+
+# Maps a keyword found in a discrepancy string to the confidence field it
+# implicates. A discrepancy that matches none of these downgrades every field,
+# because "something is wrong but we can't localize it" should lower trust
+# across the board rather than nowhere.
+_DISCREPANCY_FIELD_HINTS: dict[str, str] = {
+    "option": "options",
+    "code": "options",
+    "label": "options",
+    "type": "type",
+    "rout": "routing",  # rout(e|ing)
+    "skip": "routing",
+    "terminate": "routing",
+    "wording": "text",
+    "text": "text",
+    "qid": "text",
+}
+
+
+def _downgrade_confidence(result: ExtractionResult, discrepancies: list[str]) -> None:
+    """Halve the confidence of fields implicated by the discrepancy strings.
+
+    Mirrors the lowered scores onto the Question's `extraction_confidence` so a
+    reviewer reading either the result or the persisted question sees the same
+    downgraded numbers.
+    """
+    targeted: set[str] = set()
+    for text in discrepancies:
+        low = text.lower()
+        for keyword, field_name in _DISCREPANCY_FIELD_HINTS.items():
+            if keyword in low:
+                targeted.add(field_name)
+
+    # Ambiguous / empty discrepancies -> lower everything we track.
+    if not targeted:
+        targeted = {"text", "type", "options", "routing"}
+
+    for field_name in targeted:
+        current = float(result.confidence.get(field_name, 1.0))
+        lowered = round(current * 0.5, 4)
+        result.confidence[field_name] = lowered
+        result.question.extraction_confidence[field_name] = lowered
+
+
+def _resolve_cross_chunk_routing(
+    results: list[ExtractionResult], known_qids: set[str]
+) -> None:
+    """Deferred cross-chunk check: null routing that references a missing qid.
+
+    Runs only after every chunk is extracted, when the full qid set is known.
+    A show_if/terminate_if referencing a qid that exists nowhere in the document
+    is unresolvable, so we flag `UNRESOLVED_ROUTING_QID` and null out THAT
+    expression only (not the whole question) — the verbatim routing sentence is
+    preserved in `question.validation` so a human can still repair it by hand.
+    """
+    for result in results:
+        q = result.question
+        for kind in ("show_if", "terminate_if"):
+            expr: Expression | None = getattr(q, kind)
+            if expr is None:
+                continue
+            # A referenced qid that is neither known in the document nor this
+            # question itself is unresolvable.
+            unresolved = {
+                ref for ref in expr.referenced_qids() if ref not in known_qids
+            }
+            if unresolved:
+                result.add_flag(schema.FLAG_UNRESOLVED_ROUTING_QID)
+                setattr(q, kind, None)
+
+
+def _extraction_summary(results: list[ExtractionResult]) -> dict[str, Any]:
+    """Reviewer-facing counts: totals, per-flag counts, average confidence."""
+    flag_counts: dict[str, int] = {}
+    conf_sum = 0.0
+    conf_n = 0
+    for result in results:
+        for flag in result.flags:
+            flag_counts[flag] = flag_counts.get(flag, 0) + 1
+        for value in result.confidence.values():
+            conf_sum += float(value)
+            conf_n += 1
+    return {
+        "total_chunks": len(results),
+        "flag_counts": flag_counts,
+        "average_confidence": round(conf_sum / conf_n, 4) if conf_n else 0.0,
+        "verified_chunks": sum(1 for r in results if r.verified),
+    }
+
+
+def extract_survey_definition(
+    chunks: list[QuestionChunk], study_id: str
+) -> SurveyDefinition:
+    """Extract + verify every chunk and assemble one draft SurveyDefinition.
+
+    Sequential per chunk (v1). Parallelising the per-chunk extract+verify calls
+    is a reasonable follow-up once this runs against large real documents (each
+    chunk is independent until the cross-chunk routing pass), but is not built
+    here to keep the first version simple and its failure modes obvious.
+    """
+    results: list[ExtractionResult] = []
+    for chunk in chunks:
+        result = extract_question(chunk)
+        result = verify_question(chunk, result)
+        results.append(result)
+
+    known_qids = {r.question.qid for r in results}
+    _resolve_cross_chunk_routing(results, known_qids)
+
+    questions = [r.question for r in results]
+    default_block = Block(
+        block_id="B1",
+        label="Extracted questions",
+        question_ids=[q.qid for q in questions],
+    )
+
+    survey = SurveyDefinition(
+        study_id=study_id,
+        source="extracted",
+        status="draft",
+        blocks=[default_block],
+        questions=questions,
+    )
+    survey.metadata["validation_errors"] = survey.validate()
+    survey.metadata["extraction_summary"] = _extraction_summary(results)
+    return survey
+
+
+# --- CLI debugging entry point ---------------------------------------------
+# There is no scripts/ convention for engine debug tools (scripts/ holds demo
+# and data-generation scripts, not per-engine harnesses), so this lives inline.
+# It is a manual test harness for running real .docx/PDF questionnaires through
+# the full pipeline, not a product feature.
+
+
+def _main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        print("usage: python -m src.engines.questionnaire.extractor <questionnaire.docx|.pdf>")
+        return 2
+
+    from pathlib import Path
+
+    from src.intake.questionnaire_loader import (
+        load_docx,
+        load_pdf,
+        segment_into_questions,
+    )
+
+    path = Path(argv[1])
+    suffix = path.suffix.lower()
+    if suffix == ".docx":
+        blocks = load_docx(path)
+    elif suffix == ".pdf":
+        blocks = load_pdf(path)
+    else:
+        print(f"unsupported file type: {suffix} (expected .docx or .pdf)")
+        return 2
+
+    chunks = segment_into_questions(blocks)
+    survey = extract_survey_definition(chunks, study_id=path.stem)
+    summary = survey.metadata["extraction_summary"]
+
+    print(f"questions:          {len(survey.questions)}")
+    print(f"average confidence: {summary['average_confidence']}")
+    print(f"flag counts:        {json.dumps(summary['flag_counts'])}")
+    print(f"validation errors:  {len(survey.metadata['validation_errors'])}")
+    print("---")
+    print(survey.to_json())
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - manual debugging harness
+    raise SystemExit(_main(sys.argv))

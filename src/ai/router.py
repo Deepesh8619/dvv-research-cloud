@@ -68,6 +68,11 @@ DEFAULT_ROUTES: dict[str, dict[str, str]] = {
     "coding.apply": {"backend": "ollama", "model": "llama3.2:3b"},
     "coding.codeframe": {"backend": "claude", "model": "claude-fable-5"},
     "extract.questionnaire": {"backend": "claude", "model": "claude-fable-5"},
+    # Two-pass questionnaire extraction (src/engines/questionnaire/extractor.py).
+    # Judgment-heavy, hallucination-sensitive structured extraction — routed to
+    # Claude, matching the sibling extract.questionnaire / coding.codeframe tasks.
+    "questionnaire.extract": {"backend": "claude", "model": "claude-fable-5"},
+    "questionnaire.verify": {"backend": "claude", "model": "claude-fable-5"},
     "report.narrative": {"backend": "claude", "model": "claude-fable-5"},
     # study.chat routes through src/ai/navigator.py (multi-tool agent loop on
     # Claude Haiku) rather than run_task — kept here so the task inventory in
