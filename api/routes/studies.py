@@ -273,6 +273,55 @@ async def get_crosstabs(
     return json.loads(crosstabs_file.read_text())
 
 
+def _run_artifacts(study, what: str) -> tuple[Path, Path]:
+    """(data.parquet, datamap.json) for a processed study, or 404 with a reason."""
+    if not study.excel_path:
+        raise HTTPException(status_code=404, detail=f"{what} not yet processed")
+    run_dir = Path(study.excel_path).parent
+    parquet, datamap = run_dir / "data.parquet", run_dir / "datamap.json"
+    if not parquet.exists() or not datamap.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"{what} run predates artifact persistence — re-run the study",
+        )
+    return parquet, datamap
+
+
+@router.get("/studies/{study_id}/tracking/{baseline_id}")
+async def get_tracking(
+    study_id: str,
+    baseline_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """Wave-over-wave comparison: this study vs a baseline wave. (Authenticated)
+
+    Deterministic Total-level deltas per shared variable, sig-tested with the
+    same pooled z-test as the banner columns (src/engines/tabs/tracking.py).
+    Variables the two waves can't honestly compare (code drift, small bases)
+    come back under `skipped` with reasons rather than silently vanishing.
+    """
+    from src.core.models import DataMap
+    from src.engines.tabs.tracking import compare_waves
+
+    current = get_study(db, study_id)
+    baseline = get_study(db, baseline_id)
+    if not current or not baseline:
+        raise HTTPException(status_code=404, detail="Study not found")
+    cur_parquet, cur_dm = _run_artifacts(current, f"Study {study_id}")
+    base_parquet, base_dm = _run_artifacts(baseline, f"Baseline {baseline_id}")
+
+    report = compare_waves(
+        base_parquet,
+        DataMap.from_json(base_dm.read_text()),
+        cur_parquet,
+        DataMap.from_json(cur_dm.read_text()),
+        baseline_id=baseline_id,
+        current_id=study_id,
+    )
+    return report.to_dict()
+
+
 def _coding_file(study) -> Path:
     """coding.json lives in the orchestrator run dir (beside the decks) — the
     same location convention as crosstabs.json/datamap.json, NOT STUDIES_DIR."""
