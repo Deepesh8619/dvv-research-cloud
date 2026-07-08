@@ -16,10 +16,9 @@ import pytest
 
 from src.ai import router
 from src.ai.router import (
-    AIResponse,
     BackendUnavailable,
     ModelOutputError,
-    _default_extraction_route,
+    _extraction_chain,
     _openai_generate,
     run_task,
 )
@@ -129,51 +128,83 @@ def test_openai_generate_no_tool_call_raises_model_error(monkeypatch):
         _openai_generate("gpt-4o", "p", _SCHEMA, timeout=30)
 
 
-# --- _default_extraction_route: key-driven provider selection ---------------
+# --- _extraction_chain: Ollama-first fallback ordering ----------------------
 
 
-def test_default_route_prefers_claude_when_anthropic_key_set(monkeypatch):
+def test_chain_is_ollama_first_then_configured_cloud(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
-    route = _default_extraction_route()
-    assert route["backend"] == "claude"
+    order = [c["backend"] for c in _extraction_chain()]
+    assert order == ["ollama", "groq", "openai", "claude"]
 
 
-def test_default_route_uses_openai_when_only_openai_key_set(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
-    route = _default_extraction_route()
-    assert route["backend"] == "openai"
-    assert route["model"] == "gpt-4o"
-
-
-def test_default_route_fails_clearly_when_no_key(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+def test_chain_omits_cloud_backends_without_keys(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    with pytest.raises(BackendUnavailable) as exc:
-        _default_extraction_route()
-    assert exc.value.config_error is True
-
-
-# --- run_task: "auto" backend resolves and dispatches to openai -------------
-
-
-def test_run_task_auto_dispatches_to_openai_with_only_openai_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    # Ollama is always attempted (may be reachable locally; fails fast if not).
+    assert [c["backend"] for c in _extraction_chain()] == ["ollama"]
+
+
+def test_chain_includes_only_configured_cloud(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert [c["backend"] for c in _extraction_chain()] == ["ollama", "openai"]
+
+
+# --- run_task: "auto" walks Ollama -> Groq -> OpenAI, escalating on failure --
+
+
+def test_run_task_auto_falls_through_ollama_to_openai(monkeypatch):
+    """Ollama unreachable -> chain escalates to the configured OpenAI backend."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
 
     def fake_http_json(request, timeout):
+        if "11434" in request.full_url:  # Ollama attempt
+            raise urllib.error.URLError("connection refused")
         assert "api.openai.com" in request.full_url
         return _openai_body(json.dumps({"answer": "ok"}))
 
     monkeypatch.setattr(router, "http_json", fake_http_json)
 
     resp = run_task("questionnaire.extract", "prompt", _SCHEMA)
-    assert isinstance(resp, AIResponse)
     assert resp.backend == "openai"
     assert resp.model == "gpt-4o"
     assert resp.content == {"answer": "ok"}
+
+
+def test_run_task_auto_prefers_ollama_when_it_answers(monkeypatch):
+    """A healthy local Ollama serves the request without touching the cloud."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
+
+    def fake_http_json(request, timeout):
+        assert "11434" in request.full_url  # never reaches the cloud
+        return {"response": json.dumps({"answer": "local"})}
+
+    monkeypatch.setattr(router, "http_json", fake_http_json)
+
+    resp = run_task("questionnaire.extract", "prompt", _SCHEMA)
+    assert resp.backend == "ollama"
+    assert resp.content == {"answer": "local"}
+
+
+def test_run_task_auto_all_missing_is_config_error(monkeypatch):
+    """No Ollama and no cloud keys -> single actionable config error."""
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    def boom(request, timeout):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(router, "http_json", boom)
+
+    with pytest.raises(BackendUnavailable):
+        run_task("questionnaire.extract", "prompt", _SCHEMA)
 
 
 def test_run_task_unknown_backend_raises(monkeypatch):

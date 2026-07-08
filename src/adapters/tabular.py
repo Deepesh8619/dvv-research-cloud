@@ -149,4 +149,18 @@ def read_tabular(path: str | Path) -> tuple[pd.DataFrame, DataMap]:
             datamap.add(Variable(name=name, label=label, type=VarType.TEXT, provenance=provenance))
 
     df = df.rename(columns=renames)
+
+    # Normalize every TEXT (open-end) column to a uniform string dtype. A raw
+    # object column can hold mixed Python types — respondents type "none" in one
+    # cell and 5 in another, and Excel preserves each cell's native type — which
+    # makes PyArrow (via pl.from_pandas() in the orchestrator's load step, before
+    # QC) infer the column as string from the first value and then raise
+    # "Expected bytes, got a 'int' object" on the first int cell. This is the
+    # production failure that surfaced as a QC-stage error. Covers both the
+    # inferred TEXT path above and datamap-sheet-parsed TEXT columns; nulls stay
+    # null so missingness/coding downstream still see them as empty.
+    text_cols = [v.name for v in datamap.variables if v.type == VarType.TEXT]
+    for name in text_cols:
+        df[name] = df[name].map(lambda v: str(v) if pd.notna(v) else None)
+
     return df, datamap

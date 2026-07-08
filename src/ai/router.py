@@ -70,11 +70,10 @@ DEFAULT_ROUTES: dict[str, dict[str, str]] = {
     "extract.questionnaire": {"backend": "claude", "model": "claude-fable-5"},
     # Two-pass questionnaire extraction (src/engines/questionnaire/extractor.py).
     # Judgment-heavy, hallucination-sensitive structured extraction. Unlike the
-    # sibling tasks above these are NOT hardcoded to a provider: run_task resolves
-    # them via _default_extraction_route() against whichever LLM key is actually
-    # configured (Claude preferred, else OpenAI), because production runs with an
-    # OPENAI_API_KEY and no ANTHROPIC_API_KEY. Sentinel backend "auto" marks that
-    # deferral; the concrete backend/model is chosen per request.
+    # sibling tasks above these are NOT hardcoded to a provider: the sentinel
+    # backend "auto" makes run_task walk the Ollama → Groq → OpenAI → Claude
+    # fallback chain (_extraction_chain()) — local first (free/private), then
+    # whichever cloud backends have a key — trying each until one succeeds.
     "questionnaire.extract": {"backend": "auto", "model": ""},
     "questionnaire.verify": {"backend": "auto", "model": ""},
     "report.narrative": {"backend": "claude", "model": "claude-fable-5"},
@@ -227,6 +226,74 @@ def _claude_generate(model: str, prompt: str, schema: dict, timeout: int) -> dic
     raise ModelOutputError("claude returned no structured output")
 
 
+def _openai_compatible_generate(
+    endpoint: str, api_key: str, model: str, prompt: str, schema: dict, timeout: int, provider: str
+) -> dict:
+    """Structured extraction via any OpenAI-compatible chat-completions endpoint.
+
+    Both OpenAI and Groq speak this exact shape (forced schema-valid function
+    call, arguments returned as a JSON string under
+    choices[0].message.tool_calls), so one implementation serves both — only the
+    endpoint URL, key, and provider label differ.
+    """
+    payload = json.dumps(
+        {
+            "model": model,
+            "max_tokens": 4096,
+            "temperature": 0,
+            "messages": [{"role": "user", "content": prompt}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "emit",
+                        "description": "Emit the structured result",
+                        "parameters": schema,
+                    },
+                }
+            ],
+            "tool_choice": {"type": "function", "function": {"name": "emit"}},
+        }
+    ).encode()
+    request = urllib.request.Request(
+        endpoint,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": USER_AGENT,
+        },
+    )
+    try:
+        body = http_json(request, timeout)
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise BackendUnavailable(f"{provider} API unreachable: {exc}") from exc
+    choices = body.get("choices", [])
+    if not choices:
+        raise ModelOutputError(f"{provider} returned no choices")
+    tool_calls = choices[0].get("message", {}).get("tool_calls") or []
+    if not tool_calls:
+        raise ModelOutputError(f"{provider} returned no structured output")
+    arguments = tool_calls[0].get("function", {}).get("arguments", "")
+    return _validate(_parse_json_output(arguments), schema)
+
+
+def _groq_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
+    """Structured extraction via Groq's OpenAI-compatible chat-completions API."""
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise BackendUnavailable("GROQ_API_KEY not set", config_error=True)
+    return _openai_compatible_generate(
+        "https://api.groq.com/openai/v1/chat/completions",
+        api_key,
+        model,
+        prompt,
+        schema,
+        timeout,
+        "Groq",
+    )
+
+
 def _openai_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
     """Structured extraction via OpenAI chat-completions function calling.
 
@@ -310,31 +377,41 @@ def llm_key_presence() -> dict[str, bool]:
 # fallback) because questionnaire extraction is hallucination-sensitive and
 # warrants the stronger model.
 _EXTRACTION_MODELS = {
-    "claude": "claude-fable-5",
+    "ollama": os.environ.get("OLLAMA_EXTRACT_MODEL", "llama3.2:3b"),
+    "groq": os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
     "openai": "gpt-4o",
+    "claude": "claude-fable-5",
 }
 
+# Ollama gets a short per-attempt timeout inside the fallback chain: a local
+# model that hangs must not stall the whole request when a cloud backend could
+# answer in seconds. A connection-refused (Ollama not running — the production
+# state on Render) fails instantly regardless and falls straight through.
+_OLLAMA_CHAIN_TIMEOUT = 30
 
-def _default_extraction_route() -> dict[str, str]:
-    """Pick the extraction backend from whichever LLM key is actually configured.
 
-    Prefers Claude when ANTHROPIC_API_KEY is present (its Fable model is what the
-    questionnaire pipeline was tuned against), else OpenAI when OPENAI_API_KEY is
-    present. Raises BackendUnavailable(config_error=True) if neither is set, so a
-    missing-key deploy fails with one actionable message rather than dispatching
-    to a backend that will only fail later. Resolved per call (not import-time)
-    so tests and runtime pick up the current environment.
+def _extraction_chain() -> list[dict[str, str]]:
+    """Ordered backend fallback for judgment-heavy extraction: local first.
+
+    The chain is **Ollama → Groq → OpenAI → Claude**: try the free/private local
+    model first, fall through to Groq's free cloud tier, then paid OpenAI, then
+    Claude — each step included only if it's actually usable (a cloud step needs
+    its key; Ollama is always attempted since it may be reachable locally and
+    fails fast when it isn't). `run_task` walks this list, escalating on any
+    BackendUnavailable/ModelOutputError and only raising once every candidate has
+    failed. Resolved per call so tests and runtime see the current environment.
     """
     keys = llm_key_presence()
-    if keys.get("ANTHROPIC_API_KEY"):
-        return {"backend": "claude", "model": _EXTRACTION_MODELS["claude"]}
+    chain: list[dict[str, str]] = [
+        {"backend": "ollama", "model": _EXTRACTION_MODELS["ollama"]}
+    ]
+    if keys.get("GROQ_API_KEY"):
+        chain.append({"backend": "groq", "model": _EXTRACTION_MODELS["groq"]})
     if keys.get("OPENAI_API_KEY"):
-        return {"backend": "openai", "model": _EXTRACTION_MODELS["openai"]}
-    raise BackendUnavailable(
-        "no LLM key configured for questionnaire extraction: set OPENAI_API_KEY "
-        "or ANTHROPIC_API_KEY",
-        config_error=True,
-    )
+        chain.append({"backend": "openai", "model": _EXTRACTION_MODELS["openai"]})
+    if keys.get("ANTHROPIC_API_KEY"):
+        chain.append({"backend": "claude", "model": _EXTRACTION_MODELS["claude"]})
+    return chain
 
 
 def run_task(
@@ -348,16 +425,68 @@ def run_task(
     route = (routes or DEFAULT_ROUTES).get(task)
     if route is None:
         raise KeyError(f"no route configured for task: {task}")
-    # "auto" defers provider choice to whichever LLM key is configured now.
+    # "auto" defers to the Ollama → Groq → OpenAI → Claude fallback chain,
+    # trying each configured backend until one succeeds.
     if route["backend"] == "auto":
-        route = _default_extraction_route()
-    backend, model = route["backend"], route["model"]
+        return _run_chain(_extraction_chain(), prompt, schema, timeout)
+    return _run_one(route["backend"], route["model"], prompt, schema, timeout)
+
+
+def _run_one(
+    backend: str, model: str, prompt: str, schema: dict, timeout: int
+) -> AIResponse:
+    """Dispatch one concrete backend and wrap the result."""
     if backend == "ollama":
         content = _ollama_generate(model, prompt, schema, timeout)
-    elif backend == "claude":
-        content = _claude_generate(model, prompt, schema, timeout)
+    elif backend == "groq":
+        content = _groq_generate(model, prompt, schema, timeout)
     elif backend == "openai":
         content = _openai_generate(model, prompt, schema, timeout)
+    elif backend == "claude":
+        content = _claude_generate(model, prompt, schema, timeout)
     else:
         raise ValueError(f"unknown backend: {backend}")
     return AIResponse(content=content, backend=backend, model=model)
+
+
+def _run_chain(
+    chain: list[dict[str, str]], prompt: str, schema: dict, timeout: int
+) -> AIResponse:
+    """Walk a fallback chain, escalating on failure, raising only if all fail.
+
+    A backend that fails to serve (BackendUnavailable) or returns unusable output
+    (ModelOutputError) hands off to the next candidate. If the whole chain fails,
+    the LAST error is raised — but its `config_error` flag is set only when EVERY
+    step was a config fault (all keys missing), so the extractor's flag taxonomy
+    still distinguishes "nothing is configured" (actionable) from "a configured
+    backend was down" (transient).
+    """
+    if not chain:
+        raise BackendUnavailable(
+            "no extraction backend available: start Ollama or set GROQ_API_KEY / "
+            "OPENAI_API_KEY / ANTHROPIC_API_KEY",
+            config_error=True,
+        )
+    last_exc: Exception | None = None
+    all_config_errors = True
+    for candidate in chain:
+        # Cap Ollama's attempt so a hung local model can't stall the chain.
+        attempt_timeout = (
+            min(timeout, _OLLAMA_CHAIN_TIMEOUT)
+            if candidate["backend"] == "ollama"
+            else timeout
+        )
+        try:
+            return _run_one(
+                candidate["backend"], candidate["model"], prompt, schema, attempt_timeout
+            )
+        except (BackendUnavailable, ModelOutputError) as exc:
+            last_exc = exc
+            if not getattr(exc, "config_error", False):
+                all_config_errors = False
+    assert last_exc is not None
+    if isinstance(last_exc, BackendUnavailable) and not all_config_errors:
+        # At least one backend was reachable but failed transiently — surface as
+        # a transient (retryable) fault, not an actionable config error.
+        raise BackendUnavailable(str(last_exc), config_error=False)
+    raise last_exc
