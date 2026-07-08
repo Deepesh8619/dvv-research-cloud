@@ -284,6 +284,40 @@ def test_approve_all_gate(client):
     assert test_client.get("/api/studies/study_q1/questionnaire").json()["status"] == "approved"
 
 
+def test_approve_clean_bulk_approves_only_unflagged(client):
+    """approve-clean bulk-approves every question with no blocking flag and
+    leaves flagged ones untouched (still requiring a deliberate individual
+    approval), so it can't be used to bypass the approve-all gate."""
+    test_client, session_factory, state = client
+    # Q2 carries AMBIGUOUS_ROUTING; Q1 is clean.
+    state["survey"] = _sample_survey("study_q1", with_flags=True)
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    resp = test_client.post(
+        "/api/studies/study_q1/questionnaire/questions/approve-clean"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["newly_approved"] == ["Q1"]  # only the unflagged one
+    assert {b["qid"] for b in body["still_blocked"]} == {"Q2"}
+
+    # Q2's blocking flag is NOT cleared — the gate still rejects it.
+    q2 = test_client.get("/api/studies/study_q1/questionnaire/questions/Q2").json()
+    assert "AMBIGUOUS_ROUTING" in q2["flags"]
+    gate = test_client.post("/api/studies/study_q1/questionnaire/approve-all")
+    assert gate.status_code == 422
+    assert {u["qid"] for u in gate.json()["detail"]["unresolved"]} == {"Q2"}
+
+    # Hand-approving Q2 clears its flag; now the gate passes.
+    test_client.post("/api/studies/study_q1/questionnaire/questions/Q2/approve")
+    assert (
+        test_client.post("/api/studies/study_q1/questionnaire/approve-all").status_code
+        == 200
+    )
+
+
 def test_approve_all_blocked_by_flags_until_approved(client):
     """A blocking flag stops approve-all while the question is un-approved, but
     individually approving the question CLEARS its blocking flags (T18), so

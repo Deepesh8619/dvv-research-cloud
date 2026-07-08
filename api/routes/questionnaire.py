@@ -597,6 +597,55 @@ async def approve_question(
     }
 
 
+@router.post("/studies/{study_id}/questionnaire/questions/approve-clean")
+async def approve_clean(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Bulk-approve every question that is clean — not yet approved AND carrying
+    no blocking flag — in one shot. (Owner/Analyst)
+
+    This is the "approve all remaining" convenience: it does the per-question
+    approve for the questions that need no human judgement, so the reviewer is
+    left with only the flagged ones to look at by hand. It deliberately does NOT
+    touch flagged questions (and therefore never clears a blocking flag — unlike
+    the single-question `approve`, which clears flags precisely because a human
+    is explicitly confirming that one). This keeps the approve-all gate honest:
+    a flagged question still requires a deliberate individual approval.
+
+    Returns how many were newly approved and which remain blocked (with their
+    flags), so the UI can point the reviewer straight at the leftovers.
+    """
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    approved = set(questionnaire.approved_qids or [])
+
+    newly_approved: list[str] = []
+    still_blocked: list[dict] = []
+    for q in survey.questions:
+        blocking = sorted(set(q.flags) & _BLOCKING_FLAGS)
+        if blocking:
+            if q.qid not in approved:
+                still_blocked.append({"qid": q.qid, "flags": blocking})
+            continue
+        if q.qid not in approved:
+            approved.add(q.qid)
+            newly_approved.append(q.qid)
+
+    if newly_approved:
+        set_questionnaire_approved_qids(db, questionnaire.id, sorted(approved))
+        if questionnaire.status == "draft":
+            update_questionnaire_status(db, questionnaire.id, "in_review")
+
+    return {
+        "n_newly_approved": len(newly_approved),
+        "newly_approved": newly_approved,
+        "n_approved": len(approved),
+        "still_blocked": still_blocked,
+    }
+
+
 @router.post("/studies/{study_id}/questionnaire/approve-all")
 async def approve_all(
     study_id: str,

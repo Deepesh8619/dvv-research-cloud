@@ -490,6 +490,8 @@ export default function QuestionnairePage() {
   const [approveAllError, setApproveAllError] = useState<UnresolvedQuestion[] | null>(null)
   const [approvingAll, setApprovingAll] = useState(false)
   const [approvedOk, setApprovedOk] = useState(false)
+  const [approvingClean, setApprovingClean] = useState(false)
+  const [cleanMsg, setCleanMsg] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const loadStatus = useCallback(async () => {
@@ -585,6 +587,34 @@ export default function QuestionnairePage() {
     }
   }
 
+  const handleApproveClean = async () => {
+    if (!studyId) return
+    setApprovingClean(true)
+    setCleanMsg(null)
+    setApproveAllError(null)
+    try {
+      const res = await questionnaireApi.approveClean(studyId)
+      const { n_newly_approved, still_blocked } = res.data
+      await loadQuestions()
+      await loadStatus()
+      if (still_blocked.length > 0) {
+        setCleanMsg(
+          `Approved ${n_newly_approved} clean question${n_newly_approved === 1 ? '' : 's'}. ` +
+            `${still_blocked.length} still need${still_blocked.length === 1 ? 's' : ''} manual review (flagged).`,
+        )
+      } else {
+        setCleanMsg(
+          `Approved ${n_newly_approved} question${n_newly_approved === 1 ? '' : 's'}. ` +
+            `Nothing left flagged — you can finalize.`,
+        )
+      }
+    } catch (err) {
+      setCleanMsg(errorMessage(err) || 'Bulk approve failed')
+    } finally {
+      setApprovingClean(false)
+    }
+  }
+
   if (loading) return <LoadingSpinner />
 
   const nApproved = questions.filter((q) => q.approved).length
@@ -623,9 +653,14 @@ export default function QuestionnairePage() {
       {!loadError && (notFound || status?.status === 'error') && (
         <div className="space-y-4 max-w-xl">
           {status?.status === 'error' && (
-            <p className="text-sm text-red-600 bg-red-50 rounded-md p-3">
-              Extraction failed for the last upload. You can upload again.
-            </p>
+            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3 space-y-1">
+              <p className="font-medium">Extraction failed for the last upload. You can upload again.</p>
+              {status.error_detail && (
+                <p className="text-red-500">
+                  <span className="font-medium">Reason:</span> {status.error_detail}
+                </p>
+              )}
+            </div>
           )}
           <UploadPanel studyId={studyId!} onUploaded={() => { setLoading(true); loadStatus() }} disabled={!canWrite} />
         </div>
@@ -674,6 +709,11 @@ export default function QuestionnairePage() {
               </ul>
             </div>
           )}
+          {cleanMsg && (
+            <div className="bg-sky-50 border border-sky-200 rounded-md p-3 mb-4 text-sm text-sky-800">
+              {cleanMsg}
+            </div>
+          )}
           {approvedOk && (
             <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3 mb-4 text-sm text-emerald-700">
               Questionnaire approved.
@@ -686,13 +726,24 @@ export default function QuestionnairePage() {
               <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between">
                 <span className="text-sm font-medium text-slate-700">{questions.length} questions</span>
                 {canWrite && (
-                  <button
-                    onClick={handleApproveAll}
-                    disabled={approvingAll || questions.length === 0}
-                    className="text-xs bg-emerald-600 text-white font-medium px-3 py-1.5 rounded-md hover:bg-emerald-700 disabled:opacity-50"
-                  >
-                    {approvingAll ? 'Approving…' : 'Approve all'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleApproveClean}
+                      disabled={approvingClean || questions.length === 0}
+                      title="Approve every question that has no blocking flag, so you only hand-review the flagged ones"
+                      className="text-xs bg-white border border-emerald-600 text-emerald-700 font-medium px-3 py-1.5 rounded-md hover:bg-emerald-50 disabled:opacity-50"
+                    >
+                      {approvingClean ? 'Approving…' : 'Approve remaining'}
+                    </button>
+                    <button
+                      onClick={handleApproveAll}
+                      disabled={approvingAll || questions.length === 0}
+                      title="Finalize the whole questionnaire — requires every question approved and unflagged"
+                      className="text-xs bg-emerald-600 text-white font-medium px-3 py-1.5 rounded-md hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      {approvingAll ? 'Finalizing…' : 'Finalize'}
+                    </button>
+                  </div>
                 )}
               </div>
               <div className="max-h-[70vh] overflow-y-auto">

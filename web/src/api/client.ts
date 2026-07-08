@@ -293,6 +293,7 @@ export interface QuestionnaireStatus {
   n_approved: number
   validation_errors: string[]
   extraction_summary: Record<string, unknown>
+  error_detail?: string | null
 }
 
 export interface QuestionsListResponse {
@@ -359,6 +360,14 @@ export const questionnaireApi = {
       `/studies/${studyId}/questionnaire/questions/${qid}/approve`,
       {},
     ),
+
+  approveClean: async (studyId: string) =>
+    api.post<{
+      n_newly_approved: number
+      newly_approved: string[]
+      n_approved: number
+      still_blocked: { qid: string; flags: string[] }[]
+    }>(`/studies/${studyId}/questionnaire/questions/approve-clean`, {}),
 
   approveAll: async (studyId: string) =>
     api.post<{ questionnaire_id: string; status: string }>(
