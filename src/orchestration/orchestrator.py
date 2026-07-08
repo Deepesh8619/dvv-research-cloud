@@ -384,6 +384,67 @@ class StudyOrchestrator:
         logger.info(f"[{run_id}] ✅ COMPLETE")
         return study
 
+    def retab_with_survey_labels(
+        self,
+        run_dir: str | Path,
+        client_name: str,
+        survey,
+        excel_filename: str | None = None,
+        pptx_filename: str | None = None,
+    ) -> dict:
+        """Re-run tables/decks for a completed study with real survey labels.
+
+        The questionnaire→data label merge (§3.2's datamap-merge fix): reload
+        the persisted canonical pair from the run dir, merge the approved
+        SurveyDefinition's question/option wording onto the inferred variables
+        (label_merge — deterministic, conservative), then regenerate
+        crosstabs.json and both decks in place. Deck filenames default to the
+        original ones so the study's DB paths stay valid.
+
+        Returns a summary dict (counts from the merge + whether tables were
+        regenerated) for logging/API responses.
+        """
+        from src.engines.questionnaire.label_merge import merge_labels_into_datamap
+
+        run_dir = Path(run_dir)
+        datamap_path = run_dir / "datamap.json"
+        parquet_path = run_dir / "data.parquet"
+        if not datamap_path.exists() or not parquet_path.exists():
+            raise FileNotFoundError(
+                f"run dir {run_dir} missing datamap.json/data.parquet "
+                "(study predates artifact persistence)"
+            )
+
+        datamap = DataMap.from_json(datamap_path.read_text())
+        merge = merge_labels_into_datamap(survey, datamap)
+        # Persist the enriched datamap so the navigator/API see real labels too.
+        datamap_path.write_text(datamap.to_json())
+
+        summary = {
+            "n_variables_relabelled": merge.n_variables_relabelled,
+            "n_value_labels_applied": merge.n_value_labels_applied,
+            "skipped_code_mismatch": merge.skipped_code_mismatch,
+            "unmatched_questions": merge.unmatched_questions,
+            "tables_regenerated": False,
+        }
+        if merge.n_variables_relabelled == 0:
+            return summary  # nothing changed; don't churn the decks
+
+        tab_plan = auto_tab_plan(datamap, title=f"{client_name} — Topline Tables")
+        if not tab_plan:
+            return summary
+
+        deck_run = run_tab_plan(str(parquet_path), tab_plan, datamap)
+        deck_to_json(deck_run, run_dir / "crosstabs.json")
+        render_excel(deck_run, str(run_dir / (excel_filename or f"{client_name}_deck.xlsx")))
+        render_pptx(deck_run, str(run_dir / (pptx_filename or f"{client_name}_deck.pptx")))
+        summary["tables_regenerated"] = True
+        logger.info(
+            f"[retab {run_dir.name}] {merge.n_variables_relabelled} variables relabelled; "
+            "tables and decks regenerated with survey labels"
+        )
+        return summary
+
     def _run_qc(self, df: pl.DataFrame, datamap: DataMap) -> QCReport:
         """Validate the loaded data."""
         issues = []

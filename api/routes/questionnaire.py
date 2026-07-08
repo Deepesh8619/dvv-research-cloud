@@ -683,4 +683,42 @@ async def approve_all(
     _save_definition(db, questionnaire, survey)
     update_questionnaire_status(db, questionnaire.id, "approved")
     logger.info(f"[{study_id}] Questionnaire {questionnaire.id} approved by {user.name}")
-    return {"questionnaire_id": questionnaire.id, "status": "approved"}
+
+    # Label merge (§3.2's datamap-merge fix): an approved questionnaire carries
+    # the real question/option wording that a CSV/Excel import lacks. If this
+    # study's data is already processed, regenerate its tables/decks with those
+    # labels in the background — same daemon-thread pattern as _run_extraction.
+    # Best-effort: a merge failure must never un-approve the questionnaire.
+    relabel = _start_label_merge(db, study_id, survey)
+
+    return {
+        "questionnaire_id": questionnaire.id,
+        "status": "approved",
+        "label_merge_started": relabel,
+    }
+
+
+def _start_label_merge(db: Session, study_id: str, survey: SurveyDefinition) -> bool:
+    """Kick off the background re-tab with survey labels; False if not applicable."""
+    from api.db import get_study
+    from src.orchestration.orchestrator import StudyOrchestrator
+
+    study = get_study(db, study_id)
+    if not study or not study.excel_path:
+        return False  # no processed data yet — nothing to relabel
+    run_dir = Path(study.excel_path).parent
+    excel_name = Path(study.excel_path).name
+    pptx_name = Path(study.pptx_path).name if study.pptx_path else None
+    client_name = study.client_name
+
+    def _job() -> None:
+        try:
+            summary = StudyOrchestrator().retab_with_survey_labels(
+                run_dir, client_name, survey, excel_name, pptx_name
+            )
+            logger.info(f"[{study_id}] label merge: {summary}")
+        except Exception as exc:
+            logger.error(f"[{study_id}] label merge failed: {exc}", exc_info=True)
+
+    threading.Thread(target=_job, daemon=True).start()
+    return True
