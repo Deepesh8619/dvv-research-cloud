@@ -731,17 +731,22 @@ def _start_label_merge(db: Session, study_id: str, survey: SurveyDefinition) -> 
                 run_dir, client_name, survey, excel_name, pptx_name
             )
             logger.info(f"[{study_id}] label merge: {summary}")
-            # Mirror the enriched datamap into the durable DB copy so the
-            # merged labels survive a restart along with everything else.
+            # Mirror the enriched datamap + regenerated tables into the durable
+            # DB copies so the merged labels survive a restart.
             datamap_file = run_dir / "datamap.json"
+            crosstabs_file = run_dir / "crosstabs.json"
             if summary.get("n_variables_relabelled") and datamap_file.exists():
-                from api.db import SessionLocal, update_study_paths
+                from api.db import SessionLocal, set_study_artifacts, update_study_paths
 
                 job_db = SessionLocal()
                 try:
                     update_study_paths(
                         job_db, study_id, datamap_json=datamap_file.read_text()
                     )
+                    if crosstabs_file.exists():
+                        set_study_artifacts(
+                            job_db, study_id, crosstabs_json=crosstabs_file.read_text()
+                        )
                 finally:
                     job_db.close()
         except Exception as exc:

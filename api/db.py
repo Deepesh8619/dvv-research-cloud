@@ -81,6 +81,15 @@ class StudyDB(Base):
     # the parquet itself is gone (tables can't recompute, but the chat can
     # still answer structure questions).
     datamap_json = Column(String, nullable=True)
+    # Free-tier survival kit: every small artifact a restart used to destroy
+    # now has a durable copy here. crosstabs/coding are KB-scale JSON; the
+    # original upload is stored gzip+base64 (TEXT for cross-dialect DDL —
+    # SQLite has no BYTEA) up to a size cap, so any study can be re-processed
+    # from the DB alone after the disk is wiped.
+    crosstabs_json = Column(String, nullable=True)
+    coding_json = Column(String, nullable=True)
+    source_filename = Column(String, nullable=True)
+    source_file_b64 = Column(String, nullable=True)  # gzip + base64 of the upload
 
 
 class ChatMessageDB(Base):
@@ -195,6 +204,11 @@ def _ensure_new_columns():
         "studies": {
             # Durable DataMap storage — added after `studies` first deployed.
             "datamap_json": "TEXT",
+            # Free-tier survival kit: artifacts + original upload in the DB.
+            "crosstabs_json": "TEXT",
+            "coding_json": "TEXT",
+            "source_filename": "VARCHAR",
+            "source_file_b64": "TEXT",
         },
     }
     inspector = inspect(engine)
@@ -308,6 +322,33 @@ def update_study_paths(
         study.updated_at = datetime.now().isoformat()
         db.commit()
         db.refresh(study)
+    return study
+
+
+def set_study_artifacts(
+    db: Session,
+    study_id: str,
+    crosstabs_json: str = None,
+    coding_json: str = None,
+    source_filename: str = None,
+    source_file_b64: str = None,
+):
+    """Persist durable copies of a study's artifacts (free-tier survival kit).
+
+    Only fields passed non-None are written, so callers can update one artifact
+    without clobbering the others."""
+    study = get_study(db, study_id)
+    if study:
+        if crosstabs_json is not None:
+            study.crosstabs_json = crosstabs_json
+        if coding_json is not None:
+            study.coding_json = coding_json
+        if source_filename is not None:
+            study.source_filename = source_filename
+        if source_file_b64 is not None:
+            study.source_file_b64 = source_file_b64
+        study.updated_at = datetime.now().isoformat()
+        db.commit()
     return study
 
 

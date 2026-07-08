@@ -46,6 +46,114 @@ from src.orchestration.orchestrator import StudyOrchestrator
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Original uploads are archived gzip+base64 into Postgres so a study can be
+# re-processed after Render's ephemeral disk is wiped. Cap what we archive:
+# base64 inflates ~4/3, and the free Postgres tier is 1GB total. 25MB of
+# compressed source covers every realistic CSV/Excel datafeed; a file over
+# the cap simply isn't archived (re-process then needs a fresh upload).
+MAX_ARCHIVED_SOURCE_BYTES = 25 * 1024 * 1024
+
+
+def _archive_source_file(job_db, study_id: str, file_path: Path) -> None:
+    """Best-effort: gzip+base64 the upload into the study row (size-capped)."""
+    import base64
+    import gzip
+
+    from api.db import set_study_artifacts
+
+    try:
+        compressed = gzip.compress(file_path.read_bytes(), compresslevel=6)
+        if len(compressed) > MAX_ARCHIVED_SOURCE_BYTES:
+            logger.info(
+                f"[{study_id}] source not archived: {len(compressed)} bytes compressed "
+                f"exceeds cap ({MAX_ARCHIVED_SOURCE_BYTES})"
+            )
+            return
+        set_study_artifacts(
+            job_db,
+            study_id,
+            source_filename=file_path.name,
+            source_file_b64=base64.b64encode(compressed).decode("ascii"),
+        )
+        logger.info(f"[{study_id}] source archived to DB ({len(compressed)} bytes gz)")
+    except Exception as exc:
+        logger.warning(f"[{study_id}] source archive failed (non-fatal): {exc}")
+
+
+def _restore_source_file(study, upload_dir: Path) -> Path | None:
+    """Rebuild the original upload from the DB archive; None if not archived."""
+    import base64
+    import gzip
+
+    if not study.source_file_b64 or not study.source_filename:
+        return None
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    path = upload_dir / study.source_filename
+    path.write_bytes(gzip.decompress(base64.b64decode(study.source_file_b64)))
+    return path
+
+
+def _run_orchestration_job(study_id: str, client_name: str, file_path: Path) -> None:
+    """The full pipeline for one study, on a fresh DB session (daemon thread).
+
+    Shared by upload and re-process. On success, persists deck paths plus the
+    durable artifact copies (datamap/crosstabs/coding JSON) so the study
+    remains fully servable after the ephemeral disk is wiped.
+    """
+    from api.db import SessionLocal, set_study_artifacts
+
+    job_db = SessionLocal()
+    try:
+        orchestrator = StudyOrchestrator(work_dir=STUDIES_DIR)
+        result = orchestrator.run_study(
+            client_name=client_name,
+            source_file=file_path,
+            auto_approve_classify=AUTO_APPROVE_CLASSIFY,
+            auto_approve_qc=AUTO_APPROVE_QC,
+            require_delivery_approval=REQUIRE_DELIVERY_APPROVAL,
+        )
+        logger.info(f"[{study_id}] Orchestration complete: {result.stage}")
+
+        metadata = {
+            "classification_confidence": result.source_file.classified_confidence,
+        }
+        if result.qc_report:
+            metadata["qc_passed"] = result.qc_report.passed
+            metadata["qc_issues"] = result.qc_report.issues
+            metadata["qc_warnings"] = result.qc_report.warnings
+        update_study_status(job_db, study_id, result.stage.value, metadata)
+
+        if result.excel_deck_path:
+            def _read(path) -> str | None:
+                return Path(path).read_text() if path and Path(path).exists() else None
+
+            update_study_paths(
+                job_db,
+                study_id,
+                excel_path=str(result.excel_deck_path),
+                pptx_path=str(result.pptx_deck_path) if result.pptx_deck_path else None,
+                datamap_json=_read(result.datamap_path),
+            )
+            set_study_artifacts(
+                job_db,
+                study_id,
+                crosstabs_json=_read(result.crosstabs_path),
+                coding_json=_read(result.coding_path),
+            )
+            logger.info(f"[{study_id}] Updated paths + durable artifacts")
+
+        for gate, (approver, _timestamp) in result.approval_chain.items():
+            approve_gate(job_db, study_id, gate, approver)
+            logger.info(f"[{study_id}] Approved {gate} by {approver}")
+
+        _archive_source_file(job_db, study_id, file_path)
+
+    except Exception as e:
+        logger.error(f"[{study_id}] Orchestration failed: {e}", exc_info=True)
+        update_study_status(job_db, study_id, "error", {"error": str(e)})
+    finally:
+        job_db.close()
+
 
 @router.post("/studies/upload", response_model=UploadResponse)
 async def upload_study(
@@ -86,59 +194,9 @@ async def upload_study(
         # Start orchestration in background (fresh DB session — request session
         # closes when this handler returns)
         client_name = study.client_name
-
-        def run_orchestration():
-            from api.db import SessionLocal
-
-            job_db = SessionLocal()
-            try:
-                orchestrator = StudyOrchestrator(work_dir=STUDIES_DIR)
-                result = orchestrator.run_study(
-                    client_name=client_name,
-                    source_file=file_path,
-                    auto_approve_classify=AUTO_APPROVE_CLASSIFY,
-                    auto_approve_qc=AUTO_APPROVE_QC,
-                    require_delivery_approval=REQUIRE_DELIVERY_APPROVAL,
-                )
-                logger.info(f"[{study_id}] Orchestration complete: {result.stage}")
-
-                metadata = {
-                    "classification_confidence": result.source_file.classified_confidence,
-                }
-                if result.qc_report:
-                    metadata["qc_passed"] = result.qc_report.passed
-                    metadata["qc_issues"] = result.qc_report.issues
-                    metadata["qc_warnings"] = result.qc_report.warnings
-                update_study_status(job_db, study_id, result.stage.value, metadata)
-
-                if result.excel_deck_path:
-                    # Durable DataMap copy: the run dir's datamap.json is on
-                    # ephemeral disk (wiped every deploy) — the DB column keeps
-                    # the study's variable metadata alive across restarts.
-                    datamap_json = None
-                    if result.datamap_path and Path(result.datamap_path).exists():
-                        datamap_json = Path(result.datamap_path).read_text()
-                    update_study_paths(
-                        job_db,
-                        study_id,
-                        excel_path=str(result.excel_deck_path),
-                        pptx_path=str(result.pptx_deck_path) if result.pptx_deck_path else None,
-                        datamap_json=datamap_json,
-                    )
-                    logger.info(f"[{study_id}] Updated paths: Excel + PPT + datamap")
-
-                for gate, (approver, _timestamp) in result.approval_chain.items():
-                    approve_gate(job_db, study_id, gate, approver)
-                    logger.info(f"[{study_id}] Approved {gate} by {approver}")
-
-            except Exception as e:
-                logger.error(f"[{study_id}] Orchestration failed: {e}", exc_info=True)
-                update_study_status(job_db, study_id, "error", {"error": str(e)})
-            finally:
-                job_db.close()
-
-        # Run async
-        thread = threading.Thread(target=run_orchestration, daemon=True)
+        thread = threading.Thread(
+            target=_run_orchestration_job, args=(study_id, client_name, file_path), daemon=True
+        )
         thread.start()
 
         return UploadResponse(
@@ -152,6 +210,53 @@ async def upload_study(
     except Exception as e:
         logger.error(f"Upload failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/studies/{study_id}/reprocess")
+async def reprocess_study(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Re-run the full pipeline for an existing study. (Owner/Analyst)
+
+    The free-tier recovery path: Render restarts wipe the disk, but the
+    original upload is archived in Postgres — restore it and run the same
+    orchestration as a fresh upload (new run dir, new decks, new durable
+    artifacts; the study keeps its id, share links and approval history).
+    Also how a study picks up pipeline improvements (new QC checks, coding)
+    without re-uploading.
+    """
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    upload_dir = STUDIES_DIR / study_id
+    # Prefer the on-disk original when it survived; else restore from the DB.
+    file_path = None
+    if upload_dir.exists():
+        candidates = [p for p in upload_dir.iterdir() if p.suffix in (".sav", ".csv", ".xlsx")]
+        if candidates:
+            file_path = candidates[0]
+    if file_path is None:
+        file_path = _restore_source_file(study, upload_dir)
+    if file_path is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Original file is gone (disk wiped) and no archived copy exists "
+                "for this study — upload the file again as a new project"
+            ),
+        )
+
+    update_study_status(db, study_id, "classifying", {"reprocessed_by": user.name})
+    threading.Thread(
+        target=_run_orchestration_job,
+        args=(study_id, study.client_name, file_path),
+        daemon=True,
+    ).start()
+    logger.info(f"[{study_id}] Re-process started by {user.name} from {file_path.name}")
+    return {"study_id": study_id, "status": "classifying", "source": file_path.name}
 
 
 @router.get("/studies", response_model=StudyListResponse)
@@ -264,20 +369,25 @@ async def get_crosstabs(
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
 ):
-    """Return the computed tables (JSON) for the web viewer. (Authenticated users only)"""
+    """Return the computed tables (JSON) for the web viewer. (Authenticated users only)
+
+    Reads the run dir's crosstabs.json when the disk still has it, else falls
+    back to the durable DB copy — tables stay viewable after a restart even
+    though the parquet/decks are gone."""
     study = get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
     if not study.excel_path:
         raise HTTPException(status_code=404, detail="Tables not yet computed")
 
-    crosstabs_file = Path(study.excel_path).parent / "crosstabs.json"
-    if not crosstabs_file.exists():
-        raise HTTPException(status_code=404, detail="No table data for this study")
-
     import json
 
-    return json.loads(crosstabs_file.read_text())
+    crosstabs_file = Path(study.excel_path).parent / "crosstabs.json"
+    if crosstabs_file.exists():
+        return json.loads(crosstabs_file.read_text())
+    if getattr(study, "crosstabs_json", None):
+        return json.loads(study.crosstabs_json)
+    raise HTTPException(status_code=404, detail="No table data for this study")
 
 
 def _run_artifacts(study, what: str) -> tuple[Path, Path]:
@@ -406,6 +516,10 @@ async def get_coding(
     try:
         return json.loads(_coding_file(study).read_text())
     except HTTPException as exc:
+        # Disk copy gone (restart) -> durable DB copy; else list the study's
+        # open-ends as not-coded; else the original 404.
+        if getattr(study, "coding_json", None):
+            return json.loads(study.coding_json)
         fallback = _uncoded_open_ends_payload(study)
         if fallback:
             return fallback
@@ -441,8 +555,17 @@ async def resolve_coding_item(
 
     import json
 
-    path = _coding_file(study)
-    coding = json.loads(path.read_text())
+    from api.db import set_study_artifacts
+
+    # Load from disk when it survived, else the durable DB copy.
+    path = None
+    try:
+        path = _coding_file(study)
+        coding = json.loads(path.read_text())
+    except HTTPException:
+        if not getattr(study, "coding_json", None):
+            raise
+        coding = json.loads(study.coding_json)
     variable_block = coding.get(variable)
     if variable_block is None:
         raise HTTPException(status_code=404, detail=f"No coding for variable {variable}")
@@ -462,7 +585,15 @@ async def resolve_coding_item(
             if codes is not None:
                 item["final_codes"] = codes
             item["resolved_by"] = user.name
-            path.write_text(json.dumps(coding, indent=1))
+            payload = json.dumps(coding, indent=1)
+            # DB copy is authoritative; the file echo is best-effort (the run
+            # dir may be gone after a restart).
+            set_study_artifacts(db, study_id, coding_json=payload)
+            if path is not None:
+                try:
+                    path.write_text(payload)
+                except OSError:
+                    pass
             return {"variable": variable, "respondent_id": respondent_id, "status": status}
     raise HTTPException(
         status_code=404, detail=f"respondent {respondent_id} not in {variable}'s review queue"

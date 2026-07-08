@@ -230,6 +230,13 @@ export const studiesApi = {
     return api.post(`/studies/${id}/approve/${gate}`, {})
   },
 
+  reprocess: async (id: string) => {
+    return api.post<{ study_id: string; status: string; source: string }>(
+      `/studies/${id}/reprocess`,
+      {},
+    )
+  },
+
   archive: async (id: string) => {
     return api.delete(`/studies/${id}`)
   },

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import axios from 'axios'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ProfileVariable, Study, studiesApi, shareApi, ShareLink, StudyProfile } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -46,6 +47,8 @@ export default function ProjectPage() {
   const [shareLink, setShareLink] = useState<ShareLink | null>(null)
   const [showShareModal, setShowShareModal] = useState(false)
   const [sharing, setSharing] = useState(false)
+  const [reprocessing, setReprocessing] = useState(false)
+  const [reprocessError, setReprocessError] = useState<string | null>(null)
 
   const load = useCallback(() => {
     if (!id) return
@@ -103,6 +106,22 @@ export default function ProjectPage() {
     }
   }
 
+  const handleReprocess = async () => {
+    if (!id || reprocessing) return
+    if (!window.confirm('Re-run the full pipeline for this project? Tables and decks will be regenerated.')) return
+    setReprocessing(true)
+    setReprocessError(null)
+    try {
+      await studiesApi.reprocess(id)
+      load()
+    } catch (err) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null
+      setReprocessError(typeof detail === 'string' ? detail : 'Re-process failed')
+    } finally {
+      setReprocessing(false)
+    }
+  }
+
   const handleNavigate = useCallback((targetTab: string) => {
     // tableId (crosstab selection) is no longer routed through a Tables tab —
     // the chat navigator renders the requested crosstab inline via show_table,
@@ -139,6 +158,16 @@ export default function ProjectPage() {
             <StatusPill status={study.status} />
           </div>
           <div className="flex items-center gap-2">
+            {(user?.role === 'owner' || user?.role === 'analyst') && (
+              <button
+                onClick={handleReprocess}
+                disabled={reprocessing}
+                title="Re-run the full pipeline from the original file (recovers a study after a server restart; picks up new QC/coding features)"
+                className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50 disabled:opacity-50"
+              >
+                {reprocessing ? 'Starting…' : 'Re-process'}
+              </button>
+            )}
             <Link
               to={`/projects/${study.id}/questionnaire`}
               className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
@@ -182,6 +211,11 @@ export default function ProjectPage() {
           </div>
         </div>
         <p className="text-xs text-slate-400 font-mono mt-1">{study.id}</p>
+        {reprocessError && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2 mt-2">
+            {reprocessError}
+          </p>
+        )}
       </div>
 
       {/* Tab nav */}
