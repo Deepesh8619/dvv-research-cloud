@@ -327,6 +327,53 @@ export const QUESTION_TYPES = [
   'info',
 ] as const
 
+// --- Verbatim coding review queue -------------------------------------------
+
+export interface CodeDef {
+  id: string
+  label: string
+  description: string
+  type: string
+  parent_id: string | null
+  examples: string[]
+}
+
+export interface ReviewItem {
+  respondent_id: number
+  verbatim: string
+  suggested_codes: string[]
+  confidence: number
+  reasoning: string
+  status: 'pending' | 'accepted' | 'corrected'
+  final_codes?: string[]
+  resolved_by?: string
+}
+
+export interface CodingVariable {
+  question_var: string
+  codeframe: { allow_multi: boolean; version: number; codes: CodeDef[] }
+  summary: { n_auto_coded: number; n_needs_review: number; confidence_mean: number }
+  review_queue: ReviewItem[]
+}
+
+export type CodingPayload = Record<string, CodingVariable>
+
+export const codingApi = {
+  get: async (studyId: string) => api.get<CodingPayload>(`/studies/${studyId}/coding`),
+
+  resolve: async (
+    studyId: string,
+    variable: string,
+    respondentId: number,
+    status: 'accepted' | 'corrected',
+    codes?: string[],
+  ) =>
+    api.patch<{ variable: string; respondent_id: number; status: string }>(
+      `/studies/${studyId}/coding/${variable}/${respondentId}`,
+      codes === undefined ? { status } : { status, codes },
+    ),
+}
+
 export const questionnaireApi = {
   status: async (studyId: string) =>
     api.get<QuestionnaireStatus>(`/studies/${studyId}/questionnaire`),
