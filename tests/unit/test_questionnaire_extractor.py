@@ -415,20 +415,26 @@ def test_no_circuit_break_when_one_chunk_succeeds_first():
 
 def test_extract_question_resolves_to_openai_with_only_openai_key(monkeypatch):
     """Smoke test the real routing path: run_task is NOT patched here. With only
-    OPENAI_API_KEY set, `questionnaire.extract`'s "auto" backend must resolve to
-    OpenAI and drive extraction end-to-end. Only the network boundary
-    (router.http_json) is stubbed, so this proves the route wiring, backend
-    dispatch, and result assembly all agree — the user's actual production
-    state (OpenAI key, no Anthropic key)."""
+    OPENAI_API_KEY set, `questionnaire.extract`'s "auto" chain must try local
+    Ollama first (unreachable here), fall through to OpenAI, and drive
+    extraction end-to-end. Only the network boundary (router.http_json) is
+    stubbed, so this proves the chain wiring, backend dispatch, and result
+    assembly all agree — the production state on Render (no local Ollama,
+    a cloud key configured)."""
+    import urllib.error
+
     from src.ai import router as _router
 
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
 
     content = _extraction_content(qid="Q1")
 
     def fake_http_json(request, timeout):
-        assert "api.openai.com" in request.full_url  # routed to OpenAI, not Claude
+        if "11434" in request.full_url:  # the Ollama-first attempt
+            raise urllib.error.URLError("connection refused")
+        assert "api.openai.com" in request.full_url  # then falls through to OpenAI
         arguments = __import__("json").dumps(content)
         call = {"function": {"name": "emit", "arguments": arguments}}
         return {"choices": [{"message": {"tool_calls": [call]}}]}

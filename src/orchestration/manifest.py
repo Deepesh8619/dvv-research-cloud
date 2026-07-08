@@ -61,6 +61,7 @@ class StudyRun:
     qc_report: QCReport | None = None
     datamap_path: Path | None = None
     crosstabs_path: Path | None = None
+    coding_path: Path | None = None  # coding.json: codeframes + review queues
     excel_deck_path: Path | None = None
     pptx_deck_path: Path | None = None
     slack_thread_id: str | None = None

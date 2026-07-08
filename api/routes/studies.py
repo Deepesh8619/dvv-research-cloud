@@ -273,6 +273,99 @@ async def get_crosstabs(
     return json.loads(crosstabs_file.read_text())
 
 
+def _coding_file(study) -> Path:
+    """coding.json lives in the orchestrator run dir (beside the decks) — the
+    same location convention as crosstabs.json/datamap.json, NOT STUDIES_DIR."""
+    if not study.excel_path:
+        raise HTTPException(status_code=404, detail="Study not yet processed")
+    path = Path(study.excel_path).parent / "coding.json"
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No verbatim coding for this study "
+                "(no open-ends, or run predates coding persistence)"
+            ),
+        )
+    return path
+
+
+@router.get("/studies/{study_id}/coding")
+async def get_coding(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """Codeframes + review queues for every coded open-end. (Authenticated users)
+
+    Serves the coding.json the orchestrator persisted at run time — no LLM call
+    happens here; this is a pure read of already-computed results.
+    """
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    import json
+
+    return json.loads(_coding_file(study).read_text())
+
+
+@router.patch("/studies/{study_id}/coding/{variable}/{respondent_id}")
+async def resolve_coding_item(
+    study_id: str,
+    variable: str,
+    respondent_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Resolve one review-queue item: accept the suggestion or correct the codes.
+
+    Body: {"codes": [...], "status": "accepted" | "corrected"}. Persists the
+    human decision into coding.json (status, final codes, who resolved it).
+    NOTE (honest limitation): this updates the review record, not the study's
+    data.parquet — re-tabbing with corrected codes is a follow-up; the record
+    here is the source of truth a re-run would apply. (Owner/Analyst)
+    """
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    status = payload.get("status", "accepted")
+    if status not in ("accepted", "corrected"):
+        raise HTTPException(status_code=422, detail="status must be accepted|corrected")
+    codes = payload.get("codes")
+    if codes is not None and not isinstance(codes, list):
+        raise HTTPException(status_code=422, detail="codes must be a list of code ids")
+
+    import json
+
+    path = _coding_file(study)
+    coding = json.loads(path.read_text())
+    variable_block = coding.get(variable)
+    if variable_block is None:
+        raise HTTPException(status_code=404, detail=f"No coding for variable {variable}")
+    # Validate corrected codes against the variable's own codeframe so a typo'd
+    # code id can't silently enter the record.
+    if codes:
+        known = {c["id"] for c in variable_block["codeframe"]["codes"]}
+        unknown = [c for c in codes if c not in known]
+        if unknown:
+            raise HTTPException(
+                status_code=422, detail=f"unknown code ids: {', '.join(unknown)}"
+            )
+
+    for item in variable_block["review_queue"]:
+        if item["respondent_id"] == respondent_id:
+            item["status"] = status
+            if codes is not None:
+                item["final_codes"] = codes
+            item["resolved_by"] = user.name
+            path.write_text(json.dumps(coding, indent=1))
+            return {"variable": variable, "respondent_id": respondent_id, "status": status}
+    raise HTTPException(
+        status_code=404, detail=f"respondent {respondent_id} not in {variable}'s review queue"
+    )
+
+
 @router.get("/studies/{study_id}/charts/{filename}")
 async def get_chart(
     study_id: str,

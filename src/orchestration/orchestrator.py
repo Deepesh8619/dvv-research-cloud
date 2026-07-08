@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime
@@ -13,7 +14,7 @@ import polars as pl
 from src.adapters.spss import read_sav
 from src.adapters.tabular import read_tabular
 from src.core.models import DataMap, VarType
-from src.engines.coding.runner import run_coding_job
+from src.engines.coding.runner import coding_run_to_artifact, run_coding_job
 from src.engines.tabs.runner import deck_to_json, run_tab_plan
 from src.engines.tabs.spec import TableSpec, TabPlan, auto_nets, load_tab_plan
 from src.intake.classify import classify_file
@@ -294,6 +295,7 @@ class StudyOrchestrator:
         open_ends = [v for v in datamap.variables if v.type == VarType.TEXT]
         if open_ends:
             logger.info(f"[{run_id}] Found {len(open_ends)} open-end questions; auto-coding...")
+            coding_artifacts: dict[str, dict] = {}
             for var in open_ends:
                 try:
                     coding_run = run_coding_job(
@@ -303,13 +305,37 @@ class StudyOrchestrator:
                         var.label,
                         min_confidence=min_coding_confidence,
                     )
-                    df = coding_run.df_coded
+                    # batch_code_verbatims adds GENERIC column names (codes,
+                    # coding_confidence, ...) — with 2+ open-ends the second
+                    # run would silently overwrite the first's results, so
+                    # rename them per source variable immediately.
+                    df = coding_run.df_coded.rename(
+                        {
+                            "codes": f"{var.name}_codes",
+                            "coding_confidence": f"{var.name}_coding_confidence",
+                            "coding_reasoning": f"{var.name}_coding_reasoning",
+                            "needs_coding_review": f"{var.name}_needs_coding_review",
+                        }
+                    )
+                    coding_artifacts[var.name] = coding_run_to_artifact(coding_run)
                     logger.info(
                         f"[{run_id}] {var.name}: {coding_run.n_auto_coded} auto-coded, "
                         f"{coding_run.n_needs_review} need review"
                     )
                 except Exception as e:
                     logger.error(f"[{run_id}] Coding failed for {var.name}: {e}")
+
+            if coding_artifacts:
+                # Re-persist the parquet WITH the coded columns — it was first
+                # written pre-coding, and tables/navigator read from the file,
+                # not this in-memory frame. Without this rewrite every coded
+                # column silently vanished at the end of the run (the coding
+                # engine's output never reached a single downstream consumer).
+                df.write_parquet(str(data_parquet_path))
+                # Codeframes + review queues persist beside the deck so the
+                # review-queue API/UI can serve them without re-running the LLM.
+                study.coding_path = study_dir / "coding.json"
+                study.coding_path.write_text(json.dumps(coding_artifacts, indent=1))
 
             study.stage = StudyStage.CODING_DONE
 
@@ -388,6 +414,28 @@ class StudyOrchestrator:
             )
         if moderate_missing:
             warnings.append(f"{len(moderate_missing)} columns are 20–50% empty")
+
+        # Respondent-quality checks (speeders / straightliners / duplicates /
+        # gibberish open-ends) — the cleaning layer DP shops and the incumbent
+        # platforms run before tables. Warnings, not hard issues: dropping a
+        # respondent is a human judgement (the delivery gate exists for this),
+        # so QC surfaces them without failing the run. Full per-respondent
+        # detail rides in metadata for a future data-quality review UI.
+        from src.engines.qc.respondents import run_respondent_qc, summarize_for_report
+
+        respondent_qc = run_respondent_qc(df, datamap)
+        warnings.extend(summarize_for_report(respondent_qc, len(df)))
+        metadata["respondent_qc"] = {
+            "checks_run": respondent_qc.checks_run,
+            "checks_skipped": respondent_qc.checks_skipped,
+            "n_flagged_respondents": len(respondent_qc.flagged_rows()),
+            "speeders": respondent_qc.speeders,
+            "straightliners": respondent_qc.straightliners,
+            "duplicates": respondent_qc.duplicates,
+            "gibberish_open_ends": respondent_qc.gibberish_open_ends,
+            "duration_column": respondent_qc.duration_column,
+            "grids_checked": respondent_qc.grids_checked,
+        }
 
         passed = len(issues) == 0
         return QCReport(passed=passed, issues=issues, warnings=warnings, metadata=metadata)

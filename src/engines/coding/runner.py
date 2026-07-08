@@ -75,15 +75,59 @@ class ReviewQueueItem:
 
 def extract_review_queue(run: CodingRun) -> list[ReviewQueueItem]:
     """Extract verbatims that need human review, sorted by low confidence first."""
-    review_df = run.df_coded.filter(pl.col("needs_coding_review")).sort_by("coding_confidence")
+    review_df = run.df_coded.filter(pl.col("needs_coding_review")).sort("coding_confidence")
 
     queue = []
     for row in review_df.iter_rows(named=True):
         queue.append(ReviewQueueItem(
             respondent_id=int(row["respondent_id"]),
-            verbatim=row["text"],
+            verbatim=str(row[run.question_var] or ""),
             suggested_codes=row["codes"] or [],
             confidence=float(row["coding_confidence"]),
             reasoning=row["coding_reasoning"],
         ))
     return queue
+
+
+def coding_run_to_artifact(run: CodingRun) -> dict:
+    """Serialize one coding run for persistence (studies/<run>/coding.json).
+
+    Everything a review UI needs without re-running any model: the codeframe
+    (so a reviewer can re-assign codes), the summary counts, and the review
+    queue sorted worst-confidence-first. Plain dicts only — this goes through
+    json.dumps and back.
+    """
+    return {
+        "question_var": run.question_var,
+        "codeframe": {
+            "allow_multi": run.codeframe.allow_multi,
+            "version": run.codeframe.version,
+            "codes": [
+                {
+                    "id": c.id,
+                    "label": c.label,
+                    "description": c.description,
+                    "type": str(c.type),
+                    "parent_id": c.parent_id,
+                    "examples": list(c.examples or []),
+                }
+                for c in run.codeframe.codes
+            ],
+        },
+        "summary": {
+            "n_auto_coded": run.n_auto_coded,
+            "n_needs_review": run.n_needs_review,
+            "confidence_mean": run.confidence_mean,
+        },
+        "review_queue": [
+            {
+                "respondent_id": item.respondent_id,
+                "verbatim": item.verbatim,
+                "suggested_codes": item.suggested_codes,
+                "confidence": item.confidence,
+                "reasoning": item.reasoning,
+                "status": "pending",  # a reviewer flips to accepted/corrected
+            }
+            for item in extract_review_queue(run)
+        ],
+    }
