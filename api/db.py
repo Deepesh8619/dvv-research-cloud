@@ -74,6 +74,13 @@ class StudyDB(Base):
     approval_chain = Column(JSON, default={})
     excel_path = Column(String, nullable=True)
     pptx_path = Column(String, nullable=True)
+    # Durable DataMap JSON (same rationale as questionnaires.definition_json,
+    # T17): the on-disk datamap.json lives on Render's ephemeral disk and is
+    # wiped by every deploy/restart, taking the navigator's study context with
+    # it. The DB copy keeps variable metadata alive across restarts even when
+    # the parquet itself is gone (tables can't recompute, but the chat can
+    # still answer structure questions).
+    datamap_json = Column(String, nullable=True)
 
 
 class ChatMessageDB(Base):
@@ -185,6 +192,10 @@ def _ensure_new_columns():
             "definition_json": "TEXT",
             "error_detail": "VARCHAR",
         },
+        "studies": {
+            # Durable DataMap storage — added after `studies` first deployed.
+            "datamap_json": "TEXT",
+        },
     }
     inspector = inspect(engine)
     for table, required in required_by_table.items():
@@ -278,14 +289,22 @@ def approve_gate(db: Session, study_id: str, gate: str, approved_by: str):
     return study
 
 
-def update_study_paths(db: Session, study_id: str, excel_path: str = None, pptx_path: str = None):
-    """Update study output file paths."""
+def update_study_paths(
+    db: Session,
+    study_id: str,
+    excel_path: str = None,
+    pptx_path: str = None,
+    datamap_json: str = None,
+):
+    """Update study output file paths (and the durable DataMap copy)."""
     study = get_study(db, study_id)
     if study:
         if excel_path:
             study.excel_path = excel_path
         if pptx_path:
             study.pptx_path = pptx_path
+        if datamap_json:
+            study.datamap_json = datamap_json
         study.updated_at = datetime.now().isoformat()
         db.commit()
         db.refresh(study)

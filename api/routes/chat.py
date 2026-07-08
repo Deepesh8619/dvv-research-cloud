@@ -107,14 +107,26 @@ def _study_dir(study) -> Path:
     return STUDIES_DIR / study.id
 
 
-def _load_datamap(study_dir: Path) -> DataMap | None:
+def _load_datamap(study_dir: Path, study=None) -> DataMap | None:
+    """DataMap from the run dir, falling back to the durable DB copy.
+
+    The run dir lives on Render's ephemeral disk — a deploy/restart wipes it.
+    `studies.datamap_json` (written at pipeline completion) keeps the variable
+    metadata alive so the navigator still knows the study's structure after a
+    restart, even when the parquet is gone. File wins when both exist (it may
+    carry a fresher label merge... though retab persists to both eventually)."""
     path = study_dir / "datamap.json"
-    if not path.exists():
-        return None
-    try:
-        return DataMap.from_json(path.read_text())
-    except Exception:
-        return None
+    if path.exists():
+        try:
+            return DataMap.from_json(path.read_text())
+        except Exception:
+            pass
+    if study is not None and getattr(study, "datamap_json", None):
+        try:
+            return DataMap.from_json(study.datamap_json)
+        except Exception:
+            pass
+    return None
 
 
 def _load_deck(study_dir: Path) -> dict:
@@ -515,7 +527,7 @@ async def chat_with_study(
         raise HTTPException(status_code=404, detail="Study not found")
 
     study_dir = _study_dir(study)
-    datamap = _load_datamap(study_dir)
+    datamap = _load_datamap(study_dir, study)
     deck = _load_deck(study_dir)
     context, intent = build_routed_context(study, datamap, deck, request.message)
     specialist = specialist_for_intent(intent)

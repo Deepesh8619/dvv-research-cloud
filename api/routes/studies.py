@@ -112,13 +112,20 @@ async def upload_study(
                 update_study_status(job_db, study_id, result.stage.value, metadata)
 
                 if result.excel_deck_path:
+                    # Durable DataMap copy: the run dir's datamap.json is on
+                    # ephemeral disk (wiped every deploy) — the DB column keeps
+                    # the study's variable metadata alive across restarts.
+                    datamap_json = None
+                    if result.datamap_path and Path(result.datamap_path).exists():
+                        datamap_json = Path(result.datamap_path).read_text()
                     update_study_paths(
                         job_db,
                         study_id,
                         excel_path=str(result.excel_deck_path),
                         pptx_path=str(result.pptx_deck_path) if result.pptx_deck_path else None,
+                        datamap_json=datamap_json,
                     )
-                    logger.info(f"[{study_id}] Updated paths: Excel + PPT")
+                    logger.info(f"[{study_id}] Updated paths: Excel + PPT + datamap")
 
                 for gate, (approver, _timestamp) in result.approval_chain.items():
                     approve_gate(job_db, study_id, gate, approver)
@@ -483,7 +490,7 @@ async def get_study_profile(
     if not report.get("success"):
         raise HTTPException(status_code=500, detail=report.get("error", "Profile failed"))
 
-    datamap = _load_datamap(study_dir)
+    datamap = _load_datamap(study_dir, study)
     labels = {v.name: v.label for v in datamap.variables} if datamap else {}
 
     flags = report["flags"]
