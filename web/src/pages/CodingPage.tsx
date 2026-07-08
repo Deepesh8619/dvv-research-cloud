@@ -197,6 +197,11 @@ function VariableQueue({
           {(variable.summary.confidence_mean * 100).toFixed(0)}%
         </span>
       </div>
+      {variable.note && (
+        <div className="px-4 py-3 bg-amber-50 border-b border-amber-100 text-sm text-amber-800">
+          {variable.note}
+        </div>
+      )}
       <div className="max-h-[60vh] overflow-y-auto">
         {variable.review_queue.map((item) => (
           <ReviewRow
@@ -210,7 +215,7 @@ function VariableQueue({
             }
           />
         ))}
-        {variable.review_queue.length === 0 && (
+        {variable.review_queue.length === 0 && !variable.note && (
           <p className="text-sm text-slate-400 p-4">
             Nothing queued — every verbatim was coded above the confidence threshold.
           </p>

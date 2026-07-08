@@ -351,6 +351,8 @@ export interface ReviewItem {
 
 export interface CodingVariable {
   question_var: string
+  label?: string
+  note?: string // present when coding never ran for this variable
   codeframe: { allow_multi: boolean; version: number; codes: CodeDef[] }
   summary: { n_auto_coded: number; n_needs_review: number; confidence_mean: number }
   review_queue: ReviewItem[]

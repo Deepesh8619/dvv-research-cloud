@@ -346,6 +346,44 @@ def _coding_file(study) -> Path:
     return path
 
 
+def _uncoded_open_ends_payload(study) -> dict:
+    """Coding payload listing a study's open-ends even when coding never ran.
+
+    A reviewer opening the Coding page should always see what the study's
+    open-end questions ARE and that they aren't coded (with why to the extent
+    we know), not a bare 404 — an empty page teaches nothing. Built from the
+    datamap (durable DB copy first, run-dir file as fallback)."""
+    datamap_json = getattr(study, "datamap_json", None)
+    if not datamap_json and study.excel_path:
+        path = Path(study.excel_path).parent / "datamap.json"
+        if path.exists():
+            datamap_json = path.read_text()
+    if not datamap_json:
+        return {}
+
+    from src.core.models import DataMap, VarType
+
+    try:
+        datamap = DataMap.from_json(datamap_json)
+    except Exception:
+        return {}
+    return {
+        v.name: {
+            "question_var": v.name,
+            "label": v.label,
+            "note": (
+                "Not coded — this run predates coding persistence or the coding "
+                "backends were unavailable. Re-run the study to code it."
+            ),
+            "codeframe": {"allow_multi": True, "version": 0, "codes": []},
+            "summary": {"n_auto_coded": 0, "n_needs_review": 0, "confidence_mean": 0.0},
+            "review_queue": [],
+        }
+        for v in datamap.variables
+        if v.type == VarType.TEXT
+    }
+
+
 @router.get("/studies/{study_id}/coding")
 async def get_coding(
     study_id: str,
@@ -355,14 +393,23 @@ async def get_coding(
     """Codeframes + review queues for every coded open-end. (Authenticated users)
 
     Serves the coding.json the orchestrator persisted at run time — no LLM call
-    happens here; this is a pure read of already-computed results.
+    happens here. When no coding.json exists (older run, or coding failed), the
+    study's open-end variables are still listed with a not-coded note so the
+    page is informative rather than empty; only a study with genuinely zero
+    open-ends 404s.
     """
     study = get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
     import json
 
-    return json.loads(_coding_file(study).read_text())
+    try:
+        return json.loads(_coding_file(study).read_text())
+    except HTTPException as exc:
+        fallback = _uncoded_open_ends_payload(study)
+        if fallback:
+            return fallback
+        raise exc
 
 
 @router.patch("/studies/{study_id}/coding/{variable}/{respondent_id}")

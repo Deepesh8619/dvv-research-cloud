@@ -39,6 +39,32 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc):
+    """Turn unhandled crashes into diagnosable JSON 500s WITH CORS headers.
+
+    Unhandled exceptions bypass CORSMiddleware (Starlette's ServerErrorMiddleware
+    sits outside it), so the cross-origin frontend saw them as an opaque
+    "Network Error" / CORS block instead of the real failure — a production 500
+    on question-save was undiagnosable from the browser. This handler logs the
+    full traceback server-side, returns the exception type + message (enough to
+    act on, no stack trace leaked), and re-attaches the CORS header manually
+    since the middleware won't run for this response path.
+    """
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}",
+                 exc_info=True)
+    origin = request.headers.get("origin", "")
+    headers = {}
+    if origin in CORS_ORIGINS or "*" in CORS_ORIGINS:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Server error: {type(exc).__name__}: {exc}"},
+        headers=headers,
+    )
+
+
 # Health check
 @app.get("/api/health")
 async def health():

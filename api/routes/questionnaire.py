@@ -169,7 +169,21 @@ def _save_definition(db: Session, questionnaire, survey: SurveyDefinition) -> No
     payload = survey.to_json()
     set_questionnaire_definition(db, questionnaire.id, payload)
     if questionnaire.definition_path:
-        Path(questionnaire.definition_path).write_text(payload)
+        # Best-effort only: on Render the path sits on the ephemeral disk and a
+        # deploy wipes its parent directory — an unguarded write_text() here
+        # 500'd every question-save after a restart (surfacing in the browser
+        # as an opaque "Network Error", since unhandled crashes also lose their
+        # CORS headers). The durable column write above already succeeded; a
+        # failed file echo must never fail the request.
+        try:
+            path = Path(questionnaire.definition_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(payload)
+        except OSError as exc:
+            logger.warning(
+                f"Could not refresh ephemeral definition file "
+                f"{questionnaire.definition_path}: {exc}"
+            )
 
 
 # --- Serialization helpers --------------------------------------------------

@@ -65,8 +65,12 @@ def http_json(request: urllib.request.Request, timeout: int) -> dict:
 
 DEFAULT_ROUTES: dict[str, dict[str, str]] = {
     "intake.classify": {"backend": "ollama", "model": "llama3.2:3b"},
-    "coding.apply": {"backend": "ollama", "model": "llama3.2:3b"},
-    "coding.codeframe": {"backend": "claude", "model": "claude-fable-5"},
+    # Verbatim coding rides the same Ollama → Groq → OpenAI → Claude chain as
+    # questionnaire extraction: the previous hardcoded backends meant coding
+    # silently failed anywhere the one named backend was missing (Render has
+    # no Ollama and no Anthropic key — production never coded a verbatim).
+    "coding.apply": {"backend": "auto", "model": ""},
+    "coding.codeframe": {"backend": "auto", "model": ""},
     "extract.questionnaire": {"backend": "claude", "model": "claude-fable-5"},
     # Two-pass questionnaire extraction (src/engines/questionnaire/extractor.py).
     # Judgment-heavy, hallucination-sensitive structured extraction. Unlike the
