@@ -899,7 +899,8 @@ def get_session_answers_map(db: Session, session_id: str) -> dict:
 
 
 def fielding_link_counts(db: Session, link_id: str) -> dict:
-    """Per-link session tallies: starts, completes (10), terminates (20)."""
+    """Per-link session tallies by Lucid/Cint status code: starts, completes (10),
+    terminates (20), security (30), overquota (40) — the field-monitor buckets."""
     sessions = (
         db.query(RespondentSessionDB)
         .filter(RespondentSessionDB.fielding_link_id == link_id)
@@ -909,6 +910,8 @@ def fielding_link_counts(db: Session, link_id: str) -> dict:
         "starts": len(sessions),
         "completes": sum(1 for s in sessions if s.status_code == 10),
         "terminates": sum(1 for s in sessions if s.status_code == 20),
+        "security": sum(1 for s in sessions if s.status_code == 30),
+        "overquota": sum(1 for s in sessions if s.status_code == 40),
     }
 
 

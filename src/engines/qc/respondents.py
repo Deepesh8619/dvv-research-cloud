@@ -40,11 +40,15 @@ from src.core.models import DataMap, VarType
 MIN_GRID_ITEMS = 4
 # Interview length below this fraction of the sample median marks a speeder.
 SPEEDER_MEDIAN_FRACTION = 1 / 3
+# Fewest completes needed before the median interview time is stable enough to
+# derive a speeder threshold from — below this, one fast interview skews it.
+MIN_SPEEDER_N = 10
 # Column names (lowercased) that plausibly hold interview duration in seconds
 # or minutes. Ordered: first hit wins.
 _DURATION_NAMES = (
     "duration",
     "duration_in_seconds",
+    "vdurationsec",  # fielding paradata (materialize.PARA_DURATION), lowercased
     "interviewtime",
     "timespent",
     "time_spent",
@@ -237,15 +241,27 @@ def detect_gibberish_open_ends(df: pl.DataFrame, datamap: DataMap) -> dict[str, 
     return out
 
 
-def run_respondent_qc(df: pl.DataFrame, datamap: DataMap) -> RespondentQCResult:
-    """Run every respondent-quality check and assemble one result."""
+def run_respondent_qc(
+    df: pl.DataFrame, datamap: DataMap, *, speeder_min_n: int = 0
+) -> RespondentQCResult:
+    """Run every respondent-quality check and assemble one result.
+
+    speeder_min_n: minimum completes before the speeder check runs (the median
+    is unstable below it). Defaults to 0 (no floor) so existing callers keep
+    their behavior; the fielding path passes MIN_SPEEDER_N.
+    """
     result = RespondentQCResult()
 
-    speeders, duration_col = detect_speeders(df, datamap)
+    duration_col = _find_duration_column(df, datamap)
     if duration_col is None:
         result.checks_skipped["speeders"] = "no interview-duration column found"
+    elif df[duration_col].drop_nulls().len() < speeder_min_n:
+        result.checks_skipped["speeders"] = (
+            f"only {df[duration_col].drop_nulls().len()} timed interviews; "
+            f"need >= {speeder_min_n} for a stable median"
+        )
     else:
-        result.speeders = speeders
+        result.speeders, _ = detect_speeders(df, datamap)
         result.duration_column = duration_col
         result.checks_run.append("speeders")
 
@@ -296,3 +312,53 @@ def summarize_for_report(result: RespondentQCResult, n_respondents: int) -> list
             "questions look like gibberish/keyboard-mash"
         )
     return lines
+
+
+def respondent_qc_report(df: pl.DataFrame, datamap: DataMap) -> dict:
+    """Run every respondent-quality check and return a JSON-serializable report.
+
+    Single entry point for the Steward's check_respondent_quality tool. Flagged
+    rows are reported as `respondent_id` values when that column exists (fielded
+    studies always have it; SPSS imports may not), else as 0-based row indices.
+    Never raises — an empty/degenerate file yields a report with everything
+    clean and the honest checks_skipped notes.
+    """
+    result = run_respondent_qc(df, datamap, speeder_min_n=MIN_SPEEDER_N)
+    n = df.height
+
+    ids = df["respondent_id"].to_list() if "respondent_id" in df.columns else None
+    key = "respondent_id" if ids is not None else "row_index"
+
+    def label(indices: list[int]) -> list:
+        return [ids[i] for i in indices] if ids is not None else list(indices)
+
+    notes = summarize_for_report(result, n)
+    for check, why in result.checks_skipped.items():
+        notes.append(f"{check} not run: {why}")
+
+    return {
+        "success": True,
+        "tool": "check_respondent_quality",
+        "row_count": n,
+        "id_key": key,
+        "flagged": {
+            "speeders": label(result.speeders),
+            "straightliners": label(result.straightliners),
+            "duplicates": label(result.duplicates),
+            "gibberish_open_ends": {
+                var: label(rows) for var, rows in result.gibberish_open_ends.items()
+            },
+        },
+        "summary": {
+            "speeders": len(result.speeders),
+            "straightliners": len(result.straightliners),
+            "duplicates": len(result.duplicates),
+            "gibberish_open_ends": sum(len(v) for v in result.gibberish_open_ends.values()),
+            "total_flagged": len(result.flagged_rows()),
+        },
+        "checks_run": result.checks_run,
+        "checks_skipped": result.checks_skipped,
+        "duration_column": result.duration_column,
+        "grids_checked": result.grids_checked,
+        "notes": notes,
+    }

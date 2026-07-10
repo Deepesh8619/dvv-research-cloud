@@ -261,6 +261,19 @@ TOOLS = [
         },
     },
     {
+        "name": "check_respondent_quality",
+        "description": (
+            "Flag low-quality respondents in a fielded study: speeders (finished in "
+            "under 1/3 of the median interview time), straightliners (identical answer "
+            "across a whole grid), duplicate respondents, and gibberish open-ends. "
+            "Returns per-respondent ids per check plus summary counts. Use for 'bad "
+            "respondents', 'speeders', 'straightliners', 'clean the sample', 'data "
+            "cleaning'. Needs paradata (fielded study) for the speeder check; on a "
+            "non-fielded study it says so and still runs the other checks."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
         "name": "get_question_details",
         "description": (
             "Look up the full extracted questionnaire question for a given qid: "

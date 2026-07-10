@@ -10,10 +10,12 @@ import polars as pl
 
 from src.core.models import DataMap, Variable, VarType
 from src.engines.qc.respondents import (
+    MIN_SPEEDER_N,
     detect_duplicates,
     detect_gibberish_open_ends,
     detect_speeders,
     detect_straightliners,
+    respondent_qc_report,
     run_respondent_qc,
     summarize_for_report,
 )
@@ -136,3 +138,75 @@ def test_run_respondent_qc_summary_and_skips():
     assert any("straightlined" in line for line in lines)
     assert any("gibberish" in line for line in lines)
     assert not any("median time" in line for line in lines)  # speeders skipped
+
+
+# --- respondent_qc_report (the Steward tool entry point) ---
+
+
+def _fielding_datamap() -> DataMap:
+    """A materialized-fielding-shaped map: respondent_id, a 4-item grid, paradata."""
+    dm = DataMap()
+    dm.add(Variable(name="respondent_id", label="Respondent ID", type=VarType.NUMERIC))
+    for i in range(1, 5):
+        dm.add(
+            Variable(name=f"Q5r{i}", label=f"Item {i}", type=VarType.SINGLE, values=dict(_SCALE))
+        )
+    dm.add(Variable(name="vDurationSec", label="Interview duration", type=VarType.NUMERIC))
+    return dm
+
+
+def test_report_flags_speeder_and_straightliner_by_respondent_id():
+    dm = _fielding_datamap()
+    n = 12
+    df = pl.DataFrame(
+        {
+            "respondent_id": list(range(101, 101 + n)),
+            # row0 (id 101) races through; median stays 600 -> threshold 200.
+            "vDurationSec": [50] + [600] * 10 + [900],
+            # row1 (id 102) straightlines all 3s; no other row is uniform.
+            "Q5r1": [1, 3, 1, 2, 4, 5, 1, 2, 3, 4, 5, 1],
+            "Q5r2": [2, 3, 4, 1, 3, 2, 5, 1, 2, 3, 4, 5],
+            "Q5r3": [3, 3, 1, 5, 2, 4, 1, 3, 5, 2, 1, 4],
+            "Q5r4": [4, 3, 2, 1, 5, 3, 2, 4, 1, 5, 3, 2],
+        }
+    )
+    report = respondent_qc_report(df, dm)
+    assert report["success"] and report["id_key"] == "respondent_id"
+    assert report["flagged"]["speeders"] == [101]
+    assert report["flagged"]["straightliners"] == [102]
+    # A clean respondent appears in no flag list.
+    assert 103 not in report["flagged"]["speeders"]
+    assert 103 not in report["flagged"]["straightliners"]
+    assert report["summary"]["speeders"] == 1
+    assert report["summary"]["straightliners"] == 1
+
+
+def test_report_non_fielded_study_degrades_gracefully():
+    """No vDurationSec (a non-fielded/imported study) -> speeders skipped, no crash."""
+    dm = DataMap()
+    dm.add(Variable(name="S1", label="Gender", type=VarType.SINGLE, values={1: "M", 2: "F"}))
+    df = pl.DataFrame({"S1": [1, 2, 1, 2]})
+    report = respondent_qc_report(df, dm)
+    assert report["success"]
+    assert report["id_key"] == "row_index"  # no respondent_id column
+    assert "speeders" in report["checks_skipped"]
+    assert any("duration" in note for note in report["notes"])
+
+
+def test_report_small_n_skips_speeder_check():
+    dm = _fielding_datamap()
+    df = pl.DataFrame(
+        {
+            "respondent_id": [1, 2, 3, 4, 5],
+            "vDurationSec": [10, 600, 600, 600, 600],  # id 1 would be a speeder if run
+            "Q5r1": [1, 2, 3, 4, 5],
+            "Q5r2": [2, 3, 4, 5, 1],
+            "Q5r3": [3, 4, 5, 1, 2],
+            "Q5r4": [4, 5, 1, 2, 3],
+        }
+    )
+    assert df.height < MIN_SPEEDER_N
+    report = respondent_qc_report(df, dm)
+    assert report["flagged"]["speeders"] == []
+    assert "speeders" in report["checks_skipped"]
+    assert "stable median" in report["checks_skipped"]["speeders"]

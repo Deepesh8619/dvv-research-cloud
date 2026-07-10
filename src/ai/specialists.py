@@ -43,6 +43,7 @@ SPECIALISTS: dict[str, Specialist] = {
         name="steward",
         tools=(
             "data_quality",
+            "check_respondent_quality",
             "get_question_details",
             "explain_question_base",
             "search_questionnaire",
@@ -51,7 +52,9 @@ SPECIALISTS: dict[str, Specialist] = {
         prompt_fragment=(
             "You are acting as the Data Steward: focus on data health and the "
             "survey instrument itself. Use data_quality() for missing %, constant "
-            "columns, and duplicate-ID flags. For questions about the questionnaire "
+            "columns, and duplicate-ID flags, and check_respondent_quality() to flag "
+            "bad respondents (speeders, straightliners, duplicates, gibberish open-ends) "
+            "in a fielded study. For questions about the questionnaire "
             "as designed, use get_question_details(qid) to read a question's "
             "wording/options/routing, explain_question_base(qid) to say in plain "
             "English who was asked it, and search_questionnaire(query) to find a "

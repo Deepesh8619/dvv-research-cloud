@@ -464,6 +464,52 @@ export interface AnswersResult {
   redirect_url?: string | null
 }
 
+// --- Fielding management (T13, authenticated) -------------------------------
+// Mirrors api/routes/fielding.py + materialize.py. `counts` keys match
+// db.fielding_link_counts: starts / completes / terminates / security / overquota.
+
+export interface FieldingRedirects {
+  redirect_complete?: string | null
+  redirect_terminate?: string | null
+  redirect_overquota?: string | null
+  redirect_security?: string | null
+}
+
+export interface FieldingLink extends FieldingRedirects {
+  id: string
+  study_id: string
+  questionnaire_id: string
+  token: string
+  status: 'open' | 'closed'
+  survey_version: number
+  created_by: string
+  created_at: string
+  closed_at: string | null
+  respondent_path: string
+  counts: {
+    starts?: number
+    completes?: number
+    terminates?: number
+    security?: number
+    overquota?: number
+  }
+}
+
+export interface QuotaCell {
+  id: string
+  fielding_link_id: string
+  name: string
+  condition: Expression
+  limit: number
+  count: number
+}
+
+export interface MaterializeResult {
+  n_respondents: number
+  n_variables: number
+  destination: string
+}
+
 export const fieldingApi = {
   // `search` is window.location.search (e.g. "?pid=P1&rid=R2") so the backend
   // captures panel params into the session's entry_params at entry time.
@@ -489,6 +535,48 @@ export const fieldingApi = {
 
   resume: async (token: string, sessionId: string) =>
     api.get<RespondentSession>(`/r/${token}/sessions/${sessionId}`),
+
+  // --- Management (authenticated) ---
+  listLinks: async (studyId: string) =>
+    api.get<{ study_id: string; links: FieldingLink[] }>(`/studies/${studyId}/fielding/links`),
+
+  createLink: async (studyId: string, redirects?: FieldingRedirects) =>
+    api.post<FieldingLink>(`/studies/${studyId}/fielding/links`, redirects ?? {}),
+
+  closeLink: async (studyId: string, linkId: string) =>
+    api.post<FieldingLink>(`/studies/${studyId}/fielding/links/${linkId}/close`, {}),
+
+  listQuotas: async (studyId: string, linkId: string) =>
+    api.get<{ link_id: string; cells: QuotaCell[] }>(
+      `/studies/${studyId}/fielding/links/${linkId}/quotas`,
+    ),
+
+  createQuota: async (
+    studyId: string,
+    linkId: string,
+    cell: { name: string; condition: Record<string, unknown>; limit: number },
+  ) =>
+    api.post<{ link_id: string; cells: QuotaCell[] }>(
+      `/studies/${studyId}/fielding/links/${linkId}/quotas`,
+      { cells: [cell] },
+    ),
+
+  updateQuota: async (
+    studyId: string,
+    linkId: string,
+    quotaId: string,
+    patch: { limit?: number; condition?: Record<string, unknown> },
+  ) =>
+    api.patch<QuotaCell>(
+      `/studies/${studyId}/fielding/links/${linkId}/quotas/${quotaId}`,
+      patch,
+    ),
+
+  materialize: async (studyId: string, linkId: string) =>
+    api.post<MaterializeResult>(
+      `/studies/${studyId}/fielding/links/${linkId}/materialize`,
+      {},
+    ),
 }
 
 export const chatApi = {

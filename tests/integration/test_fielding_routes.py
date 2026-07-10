@@ -195,7 +195,13 @@ def test_list_links_reports_counts(client):
     resp = test_client.get("/api/studies/study_f1/fielding/links")
     assert resp.status_code == 200
     counts = resp.json()["links"][0]["counts"]
-    assert counts == {"starts": 2, "completes": 1, "terminates": 1}
+    assert counts == {
+        "starts": 2,
+        "completes": 1,
+        "terminates": 1,
+        "security": 0,
+        "overquota": 0,
+    }
 
 
 def test_reviewer_can_get_but_not_create(client):

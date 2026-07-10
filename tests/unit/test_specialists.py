@@ -67,6 +67,7 @@ def test_classify_specialist_matches_intent_mapping():
 def test_tools_for_specialist_returns_only_owned_tools():
     assert set(tools_for_specialist("steward")) == {
         "data_quality",
+        "check_respondent_quality",
         "get_question_details",
         "explain_question_base",
         "search_questionnaire",
@@ -89,6 +90,7 @@ def test_tools_for_specialist_compound_adds_showcase_tools():
     compound = set(tools_for_specialist("steward", compound=True))
     steward_tools = {
         "data_quality",
+        "check_respondent_quality",
         "get_question_details",
         "explain_question_base",
         "search_questionnaire",

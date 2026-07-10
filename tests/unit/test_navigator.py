@@ -728,6 +728,37 @@ def test_search_questionnaire_no_questionnaire():
 #     with the DB/disk lookup mocked -------------------------------------------
 
 
+def test_executor_dispatches_check_respondent_quality(tmp_path):
+    """The chat.py executor wires check_respondent_quality to the QC engine and
+    flags a fielded study's speeder by respondent_id."""
+    df = pl.DataFrame(
+        {
+            "respondent_id": list(range(1, 13)),
+            "vDurationSec": [30] + [600] * 10 + [900],  # id 1 is a speeder
+            "Q5r1": [1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2],
+        }
+    )
+    df.write_parquet(str(tmp_path / "data.parquet"))
+    datamap = DataMap()
+    datamap.add(Variable(name="respondent_id", type=VarType.NUMERIC))
+    datamap.add(Variable(name="vDurationSec", type=VarType.NUMERIC))
+    datamap.add(Variable(name="Q5r1", type=VarType.SINGLE, values={i: str(i) for i in range(1, 6)}))
+
+    execute = _make_executor(tmp_path, datamap, deck={}, study_id="study_x")
+    result = execute("check_respondent_quality", {})
+    assert result["success"] and result["tool"] == "check_respondent_quality"
+    assert result["flagged"]["speeders"] == [1]
+
+
+def test_executor_check_respondent_quality_no_data(tmp_path):
+    """No data.parquet -> clean failure, never a stack trace."""
+    datamap = DataMap()
+    datamap.add(Variable(name="respondent_id", type=VarType.NUMERIC))
+    execute = _make_executor(tmp_path, datamap, deck={}, study_id="study_x")
+    result = execute("check_respondent_quality", {})
+    assert result["success"] is False and "not available" in result["error"]
+
+
 def test_executor_dispatches_questionnaire_tools(study_dir, survey):
     """The chat.py executor wires the questionnaire tools; _load_approved_survey
     is the single DB/disk seam we patch."""

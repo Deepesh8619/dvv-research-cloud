@@ -7,6 +7,7 @@ import RequireAuth from './components/RequireAuth'
 import AdminPage from './pages/AdminPage'
 import CodingPage from './pages/CodingPage'
 import DashboardPage from './pages/DashboardPage'
+import FieldingPage from './pages/FieldingPage'
 import LoginPage from './pages/LoginPage'
 import NewProjectPage from './pages/NewProjectPage'
 import ProjectPage from './pages/ProjectPage'
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="/projects/new" element={<NewProjectPage />} />
             <Route path="/projects/:id" element={<ProjectPage />} />
             <Route path="/projects/:id/questionnaire" element={<QuestionnairePage />} />
+            <Route path="/projects/:id/fielding" element={<FieldingPage />} />
             <Route path="/coding" element={<CodingPage />} />
             <Route path="/admin" element={<AdminPage />} />
             {/* Legacy routes */}

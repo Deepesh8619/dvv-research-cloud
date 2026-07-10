@@ -174,6 +174,12 @@ export default function ProjectPage() {
             >
               Questionnaire
             </Link>
+            <Link
+              to={`/projects/${study.id}/fielding`}
+              className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
+            >
+              Fielding
+            </Link>
             {study.excel_path && (
               <a
                 href={studiesApi.downloadUrl(study.id, 'excel')}

@@ -38,6 +38,7 @@ from src.engines.analysis.charts import generate_chart
 from src.engines.analysis.codegen import generate_code
 from src.engines.analysis.pivot import generate_pivot
 from src.engines.analysis.quality import data_quality
+from src.engines.qc.respondents import respondent_qc_report
 from src.engines.questionnaire.linker import (
     RoutingValidation,
     cross_validate_routing,
@@ -355,6 +356,27 @@ def _make_executor(
     def _quality(params: dict) -> dict:
         return data_quality(parquet, variables=params.get("variables"))
 
+    def _respondent_quality(params: dict) -> dict:
+        if not parquet.exists():
+            return {
+                "success": False,
+                "tool": "check_respondent_quality",
+                "error": "Respondent data not available for this study",
+            }
+        if datamap is None:
+            return {
+                "success": False,
+                "tool": "check_respondent_quality",
+                "error": "No DataMap available for this study",
+            }
+        try:
+            import polars as pl
+
+            df = pl.read_parquet(parquet)
+        except Exception as exc:  # noqa: BLE001 - surface, never stack-trace to LLM
+            return {"success": False, "tool": "check_respondent_quality", "error": str(exc)}
+        return respondent_qc_report(df, datamap)
+
     # Approved questionnaire is loaded lazily and cached for this executor: most
     # questions never touch it, and a study rarely has one at all, so we avoid a
     # DB hit + disk read unless a questionnaire tool is actually called.
@@ -486,6 +508,9 @@ def _make_executor(
 
         if name == "data_quality":
             return _quality(params)
+
+        if name == "check_respondent_quality":
+            return _respondent_quality(params)
 
         if name == "get_question_details":
             return get_question_details(
