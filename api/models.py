@@ -219,3 +219,58 @@ class QuestionUpdateRequest(BaseModel):
     # "Clear this field" (explicit null) vs. "leave unchanged" (omitted) are
     # distinguished by the route via `model_fields_set`, since both surface here
     # as None.
+
+
+# --- Fielding models (T9') --------------------------------------------------
+
+
+class FieldingLinkResponse(BaseModel):
+    """A created/listed fielding link. `respondent_path` is the public URL path
+    a respondent visits (no auth); `counts` is present in list responses."""
+
+    id: str
+    study_id: str
+    questionnaire_id: str
+    token: str
+    status: str  # open | closed
+    survey_version: int
+    created_by: str
+    created_at: str
+    closed_at: str | None = None
+    respondent_path: str
+    counts: dict = {}
+
+
+class FieldingLinkListResponse(BaseModel):
+    """All fielding links for a study, each with per-link session counts."""
+
+    study_id: str
+    links: list[FieldingLinkResponse] = []
+
+
+class RespondentEntryResponse(BaseModel):
+    """Payload served to a respondent on entry: a fresh session id plus the
+    compiled SurveyJS JSON (rendering only — no terminate logic is embedded;
+    the server enforces `terminate_if`)."""
+
+    session_id: str
+    status: str = "open"  # open | closed
+    surveyjs_json: dict = {}
+    current_page: int = 0
+
+
+class RespondentAnswersRequest(BaseModel):
+    """A page's worth of answers plus the page the respondent is now on."""
+
+    answers: dict = {}
+    current_page: int = 0
+
+
+class RespondentSessionResponse(BaseModel):
+    """Resume payload: accumulated answers + progress + any terminal status."""
+
+    session_id: str
+    status_code: int | None = None
+    current_page: int = 0
+    answers: dict = {}
+    completed_at: str | None = None

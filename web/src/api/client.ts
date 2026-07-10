@@ -432,6 +432,61 @@ export const questionnaireApi = {
     ),
 }
 
+// --- Fielding / respondent runtime (T9') ------------------------------------
+// The respondent endpoints are PUBLIC (no JWT). The shared `api` instance only
+// attaches an Authorization header when a token happens to be in localStorage,
+// which the public backend routes ignore — so respondents (who have none) reach
+// them fine.
+
+export interface RespondentEntry {
+  session_id: string
+  status: 'open' | 'closed'
+  surveyjs_json: Record<string, unknown>
+  current_page: number
+}
+
+export interface RespondentSession {
+  session_id: string
+  status_code: number | null
+  current_page: number
+  answers: Record<string, unknown>
+  completed_at: string | null
+}
+
+export interface AnswersResult {
+  ok?: boolean
+  terminated?: boolean
+  status_code?: number | null
+  already_final?: boolean
+}
+
+export const fieldingApi = {
+  // `search` is window.location.search (e.g. "?pid=P1&rid=R2") so the backend
+  // captures panel params into the session's entry_params at entry time.
+  enter: async (token: string, search = '') =>
+    api.get<RespondentEntry>(`/r/${token}${search}`),
+
+  answers: async (
+    token: string,
+    sessionId: string,
+    answers: Record<string, unknown>,
+    currentPage: number,
+  ) =>
+    api.post<AnswersResult>(`/r/${token}/sessions/${sessionId}/answers`, {
+      answers,
+      current_page: currentPage,
+    }),
+
+  complete: async (token: string, sessionId: string) =>
+    api.post<{ status_code: number | null; complete: boolean }>(
+      `/r/${token}/sessions/${sessionId}/complete`,
+      {},
+    ),
+
+  resume: async (token: string, sessionId: string) =>
+    api.get<RespondentSession>(`/r/${token}/sessions/${sessionId}`),
+}
+
 export const chatApi = {
   send: async (studyId: string, message: string) => {
     return api.post<ChatResponse>(`/studies/${studyId}/chat`, { message })

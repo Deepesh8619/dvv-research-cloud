@@ -12,6 +12,7 @@ import NewProjectPage from './pages/NewProjectPage'
 import ProjectPage from './pages/ProjectPage'
 import ProjectsPage from './pages/ProjectsPage'
 import QuestionnairePage from './pages/QuestionnairePage'
+import RespondentPage from './pages/RespondentPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import SharePage from './pages/SharePage'
 
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/share/:token" element={<SharePage />} />
+          <Route path="/r/:token" element={<RespondentPage />} />
 
           {/* Protected routes (auth required) */}
           <Route element={<RequireAuth><Shell /></RequireAuth>}>

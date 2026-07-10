@@ -153,6 +153,94 @@ class QuestionnaireDB(Base):
     updated_at = Column(String)
 
 
+class FieldingLinkDB(Base):
+    """A public link that serves ONE approved questionnaire to respondents (T9').
+
+    Created (authenticated) from a study's approved questionnaire, then handed to
+    a panel/vendor as a public URL. Respondents reach it with no JWT — the
+    unguessable `token` is the only credential, mirroring ShareLinkDB.
+
+    Survey-version pinning: the approved `SurveyDefinition` JSON is *snapshotted*
+    into `survey_json` at link-creation time, and `survey_version` records the
+    definition's version int. A later re-approval of the questionnaire (a new
+    edit + approve cycle that bumps the definition) therefore does NOT silently
+    change a survey already in the field — in-flight respondents keep answering
+    the exact instrument the link was opened with, and server-authoritative
+    terminate re-checks run against that same pinned copy. Snapshotting the whole
+    JSON (rather than referencing the live QuestionnaireDB row) is the simplest
+    correct approach: the questionnaire row is mutable through the review API,
+    so a reference would not actually pin anything.
+
+    `study_id`/`questionnaire_id` are plain string references (no FK), matching
+    the rest of this codebase.
+    """
+
+    __tablename__ = "fielding_links"
+
+    id = Column(String, primary_key=True, index=True)
+    questionnaire_id = Column(String, index=True)
+    study_id = Column(String, index=True)
+    token = Column(String, unique=True, index=True)
+    status = Column(String, default="open", index=True)  # open | closed
+    survey_version = Column(Integer, default=1)
+    survey_json = Column(Text)  # pinned SurveyDefinition JSON snapshot
+    created_by = Column(String)  # user email
+    created_at = Column(String)
+    closed_at = Column(String, nullable=True)
+
+
+class RespondentSessionDB(Base):
+    """One respondent's attempt at a fielded survey (T9').
+
+    A Postgres row from the first entry hit — never JSON-on-disk — so live
+    responses survive Render free-tier restarts (which wipe the disk).
+
+    `status_code` follows Lucid/Cint convention exactly (key decision #7): NULL
+    while in progress, then 10 complete / 20 terminate / 30 security /
+    40 overquota. 40 is not produced until T10's quota engine, but the column
+    contract includes it now so vendor redirect URLs need no translation later.
+
+    `entry_params` captures arbitrary URL query params at entry (e.g. a panel's
+    `pid`/`rid`) — T10's redirect protocol reads these back. `current_page`
+    supports resume.
+    """
+
+    __tablename__ = "respondent_sessions"
+
+    id = Column(String, primary_key=True, index=True)
+    fielding_link_id = Column(String, index=True)
+    status_code = Column(Integer, nullable=True)  # None|10|20|30|40
+    entry_params = Column(JSON, default=dict)
+    current_page = Column(Integer, default=0)
+    started_at = Column(String)
+    last_seen_at = Column(String)
+    completed_at = Column(String, nullable=True)
+
+
+class RespondentAnswerDB(Base):
+    """One answer to one question within a respondent session (T9').
+
+    Chosen over a single JSONB blob on the session (both were allowed by the
+    plan) because per-answer rows carry a per-question `answered_at` timestamp,
+    which T14's speeder/quality flags need, and because writing one row per
+    answered question is the natural incremental-capture unit for resume/partial
+    data. Re-answering a question upserts the existing (session_id, qid) row in
+    place rather than appending, so the row set always reflects the respondent's
+    latest answers — T11 materializes these straight into a wide DataFrame.
+
+    `value` is JSON so it uniformly holds a scalar code (single-select), a list
+    (multi-select), a number, free text, or a grid dict.
+    """
+
+    __tablename__ = "respondent_answers"
+
+    id = Column(String, primary_key=True, index=True)
+    session_id = Column(String, index=True)
+    qid = Column(String, index=True)
+    value = Column(JSON)
+    answered_at = Column(String)
+
+
 def init_db():
     """Initialize database tables."""
     Base.metadata.create_all(bind=engine)
@@ -576,6 +664,196 @@ def set_questionnaire_approved_qids(
         db.commit()
         db.refresh(questionnaire)
     return questionnaire
+
+
+# --- Fielding (T9') ---------------------------------------------------------
+
+
+def create_fielding_link(
+    db: Session,
+    study_id: str,
+    questionnaire_id: str,
+    survey_version: int,
+    survey_json: str,
+    created_by: str,
+) -> "FieldingLinkDB":
+    """Open a fielding link, pinning the approved SurveyDefinition JSON snapshot."""
+    from uuid import uuid4
+
+    link = FieldingLinkDB(
+        id=f"flink_{uuid4().hex[:8]}",
+        questionnaire_id=questionnaire_id,
+        study_id=study_id,
+        token=secrets.token_urlsafe(24),
+        status="open",
+        survey_version=survey_version,
+        survey_json=survey_json,
+        created_by=created_by,
+        created_at=datetime.now().isoformat(),
+        closed_at=None,
+    )
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    return link
+
+
+def get_fielding_link(db: Session, link_id: str) -> "FieldingLinkDB":
+    """Get a fielding link by id."""
+    return db.query(FieldingLinkDB).filter(FieldingLinkDB.id == link_id).first()
+
+
+def get_fielding_link_by_token(db: Session, token: str) -> "FieldingLinkDB":
+    """Get a fielding link by its public token."""
+    return db.query(FieldingLinkDB).filter(FieldingLinkDB.token == token).first()
+
+
+def list_fielding_links_for_study(db: Session, study_id: str) -> list["FieldingLinkDB"]:
+    """List a study's fielding links, most recent first."""
+    from sqlalchemy import desc
+
+    return (
+        db.query(FieldingLinkDB)
+        .filter(FieldingLinkDB.study_id == study_id)
+        .order_by(desc(FieldingLinkDB.created_at))
+        .all()
+    )
+
+
+def close_fielding_link(db: Session, link_id: str) -> "FieldingLinkDB":
+    """Close a link so it stops accepting NEW sessions (idempotent)."""
+    link = get_fielding_link(db, link_id)
+    if link and link.status != "closed":
+        link.status = "closed"
+        link.closed_at = datetime.now().isoformat()
+        db.commit()
+        db.refresh(link)
+    return link
+
+
+def create_respondent_session(
+    db: Session, fielding_link_id: str, entry_params: dict | None = None
+) -> "RespondentSessionDB":
+    """Start a respondent session (status_code stays NULL until terminal)."""
+    from uuid import uuid4
+
+    now = datetime.now().isoformat()
+    session = RespondentSessionDB(
+        id=f"rsess_{uuid4().hex[:8]}",
+        fielding_link_id=fielding_link_id,
+        status_code=None,
+        entry_params=entry_params or {},
+        current_page=0,
+        started_at=now,
+        last_seen_at=now,
+        completed_at=None,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def get_respondent_session(db: Session, session_id: str) -> "RespondentSessionDB":
+    """Get a respondent session by id."""
+    return (
+        db.query(RespondentSessionDB)
+        .filter(RespondentSessionDB.id == session_id)
+        .first()
+    )
+
+
+def touch_respondent_session(
+    db: Session, session_id: str, current_page: int | None = None
+) -> "RespondentSessionDB":
+    """Bump last_seen_at (and optionally current_page) on progress."""
+    session = get_respondent_session(db, session_id)
+    if session:
+        session.last_seen_at = datetime.now().isoformat()
+        if current_page is not None:
+            session.current_page = current_page
+        db.commit()
+        db.refresh(session)
+    return session
+
+
+def set_respondent_session_status(
+    db: Session, session_id: str, status_code: int
+) -> "RespondentSessionDB":
+    """Set a terminal status code (10/20/30/40) and stamp completed_at.
+
+    Terminal states are write-once: a session that already carries a status_code
+    is returned unchanged, so a terminated respondent resubmitting can neither
+    un-terminate nor overwrite an existing complete/terminate.
+    """
+    session = get_respondent_session(db, session_id)
+    if session and session.status_code is None:
+        session.status_code = status_code
+        session.completed_at = datetime.now().isoformat()
+        session.last_seen_at = session.completed_at
+        db.commit()
+        db.refresh(session)
+    return session
+
+
+def upsert_respondent_answer(
+    db: Session, session_id: str, qid: str, value
+) -> "RespondentAnswerDB":
+    """Insert or update one (session, qid) answer, refreshing answered_at."""
+    from uuid import uuid4
+
+    answer = (
+        db.query(RespondentAnswerDB)
+        .filter(
+            RespondentAnswerDB.session_id == session_id,
+            RespondentAnswerDB.qid == qid,
+        )
+        .first()
+    )
+    if answer:
+        answer.value = value
+        answer.answered_at = datetime.now().isoformat()
+    else:
+        answer = RespondentAnswerDB(
+            id=f"rans_{uuid4().hex[:8]}",
+            session_id=session_id,
+            qid=qid,
+            value=value,
+            answered_at=datetime.now().isoformat(),
+        )
+        db.add(answer)
+    db.commit()
+    db.refresh(answer)
+    return answer
+
+
+def list_respondent_answers(db: Session, session_id: str) -> list["RespondentAnswerDB"]:
+    """All answer rows for a session (order stable by qid)."""
+    return (
+        db.query(RespondentAnswerDB)
+        .filter(RespondentAnswerDB.session_id == session_id)
+        .order_by(RespondentAnswerDB.qid)
+        .all()
+    )
+
+
+def get_session_answers_map(db: Session, session_id: str) -> dict:
+    """Accumulated answers as a {qid: value} dict (for evaluate() + resume)."""
+    return {a.qid: a.value for a in list_respondent_answers(db, session_id)}
+
+
+def fielding_link_counts(db: Session, link_id: str) -> dict:
+    """Per-link session tallies: starts, completes (10), terminates (20)."""
+    sessions = (
+        db.query(RespondentSessionDB)
+        .filter(RespondentSessionDB.fielding_link_id == link_id)
+        .all()
+    )
+    return {
+        "starts": len(sessions),
+        "completes": sum(1 for s in sessions if s.status_code == 10),
+        "terminates": sum(1 for s in sessions if s.status_code == 20),
+    }
 
 
 def seed_admin_user():
