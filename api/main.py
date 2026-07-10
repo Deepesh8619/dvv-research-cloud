@@ -96,7 +96,15 @@ async def root():
 
 # Import routes
 try:
-    from api.routes import auth, chat, fielding, public, questionnaire, studies
+    from api.routes import (
+        auth,
+        chat,
+        fielding,
+        materialize,
+        public,
+        questionnaire,
+        studies,
+    )
 
     app.include_router(auth.router, prefix="/api")
     logger.info("✅ Auth routes loaded")
@@ -115,6 +123,9 @@ try:
 
     app.include_router(fielding.router, prefix="/api")
     logger.info("✅ Fielding routes loaded")
+
+    app.include_router(materialize.router, prefix="/api")
+    logger.info("✅ Materialize routes loaded")
 except Exception as e:
     logger.warning(f"Routes not yet available: {e}")
 

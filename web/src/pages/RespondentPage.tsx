@@ -40,6 +40,13 @@ export default function RespondentPage() {
 
   useEffect(() => {
     let cancelled = false
+
+    // Any terminal API response may carry a vendor redirect URL (T10). Show the
+    // terminal screen briefly, then hand the respondent back to the panel.
+    const goRedirect = (url?: string | null) => {
+      if (url) setTimeout(() => (window.location.href = url), 1200)
+    }
+
     const load = async () => {
       if (!token) {
         setError('Missing survey link.')
@@ -51,6 +58,13 @@ export default function RespondentPage() {
         if (cancelled) return
         if (res.data.status === 'closed') {
           setPhase('closed')
+          return
+        }
+        // Terminal-at-entry (duplicate-pid security = 30): don't serve the survey.
+        if (res.data.status_code != null) {
+          terminatedRef.current = true
+          setPhase('terminated')
+          goRedirect(res.data.redirect_url)
           return
         }
         sessionIdRef.current = res.data.session_id
@@ -67,8 +81,15 @@ export default function RespondentPage() {
           const terminated = await submitPage(sender, sender.currentPageNo)
           if (terminated || terminatedRef.current) return
           try {
-            await fieldingApi.complete(token, sessionIdRef.current)
-            setPhase('complete')
+            const res = await fieldingApi.complete(token, sessionIdRef.current)
+            // Complete may screen out at complete-time on overquota (40).
+            if (res.data.status_code === 40) {
+              terminatedRef.current = true
+              setPhase('terminated')
+            } else {
+              setPhase('complete')
+            }
+            goRedirect(res.data.redirect_url)
           } catch {
             setError('We could not save your final response. Please try again.')
             setPhase('error')
@@ -97,6 +118,7 @@ export default function RespondentPage() {
         if (res.data.terminated) {
           terminatedRef.current = true
           setPhase('terminated')
+          goRedirect(res.data.redirect_url)
           return true
         }
         return false

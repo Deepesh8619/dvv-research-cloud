@@ -187,6 +187,15 @@ class FieldingLinkDB(Base):
     created_by = Column(String)  # user email
     created_at = Column(String)
     closed_at = Column(String, nullable=True)
+    # Vendor redirect URL templates (T10). Nullable: a link with no template
+    # keeps the built-in thank-you/screen-out screens. `{pid}`/`{rid}`/any
+    # `{param}` placeholder is substituted from the session's entry_params on a
+    # terminal status. Added after fielding_links first shipped (T9') -> see
+    # _ensure_new_columns.
+    redirect_complete = Column(String, nullable=True)
+    redirect_terminate = Column(String, nullable=True)
+    redirect_overquota = Column(String, nullable=True)
+    redirect_security = Column(String, nullable=True)
 
 
 class RespondentSessionDB(Base):
@@ -239,6 +248,34 @@ class RespondentAnswerDB(Base):
     qid = Column(String, index=True)
     value = Column(JSON)
     answered_at = Column(String)
+
+
+class QuotaCellDB(Base):
+    """One quota cell for a fielding link (T10).
+
+    A cell is a named target: `condition_json` is a serialized `Expression`
+    (same AST as routing — key decision #4, one condition language everywhere)
+    evaluated against a session's accumulated answers, `cell_limit` is how many
+    completes it accepts, `count` is how many it has. Enforcement is
+    server-authoritative (key decision #5: quota cells cost real money if gamed
+    client-side) via an atomic conditional UPDATE — see
+    `increment_quota_cell_if_under_limit`.
+
+    New table -> `Base.metadata.create_all` provisions it in full; no
+    `_ensure_new_columns` entry is needed (that's only for columns added to a
+    pre-existing table). `fielding_link_id` is a plain string reference (no FK),
+    matching the rest of this codebase. Column is `cell_limit`, not `limit`, to
+    dodge the SQL reserved word in the raw atomic UPDATE.
+    """
+
+    __tablename__ = "quota_cells"
+
+    id = Column(String, primary_key=True, index=True)
+    fielding_link_id = Column(String, index=True)
+    name = Column(String)
+    condition_json = Column(Text)  # serialized Expression.to_dict()
+    cell_limit = Column(Integer, default=0)
+    count = Column(Integer, default=0)
 
 
 def init_db():
@@ -297,6 +334,15 @@ def _ensure_new_columns():
             "coding_json": "TEXT",
             "source_filename": "VARCHAR",
             "source_file_b64": "TEXT",
+        },
+        "fielding_links": {
+            # Vendor redirect templates (T10) — added after fielding_links
+            # first shipped (T9'), so the live Postgres table needs them ALTERed
+            # in even though the ORM model now declares them.
+            "redirect_complete": "VARCHAR",
+            "redirect_terminate": "VARCHAR",
+            "redirect_overquota": "VARCHAR",
+            "redirect_security": "VARCHAR",
         },
     }
     inspector = inspect(engine)
@@ -676,10 +722,16 @@ def create_fielding_link(
     survey_version: int,
     survey_json: str,
     created_by: str,
+    redirects: dict | None = None,
 ) -> "FieldingLinkDB":
-    """Open a fielding link, pinning the approved SurveyDefinition JSON snapshot."""
+    """Open a fielding link, pinning the approved SurveyDefinition JSON snapshot.
+
+    `redirects` optionally seeds the vendor redirect templates (T10); only the
+    keys present (redirect_complete/terminate/overquota/security) are set.
+    """
     from uuid import uuid4
 
+    redirects = redirects or {}
     link = FieldingLinkDB(
         id=f"flink_{uuid4().hex[:8]}",
         questionnaire_id=questionnaire_id,
@@ -691,6 +743,10 @@ def create_fielding_link(
         created_by=created_by,
         created_at=datetime.now().isoformat(),
         closed_at=None,
+        redirect_complete=redirects.get("redirect_complete"),
+        redirect_terminate=redirects.get("redirect_terminate"),
+        redirect_overquota=redirects.get("redirect_overquota"),
+        redirect_security=redirects.get("redirect_security"),
     )
     db.add(link)
     db.commit()
@@ -854,6 +910,131 @@ def fielding_link_counts(db: Session, link_id: str) -> dict:
         "completes": sum(1 for s in sessions if s.status_code == 10),
         "terminates": sum(1 for s in sessions if s.status_code == 20),
     }
+
+
+def list_respondent_sessions(db: Session, fielding_link_id: str) -> list["RespondentSessionDB"]:
+    """All sessions for a link (used by the duplicate-pid security check)."""
+    return (
+        db.query(RespondentSessionDB)
+        .filter(RespondentSessionDB.fielding_link_id == fielding_link_id)
+        .all()
+    )
+
+
+def set_fielding_link_redirects(db: Session, link_id: str, redirects: dict) -> "FieldingLinkDB":
+    """Set/overwrite vendor redirect templates on a link (T10 PATCH).
+
+    Only keys present in `redirects` are written, so a PATCH can update one
+    template without clobbering the others. A key mapped to None clears it.
+    """
+    link = get_fielding_link(db, link_id)
+    if link:
+        for col in (
+            "redirect_complete",
+            "redirect_terminate",
+            "redirect_overquota",
+            "redirect_security",
+        ):
+            if col in redirects:
+                setattr(link, col, redirects[col])
+        db.commit()
+        db.refresh(link)
+    return link
+
+
+# --- Quota cells (T10) ------------------------------------------------------
+
+
+def create_quota_cell(
+    db: Session, fielding_link_id: str, name: str, condition_json: str, limit: int
+) -> "QuotaCellDB":
+    """Create one quota cell (count starts at 0)."""
+    from uuid import uuid4
+
+    cell = QuotaCellDB(
+        id=f"quota_{uuid4().hex[:8]}",
+        fielding_link_id=fielding_link_id,
+        name=name,
+        condition_json=condition_json,
+        cell_limit=limit,
+        count=0,
+    )
+    db.add(cell)
+    db.commit()
+    db.refresh(cell)
+    return cell
+
+
+def list_quota_cells(db: Session, fielding_link_id: str) -> list["QuotaCellDB"]:
+    """All quota cells for a link (live counts)."""
+    return (
+        db.query(QuotaCellDB)
+        .filter(QuotaCellDB.fielding_link_id == fielding_link_id)
+        .order_by(QuotaCellDB.id)
+        .all()
+    )
+
+
+def get_quota_cell(db: Session, quota_id: str) -> "QuotaCellDB":
+    """Get one quota cell by id."""
+    return db.query(QuotaCellDB).filter(QuotaCellDB.id == quota_id).first()
+
+
+def update_quota_cell_limit(db: Session, quota_id: str, limit: int) -> "QuotaCellDB":
+    """Change a cell's limit (raising mid-field is routine MR practice)."""
+    cell = get_quota_cell(db, quota_id)
+    if cell:
+        cell.cell_limit = limit
+        db.commit()
+        db.refresh(cell)
+    return cell
+
+
+def set_quota_cell_condition(db: Session, quota_id: str, condition_json: str) -> "QuotaCellDB":
+    """Rewrite a cell's condition (only allowed by the route before any session
+    exists — changing it mid-field would invalidate already-counted completes)."""
+    cell = get_quota_cell(db, quota_id)
+    if cell:
+        cell.condition_json = condition_json
+        db.commit()
+        db.refresh(cell)
+    return cell
+
+
+def increment_quota_cell_if_under_limit(db: Session, quota_id: str) -> bool:
+    """Atomically claim a slot in a cell; return True iff a slot was taken.
+
+    Single conditional UPDATE — `count = count + 1 WHERE count < cell_limit` —
+    so two respondents completing simultaneously can never both take the last
+    slot: the DB serializes the two UPDATEs and the second sees count already at
+    the limit and matches zero rows. This is atomic on BOTH Postgres and SQLite
+    with NO explicit locking (`SELECT ... FOR UPDATE` is a silent no-op on the
+    SQLite the tests use), which is exactly why the pattern is a conditional
+    UPDATE + rowcount check rather than read-modify-write.
+    """
+    from sqlalchemy import text
+
+    result = db.execute(
+        text(
+            "UPDATE quota_cells SET count = count + 1 "
+            "WHERE id = :id AND count < cell_limit"
+        ),
+        {"id": quota_id},
+    )
+    db.commit()
+    return result.rowcount > 0
+
+
+def decrement_quota_cell(db: Session, quota_id: str) -> None:
+    """Release a slot (roll back a speculative increment when a sibling cell was
+    full — see the multi-cell policy in the complete handler)."""
+    from sqlalchemy import text
+
+    db.execute(
+        text("UPDATE quota_cells SET count = count - 1 WHERE id = :id"),
+        {"id": quota_id},
+    )
+    db.commit()
 
 
 def seed_admin_user():

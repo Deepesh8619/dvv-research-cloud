@@ -27,7 +27,9 @@ Status codes are the Lucid/Cint convention (key decision #7): 10 complete,
 with later tasks (quota engine / vendor redirect protocol are explicitly T10).
 """
 
+import json
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -41,29 +43,42 @@ from api.db import (
     UserDB,
     close_fielding_link,
     create_fielding_link,
+    create_quota_cell,
     create_respondent_session,
+    decrement_quota_cell,
     fielding_link_counts,
     get_db,
     get_fielding_link,
     get_fielding_link_by_token,
+    get_quota_cell,
     get_respondent_session,
     get_session_answers_map,
     get_study,
+    increment_quota_cell_if_under_limit,
     list_fielding_links_for_study,
     list_questionnaires_for_study,
+    list_quota_cells,
+    list_respondent_sessions,
+    set_quota_cell_condition,
     set_respondent_session_status,
     touch_respondent_session,
+    update_quota_cell_limit,
     upsert_respondent_answer,
 )
 from api.models import (
     FieldingLinkListResponse,
     FieldingLinkResponse,
+    FieldingRedirectsRequest,
+    QuotaCellResponse,
+    QuotaCellsCreateRequest,
+    QuotaCellsResponse,
+    QuotaCellUpdateRequest,
     RespondentAnswersRequest,
     RespondentEntryResponse,
     RespondentSessionResponse,
 )
 from api.routes.questionnaire import _read_definition_json
-from src.core.survey_definition import SurveyDefinition, evaluate
+from src.core.survey_definition import Expression, SurveyDefinition, evaluate
 from src.renderers.surveyjs_compiler import compile_to_surveyjs
 
 logger = logging.getLogger(__name__)
@@ -72,8 +87,67 @@ router = APIRouter()
 # Lucid/Cint status codes (key decision #7).
 STATUS_COMPLETE = 10
 STATUS_TERMINATE = 20
-STATUS_SECURITY = 30  # noqa: F841 - reserved; produced by later tasks
-STATUS_OVERQUOTA = 40  # noqa: F841 - reserved for T10's quota engine
+STATUS_SECURITY = 30  # duplicate-pid screen-out (T10)
+STATUS_OVERQUOTA = 40  # quota engine (T10)
+
+# status_code -> the redirect-template column on FieldingLinkDB.
+_REDIRECT_COL = {
+    STATUS_COMPLETE: "redirect_complete",
+    STATUS_TERMINATE: "redirect_terminate",
+    STATUS_OVERQUOTA: "redirect_overquota",
+    STATUS_SECURITY: "redirect_security",
+}
+
+
+def _apply_redirect_template(template: str | None, entry_params: dict) -> str | None:
+    """Substitute `{param}` placeholders from entry_params (missing -> "").
+
+    A missing param yields an empty string rather than a 500, so a vendor URL
+    template that references a `{pid}` the panel didn't send still resolves.
+    """
+    if not template:
+        return None
+    return re.sub(
+        r"\{(\w+)\}",
+        lambda m: str((entry_params or {}).get(m.group(1), "")),
+        template,
+    )
+
+
+def _redirect_url(link, session) -> str | None:
+    """The substituted vendor redirect for this session's terminal status, or
+    None when no template is configured for it."""
+    col = _REDIRECT_COL.get(session.status_code)
+    template = getattr(link, col, None) if col else None
+    return _apply_redirect_template(template, session.entry_params or {})
+
+
+def _with_redirect(payload: dict, link, session) -> dict:
+    """Add `redirect_url` to a terminal response ONLY when a template resolves.
+
+    Kept conditional so a link with no vendor redirect returns the exact same
+    body shape as T9' did (the built-in screens keep working)."""
+    url = _redirect_url(link, session)
+    if url:
+        payload["redirect_url"] = url
+    return payload
+
+
+def _matching_cells(cells, answers: dict, decidable_only: bool = False):
+    """Quota cells whose condition matches `answers`.
+
+    `decidable_only` keeps only cells whose every referenced qid is already
+    answered — i.e. the match can't change with future answers — which is the
+    correctness gate for the early (answer-time) overquota exit.
+    """
+    out = []
+    for cell in cells:
+        expr = Expression.from_dict(json.loads(cell.condition_json))
+        if decidable_only and not expr.referenced_qids().issubset(answers.keys()):
+            continue
+        if evaluate(expr, answers):
+            out.append(cell)
+    return out
 
 
 def _respondent_path(token: str) -> str:
@@ -94,6 +168,10 @@ def _link_response(link, counts: dict | None = None) -> FieldingLinkResponse:
         closed_at=link.closed_at,
         respondent_path=_respondent_path(link.token),
         counts=counts or {},
+        redirect_complete=link.redirect_complete,
+        redirect_terminate=link.redirect_terminate,
+        redirect_overquota=link.redirect_overquota,
+        redirect_security=link.redirect_security,
     )
 
 
@@ -126,13 +204,15 @@ def _approved_questionnaire(db: Session, study_id: str):
 )
 async def create_link(
     study_id: str,
+    redirects: FieldingRedirectsRequest | None = None,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
 ):
     """Open a fielding link for the study's approved questionnaire. (Owner/Analyst)
 
     The approved `SurveyDefinition` JSON is snapshotted onto the link so a later
-    re-approval can't change a survey already in the field."""
+    re-approval can't change a survey already in the field. Vendor redirect
+    templates may be seeded here or set later via PATCH."""
     questionnaire = _approved_questionnaire(db, study_id)
     payload = _read_definition_json(db, questionnaire)
     if payload is None:
@@ -147,6 +227,7 @@ async def create_link(
         survey_version=survey.version,
         survey_json=payload,
         created_by=user.email,
+        redirects=redirects.model_dump(exclude_unset=True) if redirects else None,
     )
     logger.info(
         f"[{study_id}] Fielding link {link.id} opened by {user.name} "
@@ -203,6 +284,111 @@ async def close_link(
     return _link_response(link, fielding_link_counts(db, link.id))
 
 
+# --- Quota management (owner/analyst) ---------------------------------------
+
+
+def _owner_link(db: Session, study_id: str, link_id: str):
+    """Resolve a link that belongs to `study_id`, or 404 (management side)."""
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    link = get_fielding_link(db, link_id)
+    if not link or link.study_id != study_id:
+        raise HTTPException(status_code=404, detail="Fielding link not found")
+    return link
+
+
+def _quota_response(cell) -> QuotaCellResponse:
+    return QuotaCellResponse(
+        id=cell.id,
+        fielding_link_id=cell.fielding_link_id,
+        name=cell.name,
+        condition=json.loads(cell.condition_json),
+        limit=cell.cell_limit,
+        count=cell.count,
+    )
+
+
+def _quotas_response(db: Session, link_id: str) -> QuotaCellsResponse:
+    return QuotaCellsResponse(
+        link_id=link_id,
+        cells=[_quota_response(c) for c in list_quota_cells(db, link_id)],
+    )
+
+
+@router.post(
+    "/studies/{study_id}/fielding/links/{link_id}/quotas",
+    response_model=QuotaCellsResponse,
+)
+async def create_quotas(
+    study_id: str,
+    link_id: str,
+    body: QuotaCellsCreateRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Add quota cells to a link. (Owner/Analyst)
+
+    Each cell's `condition` is an `Expression.to_dict()` — the same AST as
+    routing/terminates (key decision #4, one condition language everywhere).
+    Returns the link's full cell list with live counts.
+    """
+    link = _owner_link(db, study_id, link_id)
+    for cell in body.cells:
+        create_quota_cell(db, link.id, cell.name, json.dumps(cell.condition), cell.limit)
+    return _quotas_response(db, link.id)
+
+
+@router.get(
+    "/studies/{study_id}/fielding/links/{link_id}/quotas",
+    response_model=QuotaCellsResponse,
+)
+async def list_quotas(
+    study_id: str,
+    link_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """List a link's quota cells with live counts. (Authenticated)"""
+    link = _owner_link(db, study_id, link_id)
+    return _quotas_response(db, link.id)
+
+
+@router.patch(
+    "/studies/{study_id}/fielding/links/{link_id}/quotas/{quota_id}",
+    response_model=QuotaCellResponse,
+)
+async def update_quota(
+    study_id: str,
+    link_id: str,
+    quota_id: str,
+    body: QuotaCellUpdateRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Patch a quota cell. (Owner/Analyst)
+
+    Raising/lowering `limit` is always allowed (raising mid-field is routine MR
+    practice). Changing `condition` is REJECTED (409) once ANY session exists on
+    the link — a redefinition would invalidate completes already counted under
+    the old definition.
+    """
+    link = _owner_link(db, study_id, link_id)
+    cell = get_quota_cell(db, quota_id)
+    if not cell or cell.fielding_link_id != link.id:
+        raise HTTPException(status_code=404, detail="Quota cell not found")
+    if body.condition is not None:
+        if list_respondent_sessions(db, link.id):
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot change a quota condition after fielding has started",
+            )
+        cell = set_quota_cell_condition(db, quota_id, json.dumps(body.condition))
+    if body.limit is not None:
+        cell = update_quota_cell_limit(db, quota_id, body.limit)
+    return _quota_response(cell)
+
+
 # --- Respondent endpoints (PUBLIC, token-based, no JWT) ---------------------
 
 
@@ -240,6 +426,27 @@ async def enter_survey(token: str, request: Request, db: Session = Depends(get_d
         return RespondentEntryResponse(session_id="", status="closed", surveyjs_json={})
 
     entry_params = dict(request.query_params)
+
+    # Security screen-out (status 30): a panel `pid` that already has a terminal
+    # session on this link is a duplicate/fraud signal — don't re-serve the
+    # survey. Record the attempt with status 30 and hand back the terminal
+    # payload (redirect_security substituted) instead of the questionnaire.
+    pid = (entry_params.get("pid") or "").strip()
+    if pid and any(
+        s.status_code is not None and (s.entry_params or {}).get("pid") == pid
+        for s in list_respondent_sessions(db, link.id)
+    ):
+        session = create_respondent_session(db, link.id, entry_params=entry_params)
+        set_respondent_session_status(db, session.id, STATUS_SECURITY)
+        session = get_respondent_session(db, session.id)
+        return RespondentEntryResponse(
+            session_id=session.id,
+            status="open",
+            surveyjs_json={},
+            status_code=STATUS_SECURITY,
+            redirect_url=_redirect_url(link, session),
+        )
+
     session = create_respondent_session(db, link.id, entry_params=entry_params)
 
     survey = SurveyDefinition.from_json(link.survey_json)
@@ -295,11 +502,31 @@ async def submit_answers(
     for question in survey.questions:
         if question.terminate_if is not None and evaluate(question.terminate_if, answers):
             set_respondent_session_status(db, session_id, STATUS_TERMINATE)
+            session = get_respondent_session(db, session_id)
             logger.info(
                 f"[{link.study_id}] Session {session_id} terminated by "
                 f"{question.qid}.terminate_if"
             )
-            return {"terminated": True, "status_code": STATUS_TERMINATE}
+            return _with_redirect(
+                {"terminated": True, "status_code": STATUS_TERMINATE}, link, session
+            )
+
+    # Early (answer-time) overquota: screen out a doomed respondent NOW instead
+    # of making them answer the rest. Only cells that are already DECIDABLE from
+    # the answers so far are considered (`decidable_only`) — a cell whose match
+    # could still flip with a future answer must not fire early. No increment
+    # happens here; this is a fast-fail, the atomic slot claim is at complete.
+    for cell in _matching_cells(list_quota_cells(db, link.id), answers, decidable_only=True):
+        if cell.count >= cell.cell_limit:
+            set_respondent_session_status(db, session_id, STATUS_OVERQUOTA)
+            session = get_respondent_session(db, session_id)
+            logger.info(
+                f"[{link.study_id}] Session {session_id} overquota (early) on "
+                f"cell {cell.id}"
+            )
+            return _with_redirect(
+                {"terminated": True, "status_code": STATUS_OVERQUOTA}, link, session
+            )
 
     return {"ok": True, "terminated": False}
 
@@ -310,21 +537,56 @@ async def complete_survey(
     session_id: str,
     db: Session = Depends(get_db),
 ):
-    """Mark the session complete (status 10). Idempotent + terminal-safe.
+    """Mark the session complete (status 10) with atomic quota enforcement.
 
-    `set_respondent_session_status` is write-once, so calling this twice returns
-    10 both times, and a session already terminated (20) is NOT flipped to
-    complete — the first terminal status wins.
+    Idempotent + terminal-safe: `set_respondent_session_status` is write-once, so
+    a re-complete returns the same status without re-running enforcement (no
+    double-increment), and a session already terminated (20) is not flipped.
+
+    Quota enforcement: every cell whose condition matches the session's answers
+    must have a free slot. Each slot is claimed with an atomic conditional
+    UPDATE (`count = count + 1 WHERE count < cell_limit`) — see
+    `increment_quota_cell_if_under_limit`. Multi-cell no-partial-increment
+    policy: we claim slots one at a time and, if ANY matching cell is already
+    full, we COMPENSATE by decrementing the slots already claimed and record
+    status 40 — a respondent never consumes some of their target cells but not
+    all. (Compensate, rather than pre-check-then-claim, because a SELECT before
+    the UPDATE wouldn't be atomic under concurrency; the UPDATE+rowcount is.)
     """
     link = _resolve_link(db, token)
     session = _resolve_session(db, link, session_id)
-    if session.status_code is None:
-        set_respondent_session_status(db, session_id, STATUS_COMPLETE)
-        session = get_respondent_session(db, session_id)
-    return {
-        "status_code": session.status_code,
-        "complete": session.status_code == STATUS_COMPLETE,
-    }
+
+    if session.status_code is not None:  # already terminal — idempotent
+        return _with_redirect(
+            {
+                "status_code": session.status_code,
+                "complete": session.status_code == STATUS_COMPLETE,
+            },
+            link,
+            session,
+        )
+
+    answers = get_session_answers_map(db, session_id)
+    matching = _matching_cells(list_quota_cells(db, link.id), answers)
+
+    claimed: list[str] = []
+    for cell in matching:
+        if increment_quota_cell_if_under_limit(db, cell.id):
+            claimed.append(cell.id)
+        else:  # a matching cell is full — roll back and screen out overquota
+            for cid in claimed:
+                decrement_quota_cell(db, cid)
+            set_respondent_session_status(db, session_id, STATUS_OVERQUOTA)
+            session = get_respondent_session(db, session_id)
+            return _with_redirect(
+                {"status_code": STATUS_OVERQUOTA, "complete": False}, link, session
+            )
+
+    set_respondent_session_status(db, session_id, STATUS_COMPLETE)
+    session = get_respondent_session(db, session_id)
+    return _with_redirect(
+        {"status_code": STATUS_COMPLETE, "complete": True}, link, session
+    )
 
 
 @router.get(
@@ -349,4 +611,5 @@ async def resume_session(
         current_page=session.current_page or 0,
         answers=get_session_answers_map(db, session_id),
         completed_at=session.completed_at,
+        redirect_url=_redirect_url(link, session),
     )

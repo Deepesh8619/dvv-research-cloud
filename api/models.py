@@ -239,6 +239,11 @@ class FieldingLinkResponse(BaseModel):
     closed_at: str | None = None
     respondent_path: str
     counts: dict = {}
+    # Vendor redirect templates (T10); None when unset.
+    redirect_complete: str | None = None
+    redirect_terminate: str | None = None
+    redirect_overquota: str | None = None
+    redirect_security: str | None = None
 
 
 class FieldingLinkListResponse(BaseModel):
@@ -257,6 +262,10 @@ class RespondentEntryResponse(BaseModel):
     status: str = "open"  # open | closed
     surveyjs_json: dict = {}
     current_page: int = 0
+    # Set only on a terminal-at-entry outcome (T10 duplicate-pid security = 30).
+    # `redirect_url` is the substituted vendor URL, or None to use built-in screens.
+    status_code: int | None = None
+    redirect_url: str | None = None
 
 
 class RespondentAnswersRequest(BaseModel):
@@ -274,3 +283,59 @@ class RespondentSessionResponse(BaseModel):
     current_page: int = 0
     answers: dict = {}
     completed_at: str | None = None
+    # Vendor redirect for a resumed terminal session (T10); None otherwise.
+    redirect_url: str | None = None
+
+
+# --- Quota + redirect models (T10) ------------------------------------------
+
+
+class QuotaCellCreate(BaseModel):
+    """One quota cell to create. `condition` is Expression.to_dict() shape."""
+
+    name: str
+    condition: dict
+    limit: int
+
+
+class QuotaCellsCreateRequest(BaseModel):
+    """Create a batch of cells on a link."""
+
+    cells: list[QuotaCellCreate]
+
+
+class QuotaCellResponse(BaseModel):
+    """A quota cell with its live count."""
+
+    id: str
+    fielding_link_id: str
+    name: str
+    condition: dict
+    limit: int
+    count: int
+
+
+class QuotaCellsResponse(BaseModel):
+    """All quota cells for a link."""
+
+    link_id: str
+    cells: list[QuotaCellResponse] = []
+
+
+class QuotaCellUpdateRequest(BaseModel):
+    """PATCH a cell. `limit` raises/lowers the target; `condition` is rejected
+    once the link has started fielding (changing the definition mid-field would
+    invalidate already-counted completes)."""
+
+    limit: int | None = None
+    condition: dict | None = None
+
+
+class FieldingRedirectsRequest(BaseModel):
+    """Vendor redirect templates — settable at link creation and via PATCH.
+    Omitted fields are left unchanged; an explicit null clears a template."""
+
+    redirect_complete: str | None = None
+    redirect_terminate: str | None = None
+    redirect_overquota: str | None = None
+    redirect_security: str | None = None

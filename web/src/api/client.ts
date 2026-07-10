@@ -443,6 +443,9 @@ export interface RespondentEntry {
   status: 'open' | 'closed'
   surveyjs_json: Record<string, unknown>
   current_page: number
+  // Set only on a terminal-at-entry outcome (duplicate-pid security = 30).
+  status_code?: number | null
+  redirect_url?: string | null
 }
 
 export interface RespondentSession {
@@ -458,6 +461,7 @@ export interface AnswersResult {
   terminated?: boolean
   status_code?: number | null
   already_final?: boolean
+  redirect_url?: string | null
 }
 
 export const fieldingApi = {
@@ -478,7 +482,7 @@ export const fieldingApi = {
     }),
 
   complete: async (token: string, sessionId: string) =>
-    api.post<{ status_code: number | null; complete: boolean }>(
+    api.post<{ status_code: number | null; complete: boolean; redirect_url?: string | null }>(
       `/r/${token}/sessions/${sessionId}/complete`,
       {},
     ),
