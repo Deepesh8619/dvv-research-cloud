@@ -15,6 +15,7 @@ import ProjectsPage from './pages/ProjectsPage'
 import QuestionnairePage from './pages/QuestionnairePage'
 import RespondentPage from './pages/RespondentPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
+import SurveyBuilderPage from './pages/SurveyBuilderPage'
 import SharePage from './pages/SharePage'
 
 function LegacyStudyRedirect() {
@@ -41,6 +42,7 @@ export default function App() {
             <Route path="/projects/new" element={<NewProjectPage />} />
             <Route path="/projects/:id" element={<ProjectPage />} />
             <Route path="/projects/:id/questionnaire" element={<QuestionnairePage />} />
+            <Route path="/projects/:id/builder" element={<SurveyBuilderPage />} />
             <Route path="/projects/:id/fielding" element={<FieldingPage />} />
             <Route path="/coding" element={<CodingPage />} />
             <Route path="/admin" element={<AdminPage />} />

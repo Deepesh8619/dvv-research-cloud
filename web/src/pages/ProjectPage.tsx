@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { ProfileVariable, Study, studiesApi, shareApi, ShareLink, StudyProfile } from '../api/client'
+import { ProfileVariable, Study, studiesApi, shareApi, ShareLink, StudyProfile, questionnaireApi } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import ChatBot from '../components/ChatBot'
 import { CheckIcon, DownloadIcon, LinkIcon } from '../components/Icons'
@@ -49,6 +49,8 @@ export default function ProjectPage() {
   const [sharing, setSharing] = useState(false)
   const [reprocessing, setReprocessing] = useState(false)
   const [reprocessError, setReprocessError] = useState<string | null>(null)
+  // null = unknown/loading; true = study has no questionnaire yet (offer builder).
+  const [noQuestionnaire, setNoQuestionnaire] = useState<boolean | null>(null)
 
   const load = useCallback(() => {
     if (!id) return
@@ -62,6 +64,16 @@ export default function ProjectPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  // Is there a questionnaire yet? A 404 means none — offer the "Build survey"
+  // entry point. Any other error leaves it unknown (button simply not shown).
+  useEffect(() => {
+    if (!id) return
+    questionnaireApi
+      .status(id)
+      .then(() => setNoQuestionnaire(false))
+      .catch((err) => setNoQuestionnaire(axios.isAxiosError(err) && err.response?.status === 404))
+  }, [id])
 
   // Poll while processing
   useEffect(() => {
@@ -167,6 +179,14 @@ export default function ProjectPage() {
               >
                 {reprocessing ? 'Starting…' : 'Re-process'}
               </button>
+            )}
+            {noQuestionnaire && (user?.role === 'owner' || user?.role === 'analyst') && (
+              <Link
+                to={`/projects/${study.id}/builder`}
+                className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
+              >
+                Build survey
+              </Link>
             )}
             <Link
               to={`/projects/${study.id}/questionnaire`}

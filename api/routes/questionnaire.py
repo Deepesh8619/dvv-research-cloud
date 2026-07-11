@@ -213,6 +213,7 @@ def _status_response(questionnaire, survey: SurveyDefinition | None) -> Question
         title=survey.title if survey else None,
         n_questions=len(survey.questions) if survey else 0,
         n_approved=len(questionnaire.approved_qids or []),
+        source=survey.source if survey else None,
         validation_errors=metadata.get("validation_errors", []),
         extraction_summary=metadata.get("extraction_summary", {}),
         # Only meaningful when status == 'error'; None otherwise. Names the root

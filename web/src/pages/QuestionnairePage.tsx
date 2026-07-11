@@ -663,6 +663,15 @@ export default function QuestionnairePage() {
             </div>
           )}
           <UploadPanel studyId={studyId!} onUploaded={() => { setLoading(true); loadStatus() }} disabled={!canWrite} />
+          {canWrite && (
+            <p className="text-sm text-slate-500">
+              Don&apos;t have a document?{' '}
+              <Link to={`/projects/${studyId}/builder`} className="text-primary-500 hover:text-primary-600 font-medium">
+                Build one from scratch
+              </Link>
+              .
+            </p>
+          )}
         </div>
       )}
 

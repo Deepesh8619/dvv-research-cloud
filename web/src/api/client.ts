@@ -298,6 +298,7 @@ export interface QuestionnaireStatus {
   title: string | null
   n_questions: number
   n_approved: number
+  source?: string | null // 'extracted' | 'authored'
   validation_errors: string[]
   extraction_summary: Record<string, unknown>
   error_detail?: string | null
@@ -311,9 +312,25 @@ export interface QuestionsListResponse {
 }
 
 export interface QuestionUpdate {
+  qid?: string | null // rename (builder); backend rewrites references consistently
   text?: string | null
   type?: string | null
   options?: Array<Record<string, unknown>> | null
+  rows?: Array<Record<string, unknown>> | null
+  cols?: Array<Record<string, unknown>> | null
+  required?: boolean | null
+  show_if?: Record<string, unknown> | null
+  terminate_if?: Record<string, unknown> | null
+}
+
+export interface QuestionCreate {
+  qid: string
+  text?: string
+  type?: string
+  options?: Array<Record<string, unknown>>
+  rows?: Array<Record<string, unknown>> | null
+  cols?: Array<Record<string, unknown>> | null
+  required?: boolean
   show_if?: Record<string, unknown> | null
   terminate_if?: Record<string, unknown> | null
 }
@@ -430,6 +447,21 @@ export const questionnaireApi = {
       `/studies/${studyId}/questionnaire/approve-all`,
       {},
     ),
+
+  // --- Authoring builder (T12) ---
+  createAuthored: async (studyId: string, title: string) =>
+    api.post<QuestionnaireStatus>(`/studies/${studyId}/questionnaire/authored`, { title }),
+
+  addQuestion: async (studyId: string, question: QuestionCreate) =>
+    api.post<Question>(`/studies/${studyId}/questionnaire/questions`, question),
+
+  deleteQuestion: async (studyId: string, qid: string) =>
+    api.delete<{ deleted: string; n_questions: number }>(
+      `/studies/${studyId}/questionnaire/questions/${qid}`,
+    ),
+
+  reorderQuestions: async (studyId: string, qids: string[]) =>
+    api.put<{ order: string[] }>(`/studies/${studyId}/questionnaire/questions/order`, { qids }),
 }
 
 // --- Fielding / respondent runtime (T9') ------------------------------------

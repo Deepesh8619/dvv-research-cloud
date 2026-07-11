@@ -192,6 +192,9 @@ class QuestionnaireStatusResponse(BaseModel):
     title: str | None = None
     n_questions: int = 0
     n_approved: int = 0
+    # "extracted" or "authored" — lets the builder vs. review UIs decide which one
+    # owns a given questionnaire (the builder redirects extracted docs to review).
+    source: str | None = None
     validation_errors: list[str] = []
     extraction_summary: dict = {}
     # Set only when status == "error": the human-readable failure reason (e.g. a
