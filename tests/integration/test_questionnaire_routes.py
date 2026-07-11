@@ -633,6 +633,181 @@ def test_health_reports_llm_key_presence_booleans(client, monkeypatch):
     assert "super-secret-value" not in serialized
 
 
+# --- T12: authored survey builder -------------------------------------------
+
+
+def _create_authored(test_client, study_id="study_q1", title="From scratch"):
+    return test_client.post(
+        f"/api/studies/{study_id}/questionnaire/authored", json={"title": title}
+    )
+
+
+def test_create_authored_happy_path(client):
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+
+    resp = _create_authored(test_client)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "draft"
+    assert body["title"] == "From scratch"
+    assert body["n_questions"] == 0
+
+    # The blank authored survey is immediately reachable via the normal endpoints.
+    qs = test_client.get("/api/studies/study_q1/questionnaire/questions")
+    assert qs.status_code == 200
+    assert qs.json()["questions"] == []
+
+
+def test_create_authored_409_when_exists(client):
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _create_authored(test_client)
+    resp = _create_authored(test_client)
+    assert resp.status_code == 409
+
+
+def test_create_authored_404_unknown_study(client):
+    test_client, _, _ = client
+    assert _create_authored(test_client, study_id="nope").status_code == 404
+
+
+def test_create_authored_reviewer_403(client):
+    test_client, session_factory, state = client
+    _make_study(session_factory)
+    state["role"] = "reviewer"
+    assert _create_authored(test_client).status_code == 403
+
+
+def _add_question(test_client, study_id="study_q1", **fields):
+    return test_client.post(
+        f"/api/studies/{study_id}/questionnaire/questions", json=fields
+    )
+
+
+def test_add_question_appends(client):
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _create_authored(test_client)
+
+    resp = _add_question(test_client, qid="Q1", text="Age", type="numeric")
+    assert resp.status_code == 200
+    assert resp.json()["qid"] == "Q1"
+
+    qids = [q["qid"] for q in test_client.get(
+        "/api/studies/study_q1/questionnaire/questions"
+    ).json()["questions"]]
+    assert qids == ["Q1"]
+
+
+def test_add_question_rejects_unknown_routing_ref(client):
+    """A new question whose show_if references a nonexistent qid is a NEW
+    validation problem — rejected 422."""
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _create_authored(test_client)
+
+    resp = _add_question(
+        test_client,
+        qid="Q1",
+        text="Follow-up",
+        type="single",
+        options=[{"code": 1, "label": "Yes"}],
+        show_if={"op": "eq", "qid": "NOPE", "value": 1},
+    )
+    assert resp.status_code == 422
+    assert "problems" in resp.json()["detail"]
+
+
+def test_delete_question_dangling_reference_422(client):
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _create_authored(test_client)
+    _add_question(test_client, qid="Q1", text="Age", type="numeric")
+    _add_question(
+        test_client,
+        qid="Q2",
+        text="Follow-up",
+        type="single",
+        options=[{"code": 1, "label": "Yes"}],
+        show_if={"op": "gt", "qid": "Q1", "value": 17},
+    )
+
+    resp = test_client.delete("/api/studies/study_q1/questionnaire/questions/Q1")
+    assert resp.status_code == 422
+    assert "Q2" in resp.json()["detail"]["referenced_by"]
+
+    # Deleting the referencer first, then Q1, works.
+    assert test_client.delete(
+        "/api/studies/study_q1/questionnaire/questions/Q2"
+    ).status_code == 200
+    assert test_client.delete(
+        "/api/studies/study_q1/questionnaire/questions/Q1"
+    ).status_code == 200
+
+
+def test_reorder_validates_permutation(client):
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _create_authored(test_client)
+    _add_question(test_client, qid="Q1", text="One", type="open_text")
+    _add_question(test_client, qid="Q2", text="Two", type="open_text")
+
+    # Not a permutation -> 422.
+    bad = test_client.put(
+        "/api/studies/study_q1/questionnaire/questions/order", json={"qids": ["Q1"]}
+    )
+    assert bad.status_code == 422
+
+    ok = test_client.put(
+        "/api/studies/study_q1/questionnaire/questions/order",
+        json={"qids": ["Q2", "Q1"]},
+    )
+    assert ok.status_code == 200
+    qids = [q["qid"] for q in test_client.get(
+        "/api/studies/study_q1/questionnaire/questions"
+    ).json()["questions"]]
+    assert qids == ["Q2", "Q1"]
+
+
+def test_authored_survey_reaches_fielding(client):
+    """The key T12 unification test: a survey BUILT from scratch flows through
+    the SAME approve -> fielding path an extracted one does. Create authored ->
+    add 2 questions (one with terminate_if) -> approve each -> approve-all ->
+    open a fielding link."""
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _create_authored(test_client, title="Fieldable")
+
+    assert _add_question(
+        test_client, qid="Q1", text="Age", type="numeric"
+    ).status_code == 200
+    # Q2 carries a terminate_if referencing the prior Q1.
+    assert _add_question(
+        test_client,
+        qid="Q2",
+        text="Interested?",
+        type="single",
+        options=[{"code": 1, "label": "Yes"}, {"code": 2, "label": "No"}],
+        terminate_if={"op": "lt", "qid": "Q1", "value": 18},
+    ).status_code == 200
+
+    for qid in ("Q1", "Q2"):
+        assert test_client.post(
+            f"/api/studies/study_q1/questionnaire/questions/{qid}/approve"
+        ).status_code == 200
+
+    approved = test_client.post("/api/studies/study_q1/questionnaire/approve-all")
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+
+    # Same fielding path as an extracted survey — proves the unification.
+    link = test_client.post("/api/studies/study_q1/fielding/links")
+    assert link.status_code == 200
+    assert link.json()["token"]
+    assert link.json()["status"] == "open"
+
+
 def test_backfill_definition_from_file(client, tmp_path):
     """Backward-compat migration (T17): a row with definition_path pointing at a
     still-present file but an empty definition_json column is backfilled from the

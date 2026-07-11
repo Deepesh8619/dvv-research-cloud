@@ -213,12 +213,50 @@ class QuestionUpdateRequest(BaseModel):
     text: str | None = None
     type: str | None = None
     options: list[dict] | None = None
+    # rows/cols/required added for the authoring builder (T12): a grid_single
+    # needs its rows editable, and an authored question needs its required flag
+    # toggled. Extracted-review callers simply omit them (left unchanged).
+    rows: list[dict] | None = None
+    cols: list[dict] | None = None
+    required: bool | None = None
+    randomize_options: bool | None = None
     show_if: dict | None = None
     terminate_if: dict | None = None
 
     # "Clear this field" (explicit null) vs. "leave unchanged" (omitted) are
     # distinguished by the route via `model_fields_set`, since both surface here
     # as None.
+
+
+class QuestionnaireCreateRequest(BaseModel):
+    """Create a blank authored questionnaire from scratch (T12 builder)."""
+
+    title: str = ""
+
+
+class QuestionCreateRequest(BaseModel):
+    """Append one new question to an authored questionnaire (T12 builder).
+
+    Same field shapes as QuestionUpdateRequest, but qid/type are required (a new
+    question needs an identity). Routing dicts use Expression.to_dict() shape."""
+
+    qid: str
+    text: str = ""
+    type: str = "single"
+    options: list[dict] = []
+    rows: list[dict] | None = None
+    cols: list[dict] | None = None
+    required: bool = True
+    randomize_options: bool = False
+    show_if: dict | None = None
+    terminate_if: dict | None = None
+
+
+class QuestionOrderRequest(BaseModel):
+    """Reorder a questionnaire's questions (T12 builder). `qids` must be a
+    permutation of every existing qid — full list, no adds/removes."""
+
+    qids: list[str]
 
 
 # --- Fielding models (T9') --------------------------------------------------
