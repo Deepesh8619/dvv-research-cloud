@@ -9,6 +9,7 @@ Fixture conventions match test_fielding_routes.py / test_quota_routes.py.
 """
 
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -182,6 +183,42 @@ def test_materialize_is_idempotent_refresh(client, tmp_path):
     _run_respondent(test_client, token, age=31, coffee=2, brands=[2])
     second = test_client.post(f"/api/studies/study_m1/fielding/links/{link_id}/materialize")
     assert second.json()["n_respondents"] == 2  # full refresh, not append-only drift
+
+
+def test_materialize_renders_real_excel_deck(client, tmp_path):
+    import openpyxl
+
+    from api.db import get_study
+
+    test_client, sf, _ = client
+    _seed(sf)
+    link_resp = test_client.post("/api/studies/study_m1/fielding/links")
+    token = link_resp.json()["token"]
+    link_id = link_resp.json()["id"]
+
+    _run_respondent(test_client, token, age=30, coffee=1, brands=[1])
+    _run_respondent(test_client, token, age=40, coffee=2, brands=[1, 2])
+    mat = test_client.post(f"/api/studies/study_m1/fielding/links/{link_id}/materialize")
+    assert mat.status_code == 200
+
+    # excel_path now points at a REAL .xlsx openpyxl can open, with >=1 sheet.
+    db = sf()
+    excel_path = get_study(db, "study_m1").excel_path
+    db.close()
+    assert excel_path.endswith(".xlsx")
+    assert Path(excel_path).exists()
+    wb = openpyxl.load_workbook(excel_path)
+    assert len(wb.sheetnames) >= 1
+
+    # The download endpoint serves it (200).
+    dl = test_client.get("/api/studies/study_m1/download/excel")
+    assert dl.status_code == 200
+
+    # If the ephemeral file is wiped, the download degrades to a graceful 404
+    # (never a 500).
+    Path(excel_path).unlink()
+    gone = test_client.get("/api/studies/study_m1/download/excel")
+    assert gone.status_code == 404
 
 
 def test_materialize_reviewer_403(client):

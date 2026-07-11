@@ -40,6 +40,7 @@ from src.core.survey_definition import SurveyDefinition
 from src.engines.fielding.materialize import STATUS_COMPLETE, materialize_fielding
 from src.engines.tabs.runner import deck_to_json, run_tab_plan
 from src.orchestration.orchestrator import auto_tab_plan
+from src.renderers.excel import render_deck as render_excel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -91,16 +92,22 @@ async def materialize_link(
     # same machinery the orchestrator uses. Skipped cleanly if no tabulatable
     # (single-coded) questions exist.
     crosstabs_json = None
+    # Fallback when there are no tabulatable (single-coded) questions: keep the
+    # marker. excel_path only needs to point INTO run_dir for _study_dir to
+    # resolve it; the deck download then 404s, which download_deck already
+    # handles gracefully (it 404s on any missing file, never 500s).
+    excel_path = str(run_dir / "fielded.marker")
     tab_plan = auto_tab_plan(datamap, title=f"{study.client_name} — Fielded Topline")
     if tab_plan:
         deck_run = run_tab_plan(str(parquet_path), tab_plan, datamap)
         deck_to_json(deck_run, run_dir / "crosstabs.json")
         crosstabs_json = (run_dir / "crosstabs.json").read_text()
-
-    # excel_path is the frontend's analysis-ready gate + how _study_dir resolves
-    # the run dir. No .xlsx is rendered for a fielded materialization v1 (the
-    # deck download simply 404s); the path only needs to point into run_dir.
-    excel_path = str(run_dir / "fielded.marker")
+        # Render the SAME deck to .xlsx via the existing renderer — the exact
+        # call the orchestrator uses for uploaded studies. Ephemeral disk is
+        # acceptable for v1: re-materializing (one click) regenerates it.
+        xlsx_path = run_dir / f"{study_id}_fielded_deck.xlsx"
+        render_excel(deck_run, str(xlsx_path))
+        excel_path = str(xlsx_path)
     update_study_paths(db, study_id, excel_path=excel_path, datamap_json=datamap.to_json())
     if crosstabs_json is not None:
         set_study_artifacts(db, study_id, crosstabs_json=crosstabs_json)
