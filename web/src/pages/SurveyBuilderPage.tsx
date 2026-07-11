@@ -277,7 +277,11 @@ function QuestionDetail({
         </div>
       )}
 
-      {/* Routing — prior qids only (backend rejects forward references) */}
+      {/* Routing — show_if references prior questions only (a question can't
+          gate its own display, and the backend rejects forward references).
+          terminate_if additionally offers the question ITSELF: "terminate if
+          S1 = 3" on S1 is the canonical screener pattern, explicitly allowed
+          by SurveyDefinition.validate(). */}
       <div className="border border-slate-200 rounded-md p-3">
         <RoutingEditor
           label="Show this question if"
@@ -292,7 +296,7 @@ function QuestionDetail({
           label="Terminate / screen out if"
           flat={state.terminateIf}
           onChange={(f) => set('terminateIf', f)}
-          qidOptions={priorQids}
+          qidOptions={[...priorQids, q.qid]}
           disabled={!canWrite}
         />
       </div>

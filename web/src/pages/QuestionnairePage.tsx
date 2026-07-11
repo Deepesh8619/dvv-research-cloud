@@ -387,12 +387,15 @@ function QuestionDetail({
         </div>
       )}
 
-      {/* Routing: show_if & terminate_if, each beside its verbatim source */}
+      {/* Routing: show_if & terminate_if, each beside its verbatim source.
+          show_if excludes the question itself (it can't gate its own display);
+          terminate_if INCLUDES it — "terminate if S1 = 3" on S1 is the
+          canonical screener pattern and validate() explicitly allows it. */}
       <RoutingBlock
         label="Show this question if"
         flat={state.showIf}
         verbatim={state.showIfVerbatim}
-        priorQids={priorQids}
+        priorQids={priorQids.filter((qid) => qid !== q.qid)}
         canWrite={canWrite}
         onChangeFlat={(f) => set('showIf', f)}
       />
@@ -777,7 +780,7 @@ export default function QuestionnairePage() {
                   key={selected.qid}
                   studyId={studyId!}
                   q={selected}
-                  priorQids={priorQidsFor(selected.qid).filter((qid) => qid !== selected.qid)}
+                  priorQids={priorQidsFor(selected.qid)}
                   canWrite={canWrite}
                   onSaved={onQuestionSaved}
                   onApproved={onQuestionApproved}
