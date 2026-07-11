@@ -1,0 +1,3449 @@
+[
+  {
+    "segment_slug": "fmcg-oral-care",
+    "study_title": "Oral Care Usage & Attitudes (U&A)",
+    "client_name": "DVV Demo - FMCG Practice",
+    "survey": {
+      "study_id": "demo_fmcg_oral_care",
+      "title": "Toothpaste Usage & Attitudes Study",
+      "questions": [
+        {
+          "qid": "S1",
+          "text": "Which age group do you belong to?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under 18"
+            },
+            {
+              "code": 2,
+              "label": "18-24"
+            },
+            {
+              "code": 3,
+              "label": "25-34"
+            },
+            {
+              "code": 4,
+              "label": "35-44"
+            },
+            {
+              "code": 5,
+              "label": "45-54"
+            },
+            {
+              "code": 6,
+              "label": "55 or older"
+            }
+          ],
+          "terminate_if": {
+            "op": "in",
+            "qid": "S1",
+            "values": [
+              1
+            ],
+            "verbatim_text": "Terminate if under 18"
+          }
+        },
+        {
+          "qid": "S2",
+          "text": "Do you or anyone in your household work in any of these industries?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Market research or consulting"
+            },
+            {
+              "code": 2,
+              "label": "Advertising, PR or media"
+            },
+            {
+              "code": 3,
+              "label": "FMCG / personal care manufacturing"
+            },
+            {
+              "code": 4,
+              "label": "IT / software"
+            },
+            {
+              "code": 5,
+              "label": "Education"
+            },
+            {
+              "code": 6,
+              "label": "None of these",
+              "exclusive": true
+            }
+          ],
+          "terminate_if": {
+            "op": "in",
+            "qid": "S2",
+            "values": [
+              1,
+              2,
+              3
+            ],
+            "verbatim_text": "Terminate if MR, advertising or category industry"
+          }
+        },
+        {
+          "qid": "S3",
+          "text": "Are you involved in deciding which toothpaste brand your household buys?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Yes, I decide myself"
+            },
+            {
+              "code": 2,
+              "label": "Yes, jointly with others"
+            },
+            {
+              "code": 3,
+              "label": "No, someone else decides"
+            }
+          ],
+          "terminate_if": {
+            "op": "eq",
+            "qid": "S3",
+            "value": 3,
+            "verbatim_text": "Terminate non-decision-makers"
+          }
+        },
+        {
+          "qid": "S4",
+          "text": "Which type of area do you live in?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Metro (Delhi NCR, Mumbai, Bengaluru, etc.)"
+            },
+            {
+              "code": 2,
+              "label": "Tier-1 city"
+            },
+            {
+              "code": 3,
+              "label": "Tier-2 city"
+            },
+            {
+              "code": 4,
+              "label": "Smaller town / rural"
+            }
+          ]
+        },
+        {
+          "qid": "Q1",
+          "text": "Which brands of toothpaste come to your mind first? Type the first ones you think of.",
+          "type": "open_text",
+          "required": false
+        },
+        {
+          "qid": "Q2",
+          "text": "Which of these toothpaste brands have you heard of?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Colgate"
+            },
+            {
+              "code": 2,
+              "label": "Pepsodent"
+            },
+            {
+              "code": 3,
+              "label": "Closeup"
+            },
+            {
+              "code": 4,
+              "label": "Sensodyne"
+            },
+            {
+              "code": 5,
+              "label": "Dabur Red"
+            },
+            {
+              "code": 6,
+              "label": "Patanjali Dant Kanti"
+            },
+            {
+              "code": 7,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ]
+        },
+        {
+          "qid": "Q3",
+          "text": "Which brand do you use most often?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Colgate"
+            },
+            {
+              "code": 2,
+              "label": "Pepsodent"
+            },
+            {
+              "code": 3,
+              "label": "Closeup"
+            },
+            {
+              "code": 4,
+              "label": "Sensodyne"
+            },
+            {
+              "code": 5,
+              "label": "Dabur Red"
+            },
+            {
+              "code": 6,
+              "label": "Patanjali Dant Kanti"
+            },
+            {
+              "code": 7,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ]
+        },
+        {
+          "qid": "Q4",
+          "text": "How often does your household buy toothpaste?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Every 2 weeks or more often"
+            },
+            {
+              "code": 2,
+              "label": "About once a month"
+            },
+            {
+              "code": 3,
+              "label": "Every 2-3 months"
+            },
+            {
+              "code": 4,
+              "label": "Less often"
+            }
+          ]
+        },
+        {
+          "qid": "Q5",
+          "text": "Where do you usually buy toothpaste?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Local kirana / general store"
+            },
+            {
+              "code": 2,
+              "label": "Supermarket"
+            },
+            {
+              "code": 3,
+              "label": "Online (Amazon, Blinkit, etc.)"
+            },
+            {
+              "code": 4,
+              "label": "Chemist / pharmacy"
+            }
+          ]
+        },
+        {
+          "qid": "Q6",
+          "text": "How satisfied are you with the brand you use most often on each of these?",
+          "type": "grid_single",
+          "rows": [
+            {
+              "code": 1,
+              "label": "Taste and freshness"
+            },
+            {
+              "code": 2,
+              "label": "Cavity protection"
+            },
+            {
+              "code": 3,
+              "label": "Whitening"
+            },
+            {
+              "code": 4,
+              "label": "Value for money"
+            },
+            {
+              "code": 5,
+              "label": "Easy availability"
+            }
+          ],
+          "cols": [
+            {
+              "code": 1,
+              "label": "Very dissatisfied"
+            },
+            {
+              "code": 2,
+              "label": "Dissatisfied"
+            },
+            {
+              "code": 3,
+              "label": "Neither satisfied nor dissatisfied"
+            },
+            {
+              "code": 4,
+              "label": "Satisfied"
+            },
+            {
+              "code": 5,
+              "label": "Very satisfied"
+            }
+          ]
+        },
+        {
+          "qid": "Q7",
+          "text": "On a scale of 0-10, how likely are you to recommend the toothpaste brand you use most often to a friend or colleague?",
+          "type": "numeric",
+          "validation": {
+            "min": 0,
+            "max": 10
+          }
+        },
+        {
+          "qid": "Q8",
+          "text": "What would this brand need to improve for you to rate it higher?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Price"
+            },
+            {
+              "code": 2,
+              "label": "Taste"
+            },
+            {
+              "code": 3,
+              "label": "Effectiveness"
+            },
+            {
+              "code": 4,
+              "label": "Packaging"
+            },
+            {
+              "code": 5,
+              "label": "Availability"
+            },
+            {
+              "code": 6,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ],
+          "show_if": {
+            "op": "lt",
+            "qid": "Q7",
+            "value": 7,
+            "verbatim_text": "Ask only detractors (NPS 0-6)"
+          }
+        },
+        {
+          "qid": "Q9",
+          "text": "The next time you buy toothpaste, how likely are you to buy the same brand again?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Definitely will not"
+            },
+            {
+              "code": 2,
+              "label": "Probably will not"
+            },
+            {
+              "code": 3,
+              "label": "Might or might not"
+            },
+            {
+              "code": 4,
+              "label": "Probably will"
+            },
+            {
+              "code": 5,
+              "label": "Definitely will"
+            }
+          ]
+        },
+        {
+          "qid": "Q10",
+          "text": "How likely are you to try a new toothpaste brand in the next 3 months?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Not at all likely"
+            },
+            {
+              "code": 2,
+              "label": "Not very likely"
+            },
+            {
+              "code": 3,
+              "label": "Somewhat likely"
+            },
+            {
+              "code": 4,
+              "label": "Very likely"
+            },
+            {
+              "code": 5,
+              "label": "Extremely likely"
+            }
+          ]
+        },
+        {
+          "qid": "Q11",
+          "text": "Where do you usually see or hear about toothpaste brands?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "TV advertising"
+            },
+            {
+              "code": 2,
+              "label": "YouTube / online video"
+            },
+            {
+              "code": 3,
+              "label": "Social media"
+            },
+            {
+              "code": 4,
+              "label": "Dentist recommendation"
+            },
+            {
+              "code": 5,
+              "label": "Family and friends"
+            },
+            {
+              "code": 6,
+              "label": "In-store displays"
+            }
+          ]
+        },
+        {
+          "qid": "Q12",
+          "text": "If you could change one thing about your toothpaste, what would it be?",
+          "type": "open_text",
+          "required": false
+        },
+        {
+          "qid": "Q13",
+          "text": "How important are natural or ayurvedic ingredients when choosing a toothpaste?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Not at all important"
+            },
+            {
+              "code": 2,
+              "label": "Slightly important"
+            },
+            {
+              "code": 3,
+              "label": "Moderately important"
+            },
+            {
+              "code": 4,
+              "label": "Very important"
+            },
+            {
+              "code": 5,
+              "label": "Extremely important"
+            }
+          ]
+        },
+        {
+          "qid": "D1",
+          "text": "What is your gender?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Male"
+            },
+            {
+              "code": 2,
+              "label": "Female"
+            },
+            {
+              "code": 3,
+              "label": "Other / prefer not to say"
+            }
+          ]
+        },
+        {
+          "qid": "D2",
+          "text": "What is your monthly household income?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under Rs. 25,000"
+            },
+            {
+              "code": 2,
+              "label": "Rs. 25,000 - Rs. 50,000"
+            },
+            {
+              "code": 3,
+              "label": "Rs. 50,000 - Rs. 1,00,000"
+            },
+            {
+              "code": 4,
+              "label": "Over Rs. 1,00,000"
+            },
+            {
+              "code": 5,
+              "label": "Prefer not to say"
+            }
+          ]
+        },
+        {
+          "qid": "D3",
+          "text": "How many people live in your household, including you?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "1"
+            },
+            {
+              "code": 2,
+              "label": "2"
+            },
+            {
+              "code": 3,
+              "label": "3-4"
+            },
+            {
+              "code": 4,
+              "label": "5 or more"
+            }
+          ]
+        }
+      ],
+      "blocks": [
+        {
+          "block_id": "MAIN",
+          "label": "Main",
+          "question_ids": [
+            "S1",
+            "S2",
+            "S3",
+            "S4",
+            "Q1",
+            "Q2",
+            "Q3",
+            "Q4",
+            "Q5",
+            "Q6",
+            "Q7",
+            "Q8",
+            "Q9",
+            "Q10",
+            "Q11",
+            "Q12",
+            "Q13",
+            "D1",
+            "D2",
+            "D3"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "segment_slug": "healthcare-otc-pain",
+    "study_title": "OTC Pain Relief - Consumer Journey",
+    "client_name": "DVV Demo - Healthcare Practice",
+    "survey": {
+      "study_id": "demo_healthcare_otc_pain",
+      "title": "Pain Relief Products Study",
+      "questions": [
+        {
+          "qid": "S1",
+          "text": "Which age group do you belong to?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under 18"
+            },
+            {
+              "code": 2,
+              "label": "18-24"
+            },
+            {
+              "code": 3,
+              "label": "25-34"
+            },
+            {
+              "code": 4,
+              "label": "35-44"
+            },
+            {
+              "code": 5,
+              "label": "45-54"
+            },
+            {
+              "code": 6,
+              "label": "55 or older"
+            }
+          ],
+          "terminate_if": {
+            "op": "in",
+            "qid": "S1",
+            "values": [
+              1
+            ],
+            "verbatim_text": "Terminate if under 18"
+          }
+        },
+        {
+          "qid": "S2",
+          "text": "Do you or anyone in your household work in any of these industries?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Market research or consulting"
+            },
+            {
+              "code": 2,
+              "label": "Advertising, PR or media"
+            },
+            {
+              "code": 3,
+              "label": "Healthcare, pharma or hospitals"
+            },
+            {
+              "code": 4,
+              "label": "IT / software"
+            },
+            {
+              "code": 5,
+              "label": "Education"
+            },
+            {
+              "code": 6,
+              "label": "None of these",
+              "exclusive": true
+            }
+          ],
+          "terminate_if": {
+            "op": "in",
+            "qid": "S2",
+            "values": [
+              1,
+              2,
+              3
+            ],
+            "verbatim_text": "Terminate if MR, advertising or category industry"
+          }
+        },
+        {
+          "qid": "S3",
+          "text": "Have you used any over-the-counter pain relief product (tablet, balm, spray or gel) in the past 3 months?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Yes"
+            },
+            {
+              "code": 2,
+              "label": "No"
+            }
+          ],
+          "terminate_if": {
+            "op": "eq",
+            "qid": "S3",
+            "value": 2,
+            "verbatim_text": "Terminate category non-users"
+          }
+        },
+        {
+          "qid": "S4",
+          "text": "For minor aches and pains, who do you usually turn to first?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "A doctor"
+            },
+            {
+              "code": 2,
+              "label": "The chemist / pharmacist"
+            },
+            {
+              "code": 3,
+              "label": "I choose a product myself"
+            },
+            {
+              "code": 4,
+              "label": "Family or friends"
+            }
+          ]
+        },
+        {
+          "qid": "Q1",
+          "text": "Which pain relief brands come to your mind first?",
+          "type": "open_text",
+          "required": false
+        },
+        {
+          "qid": "Q2",
+          "text": "Which of these pain relief brands have you heard of?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Moov"
+            },
+            {
+              "code": 2,
+              "label": "Volini"
+            },
+            {
+              "code": 3,
+              "label": "Iodex"
+            },
+            {
+              "code": 4,
+              "label": "Zandu Balm"
+            },
+            {
+              "code": 5,
+              "label": "Amrutanjan"
+            },
+            {
+              "code": 6,
+              "label": "Crocin"
+            },
+            {
+              "code": 7,
+              "label": "Dolo 650"
+            },
+            {
+              "code": 8,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ]
+        },
+        {
+          "qid": "Q3",
+          "text": "Which one do you use most often?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Moov"
+            },
+            {
+              "code": 2,
+              "label": "Volini"
+            },
+            {
+              "code": 3,
+              "label": "Iodex"
+            },
+            {
+              "code": 4,
+              "label": "Zandu Balm"
+            },
+            {
+              "code": 5,
+              "label": "Amrutanjan"
+            },
+            {
+              "code": 6,
+              "label": "Crocin"
+            },
+            {
+              "code": 7,
+              "label": "Dolo 650"
+            },
+            {
+              "code": 8,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ]
+        },
+        {
+          "qid": "Q4",
+          "text": "How often do you typically need a pain relief product?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Once a week or more"
+            },
+            {
+              "code": 2,
+              "label": "2-3 times a month"
+            },
+            {
+              "code": 3,
+              "label": "About once a month"
+            },
+            {
+              "code": 4,
+              "label": "Rarely"
+            }
+          ]
+        },
+        {
+          "qid": "Q5",
+          "text": "Which of these do you use it for?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Headache"
+            },
+            {
+              "code": 2,
+              "label": "Back pain"
+            },
+            {
+              "code": 3,
+              "label": "Joint pain"
+            },
+            {
+              "code": 4,
+              "label": "Muscle strain / sprains"
+            },
+            {
+              "code": 5,
+              "label": "Cold and body ache"
+            },
+            {
+              "code": 6,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ]
+        },
+        {
+          "qid": "Q6",
+          "text": "How satisfied are you with the product you use most often on each of these?",
+          "type": "grid_single",
+          "rows": [
+            {
+              "code": 1,
+              "label": "Speed of relief"
+            },
+            {
+              "code": 2,
+              "label": "How long the relief lasts"
+            },
+            {
+              "code": 3,
+              "label": "Ease of use"
+            },
+            {
+              "code": 4,
+              "label": "Price"
+            },
+            {
+              "code": 5,
+              "label": "Availability at the chemist"
+            }
+          ],
+          "cols": [
+            {
+              "code": 1,
+              "label": "Very dissatisfied"
+            },
+            {
+              "code": 2,
+              "label": "Dissatisfied"
+            },
+            {
+              "code": 3,
+              "label": "Neither satisfied nor dissatisfied"
+            },
+            {
+              "code": 4,
+              "label": "Satisfied"
+            },
+            {
+              "code": 5,
+              "label": "Very satisfied"
+            }
+          ]
+        },
+        {
+          "qid": "Q7",
+          "text": "On a scale of 0-10, how likely are you to recommend the pain relief product you use most often to a friend or colleague?",
+          "type": "numeric",
+          "validation": {
+            "min": 0,
+            "max": 10
+          }
+        },
+        {
+          "qid": "Q8",
+          "text": "What holds you back from rating it higher?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Relief is too slow"
+            },
+            {
+              "code": 2,
+              "label": "Relief does not last"
+            },
+            {
+              "code": 3,
+              "label": "Smell or feel on skin"
+            },
+            {
+              "code": 4,
+              "label": "Price"
+            },
+            {
+              "code": 5,
+              "label": "Worry about side effects"
+            },
+            {
+              "code": 6,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ],
+          "show_if": {
+            "op": "lt",
+            "qid": "Q7",
+            "value": 7,
+            "verbatim_text": "Ask only detractors (NPS 0-6)"
+          }
+        },
+        {
+          "qid": "Q9",
+          "text": "The next time you need pain relief, how likely are you to buy the same product?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Definitely will not"
+            },
+            {
+              "code": 2,
+              "label": "Probably will not"
+            },
+            {
+              "code": 3,
+              "label": "Might or might not"
+            },
+            {
+              "code": 4,
+              "label": "Probably will"
+            },
+            {
+              "code": 5,
+              "label": "Definitely will"
+            }
+          ]
+        },
+        {
+          "qid": "Q10",
+          "text": "Where did you first hear about the product you use most often?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Doctor"
+            },
+            {
+              "code": 2,
+              "label": "Chemist / pharmacist"
+            },
+            {
+              "code": 3,
+              "label": "TV advertising"
+            },
+            {
+              "code": 4,
+              "label": "Family or friends"
+            },
+            {
+              "code": 5,
+              "label": "Online / social media"
+            }
+          ]
+        },
+        {
+          "qid": "Q11",
+          "text": "Where do you look for information before trying a new health product?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Doctor"
+            },
+            {
+              "code": 2,
+              "label": "Chemist"
+            },
+            {
+              "code": 3,
+              "label": "Google search"
+            },
+            {
+              "code": 4,
+              "label": "YouTube"
+            },
+            {
+              "code": 5,
+              "label": "Family and friends"
+            },
+            {
+              "code": 6,
+              "label": "I don't look anywhere",
+              "exclusive": true
+            }
+          ]
+        },
+        {
+          "qid": "Q12",
+          "text": "If you could improve one thing about pain relief products available today, what would it be?",
+          "type": "open_text",
+          "required": false
+        },
+        {
+          "qid": "Q13",
+          "text": "For everyday aches, which do you prefer?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Ayurvedic / herbal products"
+            },
+            {
+              "code": 2,
+              "label": "Allopathic / medical products"
+            },
+            {
+              "code": 3,
+              "label": "No preference"
+            }
+          ]
+        },
+        {
+          "qid": "D1",
+          "text": "What is your gender?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Male"
+            },
+            {
+              "code": 2,
+              "label": "Female"
+            },
+            {
+              "code": 3,
+              "label": "Other / prefer not to say"
+            }
+          ]
+        },
+        {
+          "qid": "D2",
+          "text": "What is your monthly household income?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under Rs. 25,000"
+            },
+            {
+              "code": 2,
+              "label": "Rs. 25,000 - Rs. 50,000"
+            },
+            {
+              "code": 3,
+              "label": "Rs. 50,000 - Rs. 1,00,000"
+            },
+            {
+              "code": 4,
+              "label": "Over Rs. 1,00,000"
+            },
+            {
+              "code": 5,
+              "label": "Prefer not to say"
+            }
+          ]
+        },
+        {
+          "qid": "D3",
+          "text": "How many people live in your household, including you?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "1"
+            },
+            {
+              "code": 2,
+              "label": "2"
+            },
+            {
+              "code": 3,
+              "label": "3-4"
+            },
+            {
+              "code": 4,
+              "label": "5 or more"
+            }
+          ]
+        }
+      ],
+      "blocks": [
+        {
+          "block_id": "MAIN",
+          "label": "Main",
+          "question_ids": [
+            "S1",
+            "S2",
+            "S3",
+            "S4",
+            "Q1",
+            "Q2",
+            "Q3",
+            "Q4",
+            "Q5",
+            "Q6",
+            "Q7",
+            "Q8",
+            "Q9",
+            "Q10",
+            "Q11",
+            "Q12",
+            "Q13",
+            "D1",
+            "D2",
+            "D3"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "segment_slug": "bfsi-retail-banking",
+    "study_title": "Retail Banking CSAT & NPS Tracker",
+    "client_name": "DVV Demo - BFSI Practice",
+    "survey": {
+      "study_id": "demo_bfsi_retail_banking",
+      "title": "Banking Experience Study",
+      "questions": [
+        {
+          "qid": "S1",
+          "text": "Which age group do you belong to?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under 18"
+            },
+            {
+              "code": 2,
+              "label": "18-24"
+            },
+            {
+              "code": 3,
+              "label": "25-34"
+            },
+            {
+              "code": 4,
+              "label": "35-44"
+            },
+            {
+              "code": 5,
+              "label": "45-54"
+            },
+            {
+              "code": 6,
+              "label": "55 or older"
+            }
+          ],
+          "terminate_if": {
+            "op": "in",
+            "qid": "S1",
+            "values": [
+              1
+            ],
+            "verbatim_text": "Terminate if under 18"
+          }
+        },
+        {
+          "qid": "S2",
+          "text": "Do you or anyone in your household work in any of these industries?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Market research or consulting"
+            },
+            {
+              "code": 2,
+              "label": "Advertising, PR or media"
+            },
+            {
+              "code": 3,
+              "label": "Banking, insurance or financial services"
+            },
+            {
+              "code": 4,
+              "label": "IT / software"
+            },
+            {
+              "code": 5,
+              "label": "Education"
+            },
+            {
+              "code": 6,
+              "label": "None of these",
+              "exclusive": true
+            }
+          ],
+          "terminate_if": {
+            "op": "in",
+            "qid": "S2",
+            "values": [
+              1,
+              2,
+              3
+            ],
+            "verbatim_text": "Terminate if MR, advertising or category industry"
+          }
+        },
+        {
+          "qid": "S3",
+          "text": "Do you have a savings account that you actively use?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Yes"
+            },
+            {
+              "code": 2,
+              "label": "No"
+            }
+          ],
+          "terminate_if": {
+            "op": "eq",
+            "qid": "S3",
+            "value": 2,
+            "verbatim_text": "Terminate non-account-holders"
+          }
+        },
+        {
+          "qid": "S4",
+          "text": "Which bank do you consider your primary bank?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "State Bank of India (SBI)"
+            },
+            {
+              "code": 2,
+              "label": "HDFC Bank"
+            },
+            {
+              "code": 3,
+              "label": "ICICI Bank"
+            },
+            {
+              "code": 4,
+              "label": "Axis Bank"
+            },
+            {
+              "code": 5,
+              "label": "Kotak Mahindra Bank"
+            },
+            {
+              "code": 6,
+              "label": "Punjab National Bank"
+            },
+            {
+              "code": 7,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ]
+        },
+        {
+          "qid": "Q1",
+          "text": "When you think of good digital banking, which banks come to mind first?",
+          "type": "open_text",
+          "required": false
+        },
+        {
+          "qid": "Q2",
+          "text": "Which of these banks have you seen or heard advertising from recently?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "State Bank of India (SBI)"
+            },
+            {
+              "code": 2,
+              "label": "HDFC Bank"
+            },
+            {
+              "code": 3,
+              "label": "ICICI Bank"
+            },
+            {
+              "code": 4,
+              "label": "Axis Bank"
+            },
+            {
+              "code": 5,
+              "label": "Kotak Mahindra Bank"
+            },
+            {
+              "code": 6,
+              "label": "Punjab National Bank"
+            },
+            {
+              "code": 7,
+              "label": "None of these",
+              "exclusive": true
+            }
+          ]
+        },
+        {
+          "qid": "Q3",
+          "text": "Which of these have you used with your primary bank in the past month?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Mobile banking app"
+            },
+            {
+              "code": 2,
+              "label": "Net banking on desktop"
+            },
+            {
+              "code": 3,
+              "label": "Branch visit"
+            },
+            {
+              "code": 4,
+              "label": "ATM"
+            },
+            {
+              "code": 5,
+              "label": "Phone banking"
+            },
+            {
+              "code": 6,
+              "label": "UPI payments"
+            }
+          ]
+        },
+        {
+          "qid": "Q4",
+          "text": "How often do you use your bank's mobile app?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Daily"
+            },
+            {
+              "code": 2,
+              "label": "A few times a week"
+            },
+            {
+              "code": 3,
+              "label": "A few times a month"
+            },
+            {
+              "code": 4,
+              "label": "Rarely or never"
+            }
+          ]
+        },
+        {
+          "qid": "Q5",
+          "text": "How satisfied are you with your primary bank on each of these?",
+          "type": "grid_single",
+          "rows": [
+            {
+              "code": 1,
+              "label": "Mobile app experience"
+            },
+            {
+              "code": 2,
+              "label": "Service at the branch"
+            },
+            {
+              "code": 3,
+              "label": "Charges and fees"
+            },
+            {
+              "code": 4,
+              "label": "Customer support"
+            },
+            {
+              "code": 5,
+              "label": "Interest rates"
+            }
+          ],
+          "cols": [
+            {
+              "code": 1,
+              "label": "Very dissatisfied"
+            },
+            {
+              "code": 2,
+              "label": "Dissatisfied"
+            },
+            {
+              "code": 3,
+              "label": "Neither satisfied nor dissatisfied"
+            },
+            {
+              "code": 4,
+              "label": "Satisfied"
+            },
+            {
+              "code": 5,
+              "label": "Very satisfied"
+            }
+          ]
+        },
+        {
+          "qid": "Q6",
+          "text": "On a scale of 0-10, how likely are you to recommend your primary bank to a friend or colleague?",
+          "type": "numeric",
+          "validation": {
+            "min": 0,
+            "max": 10
+          }
+        },
+        {
+          "qid": "Q7",
+          "text": "What are the main reasons for your rating?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Hidden or high charges"
+            },
+            {
+              "code": 2,
+              "label": "Poor customer support"
+            },
+            {
+              "code": 3,
+              "label": "App problems or downtime"
+            },
+            {
+              "code": 4,
+              "label": "Long queues at the branch"
+            },
+            {
+              "code": 5,
+              "label": "Low interest rates"
+            },
+            {
+              "code": 6,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ],
+          "show_if": {
+            "op": "lt",
+            "qid": "Q6",
+            "value": 7,
+            "verbatim_text": "Ask only detractors (NPS 0-6)"
+          }
+        },
+        {
+          "qid": "Q8",
+          "text": "How likely are you to switch your primary bank in the next 12 months?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Not at all likely"
+            },
+            {
+              "code": 2,
+              "label": "Not very likely"
+            },
+            {
+              "code": 3,
+              "label": "Somewhat likely"
+            },
+            {
+              "code": 4,
+              "label": "Very likely"
+            },
+            {
+              "code": 5,
+              "label": "Extremely likely"
+            }
+          ]
+        },
+        {
+          "qid": "Q9",
+          "text": "Which of these do you currently hold with any bank?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Credit card"
+            },
+            {
+              "code": 2,
+              "label": "Personal or home loan"
+            },
+            {
+              "code": 3,
+              "label": "Fixed deposit"
+            },
+            {
+              "code": 4,
+              "label": "Mutual funds / investments"
+            },
+            {
+              "code": 5,
+              "label": "Insurance"
+            },
+            {
+              "code": 6,
+              "label": "None of these",
+              "exclusive": true
+            }
+          ]
+        },
+        {
+          "qid": "Q10",
+          "text": "If your bank offered a premium app-only account with zero branch visits, how likely would you be to try it?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Not at all likely"
+            },
+            {
+              "code": 2,
+              "label": "Not very likely"
+            },
+            {
+              "code": 3,
+              "label": "Somewhat likely"
+            },
+            {
+              "code": 4,
+              "label": "Very likely"
+            },
+            {
+              "code": 5,
+              "label": "Extremely likely"
+            }
+          ]
+        },
+        {
+          "qid": "Q11",
+          "text": "Where do you get information for financial decisions?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Bank's own app or website"
+            },
+            {
+              "code": 2,
+              "label": "YouTube / finance influencers"
+            },
+            {
+              "code": 3,
+              "label": "News and business media"
+            },
+            {
+              "code": 4,
+              "label": "Friends and family"
+            },
+            {
+              "code": 5,
+              "label": "Financial advisor"
+            },
+            {
+              "code": 6,
+              "label": "Social media"
+            }
+          ]
+        },
+        {
+          "qid": "Q12",
+          "text": "What is the one thing your bank should improve?",
+          "type": "open_text",
+          "required": false
+        },
+        {
+          "qid": "Q13",
+          "text": "Overall, how much do you trust your primary bank with your money?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Do not trust at all"
+            },
+            {
+              "code": 2,
+              "label": "Trust a little"
+            },
+            {
+              "code": 3,
+              "label": "Trust somewhat"
+            },
+            {
+              "code": 4,
+              "label": "Trust a lot"
+            },
+            {
+              "code": 5,
+              "label": "Trust completely"
+            }
+          ]
+        },
+        {
+          "qid": "D1",
+          "text": "What is your gender?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Male"
+            },
+            {
+              "code": 2,
+              "label": "Female"
+            },
+            {
+              "code": 3,
+              "label": "Other / prefer not to say"
+            }
+          ]
+        },
+        {
+          "qid": "D2",
+          "text": "What is your monthly household income?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under Rs. 25,000"
+            },
+            {
+              "code": 2,
+              "label": "Rs. 25,000 - Rs. 50,000"
+            },
+            {
+              "code": 3,
+              "label": "Rs. 50,000 - Rs. 1,00,000"
+            },
+            {
+              "code": 4,
+              "label": "Over Rs. 1,00,000"
+            },
+            {
+              "code": 5,
+              "label": "Prefer not to say"
+            }
+          ]
+        },
+        {
+          "qid": "D3",
+          "text": "How many people live in your household, including you?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "1"
+            },
+            {
+              "code": 2,
+              "label": "2"
+            },
+            {
+              "code": 3,
+              "label": "3-4"
+            },
+            {
+              "code": 4,
+              "label": "5 or more"
+            }
+          ]
+        }
+      ],
+      "blocks": [
+        {
+          "block_id": "MAIN",
+          "label": "Main",
+          "question_ids": [
+            "S1",
+            "S2",
+            "S3",
+            "S4",
+            "Q1",
+            "Q2",
+            "Q3",
+            "Q4",
+            "Q5",
+            "Q6",
+            "Q7",
+            "Q8",
+            "Q9",
+            "Q10",
+            "Q11",
+            "Q12",
+            "Q13",
+            "D1",
+            "D2",
+            "D3"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "segment_slug": "auto-purchase-intent",
+    "study_title": "Passenger Car Purchase Intent & Consideration",
+    "client_name": "DVV Demo - Auto Practice",
+    "survey": {
+      "study_id": "demo_auto_purchase_intent",
+      "title": "Car Buying Study",
+      "questions": [
+        {
+          "qid": "S1",
+          "text": "Which age group do you belong to?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under 18"
+            },
+            {
+              "code": 2,
+              "label": "18-24"
+            },
+            {
+              "code": 3,
+              "label": "25-34"
+            },
+            {
+              "code": 4,
+              "label": "35-44"
+            },
+            {
+              "code": 5,
+              "label": "45-54"
+            },
+            {
+              "code": 6,
+              "label": "55 or older"
+            }
+          ],
+          "terminate_if": {
+            "op": "in",
+            "qid": "S1",
+            "values": [
+              1
+            ],
+            "verbatim_text": "Terminate if under 18"
+          }
+        },
+        {
+          "qid": "S2",
+          "text": "Do you or anyone in your household work in any of these industries?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Market research or consulting"
+            },
+            {
+              "code": 2,
+              "label": "Advertising, PR or media"
+            },
+            {
+              "code": 3,
+              "label": "Automobile manufacturing or dealerships"
+            },
+            {
+              "code": 4,
+              "label": "IT / software"
+            },
+            {
+              "code": 5,
+              "label": "Education"
+            },
+            {
+              "code": 6,
+              "label": "None of these",
+              "exclusive": true
+            }
+          ],
+          "terminate_if": {
+            "op": "in",
+            "qid": "S2",
+            "values": [
+              1,
+              2,
+              3
+            ],
+            "verbatim_text": "Terminate if MR, advertising or category industry"
+          }
+        },
+        {
+          "qid": "S3",
+          "text": "Which of these describes you?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "I own a car"
+            },
+            {
+              "code": 2,
+              "label": "I plan to buy a car in the next 12 months"
+            },
+            {
+              "code": 3,
+              "label": "Both - I own one and plan to buy"
+            },
+            {
+              "code": 4,
+              "label": "Neither"
+            }
+          ],
+          "terminate_if": {
+            "op": "eq",
+            "qid": "S3",
+            "value": 4,
+            "verbatim_text": "Terminate non-owners with no purchase intent"
+          }
+        },
+        {
+          "qid": "S4",
+          "text": "Which type of area do you live in?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Metro (Delhi NCR, Mumbai, Bengaluru, etc.)"
+            },
+            {
+              "code": 2,
+              "label": "Tier-1 city"
+            },
+            {
+              "code": 3,
+              "label": "Tier-2 city"
+            },
+            {
+              "code": 4,
+              "label": "Smaller town / rural"
+            }
+          ]
+        },
+        {
+          "qid": "Q1",
+          "text": "Which car brands come to your mind first?",
+          "type": "open_text",
+          "required": false
+        },
+        {
+          "qid": "Q2",
+          "text": "Which of these brands would you consider for your next car?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Maruti Suzuki"
+            },
+            {
+              "code": 2,
+              "label": "Hyundai"
+            },
+            {
+              "code": 3,
+              "label": "Tata Motors"
+            },
+            {
+              "code": 4,
+              "label": "Mahindra"
+            },
+            {
+              "code": 5,
+              "label": "Kia"
+            },
+            {
+              "code": 6,
+              "label": "Toyota"
+            },
+            {
+              "code": 7,
+              "label": "Honda"
+            },
+            {
+              "code": 8,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ]
+        },
+        {
+          "qid": "Q3",
+          "text": "Which single brand are you most likely to buy (or do you currently drive)?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Maruti Suzuki"
+            },
+            {
+              "code": 2,
+              "label": "Hyundai"
+            },
+            {
+              "code": 3,
+              "label": "Tata Motors"
+            },
+            {
+              "code": 4,
+              "label": "Mahindra"
+            },
+            {
+              "code": 5,
+              "label": "Kia"
+            },
+            {
+              "code": 6,
+              "label": "Toyota"
+            },
+            {
+              "code": 7,
+              "label": "Honda"
+            },
+            {
+              "code": 8,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ]
+        },
+        {
+          "qid": "Q4",
+          "text": "What is your budget for your next car?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under Rs. 8 lakh"
+            },
+            {
+              "code": 2,
+              "label": "Rs. 8-12 lakh"
+            },
+            {
+              "code": 3,
+              "label": "Rs. 12-20 lakh"
+            },
+            {
+              "code": 4,
+              "label": "Over Rs. 20 lakh"
+            }
+          ]
+        },
+        {
+          "qid": "Q5",
+          "text": "Which fuel type do you prefer for your next car?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Petrol"
+            },
+            {
+              "code": 2,
+              "label": "Diesel"
+            },
+            {
+              "code": 3,
+              "label": "CNG"
+            },
+            {
+              "code": 4,
+              "label": "Hybrid"
+            },
+            {
+              "code": 5,
+              "label": "Electric"
+            }
+          ]
+        },
+        {
+          "qid": "Q6",
+          "text": "How important is each of these when choosing a car?",
+          "type": "grid_single",
+          "rows": [
+            {
+              "code": 1,
+              "label": "Mileage / running cost"
+            },
+            {
+              "code": 2,
+              "label": "Safety rating"
+            },
+            {
+              "code": 3,
+              "label": "Price and value"
+            },
+            {
+              "code": 4,
+              "label": "After-sales service"
+            },
+            {
+              "code": 5,
+              "label": "Features and technology"
+            }
+          ],
+          "cols": [
+            {
+              "code": 1,
+              "label": "Not at all important"
+            },
+            {
+              "code": 2,
+              "label": "Slightly important"
+            },
+            {
+              "code": 3,
+              "label": "Moderately important"
+            },
+            {
+              "code": 4,
+              "label": "Very important"
+            },
+            {
+              "code": 5,
+              "label": "Extremely important"
+            }
+          ]
+        },
+        {
+          "qid": "Q7",
+          "text": "On a scale of 0-10, how likely are you to recommend the car brand you are most likely to buy to a friend or colleague?",
+          "type": "numeric",
+          "validation": {
+            "min": 0,
+            "max": 10
+          }
+        },
+        {
+          "qid": "Q8",
+          "text": "What concerns hold you back about this brand?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Service costs"
+            },
+            {
+              "code": 2,
+              "label": "Reliability concerns"
+            },
+            {
+              "code": 3,
+              "label": "Resale value"
+            },
+            {
+              "code": 4,
+              "label": "Dealer experience"
+            },
+            {
+              "code": 5,
+              "label": "Missing features"
+            },
+            {
+              "code": 6,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ],
+          "show_if": {
+            "op": "lt",
+            "qid": "Q7",
+            "value": 7,
+            "verbatim_text": "Ask only detractors (NPS 0-6)"
+          }
+        },
+        {
+          "qid": "Q9",
+          "text": "When do you expect to make your next car purchase?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Within 3 months"
+            },
+            {
+              "code": 2,
+              "label": "3-6 months"
+            },
+            {
+              "code": 3,
+              "label": "6-12 months"
+            },
+            {
+              "code": 4,
+              "label": "More than 12 months away"
+            }
+          ]
+        },
+        {
+          "qid": "Q10",
+          "text": "How likely are you to consider an electric car for your next purchase?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Not at all likely"
+            },
+            {
+              "code": 2,
+              "label": "Not very likely"
+            },
+            {
+              "code": 3,
+              "label": "Somewhat likely"
+            },
+            {
+              "code": 4,
+              "label": "Very likely"
+            },
+            {
+              "code": 5,
+              "label": "Extremely likely"
+            }
+          ]
+        },
+        {
+          "qid": "Q11",
+          "text": "Where do you research before buying a car?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "YouTube reviews"
+            },
+            {
+              "code": 2,
+              "label": "Dealer visits and test drives"
+            },
+            {
+              "code": 3,
+              "label": "Friends and family"
+            },
+            {
+              "code": 4,
+              "label": "Car websites (CarDekho, CarWale, etc.)"
+            },
+            {
+              "code": 5,
+              "label": "TV advertising"
+            },
+            {
+              "code": 6,
+              "label": "Social media"
+            }
+          ]
+        },
+        {
+          "qid": "Q12",
+          "text": "What is your single biggest hesitation about buying a new car right now?",
+          "type": "open_text",
+          "required": false
+        },
+        {
+          "qid": "Q13",
+          "text": "Would you take a test drive if invited by a dealer this month?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Yes"
+            },
+            {
+              "code": 2,
+              "label": "Maybe"
+            },
+            {
+              "code": 3,
+              "label": "No"
+            }
+          ]
+        },
+        {
+          "qid": "D1",
+          "text": "What is your gender?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Male"
+            },
+            {
+              "code": 2,
+              "label": "Female"
+            },
+            {
+              "code": 3,
+              "label": "Other / prefer not to say"
+            }
+          ]
+        },
+        {
+          "qid": "D2",
+          "text": "What is your monthly household income?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under Rs. 25,000"
+            },
+            {
+              "code": 2,
+              "label": "Rs. 25,000 - Rs. 50,000"
+            },
+            {
+              "code": 3,
+              "label": "Rs. 50,000 - Rs. 1,00,000"
+            },
+            {
+              "code": 4,
+              "label": "Over Rs. 1,00,000"
+            },
+            {
+              "code": 5,
+              "label": "Prefer not to say"
+            }
+          ]
+        },
+        {
+          "qid": "D3",
+          "text": "How many people live in your household, including you?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "1"
+            },
+            {
+              "code": 2,
+              "label": "2"
+            },
+            {
+              "code": 3,
+              "label": "3-4"
+            },
+            {
+              "code": 4,
+              "label": "5 or more"
+            }
+          ]
+        }
+      ],
+      "blocks": [
+        {
+          "block_id": "MAIN",
+          "label": "Main",
+          "question_ids": [
+            "S1",
+            "S2",
+            "S3",
+            "S4",
+            "Q1",
+            "Q2",
+            "Q3",
+            "Q4",
+            "Q5",
+            "Q6",
+            "Q7",
+            "Q8",
+            "Q9",
+            "Q10",
+            "Q11",
+            "Q12",
+            "Q13",
+            "D1",
+            "D2",
+            "D3"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "segment_slug": "telecom-brand-track",
+    "study_title": "Mobile Network Brand Track & Churn",
+    "client_name": "DVV Demo - Telecom Practice",
+    "survey": {
+      "study_id": "demo_telecom_brand_track",
+      "title": "Mobile Network Study",
+      "questions": [
+        {
+          "qid": "S1",
+          "text": "Which age group do you belong to?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under 18"
+            },
+            {
+              "code": 2,
+              "label": "18-24"
+            },
+            {
+              "code": 3,
+              "label": "25-34"
+            },
+            {
+              "code": 4,
+              "label": "35-44"
+            },
+            {
+              "code": 5,
+              "label": "45-54"
+            },
+            {
+              "code": 6,
+              "label": "55 or older"
+            }
+          ],
+          "terminate_if": {
+            "op": "in",
+            "qid": "S1",
+            "values": [
+              1
+            ],
+            "verbatim_text": "Terminate if under 18"
+          }
+        },
+        {
+          "qid": "S2",
+          "text": "Do you or anyone in your household work in any of these industries?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Market research or consulting"
+            },
+            {
+              "code": 2,
+              "label": "Advertising, PR or media"
+            },
+            {
+              "code": 3,
+              "label": "Telecom operators or telecom equipment"
+            },
+            {
+              "code": 4,
+              "label": "IT / software"
+            },
+            {
+              "code": 5,
+              "label": "Education"
+            },
+            {
+              "code": 6,
+              "label": "None of these",
+              "exclusive": true
+            }
+          ],
+          "terminate_if": {
+            "op": "in",
+            "qid": "S2",
+            "values": [
+              1,
+              2,
+              3
+            ],
+            "verbatim_text": "Terminate if MR, advertising or category industry"
+          }
+        },
+        {
+          "qid": "S3",
+          "text": "Do you personally pay for a mobile connection?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Yes"
+            },
+            {
+              "code": 2,
+              "label": "No"
+            }
+          ],
+          "terminate_if": {
+            "op": "eq",
+            "qid": "S3",
+            "value": 2,
+            "verbatim_text": "Terminate non-payers"
+          }
+        },
+        {
+          "qid": "S4",
+          "text": "What type of connection is your main SIM?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Prepaid"
+            },
+            {
+              "code": 2,
+              "label": "Postpaid"
+            },
+            {
+              "code": 3,
+              "label": "I use both"
+            }
+          ]
+        },
+        {
+          "qid": "Q1",
+          "text": "Which mobile network brands' advertising have you seen recently? Type whatever comes to mind.",
+          "type": "open_text",
+          "required": false
+        },
+        {
+          "qid": "Q2",
+          "text": "Which of these mobile networks have you ever used?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Jio"
+            },
+            {
+              "code": 2,
+              "label": "Airtel"
+            },
+            {
+              "code": 3,
+              "label": "Vi (Vodafone Idea)"
+            },
+            {
+              "code": 4,
+              "label": "BSNL"
+            },
+            {
+              "code": 5,
+              "label": "None of these",
+              "exclusive": true
+            }
+          ]
+        },
+        {
+          "qid": "Q3",
+          "text": "Which network is your main SIM on?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Jio"
+            },
+            {
+              "code": 2,
+              "label": "Airtel"
+            },
+            {
+              "code": 3,
+              "label": "Vi (Vodafone Idea)"
+            },
+            {
+              "code": 4,
+              "label": "BSNL"
+            },
+            {
+              "code": 5,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ]
+        },
+        {
+          "qid": "Q4",
+          "text": "Roughly how much do you spend on mobile recharges or bills per month?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under Rs. 200"
+            },
+            {
+              "code": 2,
+              "label": "Rs. 200-400"
+            },
+            {
+              "code": 3,
+              "label": "Rs. 400-700"
+            },
+            {
+              "code": 4,
+              "label": "Over Rs. 700"
+            }
+          ]
+        },
+        {
+          "qid": "Q5",
+          "text": "How satisfied are you with your main network on each of these?",
+          "type": "grid_single",
+          "rows": [
+            {
+              "code": 1,
+              "label": "Network coverage"
+            },
+            {
+              "code": 2,
+              "label": "Data speed"
+            },
+            {
+              "code": 3,
+              "label": "Call quality"
+            },
+            {
+              "code": 4,
+              "label": "Value for money of plans"
+            },
+            {
+              "code": 5,
+              "label": "Customer care"
+            }
+          ],
+          "cols": [
+            {
+              "code": 1,
+              "label": "Very dissatisfied"
+            },
+            {
+              "code": 2,
+              "label": "Dissatisfied"
+            },
+            {
+              "code": 3,
+              "label": "Neither satisfied nor dissatisfied"
+            },
+            {
+              "code": 4,
+              "label": "Satisfied"
+            },
+            {
+              "code": 5,
+              "label": "Very satisfied"
+            }
+          ]
+        },
+        {
+          "qid": "Q6",
+          "text": "On a scale of 0-10, how likely are you to recommend your main mobile network to a friend or colleague?",
+          "type": "numeric",
+          "validation": {
+            "min": 0,
+            "max": 10
+          }
+        },
+        {
+          "qid": "Q7",
+          "text": "What are the main problems you face?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Call drops"
+            },
+            {
+              "code": 2,
+              "label": "Slow data"
+            },
+            {
+              "code": 3,
+              "label": "Price increases"
+            },
+            {
+              "code": 4,
+              "label": "Poor customer support"
+            },
+            {
+              "code": 5,
+              "label": "No signal in some areas"
+            },
+            {
+              "code": 6,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ],
+          "show_if": {
+            "op": "lt",
+            "qid": "Q6",
+            "value": 7,
+            "verbatim_text": "Ask only detractors (NPS 0-6)"
+          }
+        },
+        {
+          "qid": "Q8",
+          "text": "How likely are you to port to a different network in the next 6 months?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Not at all likely"
+            },
+            {
+              "code": 2,
+              "label": "Not very likely"
+            },
+            {
+              "code": 3,
+              "label": "Somewhat likely"
+            },
+            {
+              "code": 4,
+              "label": "Very likely"
+            },
+            {
+              "code": 5,
+              "label": "Extremely likely"
+            }
+          ]
+        },
+        {
+          "qid": "Q9",
+          "text": "Which of these do you use on your main connection?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Bundled OTT apps (JioCinema, Airtel Xstream, etc.)"
+            },
+            {
+              "code": 2,
+              "label": "5G data"
+            },
+            {
+              "code": 3,
+              "label": "International roaming"
+            },
+            {
+              "code": 4,
+              "label": "Family / group plan"
+            },
+            {
+              "code": 5,
+              "label": "None of these",
+              "exclusive": true
+            }
+          ]
+        },
+        {
+          "qid": "Q10",
+          "text": "How important is 5G coverage when choosing a network?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Not at all important"
+            },
+            {
+              "code": 2,
+              "label": "Slightly important"
+            },
+            {
+              "code": 3,
+              "label": "Moderately important"
+            },
+            {
+              "code": 4,
+              "label": "Very important"
+            },
+            {
+              "code": 5,
+              "label": "Extremely important"
+            }
+          ]
+        },
+        {
+          "qid": "Q11",
+          "text": "Which brand's advertising do you find most memorable?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Jio"
+            },
+            {
+              "code": 2,
+              "label": "Airtel"
+            },
+            {
+              "code": 3,
+              "label": "Vi (Vodafone Idea)"
+            },
+            {
+              "code": 4,
+              "label": "BSNL"
+            },
+            {
+              "code": 5,
+              "label": "None of them"
+            }
+          ]
+        },
+        {
+          "qid": "Q12",
+          "text": "What is the one thing your network should fix or improve?",
+          "type": "open_text",
+          "required": false
+        },
+        {
+          "qid": "Q13",
+          "text": "Which brand do you associate most with 'best network quality'?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Jio"
+            },
+            {
+              "code": 2,
+              "label": "Airtel"
+            },
+            {
+              "code": 3,
+              "label": "Vi (Vodafone Idea)"
+            },
+            {
+              "code": 4,
+              "label": "BSNL"
+            },
+            {
+              "code": 5,
+              "label": "No difference between them"
+            }
+          ]
+        },
+        {
+          "qid": "D1",
+          "text": "What is your gender?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Male"
+            },
+            {
+              "code": 2,
+              "label": "Female"
+            },
+            {
+              "code": 3,
+              "label": "Other / prefer not to say"
+            }
+          ]
+        },
+        {
+          "qid": "D2",
+          "text": "What is your monthly household income?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under Rs. 25,000"
+            },
+            {
+              "code": 2,
+              "label": "Rs. 25,000 - Rs. 50,000"
+            },
+            {
+              "code": 3,
+              "label": "Rs. 50,000 - Rs. 1,00,000"
+            },
+            {
+              "code": 4,
+              "label": "Over Rs. 1,00,000"
+            },
+            {
+              "code": 5,
+              "label": "Prefer not to say"
+            }
+          ]
+        },
+        {
+          "qid": "D3",
+          "text": "How many people live in your household, including you?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "1"
+            },
+            {
+              "code": 2,
+              "label": "2"
+            },
+            {
+              "code": 3,
+              "label": "3-4"
+            },
+            {
+              "code": 4,
+              "label": "5 or more"
+            }
+          ]
+        }
+      ],
+      "blocks": [
+        {
+          "block_id": "MAIN",
+          "label": "Main",
+          "question_ids": [
+            "S1",
+            "S2",
+            "S3",
+            "S4",
+            "Q1",
+            "Q2",
+            "Q3",
+            "Q4",
+            "Q5",
+            "Q6",
+            "Q7",
+            "Q8",
+            "Q9",
+            "Q10",
+            "Q11",
+            "Q12",
+            "Q13",
+            "D1",
+            "D2",
+            "D3"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "segment_slug": "retail-ecommerce-csat",
+    "study_title": "E-commerce Platform CSAT & Loyalty",
+    "client_name": "DVV Demo - Retail Practice",
+    "survey": {
+      "study_id": "demo_retail_ecommerce_csat",
+      "title": "Online Shopping Study",
+      "questions": [
+        {
+          "qid": "S1",
+          "text": "Which age group do you belong to?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under 18"
+            },
+            {
+              "code": 2,
+              "label": "18-24"
+            },
+            {
+              "code": 3,
+              "label": "25-34"
+            },
+            {
+              "code": 4,
+              "label": "35-44"
+            },
+            {
+              "code": 5,
+              "label": "45-54"
+            },
+            {
+              "code": 6,
+              "label": "55 or older"
+            }
+          ],
+          "terminate_if": {
+            "op": "in",
+            "qid": "S1",
+            "values": [
+              1
+            ],
+            "verbatim_text": "Terminate if under 18"
+          }
+        },
+        {
+          "qid": "S2",
+          "text": "Do you or anyone in your household work in any of these industries?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Market research or consulting"
+            },
+            {
+              "code": 2,
+              "label": "Advertising, PR or media"
+            },
+            {
+              "code": 3,
+              "label": "E-commerce or organised retail companies"
+            },
+            {
+              "code": 4,
+              "label": "IT / software"
+            },
+            {
+              "code": 5,
+              "label": "Education"
+            },
+            {
+              "code": 6,
+              "label": "None of these",
+              "exclusive": true
+            }
+          ],
+          "terminate_if": {
+            "op": "in",
+            "qid": "S2",
+            "values": [
+              1,
+              2,
+              3
+            ],
+            "verbatim_text": "Terminate if MR, advertising or category industry"
+          }
+        },
+        {
+          "qid": "S3",
+          "text": "Have you ordered anything online in the past 30 days?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Yes"
+            },
+            {
+              "code": 2,
+              "label": "No"
+            }
+          ],
+          "terminate_if": {
+            "op": "eq",
+            "qid": "S3",
+            "value": 2,
+            "verbatim_text": "Terminate lapsed / non-shoppers"
+          }
+        },
+        {
+          "qid": "S4",
+          "text": "How often do you shop online?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Weekly or more often"
+            },
+            {
+              "code": 2,
+              "label": "2-3 times a month"
+            },
+            {
+              "code": 3,
+              "label": "About once a month"
+            },
+            {
+              "code": 4,
+              "label": "Less often"
+            }
+          ]
+        },
+        {
+          "qid": "Q1",
+          "text": "When you think of shopping online, which apps or sites come to mind first?",
+          "type": "open_text",
+          "required": false
+        },
+        {
+          "qid": "Q2",
+          "text": "Which of these have you bought from in the past 3 months?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Amazon"
+            },
+            {
+              "code": 2,
+              "label": "Flipkart"
+            },
+            {
+              "code": 3,
+              "label": "Myntra"
+            },
+            {
+              "code": 4,
+              "label": "Meesho"
+            },
+            {
+              "code": 5,
+              "label": "JioMart"
+            },
+            {
+              "code": 6,
+              "label": "Blinkit / Zepto / Instamart"
+            },
+            {
+              "code": 7,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ]
+        },
+        {
+          "qid": "Q3",
+          "text": "Which one do you use most often?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Amazon"
+            },
+            {
+              "code": 2,
+              "label": "Flipkart"
+            },
+            {
+              "code": 3,
+              "label": "Myntra"
+            },
+            {
+              "code": 4,
+              "label": "Meesho"
+            },
+            {
+              "code": 5,
+              "label": "JioMart"
+            },
+            {
+              "code": 6,
+              "label": "Blinkit / Zepto / Instamart"
+            },
+            {
+              "code": 7,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ]
+        },
+        {
+          "qid": "Q4",
+          "text": "What do you usually buy online?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Fashion and footwear"
+            },
+            {
+              "code": 2,
+              "label": "Electronics and mobiles"
+            },
+            {
+              "code": 3,
+              "label": "Groceries"
+            },
+            {
+              "code": 4,
+              "label": "Beauty and personal care"
+            },
+            {
+              "code": 5,
+              "label": "Home and kitchen"
+            },
+            {
+              "code": 6,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ]
+        },
+        {
+          "qid": "Q5",
+          "text": "How satisfied are you with the platform you use most often on each of these?",
+          "type": "grid_single",
+          "rows": [
+            {
+              "code": 1,
+              "label": "Delivery speed"
+            },
+            {
+              "code": 2,
+              "label": "Product quality"
+            },
+            {
+              "code": 3,
+              "label": "Prices and offers"
+            },
+            {
+              "code": 4,
+              "label": "Returns and refunds"
+            },
+            {
+              "code": 5,
+              "label": "App experience"
+            }
+          ],
+          "cols": [
+            {
+              "code": 1,
+              "label": "Very dissatisfied"
+            },
+            {
+              "code": 2,
+              "label": "Dissatisfied"
+            },
+            {
+              "code": 3,
+              "label": "Neither satisfied nor dissatisfied"
+            },
+            {
+              "code": 4,
+              "label": "Satisfied"
+            },
+            {
+              "code": 5,
+              "label": "Very satisfied"
+            }
+          ]
+        },
+        {
+          "qid": "Q6",
+          "text": "On a scale of 0-10, how likely are you to recommend the shopping platform you use most often to a friend or colleague?",
+          "type": "numeric",
+          "validation": {
+            "min": 0,
+            "max": 10
+          }
+        },
+        {
+          "qid": "Q7",
+          "text": "What problems have you faced with it?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "Late deliveries"
+            },
+            {
+              "code": 2,
+              "label": "Wrong or damaged items"
+            },
+            {
+              "code": 3,
+              "label": "Refund hassles"
+            },
+            {
+              "code": 4,
+              "label": "High delivery fees"
+            },
+            {
+              "code": 5,
+              "label": "App issues"
+            },
+            {
+              "code": 6,
+              "label": "Other (please specify)",
+              "open_other": true
+            }
+          ],
+          "show_if": {
+            "op": "lt",
+            "qid": "Q6",
+            "value": 7,
+            "verbatim_text": "Ask only detractors (NPS 0-6)"
+          }
+        },
+        {
+          "qid": "Q8",
+          "text": "For your next online purchase, how likely are you to use the same platform?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Definitely will not"
+            },
+            {
+              "code": 2,
+              "label": "Probably will not"
+            },
+            {
+              "code": 3,
+              "label": "Might or might not"
+            },
+            {
+              "code": 4,
+              "label": "Probably will"
+            },
+            {
+              "code": 5,
+              "label": "Definitely will"
+            }
+          ]
+        },
+        {
+          "qid": "Q9",
+          "text": "How often do you use quick-commerce apps (Blinkit, Zepto, Instamart)?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Daily"
+            },
+            {
+              "code": 2,
+              "label": "Weekly"
+            },
+            {
+              "code": 3,
+              "label": "Occasionally"
+            },
+            {
+              "code": 4,
+              "label": "Never"
+            }
+          ]
+        },
+        {
+          "qid": "Q10",
+          "text": "Do you have a paid membership like Amazon Prime or Flipkart Plus?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Yes"
+            },
+            {
+              "code": 2,
+              "label": "No, but considering it"
+            },
+            {
+              "code": 3,
+              "label": "No, not interested"
+            }
+          ]
+        },
+        {
+          "qid": "Q11",
+          "text": "How do you usually discover new products online?",
+          "type": "multi",
+          "options": [
+            {
+              "code": 1,
+              "label": "App notifications and offers"
+            },
+            {
+              "code": 2,
+              "label": "Instagram"
+            },
+            {
+              "code": 3,
+              "label": "YouTube"
+            },
+            {
+              "code": 4,
+              "label": "Friends and family"
+            },
+            {
+              "code": 5,
+              "label": "TV advertising"
+            },
+            {
+              "code": 6,
+              "label": "Google search"
+            }
+          ]
+        },
+        {
+          "qid": "Q12",
+          "text": "What is the one thing online shopping platforms should improve?",
+          "type": "open_text",
+          "required": false
+        },
+        {
+          "qid": "Q13",
+          "text": "For everyday purchases, which do you prefer overall?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Strongly prefer online"
+            },
+            {
+              "code": 2,
+              "label": "Somewhat prefer online"
+            },
+            {
+              "code": 3,
+              "label": "No preference"
+            },
+            {
+              "code": 4,
+              "label": "Somewhat prefer offline stores"
+            },
+            {
+              "code": 5,
+              "label": "Strongly prefer offline stores"
+            }
+          ]
+        },
+        {
+          "qid": "D1",
+          "text": "What is your gender?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Male"
+            },
+            {
+              "code": 2,
+              "label": "Female"
+            },
+            {
+              "code": 3,
+              "label": "Other / prefer not to say"
+            }
+          ]
+        },
+        {
+          "qid": "D2",
+          "text": "What is your monthly household income?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "Under Rs. 25,000"
+            },
+            {
+              "code": 2,
+              "label": "Rs. 25,000 - Rs. 50,000"
+            },
+            {
+              "code": 3,
+              "label": "Rs. 50,000 - Rs. 1,00,000"
+            },
+            {
+              "code": 4,
+              "label": "Over Rs. 1,00,000"
+            },
+            {
+              "code": 5,
+              "label": "Prefer not to say"
+            }
+          ]
+        },
+        {
+          "qid": "D3",
+          "text": "How many people live in your household, including you?",
+          "type": "single",
+          "options": [
+            {
+              "code": 1,
+              "label": "1"
+            },
+            {
+              "code": 2,
+              "label": "2"
+            },
+            {
+              "code": 3,
+              "label": "3-4"
+            },
+            {
+              "code": 4,
+              "label": "5 or more"
+            }
+          ]
+        }
+      ],
+      "blocks": [
+        {
+          "block_id": "MAIN",
+          "label": "Main",
+          "question_ids": [
+            "S1",
+            "S2",
+            "S3",
+            "S4",
+            "Q1",
+            "Q2",
+            "Q3",
+            "Q4",
+            "Q5",
+            "Q6",
+            "Q7",
+            "Q8",
+            "Q9",
+            "Q10",
+            "Q11",
+            "Q12",
+            "Q13",
+            "D1",
+            "D2",
+            "D3"
+          ]
+        }
+      ]
+    }
+  }
+]
