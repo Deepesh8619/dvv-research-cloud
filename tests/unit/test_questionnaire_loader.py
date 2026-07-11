@@ -199,6 +199,20 @@ def test_segment_plain_word_is_not_a_label() -> None:
     assert chunks[1].candidate_qid == "Q1"
 
 
+def test_segment_arbitrary_letter_prefixes_split() -> None:
+    """Pilot regression: a real screener used P1-P3 (parent path) and T1-T5
+    (teen path); the old Q|S|A|C|D whitelist glued them onto the preceding
+    question. Any short letter prefix + number must start a new chunk."""
+    blocks = [
+        _para("S6. Which stores have you shopped at?", 0),
+        _para("P1. Are you the parent or guardian of any teenagers?", 1),
+        _para("T1. How old are you?", 2),
+        _para("PN2. Two-letter prefix question", 3),
+    ]
+    chunks = segment_into_questions(blocks)
+    assert [c.candidate_qid for c in chunks] == ["S6", "P1", "T1", "PN2"]
+
+
 def test_segment_table_stays_with_preceding_question() -> None:
     tbl = DocumentBlock(
         block_type="table",

@@ -548,14 +548,6 @@ export default function QuestionnairePage() {
     }
   }, [status?.status, loadStatus, loadQuestions])
 
-  const priorQidsFor = useCallback(
-    (qid: string) => {
-      const idx = questions.findIndex((q) => q.qid === qid)
-      return questions.slice(0, idx < 0 ? questions.length : idx + 1).map((q) => q.qid)
-    },
-    [questions],
-  )
-
   const selected = useMemo(
     () => questions.find((q) => q.qid === selectedQid) ?? null,
     [questions, selectedQid],
@@ -780,7 +772,7 @@ export default function QuestionnairePage() {
                   key={selected.qid}
                   studyId={studyId!}
                   q={selected}
-                  priorQids={priorQidsFor(selected.qid)}
+                  priorQids={questions.map((qq) => qq.qid)}
                   canWrite={canWrite}
                   onSaved={onQuestionSaved}
                   onApproved={onQuestionApproved}

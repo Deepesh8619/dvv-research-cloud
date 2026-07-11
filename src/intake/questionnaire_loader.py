@@ -57,9 +57,12 @@ class QuestionChunk:
 
 # --- Question-label detection (rule-based only) -----------------------------
 
-# Q5, S3, A1a., Q12:, D2) — a screener/section letter + number, optional suffix
-# letter, terminated by a separator so plain words like "Sales" don't match.
-_QID_RE = re.compile(r"^\s*((?:Q|S|A|C|D)\d+[a-z]?)[.):]", re.IGNORECASE)
+# Q5, S3, A1a., Q12:, D2), P1., T3. — a short letter prefix + number, optional
+# suffix letter, terminated by a separator so plain words like "Sales" don't
+# match. The prefix is ANY 1-3 letters, not a whitelist: a real client screener
+# used P1-P3 (parent path) and T1-T5 (teen path), which a Q|S|A|C|D whitelist
+# silently glued onto the preceding question (pilot finding, 2026-07).
+_QID_RE = re.compile(r"^\s*([A-Za-z]{1,3})(\d+)([a-z]?)[.):]")
 # SECTION B, SECTION 2 — a labelled section boundary with no question number.
 _SECTION_RE = re.compile(r"^\s*SECTION\s+[A-Z0-9]", re.IGNORECASE)
 # Strong instruction/boundary markers even without a question-number prefix.
@@ -74,9 +77,10 @@ def _detect_label(text: str) -> tuple[bool, str | None]:
     """
     m = _QID_RE.match(text)
     if m:
-        # Normalize the qid's leading letter to uppercase (q5 -> Q5).
-        qid = m.group(1)
-        return True, qid[0].upper() + qid[1:]
+        # Normalize the letter prefix to uppercase (q5a -> Q5a, pn2 -> PN2);
+        # a trailing sub-question letter stays lowercase as written.
+        prefix, number, suffix = m.groups()
+        return True, prefix.upper() + number + suffix
     if _SECTION_RE.match(text) or _INSTRUCTION_RE.match(text):
         return True, None
     return False, None
