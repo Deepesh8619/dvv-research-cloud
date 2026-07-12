@@ -475,6 +475,9 @@ export interface RespondentEntry {
   status: 'open' | 'closed'
   surveyjs_json: Record<string, unknown>
   current_page: number
+  // Optional segment theme slug (e.g. "fmcg") from the pinned survey metadata,
+  // or null. Client-side presentation hint only — maps to an accent palette.
+  theme?: string | null
   // Set only on a terminal-at-entry outcome (duplicate-pid security = 30).
   status_code?: number | null
   redirect_url?: string | null

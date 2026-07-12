@@ -456,6 +456,7 @@ async def enter_survey(token: str, request: Request, db: Session = Depends(get_d
         status="open",
         surveyjs_json=surveyjs_json,
         current_page=session.current_page or 0,
+        theme=survey.metadata.get("theme"),
     )
 
 

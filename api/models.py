@@ -303,6 +303,9 @@ class RespondentEntryResponse(BaseModel):
     status: str = "open"  # open | closed
     surveyjs_json: dict = {}
     current_page: int = 0
+    # Optional segment theme slug from the pinned survey's metadata (e.g. "fmcg"),
+    # or None. Purely a client-side presentation hint for accent palettes.
+    theme: str | None = None
     # Set only on a terminal-at-entry outcome (T10 duplicate-pid security = 30).
     # `redirect_url` is the substituted vendor URL, or None to use built-in screens.
     status_code: int | None = None

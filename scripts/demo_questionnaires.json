@@ -571,7 +571,10 @@
             "D3"
           ]
         }
-      ]
+      ],
+      "metadata": {
+        "theme": "fmcg"
+      }
     }
   },
   {
@@ -1152,7 +1155,10 @@
             "D3"
           ]
         }
-      ]
+      ],
+      "metadata": {
+        "theme": "healthcare"
+      }
     }
   },
   {
@@ -1740,7 +1746,10 @@
             "D3"
           ]
         }
-      ]
+      ],
+      "metadata": {
+        "theme": "bfsi"
+      }
     }
   },
   {
@@ -2319,7 +2328,10 @@
             "D3"
           ]
         }
-      ]
+      ],
+      "metadata": {
+        "theme": "auto"
+      }
     }
   },
   {
@@ -2871,7 +2883,10 @@
             "D3"
           ]
         }
-      ]
+      ],
+      "metadata": {
+        "theme": "telecom"
+      }
     }
   },
   {
@@ -3443,7 +3458,10 @@
             "D3"
           ]
         }
-      ]
+      ],
+      "metadata": {
+        "theme": "retail"
+      }
     }
   }
 ]

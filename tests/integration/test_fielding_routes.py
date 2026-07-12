@@ -266,6 +266,30 @@ def test_entry_captures_query_params(client):
     db.close()
 
 
+def test_entry_theme_is_null_when_metadata_absent(client):
+    """A survey with no metadata.theme entry-serves theme=None (default)."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)  # _sample_survey has no metadata
+    token = _create_link(test_client).json()["token"]
+
+    body = test_client.get(f"/api/r/{token}").json()
+    assert body["theme"] is None
+
+
+def test_entry_theme_passed_through_from_metadata(client):
+    """A survey pinned with metadata.theme surfaces that slug on entry."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    survey = _sample_survey("study_f1")
+    survey.metadata = {"theme": "fmcg"}
+    _make_questionnaire(sf, survey=survey)
+    token = _create_link(test_client).json()["token"]
+
+    body = test_client.get(f"/api/r/{token}").json()
+    assert body["theme"] == "fmcg"
+
+
 def test_unknown_token_404(client):
     test_client, sf, _ = client
     _make_study(sf)

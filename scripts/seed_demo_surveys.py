@@ -17,18 +17,21 @@ Run: PYTHONPATH=. .venv/bin/python scripts/seed_demo_surveys.py
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from api.db import (  # noqa: E402
+    Base,
     SessionLocal,
+    _ensure_new_columns,
     create_fielding_link,
     create_questionnaire,
     create_study,
+    engine,
     get_study,
-    init_db,
     list_fielding_links_for_study,
     list_questionnaires_for_study,
     set_questionnaire_approved_qids,
@@ -44,10 +47,18 @@ def _study_id(segment_slug: str) -> str:
     return f"demo-{segment_slug}"
 
 
-def seed(db, fixtures: list[dict]) -> list[dict]:
+def seed(db, fixtures: list[dict], refresh: bool = False) -> list[dict]:
     """Idempotently seed each fixture; return one row per segment for printing.
 
     Each row: {segment, study_id, token, n_questions, created (bool)}.
+
+    `refresh=True` (--refresh-definitions): for an already-seeded demo study,
+    overwrite the approved questionnaire's `definition_json` AND its open fielding
+    link's `survey_json` snapshot IN PLACE with the current fixture. This is how a
+    fixture change (e.g. adding `metadata.theme`) reaches links that were pinned
+    before the change. Safe ONLY for demo studies (`demo-` id prefix) because
+    their links have no real respondents whose in-flight snapshot must be
+    preserved — never do this to a production link with live sessions.
     """
     rows: list[dict] = []
     for fx in fixtures:
@@ -80,6 +91,12 @@ def seed(db, fixtures: list[dict]) -> list[dict]:
                 db, approved.id, status="approved", definition_json=survey_json
             )
             set_questionnaire_approved_qids(db, approved.id, qids)
+        elif refresh:
+            # Demo-only in-place refresh of the pinned definition (see docstring).
+            update_questionnaire_status(
+                db, approved.id, status="approved", definition_json=survey_json
+            )
+            set_questionnaire_approved_qids(db, approved.id, qids)
 
         # 3) Open fielding link (reuse an existing open one -> no duplicate).
         links = list_fielding_links_for_study(db, study_id)
@@ -93,6 +110,11 @@ def seed(db, fixtures: list[dict]) -> list[dict]:
                 survey_json=survey_json,
                 created_by=SEEDED_BY,
             )
+        elif refresh:
+            # Overwrite the pinned snapshot in place (demo links only).
+            link.survey_json = survey_json
+            db.commit()
+            db.refresh(link)
 
         rows.append(
             {
@@ -118,6 +140,28 @@ def _print_table(rows: list[dict], base_url: str) -> None:
         print(f"{r['segment']:<{seg_w}}  {r['study_id']:<{sid_w}}  {url}")
 
 
+def _prepare_db(assume_yes: bool) -> None:
+    """Create tables only — NEVER seed the admin user.
+
+    `init_db()` also calls `seed_admin_user()`, which upserts a default-password
+    owner account. Running this operator script against PRODUCTION therefore
+    minted (and re-synced) a real admin login — the dangerous bug this guards.
+    We create the schema and nothing else. `_ensure_new_columns()` is kept
+    (harmless additive migration); admin seeding is dropped entirely.
+
+    Before writing to a non-sqlite DB, print the target host (scheme+host only,
+    NEVER credentials) and give a 3-second abort window unless `--yes` is passed.
+    """
+    url = engine.url  # SQLAlchemy URL object; str(url) would leak the password.
+    where = f"{url.drivername}://{url.host or '(local file)'}"
+    print(f"seed_demo_surveys: writing to {where}")
+    if url.get_backend_name() != "sqlite" and not assume_yes:
+        print("  Non-sqlite database. Ctrl-C within 3s to abort (or pass --yes).")
+        time.sleep(3)
+    Base.metadata.create_all(bind=engine)
+    _ensure_new_columns()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -125,14 +169,26 @@ def main() -> None:
         default="http://localhost:3000",
         help="Base URL prefixed to each /r/{token} link (default: localhost:3000)",
     )
+    parser.add_argument(
+        "--refresh-definitions",
+        action="store_true",
+        help="Overwrite existing demo studies' definition + open-link snapshot "
+        "in place with the current fixture (demo studies only; safe because "
+        "demo links have no real respondents).",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the 3-second abort window when writing to a non-sqlite DB.",
+    )
     args = parser.parse_args()
 
-    init_db()  # ensure tables exist (idempotent)
+    _prepare_db(args.yes)
     fixtures = json.loads(FIXTURE.read_text())
 
     db = SessionLocal()
     try:
-        rows = seed(db, fixtures)
+        rows = seed(db, fixtures, refresh=args.refresh_definitions)
     finally:
         db.close()
 
