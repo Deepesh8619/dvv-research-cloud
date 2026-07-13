@@ -11,6 +11,8 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
+import ThemeSelect from '../components/ThemeSelect'
+import { DEFAULT_THEME_SLUG } from '../api/themes'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
 const WRITE_ROLES = new Set(['owner', 'analyst'])
@@ -458,6 +460,19 @@ export default function SurveyBuilderPage() {
   const [selectedQid, setSelectedQid] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [rowError, setRowError] = useState<string | null>(null)
+  const [themeMsg, setThemeMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const handleThemeChange = async (slug: string) => {
+    if (!studyId) return
+    setThemeMsg(null)
+    try {
+      const res = await questionnaireApi.settings(studyId, slug)
+      setStatus(res.data)
+      setThemeMsg({ ok: true, text: 'Theme saved.' })
+    } catch (err) {
+      setThemeMsg({ ok: false, text: errorMessage(err) || 'Could not save theme.' })
+    }
+  }
 
   const load = useCallback(async () => {
     if (!studyId) return
@@ -607,6 +622,25 @@ export default function SurveyBuilderPage() {
           <p className="text-sm text-slate-500 mt-1">
             {status.title ?? status.source_filename} · status: <span className="font-medium">{status.status}</span>
           </p>
+        )}
+        {status && status.source !== 'extracted' && (
+          <div className="mt-2 flex items-center gap-3">
+            <label htmlFor="survey-theme" className="text-xs text-slate-500">
+              Theme
+            </label>
+            <ThemeSelect
+              id="survey-theme"
+              value={status.theme ?? DEFAULT_THEME_SLUG}
+              onChange={handleThemeChange}
+              disabled={!canWrite}
+            />
+            <span className="text-xs text-slate-400">Default look for respondents.</span>
+            {themeMsg && (
+              <span className={`text-xs ${themeMsg.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                {themeMsg.text}
+              </span>
+            )}
+          </div>
         )}
       </div>
 

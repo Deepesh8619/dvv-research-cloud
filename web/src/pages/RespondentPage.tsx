@@ -6,6 +6,7 @@ import { Model } from 'survey-core'
 import { BorderlessLight } from 'survey-core/themes'
 import { Survey } from 'survey-react-ui'
 import { fieldingApi } from '../api/client'
+import { Theme, themeFor } from '../api/themes'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 // A single respondent view: fetch the compiled SurveyJS JSON for a public
@@ -24,44 +25,37 @@ import LoadingSpinner from '../components/LoadingSpinner'
 
 type Phase = 'loading' | 'welcome' | 'error' | 'closed' | 'running' | 'terminated' | 'complete'
 
-// Per-segment accent, keyed by the survey's optional metadata.theme slug. Absent
-// or unknown -> a neutral indigo default. Presentation only; no logic depends on it.
-const ACCENTS: Record<string, string> = {
-  fmcg: '#16a34a', // fresh green / mint
-  healthcare: '#0284c7', // calm clinical blue
-  bfsi: '#1e3a8a', // deep trust navy
-  auto: '#dc2626', // graphite + bold red
-  telecom: '#7c3aed', // vibrant violet
-  retail: '#ea580c', // warm orange
-}
-const DEFAULT_ACCENT = '#4f46e5'
+// Per-segment theme keyed by the survey's optional metadata.theme slug (T24).
+// Absent/unknown -> the DVV Indigo default. Presentation only; no logic depends
+// on it. THEMES is the ONE source of truth, shared with the pickers.
+const DEFAULT_THEME = themeFor(null)
 
-function accentFor(theme?: string | null): string {
-  return (theme && ACCENTS[theme]) || DEFAULT_ACCENT
+// The 4px card top strip — the one deliberate flourish per the design spec.
+function gradientBar(theme: Theme): string {
+  return `linear-gradient(90deg, ${theme.accent}, ${theme.accentDeep})`
 }
 
 // One polished default theme + the segment accent, applied via applyTheme. Keeps
-// the modern-survey look (styled inputs, buttons, progress bar) tied to the accent.
-function applySurveyTheme(survey: Model, accent: string): void {
+// the modern-survey look (styled inputs, progress bar) tied to the accent; the
+// deep tone drives pressed/hover, the ~10%-alpha light drives the selected tint.
+function applySurveyTheme(survey: Model, theme: Theme): void {
   survey.applyTheme({
     ...BorderlessLight,
     cssVariables: {
       ...BorderlessLight.cssVariables,
-      '--sjs-primary-backcolor': accent,
-      '--sjs-primary-backcolor-dark': accent,
-      '--sjs-primary-backcolor-light': `${accent}22`,
+      '--sjs-primary-backcolor': theme.accent,
+      '--sjs-primary-backcolor-dark': theme.accentDeep,
+      '--sjs-primary-backcolor-light': `${theme.accent}1A`, // ~10% alpha selected tint
     },
   })
 }
 
-function Centered({ accent, children }: { accent: string; children: React.ReactNode }) {
+function Centered({ theme, children }: { theme: Theme; children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div
-        className="w-full max-w-[640px] text-center bg-white rounded-2xl shadow-sm border border-slate-200 p-10"
-        style={{ borderTop: `4px solid ${accent}` }}
-      >
-        {children}
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: theme.wash }}>
+      <div className="w-full max-w-[640px] text-center bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div style={{ height: 4, background: gradientBar(theme) }} />
+        <div className="p-10">{children}</div>
       </div>
     </div>
   )
@@ -73,7 +67,7 @@ export default function RespondentPage() {
   const [error, setError] = useState('')
   const [model, setModel] = useState<Model | null>(null)
   const [title, setTitle] = useState('')
-  const [accent, setAccent] = useState(DEFAULT_ACCENT)
+  const [theme, setTheme] = useState<Theme>(DEFAULT_THEME)
   // Live refs the async event handlers read (state would be stale in closures).
   const sessionIdRef = useRef<string>('')
   const terminatedRef = useRef(false)
@@ -108,7 +102,7 @@ export default function RespondentPage() {
           return
         }
         sessionIdRef.current = res.data.session_id
-        const themeAccent = accentFor(res.data.theme)
+        const surveyTheme = themeFor(res.data.theme)
         const survey = new Model(res.data.surveyjs_json)
 
         // One question per page: this is what makes the per-page answer POST (and
@@ -121,7 +115,7 @@ export default function RespondentPage() {
         survey.focusFirstQuestionAutomatic = true
         // We swap to our own warm thank-you view on complete, so suppress SurveyJS's.
         survey.showCompletedPage = false
-        applySurveyTheme(survey, themeAccent)
+        applySurveyTheme(survey, surveyTheme)
 
         // Per-page incremental capture: POST accumulated answers on every advance.
         // Multi/checkbox/text don't auto-advance — their Next click fires this too.
@@ -151,7 +145,7 @@ export default function RespondentPage() {
 
         setModel(survey)
         setTitle(survey.title || 'Survey')
-        setAccent(themeAccent)
+        setTheme(surveyTheme)
         setPhase('welcome')
       } catch {
         if (cancelled) return
@@ -195,7 +189,7 @@ export default function RespondentPage() {
 
   if (phase === 'error') {
     return (
-      <Centered accent={accent}>
+      <Centered theme={theme}>
         <h1 className="text-lg font-semibold text-slate-900 mb-2">Something went wrong</h1>
         <p className="text-slate-600">{error || 'Please try again later.'}</p>
       </Centered>
@@ -204,7 +198,7 @@ export default function RespondentPage() {
 
   if (phase === 'closed') {
     return (
-      <Centered accent={accent}>
+      <Centered theme={theme}>
         <h1 className="text-lg font-semibold text-slate-900 mb-2">Survey closed</h1>
         <p className="text-slate-600">
           This survey is no longer accepting responses. Thank you for your interest.
@@ -215,7 +209,7 @@ export default function RespondentPage() {
 
   if (phase === 'welcome') {
     return (
-      <Centered accent={accent}>
+      <Centered theme={theme}>
         <h1 className="text-2xl font-semibold text-slate-900 mb-3">{title}</h1>
         <p className="text-slate-600 mb-8">
           This survey takes about 3 minutes. Your answers are confidential.
@@ -223,7 +217,7 @@ export default function RespondentPage() {
         <button
           onClick={() => setPhase('running')}
           className="inline-flex items-center justify-center rounded-lg px-8 py-3 text-white font-medium transition-opacity hover:opacity-90"
-          style={{ backgroundColor: accent }}
+          style={{ backgroundColor: theme.accent }}
         >
           Start
         </button>
@@ -233,7 +227,7 @@ export default function RespondentPage() {
 
   if (phase === 'terminated') {
     return (
-      <Centered accent={accent}>
+      <Centered theme={theme}>
         <h1 className="text-lg font-semibold text-slate-900 mb-2">Thank you</h1>
         <p className="text-slate-600">
           Based on your answers, you do not qualify for this survey. We appreciate your time.
@@ -244,7 +238,7 @@ export default function RespondentPage() {
 
   if (phase === 'complete') {
     return (
-      <Centered accent={accent}>
+      <Centered theme={theme}>
         <h1 className="text-2xl font-semibold text-slate-900 mb-2">Thank you!</h1>
         <p className="text-slate-600">
           Your responses have been recorded. We really appreciate you taking the time.
@@ -255,17 +249,21 @@ export default function RespondentPage() {
 
   // running — one question per page, centered card
   return (
-    <div className="min-h-screen bg-slate-50 py-8">
-      {/* Scoped polish: larger question type + touch-friendly, full-width options. */}
+    <div className="min-h-screen py-8" style={{ background: theme.wash }}>
+      {/* Scoped polish: larger question type + touch-friendly, full-width options.
+          The selected option row is tinted with the theme accent (~10% alpha bg +
+          accent border) — the accent CSS var comes from applySurveyTheme. */}
       <style>{`
         .dvv-survey .sd-question__title { font-size: 1.25rem; line-height: 1.75rem; }
-        .dvv-survey .sd-item { padding: 0.75rem 1rem; border-radius: 0.5rem; }
+        .dvv-survey .sd-item { padding: 0.75rem 1rem; border-radius: 0.5rem; border: 1px solid transparent; }
         .dvv-survey .sd-item:hover { background: rgba(0,0,0,0.03); }
+        .dvv-survey .sd-item--checked { background: ${theme.accent}1A; border-color: ${theme.accent}; }
         .dvv-survey .sd-selectbase__label { width: 100%; }
       `}</style>
       <div className="dvv-survey max-w-[640px] mx-auto px-4">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8">
-          {model && <Survey model={model} />}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div style={{ height: 4, background: gradientBar(theme) }} />
+          <div className="p-6 sm:p-8">{model && <Survey model={model} />}</div>
         </div>
       </div>
     </div>

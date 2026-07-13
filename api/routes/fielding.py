@@ -66,9 +66,9 @@ from api.db import (
     upsert_respondent_answer,
 )
 from api.models import (
+    FieldingLinkCreateRequest,
     FieldingLinkListResponse,
     FieldingLinkResponse,
-    FieldingRedirectsRequest,
     QuotaCellResponse,
     QuotaCellsCreateRequest,
     QuotaCellsResponse,
@@ -78,7 +78,12 @@ from api.models import (
     RespondentSessionResponse,
 )
 from api.routes.questionnaire import _read_definition_json
-from src.core.survey_definition import Expression, SurveyDefinition, evaluate
+from src.core.survey_definition import (
+    THEME_SLUGS,
+    Expression,
+    SurveyDefinition,
+    evaluate,
+)
 from src.renderers.surveyjs_compiler import compile_to_surveyjs
 
 logger = logging.getLogger(__name__)
@@ -204,7 +209,7 @@ def _approved_questionnaire(db: Session, study_id: str):
 )
 async def create_link(
     study_id: str,
-    redirects: FieldingRedirectsRequest | None = None,
+    body: FieldingLinkCreateRequest | None = None,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
 ):
@@ -212,7 +217,10 @@ async def create_link(
 
     The approved `SurveyDefinition` JSON is snapshotted onto the link so a later
     re-approval can't change a survey already in the field. Vendor redirect
-    templates may be seeded here or set later via PATCH."""
+    templates may be seeded here or set later via PATCH. An optional `theme` slug
+    is stamped into THIS link's snapshot metadata only (a per-link presentation
+    choice) — the entry endpoint reads it back from the snapshot, so it wins over
+    whatever the questionnaire's own definition carried, with no further change."""
     questionnaire = _approved_questionnaire(db, study_id)
     payload = _read_definition_json(db, questionnaire)
     if payload is None:
@@ -220,6 +228,16 @@ async def create_link(
         raise HTTPException(status_code=500, detail="Approved questionnaire has no definition")
     survey = SurveyDefinition.from_json(payload)
 
+    theme = body.theme if body else None
+    if theme is not None:
+        if theme not in THEME_SLUGS:
+            raise HTTPException(status_code=422, detail=f"Unknown theme slug: {theme}")
+        survey.metadata["theme"] = theme
+        payload = survey.to_json()  # stamp into the pinned snapshot only
+
+    redirects = (
+        body.model_dump(exclude_unset=True, exclude={"theme"}) if body else None
+    )
     link = create_fielding_link(
         db,
         study_id=study_id,
@@ -227,7 +245,7 @@ async def create_link(
         survey_version=survey.version,
         survey_json=payload,
         created_by=user.email,
-        redirects=redirects.model_dump(exclude_unset=True) if redirects else None,
+        redirects=redirects,
     )
     logger.info(
         f"[{study_id}] Fielding link {link.id} opened by {user.name} "

@@ -180,6 +180,70 @@ def test_create_link_succeeds_on_approved(client):
     assert body["respondent_path"] == f"/r/{body['token']}"
 
 
+def test_create_link_stamps_theme_into_snapshot(client):
+    """A `theme` on create is stamped into the link's pinned snapshot, so the
+    respondent entry endpoint returns it — without touching the questionnaire."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+
+    resp = test_client.post(
+        "/api/studies/study_f1/fielding/links", json={"theme": "healthcare"}
+    )
+    assert resp.status_code == 200
+    token = resp.json()["token"]
+
+    entry = test_client.get(f"/api/r/{token}")
+    assert entry.status_code == 200
+    assert entry.json()["theme"] == "healthcare"
+
+
+def test_create_link_theme_does_not_mutate_questionnaire(client):
+    """The link-level theme is a presentation choice on the SNAPSHOT only — the
+    questionnaire's own definition (and any later link) stays theme-free."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+
+    themed = test_client.post(
+        "/api/studies/study_f1/fielding/links", json={"theme": "auto"}
+    )
+    assert themed.status_code == 200
+
+    # A second link with no theme sees no theme — proves the definition is clean.
+    plain = _create_link(test_client)
+    plain_token = plain.json()["token"]
+    assert test_client.get(f"/api/r/{plain_token}").json()["theme"] is None
+
+
+def test_create_link_unknown_theme_422(client):
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+
+    resp = test_client.post(
+        "/api/studies/study_f1/fielding/links", json={"theme": "chartreuse"}
+    )
+    assert resp.status_code == 422
+
+
+def test_settings_theme_flows_into_fresh_link_entry(client):
+    """A theme set via the builder settings PATCH becomes the default a fresh,
+    un-themed link inherits — the entry endpoint returns it end-to-end."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+
+    assert (
+        test_client.patch(
+            "/api/studies/study_f1/questionnaire/settings", json={"theme": "retail"}
+        ).status_code
+        == 200
+    )
+    token = _create_link(test_client).json()["token"]
+    assert test_client.get(f"/api/r/{token}").json()["theme"] == "retail"
+
+
 def test_list_links_reports_counts(client):
     test_client, sf, _ = client
     _make_study(sf)

@@ -11,6 +11,7 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
+import ThemeSelect from '../components/ThemeSelect'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
 const WRITE_ROLES = new Set(['owner', 'analyst'])
@@ -398,6 +399,8 @@ function CreatePanel({
   const [error, setError] = useState<string | null>(null)
   const [showRedirects, setShowRedirects] = useState(false)
   const [redirects, setRedirects] = useState<FieldingRedirects>({})
+  // '' = inherit the survey's default theme (don't stamp an override on the link).
+  const [theme, setTheme] = useState<string>('')
 
   const handleCreate = async () => {
     setCreating(true)
@@ -406,8 +409,13 @@ function CreatePanel({
       const payload = Object.fromEntries(
         Object.entries(redirects).filter(([, v]) => v && String(v).trim()),
       )
-      await fieldingApi.createLink(studyId, Object.keys(payload).length ? payload : undefined)
+      await fieldingApi.createLink(
+        studyId,
+        Object.keys(payload).length ? payload : undefined,
+        theme || undefined,
+      )
       setRedirects({})
+      setTheme('')
       setShowRedirects(false)
       onCreated()
     } catch (err) {
@@ -447,6 +455,19 @@ function CreatePanel({
           first.
         </p>
       )}
+
+      <div className="mt-3 flex items-center gap-3">
+        <label htmlFor="link-theme" className="text-xs text-slate-500 w-28 shrink-0">
+          Respondent theme
+        </label>
+        <ThemeSelect
+          id="link-theme"
+          value={theme}
+          onChange={setTheme}
+          inheritLabel="Survey default"
+        />
+        <span className="text-xs text-slate-400">Overrides the survey default for this link only.</span>
+      </div>
 
       <button
         type="button"

@@ -302,6 +302,7 @@ export interface QuestionnaireStatus {
   validation_errors: string[]
   extraction_summary: Record<string, unknown>
   error_detail?: string | null
+  theme?: string | null // respondent theme slug (T24); null when unset
 }
 
 export interface QuestionsListResponse {
@@ -462,6 +463,10 @@ export const questionnaireApi = {
 
   reorderQuestions: async (studyId: string, qids: string[]) =>
     api.put<{ order: string[] }>(`/studies/${studyId}/questionnaire/questions/order`, { qids }),
+
+  // Survey-level presentation settings (T24). `theme` null clears it to default.
+  settings: async (studyId: string, theme: string | null) =>
+    api.patch<QuestionnaireStatus>(`/studies/${studyId}/questionnaire/settings`, { theme }),
 }
 
 // --- Fielding / respondent runtime (T9') ------------------------------------
@@ -575,8 +580,12 @@ export const fieldingApi = {
   listLinks: async (studyId: string) =>
     api.get<{ study_id: string; links: FieldingLink[] }>(`/studies/${studyId}/fielding/links`),
 
-  createLink: async (studyId: string, redirects?: FieldingRedirects) =>
-    api.post<FieldingLink>(`/studies/${studyId}/fielding/links`, redirects ?? {}),
+  // `theme` (T24) is stamped into this link's pinned snapshot only.
+  createLink: async (studyId: string, redirects?: FieldingRedirects, theme?: string | null) =>
+    api.post<FieldingLink>(`/studies/${studyId}/fielding/links`, {
+      ...(redirects ?? {}),
+      ...(theme ? { theme } : {}),
+    }),
 
   closeLink: async (studyId: string, linkId: string) =>
     api.post<FieldingLink>(`/studies/${studyId}/fielding/links/${linkId}/close`, {}),

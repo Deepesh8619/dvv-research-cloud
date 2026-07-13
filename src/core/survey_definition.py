@@ -22,6 +22,13 @@ from typing import Any, Literal
 
 SCHEMA_VERSION = "1.0"
 
+# Valid respondent-theme slugs (T24). A survey's `metadata["theme"]` is one of
+# these or absent; the front-end maps each to an accent palette (web THEMES).
+# Single source of truth for backend validation (fielding link stamp + settings).
+THEME_SLUGS = frozenset(
+    {"fmcg", "healthcare", "bfsi", "auto", "telecom", "retail", "indigo", "slate"}
+)
+
 
 class QuestionType(StrEnum):
     SINGLE = "single"

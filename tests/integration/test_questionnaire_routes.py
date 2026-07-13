@@ -679,6 +679,54 @@ def test_create_authored_reviewer_403(client):
     assert _create_authored(test_client).status_code == 403
 
 
+def test_settings_theme_persists_to_metadata(client):
+    """PATCH settings writes metadata.theme; the status echoes it back."""
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _create_authored(test_client)
+
+    resp = test_client.patch(
+        "/api/studies/study_q1/questionnaire/settings", json={"theme": "telecom"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["theme"] == "telecom"
+    # Durable: a fresh status read still reports it.
+    assert test_client.get("/api/studies/study_q1/questionnaire").json()["theme"] == "telecom"
+
+
+def test_settings_theme_unknown_slug_422(client):
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _create_authored(test_client)
+    resp = test_client.patch(
+        "/api/studies/study_q1/questionnaire/settings", json={"theme": "neon"}
+    )
+    assert resp.status_code == 422
+
+
+def test_settings_theme_null_clears(client):
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _create_authored(test_client)
+    test_client.patch("/api/studies/study_q1/questionnaire/settings", json={"theme": "bfsi"})
+    cleared = test_client.patch(
+        "/api/studies/study_q1/questionnaire/settings", json={"theme": None}
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["theme"] is None
+
+
+def test_settings_theme_reviewer_403(client):
+    test_client, session_factory, state = client
+    _make_study(session_factory)
+    _create_authored(test_client)
+    state["role"] = "reviewer"
+    resp = test_client.patch(
+        "/api/studies/study_q1/questionnaire/settings", json={"theme": "retail"}
+    )
+    assert resp.status_code == 403
+
+
 def _add_question(test_client, study_id="study_q1", **fields):
     return test_client.post(
         f"/api/studies/{study_id}/questionnaire/questions", json=fields

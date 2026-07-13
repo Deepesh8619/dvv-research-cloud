@@ -45,12 +45,14 @@ from api.db import (
 from api.models import (
     QuestionCreateRequest,
     QuestionnaireCreateRequest,
+    QuestionnaireSettingsRequest,
     QuestionnaireStatusResponse,
     QuestionnaireUploadResponse,
     QuestionOrderRequest,
     QuestionUpdateRequest,
 )
 from src.core.survey_definition import (
+    THEME_SLUGS,
     Block,
     Expression,
     Option,
@@ -219,6 +221,7 @@ def _status_response(questionnaire, survey: SurveyDefinition | None) -> Question
         # Only meaningful when status == 'error'; None otherwise. Names the root
         # cause (missing key, circuit-breaker abort) instead of a bare 'error'.
         error_detail=questionnaire.error_detail if questionnaire.status == "error" else None,
+        theme=metadata.get("theme"),
     )
 
 
@@ -448,6 +451,34 @@ async def get_questionnaire_status(
             "the questionnaire to try again."
         )
     return response
+
+
+@router.patch(
+    "/studies/{study_id}/questionnaire/settings",
+    response_model=QuestionnaireStatusResponse,
+)
+async def update_questionnaire_settings(
+    study_id: str,
+    request: QuestionnaireSettingsRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Set survey-level presentation settings — currently the respondent theme
+    slug (T24). (Owner/Analyst)
+
+    Writes `metadata["theme"]` into the questionnaire's own definition, so every
+    link opened afterwards inherits it as the default (a link may still override
+    at creation). An explicit null clears it. 422 on an unknown slug."""
+    if request.theme is not None and request.theme not in THEME_SLUGS:
+        raise HTTPException(status_code=422, detail=f"Unknown theme slug: {request.theme}")
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    if request.theme is None:
+        survey.metadata.pop("theme", None)
+    else:
+        survey.metadata["theme"] = request.theme
+    _save_definition(db, questionnaire, survey)
+    return _status_response(questionnaire, survey)
 
 
 @router.get("/studies/{study_id}/questionnaire/questions")

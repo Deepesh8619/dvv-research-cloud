@@ -201,6 +201,17 @@ class QuestionnaireStatusResponse(BaseModel):
     # missing ANTHROPIC_API_KEY surfaced by the extractor circuit breaker). None
     # otherwise, so a healthy questionnaire carries no stale error text.
     error_detail: str | None = None
+    # Respondent theme slug from metadata (T24); None when unset. Lets the builder
+    # show the currently-selected theme.
+    theme: str | None = None
+
+
+class QuestionnaireSettingsRequest(BaseModel):
+    """Survey-level presentation settings (T24). Currently only the respondent
+    theme slug; validated against THEME_SLUGS by the route. Explicit null clears
+    it back to the default."""
+
+    theme: str | None = None
 
 
 class QuestionUpdateRequest(BaseModel):
@@ -383,3 +394,12 @@ class FieldingRedirectsRequest(BaseModel):
     redirect_terminate: str | None = None
     redirect_overquota: str | None = None
     redirect_security: str | None = None
+
+
+class FieldingLinkCreateRequest(FieldingRedirectsRequest):
+    """Create-a-link body: redirect templates plus an optional respondent `theme`
+    slug (T24). The theme is stamped into the link's PINNED survey snapshot only;
+    the questionnaire's own definition is left untouched (a link-level
+    presentation choice, not an instrument edit)."""
+
+    theme: str | None = None
