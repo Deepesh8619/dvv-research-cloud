@@ -80,6 +80,10 @@ DEFAULT_ROUTES: dict[str, dict[str, str]] = {
     # whichever cloud backends have a key — trying each until one succeeds.
     "questionnaire.extract": {"backend": "auto", "model": ""},
     "questionnaire.verify": {"backend": "auto", "model": ""},
+    # Whole-document segmentation reconciliation (safety net over the regex
+    # segmenter, src/engines/questionnaire/reconciler.py). Same "auto" chain as
+    # extract/verify — local first, then whichever cloud key is present.
+    "questionnaire.reconcile_segmentation": {"backend": "auto", "model": ""},
     "report.narrative": {"backend": "claude", "model": "claude-fable-5"},
     # study.chat routes through src/ai/navigator.py (multi-tool agent loop on
     # Claude Haiku) rather than run_task — kept here so the task inventory in

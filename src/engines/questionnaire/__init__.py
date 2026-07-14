@@ -18,6 +18,7 @@ from src.engines.questionnaire.extractor import (
     extract_survey_definition,
     verify_question,
 )
+from src.engines.questionnaire.reconciler import reconcile_segmentation
 from src.engines.questionnaire.schema import (
     EXTRACTION_SCHEMA,
     VERIFICATION_SCHEMA,
@@ -33,5 +34,6 @@ __all__ = [
     "build_verification_prompt",
     "extract_question",
     "extract_survey_definition",
+    "reconcile_segmentation",
     "verify_question",
 ]

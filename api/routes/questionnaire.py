@@ -271,7 +271,7 @@ def _run_extraction(
             blocks = load_pdf(file_path)
 
         chunks = segment_into_questions(blocks)
-        survey = extract_survey_definition(chunks, study_id=study_id)
+        survey = extract_survey_definition(chunks, study_id=study_id, blocks=blocks)
         # Title from the original upload name, not the on-disk path (which is
         # renamed to the questionnaire id to avoid collisions).
         survey.title = Path(source_filename).stem

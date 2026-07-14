@@ -42,7 +42,8 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.questionnaire import schema
-from src.intake.questionnaire_loader import QuestionChunk
+from src.engines.questionnaire.reconciler import reconcile_segmentation
+from src.intake.questionnaire_loader import DocumentBlock, QuestionChunk
 
 # Question types whose whole point is a fixed answer list; an empty option list
 # on one of these is almost certainly a dropped/failed extraction, not a design.
@@ -472,15 +473,28 @@ def _extraction_summary(results: list[ExtractionResult]) -> dict[str, Any]:
 
 
 def extract_survey_definition(
-    chunks: list[QuestionChunk], study_id: str
+    chunks: list[QuestionChunk],
+    study_id: str,
+    blocks: list[DocumentBlock] | None = None,
 ) -> SurveyDefinition:
     """Extract + verify every chunk and assemble one draft SurveyDefinition.
+
+    When `blocks` (the full ordered DocumentBlock list the chunks came from) is
+    supplied, one LLM reconciliation pass runs FIRST to recover any questions the
+    regex segmenter missed (see reconciler.reconcile_segmentation); recovered
+    chunks then flow through the exact same extract->validate->verify pipeline.
+    Omitting `blocks` skips reconciliation — kept optional so unit tests that
+    hand-build chunk lists don't need real blocks (and don't pay an LLM call).
 
     Sequential per chunk (v1). Parallelising the per-chunk extract+verify calls
     is a reasonable follow-up once this runs against large real documents (each
     chunk is independent until the cross-chunk routing pass), but is not built
     here to keep the first version simple and its failure modes obvious.
     """
+    reconcile_meta: dict = {}
+    if blocks is not None:
+        chunks = reconcile_segmentation(blocks, chunks, reconcile_meta)
+
     results: list[ExtractionResult] = []
     consecutive_backend_failures = 0
     for chunk in chunks:
@@ -538,6 +552,10 @@ def extract_survey_definition(
     )
     survey.metadata["validation_errors"] = survey.validate()
     survey.metadata["extraction_summary"] = _extraction_summary(results)
+    # Document-level reconciliation status (e.g. the pass was unavailable). Only
+    # recorded when reconciliation ran and had something to report.
+    if reconcile_meta:
+        survey.metadata["reconciliation"] = reconcile_meta
     # Exception-based review: pre-approve the clean questions so the human only
     # reviews the exceptions. `verified` lives on the ExtractionResult (not the
     # persisted Question), so the clean set is computed HERE where results are in
@@ -579,7 +597,7 @@ def _main(argv: list[str]) -> int:
         return 2
 
     chunks = segment_into_questions(blocks)
-    survey = extract_survey_definition(chunks, study_id=path.stem)
+    survey = extract_survey_definition(chunks, study_id=path.stem, blocks=blocks)
     summary = survey.metadata["extraction_summary"]
 
     print(f"questions:          {len(survey.questions)}")

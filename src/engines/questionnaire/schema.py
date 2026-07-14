@@ -48,6 +48,11 @@ FLAG_EXTRACTION_CONFIG_ERROR = "EXTRACTION_CONFIG_ERROR"
 # a real document/extraction problem for this chunk, not an outage — never
 # triggers the circuit breaker.
 FLAG_EXTRACTION_MODEL_ERROR = "EXTRACTION_MODEL_ERROR"
+# Document-level (NOT per-question): the optional LLM reconciliation pass that
+# hunts for questions the regex segmenter missed could not run (backend down /
+# no route / bad output). Regex segmentation still stands, so extraction proceeds
+# on the original chunks — this flag just records that the safety net was skipped.
+FLAG_RECONCILIATION_UNAVAILABLE = "RECONCILIATION_UNAVAILABLE"
 
 
 # --- Extraction schema ------------------------------------------------------
@@ -264,4 +269,81 @@ def build_verification_prompt(chunk_text: str, extracted: dict) -> str:
         "----- STRUCTURED EXTRACTION -----\n"
         f"{json.dumps(extracted, ensure_ascii=False, indent=2)}\n"
         "----- END -----\n"
+    )
+
+
+# --- Segmentation reconciliation (LLM safety net over the regex segmenter) ---
+
+# Third LLM shape: run once over the WHOLE document AFTER the free regex
+# segmenter, to catch questions the regex could not anticipate. Every finding is
+# anchored to a numbered BLOCK INDEX (position in the DocumentBlock list), never
+# a free-text snippet — an index is exact where a paraphrased snippet is fragile
+# on merged-cell tables. The model is told which qids/ranges the regex ALREADY
+# found so it only reports what was MISSED. Consumed by
+# `src.engines.questionnaire.reconciler.reconcile_segmentation`.
+RECONCILE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "missed_questions": {
+            "type": "array",
+            "description": "One entry per question the regex segmenter MISSED. Empty if none.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "qid": {
+                        "type": ["string", "null"],
+                        "description": "A question id if the source shows one; null (with a "
+                        "note to review) if there is no visible label. Never guess a wrong id.",
+                    },
+                    "start_block_index": {
+                        "type": "integer",
+                        "description": "Index of the block where this missed question STARTS.",
+                    },
+                    "note_block_indices": {
+                        "type": "array",
+                        "description": "Indices of any note/instruction blocks immediately BEFORE "
+                        "start_block_index that belong WITH this question, not the preceding one.",
+                        "items": {"type": "integer"},
+                    },
+                },
+                "required": ["start_block_index"],
+            },
+        }
+    },
+    "required": ["missed_questions"],
+}
+
+
+def build_reconcile_prompt(numbered_blocks: str, known_ranges: str) -> str:
+    """Prompt for the whole-document segmentation reconciliation pass.
+
+    `numbered_blocks` is the document window with each block prefixed by its
+    zero-padded global index (e.g. `[003] Q Name | RESP_AGE ...`). `known_ranges`
+    lists the qids + block ranges the regex segmenter already found so the model
+    can skip them and report only what was missed.
+    """
+    return (
+        "A market-research questionnaire was split into questions by a fast REGEX "
+        "segmenter. Regex misses formats it wasn't built for. Your ONLY job is to find "
+        "questions the regex MISSED and anchor each to a block index.\n\n"
+        "Every block below is prefixed with its index like [003]. Reference blocks by that "
+        "index ONLY — never by quoting their text.\n\n"
+        "The regex ALREADY found these questions (qid: block start-end) — do NOT re-report "
+        "any of them:\n"
+        f"{known_ranges}\n\n"
+        "Report a MISSED question only when it is genuinely a distinct question the ranges "
+        "above did not capture. Specifically look for:\n"
+        "  (a) a question embedded in a prose paragraph with no table and no label at all;\n"
+        "  (b) a novel label convention that is neither 'Q5.'-style nor 'Q Name |'-style;\n"
+        "  (c) a scripter/programmer note sitting on its own that logically belongs to a "
+        "nearby question.\n\n"
+        "Rules:\n"
+        "  - Do NOT invent a question that isn't really there.\n"
+        "  - Prefer qid=null with a 'no visible label, review' intent over guessing a wrong id.\n"
+        "  - note_block_indices are only the note blocks immediately BEFORE start_block_index "
+        "that belong WITH the missed question.\n"
+        "  - Return an EMPTY list if the regex caught everything (the common case).\n\n"
+        "----- NUMBERED BLOCKS -----\n"
+        f"{numbered_blocks}\n"
+        "----- END BLOCKS -----\n"
     )
