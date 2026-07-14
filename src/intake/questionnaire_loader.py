@@ -67,6 +67,26 @@ _QID_RE = re.compile(r"^\s*([A-Za-z]{1,3})(\d+)([a-z]?)[.):]")
 _SECTION_RE = re.compile(r"^\s*SECTION\s+[A-Z0-9]", re.IGNORECASE)
 # Strong instruction/boundary markers even without a question-number prefix.
 _INSTRUCTION_RE = re.compile(r"^\s*(?:TERMINATE|SCREEN\s*OUT|SKIP\s*TO)\b", re.IGNORECASE)
+# Table-per-question format (real Google/GBK programming QREs): each question is
+# one Word table whose flattened text carries a `Q Name | <QID> | <QID> | ...`
+# row (cells repeat the value because of merged cells — take the first capture).
+# The qid is a named token (RESP_AGE, SS_EMP_STATUS), not a Q5-style label.
+_QNAME_RE = re.compile(r"(?im)^\s*Q ?Name\s*\|\s*([A-Za-z][A-Za-z0-9_]*)")
+# Programmer notes authored ABOVE their question that belong WITH the following
+# question table, not the preceding one.
+_NOTE_RE = re.compile(r"^\s*SCRIPTER\s*NOTE\b", re.IGNORECASE)
+
+
+def _table_qid(block: DocumentBlock) -> str | None:
+    """The token qid of a table-per-question block, or None for other blocks.
+
+    A table is a self-contained question iff it has a `Q Name | <token>` row.
+    Quota grids / outline tables have no such row and return None (they keep the
+    default 'attach to preceding chunk' behavior)."""
+    if block.block_type != "table":
+        return None
+    m = _QNAME_RE.search(block.text)
+    return m.group(1) if m else None
 
 
 def _detect_label(text: str) -> tuple[bool, str | None]:
@@ -340,6 +360,24 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
         )
 
     for block in blocks:
+        table_qid = _table_qid(block)
+        if table_qid is not None:
+            # A table-per-question block is its own chunk. Peel any immediately-
+            # preceding SCRIPTER NOTE paragraphs off the current chunk so they
+            # ride WITH this question rather than the previous one.
+            notes: list[DocumentBlock] = []
+            while (
+                current
+                and current[-1].block_type != "table"
+                and _NOTE_RE.match(current[-1].text)
+            ):
+                notes.insert(0, current.pop())
+            flush()
+            current = notes + [block]
+            current_qid = table_qid
+            seen_label = True
+            continue
+
         is_boundary, qid = _detect_label(block.text)
         if is_boundary:
             flush()

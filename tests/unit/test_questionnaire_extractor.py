@@ -254,6 +254,55 @@ def test_survey_definition_from_clean_chunks_validates():
     assert summary["verified_chunks"] == 2
 
 
+def test_auto_approved_qids_are_the_clean_verified_high_confidence_ones():
+    """Exception-based review: only questions that verified, carry no flag, AND
+    whose lowest field confidence >= the floor land in auto_approved_qids. Q3
+    has no flags but a below-floor options confidence, so it is NOT pre-approved."""
+    chunks = [
+        _chunk("Q1"),
+        _chunk("Q2", "Q2. Overall satisfaction?"),
+        _chunk("Q3", "Q3. Anything else?"),
+    ]
+    extraction_by_qid = {
+        "Q1": _extraction_content(qid="Q1"),
+        "Q2": _extraction_content(qid="Q2"),
+        # Below the 0.85 floor on options -> clean of flags but not pre-approved.
+        "Q3": _extraction_content(
+            qid="Q3",
+            confidence={"text": 0.9, "type": 0.9, "options": 0.5, "routing": 0.9},
+        ),
+    }
+
+    def fake_run(task, prompt, schema_arg, *args, **kwargs):
+        if task == "questionnaire.verify":
+            return _response({"faithful": True, "discrepancies": []})
+        # Match on the segmenter's qid-hint line, not a bare "Q3" (which also
+        # appears in the prompt's routing example "ASK IF Q3 = YES").
+        qid = next(q for q in ("Q1", "Q2", "Q3") if f"id as: {q}" in prompt)
+        return _response(extraction_by_qid[qid])
+
+    with patch(_EXTRACT, side_effect=fake_run):
+        survey = extract_survey_definition(chunks, study_id="study-clean")
+
+    assert survey.metadata["auto_approved_qids"] == ["Q1", "Q2"]
+
+
+def test_unverified_question_is_not_auto_approved():
+    """A question the verify pass could not run on (VERIFICATION_UNAVAILABLE) is
+    never pre-approved, even with high confidence — verified must be True."""
+    chunks = [_chunk("Q1")]
+
+    def fake_run(task, prompt, schema_arg, *args, **kwargs):
+        if task == "questionnaire.verify":
+            raise BackendUnavailable("verify offline")
+        return _response(_extraction_content(qid="Q1"))
+
+    with patch(_EXTRACT, side_effect=fake_run):
+        survey = extract_survey_definition(chunks, study_id="study-unverified")
+
+    assert survey.metadata["auto_approved_qids"] == []
+
+
 def test_unresolved_routing_qid_flagged_and_nulled():
     """Q2's show_if references Q9, which exists in no chunk -> flag + null it."""
     chunks = [_chunk("Q1"), _chunk("Q2", "Q2. Something?")]

@@ -293,9 +293,16 @@ def _run_extraction(
             definition_json=payload,
             definition_path=str(definition_path),
         )
+        # Exception-based review: pre-approve the clean questions (computed in the
+        # extractor, where per-result `verified` is in scope) so the reviewer is
+        # left with only the flagged/low-confidence exceptions. Status stays
+        # 'draft'; approve-all still gates on the remainder.
+        auto_approved = survey.metadata.get("auto_approved_qids", [])
+        if auto_approved:
+            set_questionnaire_approved_qids(job_db, questionnaire_id, auto_approved)
         logger.info(
             f"[{study_id}] Questionnaire {questionnaire_id} extracted: "
-            f"{len(survey.questions)} questions"
+            f"{len(survey.questions)} questions, {len(auto_approved)} auto-approved"
         )
     except Exception as exc:
         logger.error(

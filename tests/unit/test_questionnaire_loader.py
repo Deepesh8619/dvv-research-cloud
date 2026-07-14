@@ -225,3 +225,93 @@ def test_segment_table_stays_with_preceding_question() -> None:
     q7 = chunks[0]
     assert q7.candidate_qid == "Q7"
     assert any(b.block_type == "table" for b in q7.source_blocks)
+
+
+# --- table-per-question format (real Google/GBK programming QRE shape) -------
+
+
+def _qtable(text: str, idx: int) -> DocumentBlock:
+    """A table block whose flattened text is passed verbatim (as load_docx would
+    produce it) — merged cells repeat a value across a row, joined by ' | '."""
+    return DocumentBlock(block_type="table", text=text, paragraph_index=idx, rows=[[text]])
+
+
+def test_segment_table_per_question_each_qname_table_is_a_chunk() -> None:
+    blocks = [
+        _para("Study Overview", 0),  # preamble, no qid
+        _qtable("INTRO | INTRO\nQ Name | TQ_INTRO | TQ_INTRO\nWelcome.", 1),
+        _qtable("AGE | AGE\nQ Name | RESP_AGE | RESP_AGE\nWhat is your age?", 2),
+        _qtable("EMP | EMP\nQName | SS_EMP_STATUS\nEmployment status?", 3),
+    ]
+    chunks = segment_into_questions(blocks)
+    assert [c.candidate_qid for c in chunks] == [
+        None,
+        "TQ_INTRO",
+        "RESP_AGE",
+        "SS_EMP_STATUS",  # 'QName' (no space) also matches
+    ]
+    # The preamble paragraph is its own headless chunk, not dropped.
+    assert "Study Overview" in chunks[0].chunk_text
+
+
+def test_segment_qname_merged_cell_takes_first_token() -> None:
+    # Merged cells repeat the qid across the row; only the first is captured.
+    blocks = [_qtable("Q Name | RESP_AGE | RESP_AGE | RESP_AGE\ntext", 0)]
+    chunks = segment_into_questions(blocks)
+    assert chunks[0].candidate_qid == "RESP_AGE"
+
+
+def test_segment_table_without_qname_attaches_to_preceding_question() -> None:
+    blocks = [
+        _qtable("Q Name | TQ_BRAND | TQ_BRAND\nBrand awareness?", 0),
+        # A quota/outline grid with no 'Q Name' row keeps the old behavior.
+        _qtable("Quota Groups | Definition | Target N\nMicro | 2-9 | 75", 1),
+        _qtable("Q Name | RESP_AGE\nAge?", 2),
+    ]
+    chunks = segment_into_questions(blocks)
+    assert [c.candidate_qid for c in chunks] == ["TQ_BRAND", "RESP_AGE"]
+    # The Q-Name-less grid rides with the preceding TQ_BRAND chunk.
+    assert len(chunks[0].source_blocks) == 2
+    assert "Quota Groups" in chunks[0].chunk_text
+
+
+def test_segment_scripter_note_rides_with_following_question() -> None:
+    blocks = [
+        _qtable("Q Name | TQ_INTRO\nWelcome.", 0),
+        _para("SCRIPTER NOTE: randomize the options below", 1),
+        _qtable("Q Name | TQ_BRAND\nBrand awareness?", 2),
+    ]
+    chunks = segment_into_questions(blocks)
+    assert [c.candidate_qid for c in chunks] == ["TQ_INTRO", "TQ_BRAND"]
+    # The note belongs to TQ_BRAND (following), not TQ_INTRO (preceding).
+    assert "SCRIPTER NOTE" not in chunks[0].chunk_text
+    assert "SCRIPTER NOTE" in chunks[1].chunk_text
+
+
+def test_segment_table_format_builds_from_docx(tmp_path: Path) -> None:
+    """End-to-end via python-docx: real tables flatten to 'cell | cell' rows and
+    each Q-Name table becomes its own chunk with a token qid."""
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph("Programming QRE")  # preamble
+    for header, qid, prompt in (
+        ("AGE", "RESP_AGE", "What is your age?"),
+        ("EMP", "SS_EMP_STATUS", "Employment status?"),
+        ("COMP", "HID_COMP_SIZE", "Company size?"),
+    ):
+        t = doc.add_table(rows=3, cols=3)
+        for j in range(3):
+            t.cell(0, j).text = header
+            t.cell(1, j).text = "Q Name" if j == 0 else qid
+        t.cell(2, 0).text = prompt
+    out = tmp_path / "programming_qre.docx"
+    doc.save(str(out))
+
+    chunks = segment_into_questions(load_docx(out))
+    assert [c.candidate_qid for c in chunks] == [
+        None,
+        "RESP_AGE",
+        "SS_EMP_STATUS",
+        "HID_COMP_SIZE",
+    ]

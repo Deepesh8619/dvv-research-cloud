@@ -284,6 +284,49 @@ def test_approve_all_gate(client):
     assert test_client.get("/api/studies/study_q1/questionnaire").json()["status"] == "approved"
 
 
+def test_upload_auto_approves_clean_questions(client):
+    """Exception-based review: the extractor's clean set (metadata
+    auto_approved_qids) lands in approved_qids at draft time. Status stays
+    'draft'; approve-all then complains only about the flagged exception."""
+    test_client, session_factory, state = client
+    _make_study(session_factory)
+
+    q1 = Question(qid="Q1", text="Age?", type=QuestionType.NUMERIC,
+                  source_text="Q1", source_location="p1")
+    q2 = Question(qid="Q2", text="Gender?", type=QuestionType.SINGLE,
+                  options=[Option(code=1, label="M"), Option(code=2, label="F")],
+                  source_text="Q2", source_location="p2")
+    q3 = Question(qid="Q3", text="Brands?", type=QuestionType.MULTI,
+                  options=[Option(code=1, label="A")],
+                  source_text="Q3", source_location="p3",
+                  flags=["AMBIGUOUS_ROUTING"])
+    survey = SurveyDefinition(
+        study_id="study_q1", title="S", source="extracted", status="draft",
+        blocks=[Block(block_id="B1", question_ids=["Q1", "Q2", "Q3"])],
+        questions=[q1, q2, q3],
+    )
+    survey.metadata["validation_errors"] = survey.validate()
+    survey.metadata["auto_approved_qids"] = ["Q1", "Q2"]
+    state["survey"] = survey
+
+    _upload(test_client)
+    status = _wait_draft(test_client)
+    assert status["status"] == "draft"  # auto-approval does NOT complete the review
+    assert status["n_approved"] == 2
+
+    questions = test_client.get(
+        "/api/studies/study_q1/questionnaire/questions"
+    ).json()["questions"]
+    assert {q["qid"]: q["approved"] for q in questions} == {
+        "Q1": True, "Q2": True, "Q3": False,
+    }
+
+    # approve-all now complains only about the still-flagged Q3.
+    resp = test_client.post("/api/studies/study_q1/questionnaire/approve-all")
+    assert resp.status_code == 422
+    assert {u["qid"] for u in resp.json()["detail"]["unresolved"]} == {"Q3"}
+
+
 def test_approve_clean_bulk_approves_only_unflagged(client):
     """approve-clean bulk-approves every question with no blocking flag and
     leaves flagged ones untouched (still requiring a deliberate individual

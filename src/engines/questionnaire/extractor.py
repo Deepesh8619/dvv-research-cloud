@@ -81,6 +81,22 @@ _VERIFICATION_ERROR_KEY = "verification_error"
 # 2*N doomed LLM attempts to discover.
 _CIRCUIT_BREAKER_CHUNKS = 3
 
+# Exception-based review (product decision): a question is auto-approved
+# (pre-cleared so a human only reviews exceptions) ONLY when the pipeline is
+# fully confident in it — the grounded verify pass ran AND agreed, it carries
+# ZERO flags, and the LOWEST per-field confidence the model reported is at or
+# above this floor. Anything short of all three stays unapproved for human eyes.
+AUTO_APPROVE_CONFIDENCE_FLOOR = 0.85
+
+
+def _is_auto_approvable(result: ExtractionResult) -> bool:
+    """True if a question is clean enough to pre-approve (see the floor above)."""
+    if not result.verified or result.flags:
+        return False
+    confidences = result.confidence.values()
+    lowest = min(confidences) if confidences else 1.0
+    return lowest >= AUTO_APPROVE_CONFIDENCE_FLOOR
+
 
 @dataclass
 class ExtractionResult:
@@ -522,6 +538,13 @@ def extract_survey_definition(
     )
     survey.metadata["validation_errors"] = survey.validate()
     survey.metadata["extraction_summary"] = _extraction_summary(results)
+    # Exception-based review: pre-approve the clean questions so the human only
+    # reviews the exceptions. `verified` lives on the ExtractionResult (not the
+    # persisted Question), so the clean set is computed HERE where results are in
+    # scope and stashed on metadata for the route to persist into approved_qids.
+    survey.metadata["auto_approved_qids"] = [
+        r.question.qid for r in results if _is_auto_approvable(r)
+    ]
     return survey
 
 
