@@ -53,6 +53,12 @@ FLAG_EXTRACTION_MODEL_ERROR = "EXTRACTION_MODEL_ERROR"
 # no route / bad output). Regex segmentation still stands, so extraction proceeds
 # on the original chunks — this flag just records that the safety net was skipped.
 FLAG_RECONCILIATION_UNAVAILABLE = "RECONCILIATION_UNAVAILABLE"
+# A hidden/derived variable (qid prefixed HID_): a programmer-computed flag
+# derived from other answers, NOT a respondent-facing question. The platform has
+# no derived-variable engine, so the honest handling is detect + label (force
+# type=info + this flag) so a reviewer knows it needs manual setup — never a
+# mis-extracted, unanswerable "question".
+FLAG_DERIVED_VARIABLE = "DERIVED_VARIABLE"
 
 
 # --- Extraction schema ------------------------------------------------------
@@ -225,8 +231,58 @@ _RULES = (
 )
 
 
+# GBK/Google-style "programming spec" questions are authored as a labelled table
+# that the loader serializes into `Label: value` lines. When those labels are
+# present the model must map each row to the right structured field — teaching
+# that mapping is what makes routing/terminate/validation extraction accurate
+# instead of the model guessing what "Among who" / "Other details" mean. Only
+# appended when the convention is detected, so ordinary prose chunks aren't
+# burdened with it.
+_FIELD_SPEC_GUIDANCE = (
+    """PROGRAMMING-SPEC TABLE: this chunk uses labelled rows (`Q Name:`, `Response list:`,
+`Among who:`, `Other details:`, ...). Map each label to the right field:
+  - `Q Name:` -> the qid (trust the segmenter hint).
+  - `Response list:` and the `code: label` lines under it -> options.
+  - `Among who:` -> the SHOW condition (routing.show_if).
+      * "(blank)" means asked of EVERYONE: no show_if, routing.verbatim_text = "".
+      * A simple "VAR = value" -> {"op":"eq","qid":"VAR","value":N}.
+      * Multi-branch / bracketed / heavy "and/or" logic: DO NOT guess a structure.
+        Set routing.ambiguous = true and copy the FULL text into routing.verbatim_text.
+  - `Other details:` can hold SEVERAL different things — read carefully:
+      * "TERMINATE if ..." -> routing.terminate_if (patterns below).
+      * A numeric entry range like "Allow 0-999 to be entered" is INPUT VALIDATION,
+        NOT routing — never put it in show_if/terminate_if; record it in `instructions`.
+      * "Make N exclusive" -> note in `instructions` (option code N is exclusive).
+      * A fielding quota ("Quota of n=100 ...") is NOT a question field -> `instructions`.
+  - `Randomize:` with real (non-blank) content -> the options are randomized.
+  - `Q type:` with real content (e.g. "Multi-select up to 3") is a type/behaviour hint.
+
+TERMINATE patterns in `Other details:` — the qid is THIS question's own qid unless
+another is explicitly named. Map with existing ops only:
+  - "TERMINATE if 3-99 selected" (contiguous code range) ->
+      {"op":"and","children":[{"op":"gt","qid":Q,"value":2},{"op":"lt","qid":Q,"value":100}]}
+      (value > low-1 AND value < high+1). If the codes are enumerated, not a true
+      range, use {"op":"in","qid":Q,"values":[...]} instead.
+  - "TERMINATE if 5,6 selected" (specific codes) -> {"op":"in","qid":Q,"values":[5,6]}.
+  - "TERMINATE if 1 not selected" (negation) ->
+      {"op":"not","children":[{"op":"selected","qid":Q,"value":1}]}.
+  - If a condition references a value that is MISSING, blank, or a placeholder like
+    "??" in the source, DO NOT invent a number. Extract only the sub-conditions you
+    ARE confident about, set routing.ambiguous = true, and keep the full sentence
+    verbatim in routing.verbatim_text.
+"""
+)
+
+
+def _has_field_spec(text: str) -> bool:
+    """True when a chunk carries the programming-spec label convention."""
+    low = text.lower()
+    return "q name:" in low or "among who:" in low or "other details:" in low
+
+
 def build_extraction_prompt(chunk_text: str, candidate_qid: str | None) -> str:
     """Prompt for the single-chunk extraction pass."""
+    spec = f"{_FIELD_SPEC_GUIDANCE}\n" if _has_field_spec(chunk_text) else ""
     hint = (
         f"The document segmenter tagged this chunk's question id as: {candidate_qid}. "
         "Use it unless the text clearly shows a different id.\n\n"
@@ -238,6 +294,7 @@ def build_extraction_prompt(chunk_text: str, candidate_qid: str | None) -> str:
         "structured JSON. The chunk was segmented from a real questionnaire document.\n\n"
         f"{_TYPE_GUIDANCE}\n\n"
         f"{_RULES}\n"
+        f"{spec}"
         f"{hint}"
         "----- SOURCE CHUNK -----\n"
         f"{chunk_text}\n"

@@ -459,6 +459,85 @@ def test_no_circuit_break_when_one_chunk_succeeds_first():
     assert len(survey.questions) == 5
 
 
+# --- field-semantics: derived vars, terminate shapes, placeholder honesty ----
+
+
+def test_hid_prefixed_qid_forced_info_and_flagged():
+    """A HID_ (hidden/derived) variable is not a real question: force type=info
+    and flag DERIVED_VARIABLE even though the LLM returned a 'single' with options."""
+    content = _extraction_content(qid="HID_COMP_SIZE", qtype="single")
+    chunk = _chunk("HID_COMP_SIZE", "Q Name: HID_COMP_SIZE\nOther details: (blank)")
+
+    with patch(_EXTRACT, return_value=_response(content)):
+        result = extract_question(chunk)
+
+    assert result.question.type == QuestionType.INFO
+    assert schema.FLAG_DERIVED_VARIABLE in result.flags
+    # type=info suppresses the empty-options check (would be irrelevant noise).
+    assert schema.FLAG_EMPTY_OPTIONS not in result.flags
+
+
+def test_terminate_range_expression_shape_is_built():
+    """The pipeline correctly assembles the range-terminate Expression the prompt
+    is designed to elicit ('TERMINATE if 3-99 selected' -> value>2 AND value<100)."""
+    routing = {
+        "verbatim_text": "TERMINATE if 3-99 selected",
+        "ambiguous": False,
+        "show_if": None,
+        "terminate_if": {
+            "op": "and",
+            "children": [
+                {"op": "gt", "qid": "SS_EMP_STATUS", "value": 2},
+                {"op": "lt", "qid": "SS_EMP_STATUS", "value": 100},
+            ],
+        },
+    }
+    content = _extraction_content(qid="SS_EMP_STATUS", routing=routing)
+    with patch(_EXTRACT, return_value=_response(content)):
+        result = extract_question(_chunk("SS_EMP_STATUS"))
+
+    term = result.question.terminate_if
+    assert term is not None
+    assert term.op == "and"
+    assert {c.op for c in term.children} == {"gt", "lt"}
+    # Verbatim sentence is attached back to the structured expression.
+    assert term.verbatim_text == "TERMINATE if 3-99 selected"
+
+
+def test_placeholder_value_routing_flagged_ambiguous_no_invented_value():
+    """A source with an unfilled placeholder ('age>??') must not get an invented
+    number: the model sets ambiguous=true + null structured routing, and the
+    verbatim (with the '??') is preserved for a human to resolve."""
+    routing = {
+        "verbatim_text": "TERMINATE if age<25 or age>?? OR if 99 selected",
+        "ambiguous": True,
+        "show_if": None,
+        "terminate_if": None,
+    }
+    content = _extraction_content(qid="RESP_AGE", routing=routing)
+    with patch(_EXTRACT, return_value=_response(content)):
+        result = extract_question(_chunk("RESP_AGE"))
+
+    assert result.question.terminate_if is None  # no invented structure
+    assert schema.FLAG_AMBIGUOUS_ROUTING in result.flags
+    assert "??" in result.question.validation["routing_verbatim"]
+
+
+def test_extraction_prompt_teaches_field_spec_when_convention_present():
+    """When a chunk carries the programming-spec labels, the prompt includes the
+    field-mapping guidance AND the do-not-invent-placeholder instruction."""
+    with_spec = schema.build_extraction_prompt(
+        "Q Name: RESP_AGE\nAmong who: (blank)\nOther details: Allow 0-999", "RESP_AGE"
+    )
+    assert "PROGRAMMING-SPEC TABLE" in with_spec
+    assert "DO NOT invent a number" in with_spec
+    assert "routing.ambiguous = true" in with_spec
+
+    # A plain prose chunk without the convention does not get the extra section.
+    without = schema.build_extraction_prompt("Q1. What is your age?", "Q1")
+    assert "PROGRAMMING-SPEC TABLE" not in without
+
+
 # --- end-to-end route resolution (unpatched run_task) -----------------------
 
 

@@ -58,6 +58,13 @@ export const FLAG_INFO: Record<string, FlagInfo> = {
     blocking: false,
     severity: 'warn',
   },
+  DERIVED_VARIABLE: {
+    label: 'Derived / hidden variable',
+    description:
+      'This is a hidden variable (HID_ prefix) computed by the programmer from other answers, not a respondent-facing question. It has no routing to extract — set up its derivation manually.',
+    blocking: false,
+    severity: 'warn',
+  },
 }
 
 export function flagInfo(code: string): FlagInfo {

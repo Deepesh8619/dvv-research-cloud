@@ -68,10 +68,26 @@ _SECTION_RE = re.compile(r"^\s*SECTION\s+[A-Z0-9]", re.IGNORECASE)
 # Strong instruction/boundary markers even without a question-number prefix.
 _INSTRUCTION_RE = re.compile(r"^\s*(?:TERMINATE|SCREEN\s*OUT|SKIP\s*TO)\b", re.IGNORECASE)
 # Table-per-question format (real Google/GBK programming QREs): each question is
-# one Word table whose flattened text carries a `Q Name | <QID> | <QID> | ...`
-# row (cells repeat the value because of merged cells — take the first capture).
-# The qid is a named token (RESP_AGE, SS_EMP_STATUS), not a Q5-style label.
-_QNAME_RE = re.compile(r"(?im)^\s*Q ?Name\s*\|\s*([A-Za-z][A-Za-z0-9_]*)")
+# one Word table whose serialized text carries a `Q Name` row naming the qid.
+# The separator is `|` on the raw pipe-join path and `:` on the clean Q-Name
+# serialization path (see _serialize_qname_table), so accept either. The qid is a
+# named token (RESP_AGE, SS_EMP_STATUS), not a Q5-style label.
+_QNAME_RE = re.compile(r"(?im)^\s*Q ?Name\s*[|:]\s*([A-Za-z][A-Za-z0-9_]*)")
+
+# Boilerplate placeholder cell values that mean "nothing was filled in here",
+# NOT real content — stripped whole-cell (case-insensitively) from Q-Name
+# question tables so neither the LLM nor a human reading source_text sees
+# template noise. Exact strings observed in real GBK programming QREs.
+_BOILERPLATE_CELLS = frozenset(
+    s.lower()
+    for s in (
+        "If Custom, specify:",
+        "If not All, specify:",
+        "If Yes, details:",
+        "Provide additional scripting details here",
+        "None",
+    )
+)
 # Programmer notes authored ABOVE their question that belong WITH the following
 # question table, not the preceding one.
 _NOTE_RE = re.compile(r"^\s*SCRIPTER\s*NOTE\b", re.IGNORECASE)
@@ -87,6 +103,61 @@ def _table_qid(block: DocumentBlock) -> str | None:
         return None
     m = _QNAME_RE.search(block.text)
     return m.group(1) if m else None
+
+
+def _clean_cell(value: str) -> str:
+    """A cell's stripped content, or '' if it is only a boilerplate placeholder."""
+    v = value.strip()
+    return "" if v.lower() in _BOILERPLATE_CELLS else v
+
+
+def _row_value(cells: list[str]) -> str:
+    """Collapse a row's value cells: drop merged-cell duplicates and boilerplate.
+
+    Merged Word cells repeat the same value across every column; we keep only
+    the distinct real values (in order). Genuinely distinct cells — a rare true
+    multi-column row — are preserved, joined by ' | '."""
+    seen: list[str] = []
+    for cell in cells:
+        c = _clean_cell(cell)
+        if c and c not in seen:
+            seen.append(c)
+    return " | ".join(seen)
+
+
+def _serialize_qname_table(rows: list[list[str]]) -> str:
+    """Serialize a Q-Name question table as clean `Label: value` lines.
+
+    Naive ' | '.join(row) turns a merged-cell row into
+    `Q Name | RESP_AGE | RESP_AGE | RESP_AGE` — repetitive noise that confuses
+    the LLM extractor and is unpleasant to review. Here each row becomes its
+    label (col A) plus the de-duplicated, boilerplate-stripped value, so both the
+    model and a human see clean content. Generic (non-Q-Name) tables keep the
+    untouched pipe-join path — this only runs when a `Q Name` row is present.
+    """
+    lines: list[str] = []
+    for row in rows:
+        if not row:
+            continue
+        label = row[0].strip()
+        value = _row_value(row[1:]) if len(row) > 1 else ""
+        if not label:
+            # No label cell (a 'Response list:' header, or an option value whose
+            # code cell merged away): emit the value alone.
+            if value:
+                lines.append(value)
+        elif value == label:
+            # All cells identical (section header, question text): emit once.
+            lines.append(label)
+        elif value:
+            # Labelled row with real content: `Label: value` (e.g. option
+            # `99: Prefer not to answer`, `Q Name: RESP_AGE`).
+            lines.append(f"{label}: {value}")
+        else:
+            # Labelled but empty (e.g. `Among who` on a question asked of all,
+            # or a blank `Q type`): make the emptiness explicit for the reader.
+            lines.append(f"{label}: (blank)")
+    return "\n".join(lines)
 
 
 def _detect_label(text: str) -> tuple[bool, str | None]:
@@ -167,7 +238,13 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
         elif child in table_map:
             table: Table = table_map[child]
             rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
-            serialized = "\n".join(" | ".join(r) for r in rows)
+            # A Q-Name question table gets clean `Label: value` serialization
+            # (merged-cell duplication + boilerplate removed); generic tables
+            # (quota grids, outlines) keep the untouched pipe-join.
+            clean = _serialize_qname_table(rows)
+            serialized = clean if _QNAME_RE.search(clean) else "\n".join(
+                " | ".join(r) for r in rows
+            )
             blocks.append(
                 DocumentBlock(
                     block_type="table",

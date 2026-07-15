@@ -205,6 +205,27 @@ def _question_from_raw(content: dict, chunk: QuestionChunk) -> tuple[Question, d
     return question, routing
 
 
+def _flag_derived_variable(result: ExtractionResult, chunk: QuestionChunk) -> None:
+    """Detect a hidden/derived variable and label it honestly (no derivation).
+
+    A ``HID_*`` qid is a programmer-computed flag derived from OTHER answers, not
+    a respondent-facing question — its derivation logic usually isn't even in the
+    document. The platform has no derived-variable engine, so the honest fix is
+    detection + labelling, not derivation: force ``type=info`` and flag
+    ``DERIVED_VARIABLE`` so the review UI says "needs manual setup" instead of
+    surfacing a mis-extracted, unanswerable question. Run BEFORE validation so
+    the info type suppresses the (irrelevant) empty-options check.
+
+    Detection is by the ``HID_`` qid prefix, which is the reliable signal in real
+    GBK QREs (and the loader now strips the "provide additional scripting
+    details" boilerplate that would have been the only other, fuzzier signal).
+    """
+    qid = chunk.candidate_qid or result.question.qid or ""
+    if qid.upper().startswith("HID_"):
+        result.question.type = QuestionType.INFO
+        result.add_flag(schema.FLAG_DERIVED_VARIABLE)
+
+
 def _validate_question(result: ExtractionResult, routing: dict) -> None:
     """Deterministic per-chunk validation. No LLM calls.
 
@@ -323,6 +344,7 @@ def extract_question(chunk: QuestionChunk) -> ExtractionResult:
         question=question,
         confidence=dict(question.extraction_confidence),
     )
+    _flag_derived_variable(result, chunk)  # may flip type -> info before validation
     _validate_question(result, routing)
     return result
 

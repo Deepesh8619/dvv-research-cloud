@@ -17,6 +17,7 @@ import pytest
 from src.intake.questionnaire_loader import (
     DocumentBlock,
     _cluster_columns,
+    _serialize_qname_table,
     _sort_reading_order,
     load_docx,
     load_pdf,
@@ -315,3 +316,83 @@ def test_segment_table_format_builds_from_docx(tmp_path: Path) -> None:
         "SS_EMP_STATUS",
         "HID_COMP_SIZE",
     ]
+
+
+# --- Q-Name table serialization (merged-cell cleanup + boilerplate strip) ----
+
+
+def test_serialize_qname_table_dedups_merged_cells_and_strips_boilerplate() -> None:
+    """The merged-cell duplication pattern from the real GBK QRE collapses to
+    clean `Label: value` lines; boilerplate-only cells become blank."""
+    rows = [
+        ["AGE", "AGE", "AGE", "AGE"],  # section header: all identical -> once
+        ["Q Name", "RESP_AGE", "RESP_AGE", "RESP_AGE"],
+        ["What is your age?"] * 4,  # question text: once, unlabelled
+        ["", "Response list:", "Response list:", "Response list:"],
+        ["99", "Prefer not to answer", "Prefer not to answer", "Prefer not to answer"],
+        # merged col B blank + boilerplate in C/D -> asked of everyone (blank)
+        ["Among who", "", "If not All, specify:", "If not All, specify:"],
+        ["Q type", "", "If Custom, specify:", "If Custom, specify:"],
+        ["Randomize", "", "If Yes, details:", "If Yes, details:"],
+        ["Other details", "TERMINATE if 3-99 selected", "TERMINATE if 3-99 selected", ""],
+    ]
+    out = _serialize_qname_table(rows)
+    lines = out.splitlines()
+
+    assert lines[0] == "AGE"  # section header emitted once, not "AGE | AGE | AGE"
+    assert "Q Name: RESP_AGE" in lines
+    assert "What is your age?" in lines  # label == value -> single line
+    assert "Response list:" in lines  # empty label cell -> value alone
+    assert "99: Prefer not to answer" in lines  # code: label
+    assert "Among who: (blank)" in lines  # boilerplate-only -> blank
+    assert "Q type: (blank)" in lines
+    assert "Randomize: (blank)" in lines
+    assert "Other details: TERMINATE if 3-99 selected" in lines
+    # No merged-cell duplication anywhere and no boilerplate leaked through.
+    assert "RESP_AGE | RESP_AGE" not in out
+    assert "If not All, specify:" not in out
+    assert "If Custom, specify:" not in out
+
+
+def test_serialize_qname_table_keeps_genuinely_distinct_cells() -> None:
+    """A true multi-column row (distinct, non-duplicate cells) is preserved,
+    not collapsed — only merge duplicates are dropped."""
+    out = _serialize_qname_table([["Scale", "Low", "Mid", "High"]])
+    assert out == "Scale: Low | Mid | High"
+
+
+def test_docx_qname_table_serialized_clean_end_to_end(tmp_path: Path) -> None:
+    """The real .docx path (not just hand-built rows): a merged-cell Q-Name table
+    loads with clean, deduplicated, boilerplate-free text."""
+    from docx import Document
+
+    doc = Document()
+    t = doc.add_table(rows=5, cols=4)
+    # Simulate merged cells by writing the same value across the row.
+    for j in range(4):
+        t.cell(0, j).text = "EMPLOYMENT"
+        t.cell(1, j).text = "Q Name" if j == 0 else "SS_EMP_STATUS"
+        t.cell(2, j).text = "1" if j == 0 else "Employed full-time"
+    # Among who: blank value + boilerplate template in the trailing columns.
+    t.cell(3, 0).text = "Among who"
+    for j in (2, 3):
+        t.cell(3, j).text = "If not All, specify:"
+    # Other details: real terminate content, duplicated across the merge.
+    t.cell(4, 0).text = "Other details"
+    for j in range(1, 4):
+        t.cell(4, j).text = "TERMINATE if 3-99 selected"
+    out_path = tmp_path / "emp.docx"
+    doc.save(str(out_path))
+
+    blocks = load_docx(out_path)
+    table = next(b for b in blocks if b.block_type == "table")
+
+    assert "Q Name: SS_EMP_STATUS" in table.text
+    assert "1: Employed full-time" in table.text
+    assert "Among who: (blank)" in table.text
+    assert "Other details: TERMINATE if 3-99 selected" in table.text
+    # The merged-cell noise and boilerplate are gone.
+    assert "SS_EMP_STATUS | SS_EMP_STATUS" not in table.text
+    assert "If not All, specify:" not in table.text
+    # Rows are still preserved for any downstream grid detection.
+    assert table.rows is not None
