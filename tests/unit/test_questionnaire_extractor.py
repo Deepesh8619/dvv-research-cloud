@@ -533,6 +533,12 @@ def test_extraction_prompt_teaches_field_spec_when_convention_present():
     assert "DO NOT invent a number" in with_spec
     assert "routing.ambiguous = true" in with_spec
 
+    # The compound-OR worked example (numeric + placeholder + selected code) is
+    # taught, so the model handles "age<25 OR age>?? OR if 99 selected" by leaving
+    # terminate_if null rather than emitting a partial, under-terminating OR.
+    assert "age>?? OR if 99 selected" in with_spec
+    assert "UNDER-terminates" in with_spec
+
     # A plain prose chunk without the convention does not get the extra section.
     without = schema.build_extraction_prompt("Q1. What is your age?", "Q1")
     assert "PROGRAMMING-SPEC TABLE" not in without

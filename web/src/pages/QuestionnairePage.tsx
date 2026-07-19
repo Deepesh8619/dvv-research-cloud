@@ -188,6 +188,14 @@ function QuestionDetail({
   onApproved: (qid: string) => void
 }) {
   const [state, setState] = useState<DetailState>(() => buildDetailState(q))
+  // Display-only fallback: the extractor stashes the routing sentence in
+  // question.validation.routing_verbatim (one shared string) so it survives even
+  // when the structured show_if/terminate_if is nulled out as unresolvable — the
+  // exact ambiguous case. It is NOT wired into `state`/handleSave, so it never
+  // gets written back onto a specific show_if/terminate_if expression on the next
+  // PATCH; it only enriches the verbatim panel below.
+  const routingVerbatim =
+    typeof q.validation?.routing_verbatim === 'string' ? q.validation.routing_verbatim : null
   const [saving, setSaving] = useState(false)
   const [approving, setApproving] = useState(false)
   const [problems, setProblems] = useState<string[]>([])
@@ -394,7 +402,7 @@ function QuestionDetail({
       <RoutingBlock
         label="Show this question if"
         flat={state.showIf}
-        verbatim={state.showIfVerbatim}
+        verbatim={state.showIfVerbatim ?? routingVerbatim}
         priorQids={priorQids.filter((qid) => qid !== q.qid)}
         canWrite={canWrite}
         onChangeFlat={(f) => set('showIf', f)}
@@ -402,7 +410,7 @@ function QuestionDetail({
       <RoutingBlock
         label="Terminate / screen out if"
         flat={state.terminateIf}
-        verbatim={state.terminateIfVerbatim}
+        verbatim={state.terminateIfVerbatim ?? routingVerbatim}
         priorQids={priorQids}
         canWrite={canWrite}
         onChangeFlat={(f) => set('terminateIf', f)}

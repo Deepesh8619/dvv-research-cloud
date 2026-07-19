@@ -266,6 +266,13 @@ another is explicitly named. Map with existing ops only:
   - "TERMINATE if 5,6 selected" (specific codes) -> {"op":"in","qid":Q,"values":[5,6]}.
   - "TERMINATE if 1 not selected" (negation) ->
       {"op":"not","children":[{"op":"selected","qid":Q,"value":1}]}.
+  - COMPOUND "OR" mixing a numeric comparison, a placeholder, and a selected code,
+    e.g. "TERMINATE if age<25 OR age>?? OR if 99 selected": the "age>??" branch has a
+    missing value, so the FULL OR cannot be faithfully captured. Do NOT emit a partial
+    terminate_if holding only the confident "99 selected" branch — a partial OR silently
+    UNDER-terminates (age<25 respondents would slip through), which is worse than leaving
+    the whole thing for the human. Set terminate_if = null, routing.ambiguous = true, and
+    copy the ENTIRE sentence into routing.verbatim_text.
   - If a condition references a value that is MISSING, blank, or a placeholder like
     "??" in the source, DO NOT invent a number. Extract only the sub-conditions you
     ARE confident about, set routing.ambiguous = true, and keep the full sentence
