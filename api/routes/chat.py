@@ -10,13 +10,10 @@ which tools to call; every number comes from the deterministic engines
 import json
 import logging
 import re
-import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from api.auth import get_current_user
 from api.config import STUDIES_DIR

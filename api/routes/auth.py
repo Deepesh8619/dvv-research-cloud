@@ -2,14 +2,10 @@
 
 import hmac
 import logging
-import sys
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from api.auth import (
     UserRole,

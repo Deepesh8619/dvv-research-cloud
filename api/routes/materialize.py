@@ -14,14 +14,10 @@ the fresh full dataset. Zero completes -> 422, not a crash.
 """
 
 import logging
-import sys
-from pathlib import Path
 
 import polars as pl
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from api.auth import UserRole, require_role
 from api.config import STUDIES_DIR

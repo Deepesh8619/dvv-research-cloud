@@ -20,15 +20,12 @@ Roles (api/auth.py): owner/analyst may upload and edit; reviewer is read-only
 """
 
 import logging
-import sys
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from api.auth import UserRole, get_current_user, require_role
 from api.config import STUDIES_DIR

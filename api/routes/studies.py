@@ -1,7 +1,6 @@
 """Study endpoints."""
 
 import logging
-import sys
 import threading
 from pathlib import Path
 from uuid import uuid4
@@ -9,8 +8,6 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from api.auth import UserRole, get_current_user, require_role
 from api.config import (

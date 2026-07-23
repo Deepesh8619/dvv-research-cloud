@@ -1,14 +1,11 @@
 """Public endpoints for share links (no auth required)."""
 
 import logging
-import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from api.db import (
     get_db,
