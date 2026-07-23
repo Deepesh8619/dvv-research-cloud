@@ -320,6 +320,7 @@ export interface QuestionUpdate {
   rows?: Array<Record<string, unknown>> | null
   cols?: Array<Record<string, unknown>> | null
   required?: boolean | null
+  randomize_options?: boolean | null
   show_if?: Record<string, unknown> | null
   terminate_if?: Record<string, unknown> | null
 }
@@ -332,6 +333,7 @@ export interface QuestionCreate {
   rows?: Array<Record<string, unknown>> | null
   cols?: Array<Record<string, unknown>> | null
   required?: boolean
+  randomize_options?: boolean
   show_if?: Record<string, unknown> | null
   terminate_if?: Record<string, unknown> | null
 }

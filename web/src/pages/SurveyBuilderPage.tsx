@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import axios from 'axios'
 import {
@@ -115,6 +115,7 @@ interface DetailState {
   text: string
   type: string
   required: boolean
+  randomizeOptions: boolean
   options: QuestionOption[]
   rows: QuestionOption[]
   cols: QuestionOption[]
@@ -128,6 +129,7 @@ function buildDetailState(q: Question): DetailState {
     text: q.text,
     type: q.type,
     required: q.required,
+    randomizeOptions: q.randomize_options,
     options: (q.options ?? []).map((o) => ({ ...o })),
     rows: (q.rows ?? []).map((o) => ({ ...o })),
     cols: (q.cols ?? []).map((o) => ({ ...o })),
@@ -150,6 +152,7 @@ function QuestionDetail({
   onSaved: (oldQid: string, updated: Question) => void
 }) {
   const [state, setState] = useState<DetailState>(() => buildDetailState(q))
+  const textRef = useRef<HTMLTextAreaElement>(null)
   const [saving, setSaving] = useState(false)
   const [problems, setProblems] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -170,6 +173,23 @@ function QuestionDetail({
   const hasOptions = OPTION_TYPES.has(state.type)
   const isGrid = state.type === 'grid_single'
 
+  // Insert a piping marker {QID} at the cursor (SurveyJS interpolates it live).
+  const insertPiping = (qid: string) => {
+    if (!qid) return
+    const el = textRef.current
+    const marker = `{${qid}}`
+    const pos = el ? el.selectionStart : state.text.length
+    const next = state.text.slice(0, pos) + marker + state.text.slice(pos)
+    set('text', next)
+    // Restore focus + caret after the inserted marker.
+    requestAnimationFrame(() => {
+      if (el) {
+        el.focus()
+        el.setSelectionRange(pos + marker.length, pos + marker.length)
+      }
+    })
+  }
+
   const handleSave = async () => {
     setSaving(true)
     setProblems([])
@@ -183,6 +203,7 @@ function QuestionDetail({
         text: state.text,
         type: state.type,
         required: state.required,
+        randomize_options: hasOptions ? state.randomizeOptions : false,
         options: hasOptions ? state.options.map((o) => ({ code: o.code, label: o.label })) : [],
         rows: isGrid ? state.rows.map((o) => ({ code: o.code, label: o.label })) : null,
         cols: isGrid ? state.cols.map((o) => ({ code: o.code, label: o.label })) : null,
@@ -225,20 +246,49 @@ function QuestionDetail({
 
       {/* Text */}
       <div>
-        <label className="text-xs font-medium uppercase tracking-wide text-slate-500 block mb-1">
-          Question text
-        </label>
+        <div className="flex items-center justify-between mb-1">
+          <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
+            Question text
+          </label>
+          {canWrite && priorQids.length > 0 && (
+            <label className="flex items-center gap-1.5 text-xs text-slate-500">
+              Insert piping:
+              <select
+                value=""
+                onChange={(e) => {
+                  insertPiping(e.target.value)
+                  e.target.value = ''
+                }}
+                className="h-7 px-2 rounded border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500"
+                title="Inserts {QID} — shows the respondent's earlier answer, rendered live in the survey."
+              >
+                <option value="">answer of…</option>
+                {priorQids.map((pq) => (
+                  <option key={pq} value={pq}>
+                    {pq}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
         <textarea
+          ref={textRef}
           value={state.text}
           disabled={!canWrite}
           onChange={(e) => set('text', e.target.value)}
           rows={2}
           className="w-full px-3 py-2 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:bg-slate-50"
         />
+        {state.text.includes('{') && (
+          <p className="text-xs text-slate-400 mt-1">
+            {'{QID}'} markers show the respondent's earlier answer, rendered live in the survey.
+          </p>
+        )}
       </div>
 
-      {/* Type + required */}
-      <div className="flex items-end gap-6">
+      {/* Type + required + randomize */}
+      <div className="flex items-end gap-6 flex-wrap">
         <div>
           <label className="text-xs font-medium uppercase tracking-wide text-slate-500 block mb-1">Type</label>
           <select
@@ -264,6 +314,18 @@ function QuestionDetail({
           />
           Required
         </label>
+        {hasOptions && (
+          <label className="flex items-center gap-2 text-sm text-slate-700 h-9">
+            <input
+              type="checkbox"
+              checked={state.randomizeOptions}
+              disabled={!canWrite}
+              onChange={(e) => set('randomizeOptions', e.target.checked)}
+              className="h-4 w-4"
+            />
+            Randomize options
+          </label>
+        )}
       </div>
 
       {/* Options */}
