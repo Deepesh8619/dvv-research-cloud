@@ -70,10 +70,19 @@ export default function DashboardPage() {
           </Link>
         </div>
         {recent.length === 0 ? (
-          <div className="p-10 text-center">
-            <p className="text-slate-500 mb-3">No projects yet.</p>
-            <Link to="/projects/new" className="text-sky-600 hover:text-sky-700 text-sm font-medium">
-              Create your first project
+          <div className="px-6 py-14 flex flex-col items-center text-center">
+            <div className="w-12 h-12 rounded-xl bg-primary-50 text-primary-500 flex items-center justify-center mb-4">
+              <FolderIcon className="w-6 h-6" />
+            </div>
+            <p className="text-sm font-medium text-slate-900">No projects yet</p>
+            <p className="text-sm text-slate-500 mt-1 mb-5 max-w-xs">
+              Create your first research project to start building surveys and delivering results.
+            </p>
+            <Link
+              to="/projects/new"
+              className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md shadow-sm hover:bg-primary-600 transition-all duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+            >
+              <PlusIcon className="w-4 h-4" /> New Project
             </Link>
           </div>
         ) : (

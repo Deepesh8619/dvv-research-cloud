@@ -122,3 +122,75 @@ export function LinkIcon({ className = 'w-5 h-5' }: IconProps) {
     </svg>
   )
 }
+
+export function ClipboardIcon({ className = 'w-5 h-5' }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="5" y="4" width="14" height="17" rx="2" />
+      <path d="M9 4a1 1 0 011-1h4a1 1 0 011 1v1a1 1 0 01-1 1h-4a1 1 0 01-1-1V4z" strokeLinejoin="round" />
+      <path d="M9 11l1.5 1.5L13 10M9 16h6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function ListIcon({ className = 'w-5 h-5' }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M8 6h12M8 12h12M8 18h12M3.5 6h.01M3.5 12h.01M3.5 18h.01" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function ArrowRightIcon({ className = 'w-5 h-5' }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M5 12h14M13 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function CircleCheckIcon({ className = 'w-5 h-5' }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8.5 12.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function InfoIcon({ className = 'w-5 h-5' }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5M12 8h.01" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function EyeIcon({ className = 'w-5 h-5' }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+
+export function EyeOffIcon({ className = 'w-5 h-5' }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M3 3l18 18" strokeLinecap="round" />
+      <path d="M10.6 6.1A9.7 9.7 0 0112 6c6.5 0 10 6 10 6a17 17 0 01-3 3.6M6.5 7.6A16.9 16.9 0 002 12s3.5 7 10 7a9.6 9.6 0 004.4-1.1" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9.9 9.9a3 3 0 004.2 4.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function LogOutIcon({ className = 'w-5 h-5' }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10 12H3m0 0l3-3m-3 3l3 3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}

@@ -7,6 +7,14 @@ import { BorderlessLight } from 'survey-core/themes'
 import { Survey } from 'survey-react-ui'
 import { fieldingApi } from '../api/client'
 import { Theme, themeFor } from '../api/themes'
+import {
+  ArrowRightIcon,
+  CircleCheckIcon,
+  ClipboardIcon,
+  ClockIcon,
+  InfoIcon,
+  ListIcon,
+} from '../components/Icons'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 // A single respondent view: fetch the compiled SurveyJS JSON for a public
@@ -53,12 +61,29 @@ function applySurveyTheme(survey: Model, theme: Theme): void {
 function Centered({ theme, children }: { theme: Theme; children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: theme.wash }}>
-      <div className="w-full max-w-[640px] text-center bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="w-full max-w-[640px] text-center bg-white rounded-2xl shadow-md border border-slate-200/80 overflow-hidden">
         <div style={{ height: 4, background: gradientBar(theme) }} />
-        <div className="p-10">{children}</div>
+        <div className="p-10 sm:p-12">{children}</div>
       </div>
     </div>
   )
+}
+
+// Accent-tinted emblem: a soft accent wash square with a hairline accent ring,
+// the icon inheriting the accent via currentColor. One per terminal screen.
+function Emblem({ theme, children }: { theme: Theme; children: React.ReactNode }) {
+  return (
+    <div
+      className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl"
+      style={{ background: `${theme.accent}14`, color: theme.accent, boxShadow: `inset 0 0 0 1px ${theme.accent}29` }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function PoweredBy() {
+  return <p className="mt-8 text-xs font-medium tracking-wide text-slate-400">Powered by DVV Research Cloud</p>
 }
 
 export default function RespondentPage() {
@@ -208,30 +233,56 @@ export default function RespondentPage() {
   }
 
   if (phase === 'welcome') {
+    const questionCount = model?.getAllQuestions().length ?? 0
+    const minutes = Math.max(1, Math.ceil(questionCount / 4))
     return (
       <Centered theme={theme}>
+        <Emblem theme={theme}>
+          <ClipboardIcon className="w-8 h-8" />
+        </Emblem>
         <h1 className="text-2xl font-semibold text-slate-900 mb-3">{title}</h1>
-        <p className="text-slate-600 mb-8">
-          This survey takes about 3 minutes. Your answers are confidential.
+        <p className="text-slate-600 mb-7 max-w-sm mx-auto">
+          Your answers are confidential. There are no right or wrong responses — please answer honestly.
         </p>
+        {questionCount > 0 && (
+          <div className="mb-8 flex items-center justify-center gap-4 text-sm text-slate-500">
+            <span className="inline-flex items-center gap-1.5 tabular-nums">
+              <ListIcon className="w-4 h-4" />
+              {questionCount} {questionCount === 1 ? 'question' : 'questions'}
+            </span>
+            <span className="h-3.5 w-px bg-slate-200" />
+            <span className="inline-flex items-center gap-1.5 tabular-nums">
+              <ClockIcon className="w-4 h-4" />
+              about {minutes} min
+            </span>
+          </div>
+        )}
         <button
           onClick={() => setPhase('running')}
-          className="inline-flex items-center justify-center rounded-lg px-8 py-3 text-white font-medium transition-opacity hover:opacity-90"
-          style={{ backgroundColor: theme.accent }}
+          className="group inline-flex items-center justify-center gap-2 rounded-lg px-8 py-3 text-white font-medium shadow-sm transition-all duration-200 ease-out hover:opacity-95 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+          style={{ backgroundColor: theme.accent, ['--tw-ring-color' as string]: theme.accent }}
         >
           Start
+          <ArrowRightIcon className="w-5 h-5 transition-transform duration-200 ease-out group-hover:translate-x-0.5" />
         </button>
+        <PoweredBy />
       </Centered>
     )
   }
 
   if (phase === 'terminated') {
+    // Calm, neutral screen-out — deliberately NOT the accent (never a red alarm).
     return (
       <Centered theme={theme}>
-        <h1 className="text-lg font-semibold text-slate-900 mb-2">Thank you</h1>
-        <p className="text-slate-600">
-          Based on your answers, you do not qualify for this survey. We appreciate your time.
+        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 ring-1 ring-inset ring-slate-200">
+          <InfoIcon className="w-8 h-8" />
+        </div>
+        <h1 className="text-xl font-semibold text-slate-900 mb-2">Not a match this time</h1>
+        <p className="text-slate-600 max-w-sm mx-auto">
+          Based on your answers, this particular survey isn't the right fit. Thank you for your time — we truly
+          appreciate it.
         </p>
+        <PoweredBy />
       </Centered>
     )
   }
@@ -239,10 +290,14 @@ export default function RespondentPage() {
   if (phase === 'complete') {
     return (
       <Centered theme={theme}>
+        <Emblem theme={theme}>
+          <CircleCheckIcon className="w-8 h-8" />
+        </Emblem>
         <h1 className="text-2xl font-semibold text-slate-900 mb-2">Thank you!</h1>
-        <p className="text-slate-600">
+        <p className="text-slate-600 max-w-sm mx-auto">
           Your responses have been recorded. We really appreciate you taking the time.
         </p>
+        <PoweredBy />
       </Centered>
     )
   }
@@ -255,13 +310,23 @@ export default function RespondentPage() {
           accent border) — the accent CSS var comes from applySurveyTheme. */}
       <style>{`
         .dvv-survey .sd-question__title { font-size: 1.25rem; line-height: 1.75rem; }
-        .dvv-survey .sd-item { padding: 0.75rem 1rem; border-radius: 0.5rem; border: 1px solid transparent; }
+        .dvv-survey .sd-item {
+          padding: 0.75rem 1rem; min-height: 44px; border-radius: 0.5rem; border: 1px solid transparent;
+          transition: background 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out;
+        }
         .dvv-survey .sd-item:hover { background: rgba(0,0,0,0.03); }
-        .dvv-survey .sd-item--checked { background: ${theme.accent}1A; border-color: ${theme.accent}; }
+        .dvv-survey .sd-item--checked { background: ${theme.accent}1A; border-color: ${theme.accent}; box-shadow: inset 0 0 0 1px ${theme.accent}; }
         .dvv-survey .sd-selectbase__label { width: 100%; }
+        /* Slim, rounded progress bar; tabular figures on its label. */
+        .dvv-survey .sd-progress { height: 6px; border-radius: 9999px; }
+        .dvv-survey .sd-progress__bar { border-radius: 9999px; transition: width 250ms ease-out; }
+        .dvv-survey .sd-progress__text { font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+        @media (prefers-reduced-motion: reduce) {
+          .dvv-survey .sd-item, .dvv-survey .sd-progress__bar { transition: none; }
+        }
       `}</style>
       <div className="dvv-survey max-w-[640px] mx-auto px-4">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-md border border-slate-200/80 overflow-hidden">
           <div style={{ height: 4, background: gradientBar(theme) }} />
           <div className="p-6 sm:p-8">{model && <Survey model={model} />}</div>
         </div>

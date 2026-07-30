@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Study, studiesApi } from '../api/client'
-import { PlusIcon, SearchIcon } from '../components/Icons'
+import { FolderIcon, PlusIcon, SearchIcon } from '../components/Icons'
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatusPill from '../components/StatusPill'
 
@@ -96,8 +96,24 @@ export default function ProjectsPage() {
       {/* Table */}
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         {visible.length === 0 ? (
-          <div className="p-12 text-center text-slate-500">
-            No projects match. <Link to="/projects/new" className="text-sky-600 font-medium">Create one</Link>
+          <div className="px-6 py-16 flex flex-col items-center text-center">
+            <div className="w-12 h-12 rounded-xl bg-primary-50 text-primary-500 flex items-center justify-center mb-4">
+              <FolderIcon className="w-6 h-6" />
+            </div>
+            <p className="text-sm font-medium text-slate-900">
+              {studies.length === 0 ? 'No projects yet' : 'No projects match'}
+            </p>
+            <p className="text-sm text-slate-500 mt-1 mb-5 max-w-xs">
+              {studies.length === 0
+                ? 'Create your first research project to get started.'
+                : 'Try a different search term or filter, or create a new project.'}
+            </p>
+            <Link
+              to="/projects/new"
+              className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md shadow-sm hover:bg-primary-600 transition-all duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+            >
+              <PlusIcon className="w-4 h-4" /> New Project
+            </Link>
           </div>
         ) : (
           <table className="w-full text-sm">

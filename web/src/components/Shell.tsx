@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, NavLink, useNavigate, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import { ChatIcon, DocChartIcon, FolderIcon, GridIcon, PlusIcon, SearchIcon, ShieldIcon } from './Icons'
+import { ChatIcon, DocChartIcon, FolderIcon, GridIcon, LogOutIcon, PlusIcon, SearchIcon, ShieldIcon } from './Icons'
 
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: GridIcon },
@@ -72,7 +72,7 @@ export default function Shell() {
 
             {/* User menu */}
             {showUserMenu && (
-              <div className="absolute right-0 top-full mt-2 w-48 rounded-md bg-white border border-slate-200 shadow-lg z-50 py-1">
+              <div className="absolute right-0 top-full mt-2 w-52 rounded-lg bg-white border border-slate-200 shadow-lg ring-1 ring-slate-900/5 z-50 py-1.5">
                 <div className="px-3 py-2 border-b border-slate-100">
                   <p className="text-sm font-medium text-slate-900">{user?.name}</p>
                   <p className="text-xs text-slate-500">{user?.email}</p>
@@ -80,8 +80,9 @@ export default function Shell() {
                 </div>
                 <button
                   onClick={handleLogout}
-                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                  className="w-full flex items-center gap-2.5 text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors focus-visible:outline-none focus-visible:bg-slate-50"
                 >
+                  <LogOutIcon className="w-4 h-4 text-slate-400" />
                   Log out
                 </button>
               </div>
@@ -99,9 +100,9 @@ export default function Shell() {
               to={to}
               end={to === '/projects'}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                `relative flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${
                   isActive
-                    ? 'bg-primary-50 text-primary-500'
+                    ? "bg-primary-50 text-primary-500 before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-1 before:rounded-r-full before:bg-primary-500 before:content-['']"
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                 }`
               }
