@@ -55,6 +55,18 @@ class UploadResponse(BaseModel):
     message: str
 
 
+class CreateStudyRequest(BaseModel):
+    """Create a data-less study (survey-authoring path — no file, no pipeline).
+
+    `kind` is the frontend's chooser selection ("questionnaire" | "builder");
+    it's recorded in metadata for provenance, not used for routing (the client
+    navigates itself). `client_name` is the project name.
+    """
+
+    client_name: str = ""
+    kind: str | None = None
+
+
 class ApprovalRequest(BaseModel):
     """Approval request body."""
 
@@ -204,6 +216,10 @@ class QuestionnaireStatusResponse(BaseModel):
     # Respondent theme slug from metadata (T24); None when unset. Lets the builder
     # show the currently-selected theme.
     theme: str | None = None
+    # Detected questionnaire format profile: {slug, label, confidence, signals}.
+    # Set once extraction ran; None for authored/blank questionnaires. Lets the
+    # review UI show which client convention was recognized.
+    profile: dict | None = None
 
 
 class QuestionnaireSettingsRequest(BaseModel):

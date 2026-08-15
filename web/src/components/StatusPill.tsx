@@ -1,4 +1,5 @@
 const STATUS_CONFIG: Record<string, { label: string; classes: string; dot: string }> = {
+  authoring: { label: 'Authoring', classes: 'bg-indigo-50 text-indigo-700 ring-indigo-600/20', dot: 'bg-indigo-500' },
   classifying: { label: 'Processing', classes: 'bg-amber-50 text-amber-700 ring-amber-600/20', dot: 'bg-amber-500 animate-pulse' },
   qc_passed: { label: 'QC Passed', classes: 'bg-sky-50 text-sky-700 ring-sky-600/20', dot: 'bg-sky-500' },
   qc_pending: { label: 'QC Review', classes: 'bg-amber-50 text-amber-700 ring-amber-600/20', dot: 'bg-amber-500' },

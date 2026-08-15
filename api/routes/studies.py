@@ -31,6 +31,7 @@ from api.db import (
 )
 from api.models import (
     ApprovalRequest,
+    CreateStudyRequest,
     ShareLinkResponse,
     StudyListResponse,
     StudyMetadata,
@@ -207,6 +208,39 @@ async def upload_study(
     except Exception as e:
         logger.error(f"Upload failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/studies", response_model=StudyResponse)
+async def create_empty_study(
+    request: CreateStudyRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Create a data-less study for the survey-first path. (Owner/Analyst-only)
+
+    No data file, no orchestration — the study starts in "authoring" so the
+    questionnaire-upload or survey-builder flows can take over. It has no
+    excel_path; the analysis tabs light up later via a data upload or a T11
+    fielding materialize (which sets excel_path + status "rendered"). Returns the
+    same shape as GET /studies/{id} so the frontend can navigate straight to it.
+    """
+    study_id = f"study_{uuid4().hex[:8]}"
+    client_name = (request.client_name or "").strip() or "Untitled project"
+    study = create_study(db, study_id, client_name=client_name, status="authoring")
+    if request.kind:
+        study = update_study_status(db, study_id, "authoring", {"kind": request.kind})
+
+    return StudyResponse(
+        id=study.id,
+        client_name=study.client_name,
+        status=study.status,
+        created_at=study.created_at,
+        updated_at=study.updated_at,
+        metadata=StudyMetadata(**study.study_metadata),
+        approval_chain=[],
+        excel_path=study.excel_path,
+        pptx_path=study.pptx_path,
+    )
 
 
 @router.post("/studies/{study_id}/reprocess")

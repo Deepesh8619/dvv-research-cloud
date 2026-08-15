@@ -523,6 +523,65 @@ def test_placeholder_value_routing_flagged_ambiguous_no_invented_value():
     assert "??" in result.question.validation["routing_verbatim"]
 
 
+def test_profile_hint_selects_field_spec_and_conservative_guidance():
+    """The detected profile hint drives which guidance the prompt appends."""
+    prose = "Q1. What is your age?"
+    # field_spec hint appends the spec-table mapping even for a chunk that lacks
+    # the labels (whole-doc detection said this document is GBK).
+    gbk = schema.build_extraction_prompt(prose, "Q1", profile_hint="field_spec")
+    assert "PROGRAMMING-SPEC TABLE" in gbk
+
+    # conservative hint (unknown format) appends the caution note, no spec table.
+    unknown = schema.build_extraction_prompt(prose, "Q1", profile_hint="conservative")
+    assert "UNRECOGNIZED FORMAT" in unknown
+    assert "PROGRAMMING-SPEC TABLE" not in unknown
+
+
+def test_unknown_profile_prompt_is_identical_to_today_no_regression():
+    """A prose chunk with the 'prose' hint (or no hint) must produce EXACTLY the
+    same prompt it did before profiles existed — no regression on recognized-but-
+    unremarkable or unknown documents."""
+    prose = "Q1. What is your age?"
+    baseline = schema.build_extraction_prompt(prose, "Q1")
+    assert schema.build_extraction_prompt(prose, "Q1", profile_hint=None) == baseline
+    assert schema.build_extraction_prompt(prose, "Q1", profile_hint="prose") == baseline
+
+
+def test_gbk_document_detection_appends_field_spec_end_to_end():
+    """A GBK-detected document routes the field-spec guidance into every chunk's
+    extraction prompt, and stashes the profile on survey.metadata."""
+    from src.intake.questionnaire_loader import DocumentBlock
+
+    blocks = [
+        DocumentBlock("table", "Q Name: RESP_AGE\nResponse list:\n1: Yes", 0,
+                      rows=[["Q Name", "RESP_AGE"]]),
+        DocumentBlock("table", "Q Name: SS_EMP\nResponse list:\n1: Yes", 1,
+                      rows=[["Q Name", "SS_EMP"]]),
+    ]
+    chunks = [
+        _chunk("RESP_AGE", "Q Name: RESP_AGE\nResponse list:\n1: Yes"),
+        _chunk("SS_EMP", "Q Name: SS_EMP\nResponse list:\n1: Yes"),
+    ]
+    seen_prompts: list[str] = []
+
+    def fake_run(task, prompt, schema_arg, *args, **kwargs):
+        if task == "questionnaire.extract":
+            seen_prompts.append(prompt)
+            qid = "SS_EMP" if "SS_EMP" in prompt else "RESP_AGE"
+            return _response(_extraction_content(qid=qid))
+        if task == "questionnaire.verify":
+            return _response({"faithful": True, "discrepancies": []})
+        # reconcile pass: nothing missed
+        return _response({"missed_questions": []})
+
+    with patch(_EXTRACT, side_effect=fake_run):
+        survey = extract_survey_definition(chunks, study_id="study-gbk", blocks=blocks)
+
+    assert survey.metadata["profile"]["slug"] == "gbk_spec_table"
+    assert survey.metadata["profile"]["confidence"] >= 0.9
+    assert all("PROGRAMMING-SPEC TABLE" in p for p in seen_prompts)
+
+
 def test_extraction_prompt_teaches_field_spec_when_convention_present():
     """When a chunk carries the programming-spec labels, the prompt includes the
     field-mapping guidance AND the do-not-invent-placeholder instruction."""

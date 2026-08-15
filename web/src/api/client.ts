@@ -210,6 +210,12 @@ export const studiesApi = {
     )
   },
 
+  // Create a data-less study (survey-first path — no file, no pipeline). Returns
+  // the full Study so the caller can navigate straight into questionnaire/builder.
+  create: async (clientName: string, kind?: 'questionnaire' | 'builder') => {
+    return api.post<Study>('/studies', { client_name: clientName, kind })
+  },
+
   list: async (skip = 0, limit = 100) => {
     return api.get<StudyListResponse>('/studies', { params: { skip, limit } })
   },
@@ -303,6 +309,14 @@ export interface QuestionnaireStatus {
   extraction_summary: Record<string, unknown>
   error_detail?: string | null
   theme?: string | null // respondent theme slug (T24); null when unset
+  // Detected format profile (slug/label/confidence + the signals that fired);
+  // null for authored questionnaires or before extraction ran.
+  profile?: {
+    slug: string
+    label: string
+    confidence: number
+    signals?: Record<string, unknown>
+  } | null
 }
 
 export interface QuestionsListResponse {

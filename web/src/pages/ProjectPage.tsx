@@ -4,7 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ProfileVariable, Study, studiesApi, shareApi, ShareLink, StudyProfile, questionnaireApi } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import ChatBot from '../components/ChatBot'
-import { CheckIcon, DownloadIcon, LinkIcon } from '../components/Icons'
+import { CheckIcon, DocChartIcon, DownloadIcon, LinkIcon } from '../components/Icons'
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatusPill from '../components/StatusPill'
 
@@ -77,7 +77,9 @@ export default function ProjectPage() {
 
   // Poll while processing
   useEffect(() => {
-    if (!study || ['delivered', 'error', 'archived', 'approved_for_delivery', 'rendered'].includes(study.status)) return
+    // 'authoring' is a data-less survey-first study — nothing is processing in
+    // the background, so don't poll (it would spin forever with no change).
+    if (!study || ['delivered', 'error', 'archived', 'approved_for_delivery', 'rendered', 'authoring'].includes(study.status)) return
     const t = setInterval(load, 2500)
     return () => clearInterval(t)
   }, [study?.status, load])
@@ -153,6 +155,10 @@ export default function ProjectPage() {
   }
 
   const progress = STAGE_PROGRESS[study.status] ?? 0
+  // A survey-first study with no responses yet: the analysis tabs have nothing
+  // to show. Once it's fielded + materialized (or data is uploaded), excel_path
+  // is set and status leaves 'authoring', so the normal tabs light up.
+  const noData = study.status === 'authoring' && !study.excel_path
   const deliveryApproved = study.approval_chain.some(
     (a) => a.gate === 'delivery' && a.approved_by !== 'pending',
   )
@@ -263,8 +269,8 @@ export default function ProjectPage() {
         </nav>
       </div>
 
-      {tab === 'Overview' && <OverviewTab study={study} progress={progress} />}
-      {tab === 'Reports' && <ReportsTab study={study} />}
+      {tab === 'Overview' && (noData ? <NoDataState /> : <OverviewTab study={study} progress={progress} />)}
+      {tab === 'Reports' && (noData ? <NoDataState /> : <ReportsTab study={study} />)}
       {tab === 'Activity' && <ActivityTab study={study} />}
 
       {/* Share modal */}
@@ -331,6 +337,20 @@ export default function ProjectPage() {
         clientName={study.client_name}
         onNavigate={handleNavigate}
       />
+    </div>
+  )
+}
+
+function NoDataState() {
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 p-10 text-center">
+      <DocChartIcon className="w-10 h-10 text-slate-300 mx-auto mb-4" />
+      <h2 className="font-semibold text-slate-900">No data yet</h2>
+      <p className="text-sm text-slate-500 mt-1.5 max-w-md mx-auto">
+        Field this survey or upload responses to unlock tables and reports. Use the{' '}
+        <span className="font-medium text-slate-700">Questionnaire</span> and{' '}
+        <span className="font-medium text-slate-700">Fielding</span> links above to get started.
+      </p>
     </div>
   )
 }

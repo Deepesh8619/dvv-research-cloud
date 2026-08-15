@@ -281,15 +281,40 @@ another is explicitly named. Map with existing ops only:
 )
 
 
+# Appended when the whole-document profile detector could not confidently
+# recognize the format (profile 'unknown'). It does NOT change the extraction
+# rules — it only tells the model to stay literal and flag rather than guess, so
+# an unrecognized document is handled no worse than today, just more cautiously.
+_UNKNOWN_FORMAT_GUIDANCE = (
+    "UNRECOGNIZED FORMAT: the document's authoring convention was not confidently "
+    "identified. Extract conservatively — copy wording verbatim, do NOT infer structure "
+    "or routing that the text does not state explicitly, and prefer routing.ambiguous=true "
+    "over guessing.\n"
+)
+
+
 def _has_field_spec(text: str) -> bool:
     """True when a chunk carries the programming-spec label convention."""
     low = text.lower()
     return "q name:" in low or "among who:" in low or "other details:" in low
 
 
-def build_extraction_prompt(chunk_text: str, candidate_qid: str | None) -> str:
-    """Prompt for the single-chunk extraction pass."""
-    spec = f"{_FIELD_SPEC_GUIDANCE}\n" if _has_field_spec(chunk_text) else ""
+def build_extraction_prompt(
+    chunk_text: str, candidate_qid: str | None, profile_hint: str | None = None
+) -> str:
+    """Prompt for the single-chunk extraction pass.
+
+    `profile_hint` comes from the document's detected format profile
+    (profiles.QuestionnaireProfile.prompt_hint) and selects the RIGHT guidance
+    block: 'field_spec' appends the GBK spec-table mapping, 'conservative'
+    appends the unknown-format note, 'prose'/None append neither. The per-chunk
+    `_has_field_spec` check still fires independently (belt and suspenders) so a
+    stray spec-table chunk is handled even if whole-doc detection guessed wrong.
+    """
+    want_field_spec = profile_hint == "field_spec" or _has_field_spec(chunk_text)
+    spec = f"{_FIELD_SPEC_GUIDANCE}\n" if want_field_spec else ""
+    if profile_hint == "conservative":
+        spec = f"{_UNKNOWN_FORMAT_GUIDANCE}\n{spec}"
     hint = (
         f"The document segmenter tagged this chunk's question id as: {candidate_qid}. "
         "Use it unless the text clearly shows a different id.\n\n"

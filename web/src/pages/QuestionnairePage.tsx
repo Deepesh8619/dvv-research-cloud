@@ -636,6 +636,11 @@ export default function QuestionnairePage() {
             {status.n_questions > 0 && ` · ${nApproved}/${status.n_questions} approved`}
           </p>
         )}
+        {status?.profile && (
+          <p className="text-xs text-slate-400 mt-0.5">
+            Detected format: {status.profile.label} ({(status.profile.confidence * 100).toFixed(0)}%)
+          </p>
+        )}
       </div>
 
       {/* Status load failed for a reason other than "no questionnaire yet" */}

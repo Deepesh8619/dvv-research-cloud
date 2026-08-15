@@ -219,6 +219,7 @@ def _status_response(questionnaire, survey: SurveyDefinition | None) -> Question
         # cause (missing key, circuit-breaker abort) instead of a bare 'error'.
         error_detail=questionnaire.error_detail if questionnaire.status == "error" else None,
         theme=metadata.get("theme"),
+        profile=metadata.get("profile"),
     )
 
 

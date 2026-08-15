@@ -377,12 +377,17 @@ def create_study(
     db: Session,
     study_id: str,
     client_name: str,
+    status: str = "classifying",
 ) -> StudyDB:
-    """Create a new study in database."""
+    """Create a new study in database.
+
+    `status` defaults to the upload path's "classifying"; the survey-first path
+    (create-empty-study, no data/orchestration) passes "authoring".
+    """
     study = StudyDB(
         id=study_id,
         client_name=client_name,
-        status="classifying",
+        status=status,
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
         study_metadata={},

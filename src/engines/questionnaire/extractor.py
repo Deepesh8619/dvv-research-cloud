@@ -42,6 +42,7 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.questionnaire import schema
+from src.engines.questionnaire.profiles import detect_profile
 from src.engines.questionnaire.reconciler import reconcile_segmentation
 from src.intake.questionnaire_loader import DocumentBlock, QuestionChunk
 
@@ -315,8 +316,14 @@ def _extraction_flag_for(exc: Exception) -> str:
     return schema.FLAG_EXTRACTION_CONFIG_ERROR
 
 
-def extract_question(chunk: QuestionChunk) -> ExtractionResult:
+def extract_question(
+    chunk: QuestionChunk, profile_hint: str | None = None
+) -> ExtractionResult:
     """Extract one chunk into a structured Question + confidence + flags.
+
+    `profile_hint` is the document's detected format hint (see
+    profiles.detect_profile); it selects the per-profile extraction guidance in
+    build_extraction_prompt. None keeps the current (pre-profile) prompt.
 
     Never raises on a backend/model failure: a failed chunk comes back flagged
     (CONFIG_ERROR / UNAVAILABLE / MODEL_ERROR by actionability) with a minimal
@@ -328,7 +335,9 @@ def extract_question(chunk: QuestionChunk) -> ExtractionResult:
     the flag/error on the returned result to decide whether to abort — see
     `_is_backend_unavailable_result`.
     """
-    prompt = schema.build_extraction_prompt(chunk.chunk_text, chunk.candidate_qid)
+    prompt = schema.build_extraction_prompt(
+        chunk.chunk_text, chunk.candidate_qid, profile_hint
+    )
     try:
         response: AIResponse = run_task(
             "questionnaire.extract", prompt, schema.EXTRACTION_SCHEMA
@@ -514,13 +523,20 @@ def extract_survey_definition(
     here to keep the first version simple and its failure modes obvious.
     """
     reconcile_meta: dict = {}
+    # Recognize the document's authoring convention (GBK spec-table / prose /
+    # numbered / unknown) once, from structural signals, and route the per-chunk
+    # extraction prompt accordingly. Needs the full block list; when omitted
+    # (unit tests that hand-build chunks) detection is skipped and the prompt is
+    # unchanged from today.
+    detection = detect_profile(blocks) if blocks is not None else None
+    profile_hint = detection.profile.prompt_hint if detection else None
     if blocks is not None:
         chunks = reconcile_segmentation(blocks, chunks, reconcile_meta)
 
     results: list[ExtractionResult] = []
     consecutive_backend_failures = 0
     for chunk in chunks:
-        result = extract_question(chunk)
+        result = extract_question(chunk, profile_hint)
 
         if _is_backend_unavailable_result(result):
             consecutive_backend_failures += 1
@@ -574,6 +590,11 @@ def extract_survey_definition(
     )
     survey.metadata["validation_errors"] = survey.validate()
     survey.metadata["extraction_summary"] = _extraction_summary(results)
+    # Detected format profile (label + confidence + the signals that fired), so a
+    # reviewer sees "Detected format: GBK scripter spec-table (0.92)". Only when
+    # detection ran (blocks supplied).
+    if detection is not None:
+        survey.metadata["profile"] = detection.to_metadata()
     # Document-level reconciliation status (e.g. the pass was unavailable). Only
     # recorded when reconciliation ran and had something to report.
     if reconcile_meta:
