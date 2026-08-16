@@ -9,7 +9,7 @@ import {
   QuotaCell,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import LoadingSpinner from '../components/LoadingSpinner'
+import { CardListSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import ThemeSelect from '../components/ThemeSelect'
 
@@ -38,7 +38,7 @@ const REDIRECT_FIELDS: Array<{ key: keyof FieldingRedirects; label: string }> = 
 function CountPill({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <div className="flex flex-col items-center px-3 py-1.5 rounded-md bg-slate-50 border border-slate-200 min-w-[70px]">
-      <span className={`text-lg font-semibold ${color}`}>{value}</span>
+      <span className={`text-lg font-semibold font-mono tabular-nums ${color}`}>{value}</span>
       <span className="text-[10px] uppercase tracking-wide text-slate-500">{label}</span>
     </div>
   )
@@ -180,7 +180,7 @@ function QuotaSection({
                 {JSON.stringify(cell.condition)}
               </code>
               <QuotaBar count={cell.count} limit={cell.limit} />
-              <span className="text-xs text-slate-600 w-16 text-right">
+              <span className="text-xs text-slate-600 w-16 text-right font-mono tabular-nums">
                 {cell.count} / {cell.limit}
               </span>
               {canWrite && (
@@ -230,7 +230,7 @@ function QuotaSection({
               type="button"
               onClick={handleAdd}
               disabled={saving}
-              className="bg-primary-500 text-white text-xs font-medium px-3 py-1.5 rounded-md hover:bg-primary-600 disabled:opacity-50"
+              className="bg-primary-500 text-white text-xs font-medium px-3 py-1.5 rounded-md hover:bg-primary-600 disabled:opacity-50 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
             >
               {saving ? 'Adding…' : 'Add cell'}
             </button>
@@ -331,7 +331,7 @@ function LinkCard({
               <button
                 onClick={handleClose}
                 disabled={busy}
-                className="text-xs border border-slate-300 text-slate-700 font-medium px-3 py-1.5 rounded-md hover:bg-slate-50 disabled:opacity-50"
+                className="text-xs border border-slate-300 text-slate-700 font-medium px-3 py-1.5 rounded-md hover:bg-slate-50 disabled:opacity-50 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
               >
                 Close
               </button>
@@ -340,7 +340,7 @@ function LinkCard({
               onClick={handleMaterialize}
               disabled={busy}
               title="Load completed responses into this study's tables and analysis"
-              className="text-xs bg-primary-500 text-white font-medium px-3 py-1.5 rounded-md hover:bg-primary-600 disabled:opacity-50"
+              className="text-xs bg-primary-500 text-white font-medium px-3 py-1.5 rounded-md hover:bg-primary-600 disabled:opacity-50 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
             >
               {busy ? 'Working…' : 'Materialize'}
             </button>
@@ -440,7 +440,7 @@ function CreatePanel({
           onClick={handleCreate}
           disabled={creating || !canCreate}
           title={canCreate ? '' : 'The study needs an approved questionnaire first'}
-          className="bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600 disabled:opacity-50"
+          className="bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600 disabled:opacity-50 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
         >
           {creating ? 'Creating…' : 'Create link'}
         </button>
@@ -559,7 +559,17 @@ export default function FieldingPage() {
     return () => clearInterval(t)
   }, [links, load])
 
-  if (loading) return <LoadingSpinner />
+  if (loading) {
+    return (
+      <div>
+        <div className="mb-6">
+          <h1 className="text-2xl font-semibold text-slate-900">Field monitor</h1>
+          <p className="text-sm text-slate-500 mt-1">Loading fielding links…</p>
+        </div>
+        <CardListSkeleton count={2} />
+      </div>
+    )
+  }
 
   return (
     <div>

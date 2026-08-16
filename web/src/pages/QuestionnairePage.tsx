@@ -11,6 +11,7 @@ import {
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { TableSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import { flagInfo } from '../components/questionnaireFlags'
 
@@ -618,7 +619,17 @@ export default function QuestionnairePage() {
     }
   }
 
-  if (loading) return <LoadingSpinner />
+  if (loading) {
+    return (
+      <div>
+        <div className="mb-6">
+          <h1 className="text-2xl font-semibold text-slate-900">Questionnaire review</h1>
+          <p className="text-sm text-slate-500 mt-1">Loading questionnaire…</p>
+        </div>
+        <TableSkeleton rows={8} cols={2} />
+      </div>
+    )
+  }
 
   const nApproved = questions.filter((q) => q.approved).length
 

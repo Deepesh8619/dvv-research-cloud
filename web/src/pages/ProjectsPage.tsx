@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Study, studiesApi } from '../api/client'
 import { FolderIcon, PlusIcon, SearchIcon } from '../components/Icons'
-import LoadingSpinner from '../components/LoadingSpinner'
+import { TableSkeleton } from '../components/Skeleton'
 import StatusPill from '../components/StatusPill'
 
 const FILTERS = [
@@ -48,20 +48,30 @@ export default function ProjectsPage() {
     return out
   }, [studies, filter, query])
 
-  if (loading) return <LoadingSpinner />
+  if (loading) {
+    return (
+      <div>
+        <div className="mb-6">
+          <h1 className="text-2xl font-semibold text-slate-900">Projects</h1>
+          <p className="text-sm text-slate-500 mt-1">Loading projects…</p>
+        </div>
+        <TableSkeleton rows={6} cols={5} />
+      </div>
+    )
+  }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Projects</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className="text-sm text-slate-500 mt-1 tabular-nums">
             {visible.length} of {studies.length} projects
           </p>
         </div>
         <Link
           to="/projects/new"
-          className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600 transition-colors"
+          className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
         >
           <PlusIcon className="w-4 h-4" /> New Project
         </Link>

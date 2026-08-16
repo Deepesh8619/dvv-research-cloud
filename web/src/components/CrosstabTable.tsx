@@ -58,13 +58,13 @@ export default function CrosstabTable({ table, minBase, showBases }: Props) {
               <tr className="text-xs text-slate-500 italic">
                 <td className="sticky left-0 bg-white py-1.5 pr-4">Base: weighted</td>
                 {table.columns.map((col, j) => (
-                  <td key={j} className="text-center py-1.5 bg-slate-50">{Math.round(col.base)}</td>
+                  <td key={j} className="text-center py-1.5 bg-slate-50 font-mono tabular-nums">{Math.round(col.base)}</td>
                 ))}
               </tr>
               <tr className="text-xs text-slate-500 italic border-b border-slate-200">
                 <td className="sticky left-0 bg-white py-1.5 pr-4">Base: unweighted</td>
                 {table.columns.map((col, j) => (
-                  <td key={j} className="text-center py-1.5 bg-slate-50">{col.unweighted_base}</td>
+                  <td key={j} className="text-center py-1.5 bg-slate-50 font-mono tabular-nums">{col.unweighted_base}</td>
                 ))}
               </tr>
             </>
@@ -78,7 +78,7 @@ export default function CrosstabTable({ table, minBase, showBases }: Props) {
             >
               <td className="sticky left-0 bg-inherit py-2 pr-4 text-slate-800">{row.label}</td>
               {row.pct.map((pct, j) => (
-                <td key={j} className="text-center py-2 tabular-nums">
+                <td key={j} className="text-center py-2 font-mono tabular-nums">
                   <span
                     title={
                       row.sig[j]
@@ -99,7 +99,7 @@ export default function CrosstabTable({ table, minBase, showBases }: Props) {
             <tr className="border-t border-slate-300 italic text-slate-700">
               <td className="sticky left-0 bg-white py-2 pr-4 font-semibold">Mean</td>
               {table.means.map((m, j) => (
-                <td key={j} className="text-center py-2 tabular-nums font-medium">
+                <td key={j} className="text-center py-2 font-mono tabular-nums font-medium">
                   {m.toFixed(2)}
                   {table.mean_sig?.[j] && (
                     <sup className="text-emerald-600 font-bold ml-0.5">{table.mean_sig[j]}</sup>

@@ -228,7 +228,7 @@ export default function NewProjectPage() {
             onClick={primaryAction}
             disabled={!canCreate || submitting || (choice === 'data' && !file)}
             title={canCreate ? undefined : 'Reviewers cannot create projects'}
-            className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-5 py-2.5 rounded-md hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-5 py-2.5 rounded-md hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150 ease-out active:scale-[0.98] disabled:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
           >
             {choice !== 'data' && <PlusIcon className="w-4 h-4" />}
             {submitting ? 'Please wait…' : choice === 'data' ? 'Create project' : 'Create & continue'}
