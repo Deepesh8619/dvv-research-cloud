@@ -107,7 +107,10 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(
         qroutes,
         "extract_survey_definition",
-        lambda chunks, study_id, blocks=None: state["survey"],
+        # **kwargs absorbs rules_for_profile (the correction loop's learned-rule
+        # provider) so this double doesn't need editing again the next time the
+        # extractor gains an optional argument.
+        lambda chunks, study_id, blocks=None, **kwargs: state["survey"],
     )
 
     app.dependency_overrides[get_db] = override_get_db
@@ -643,7 +646,7 @@ def test_extraction_failure_surfaces_error_detail(client, monkeypatch):
     test_client, session_factory, _ = client
     _make_study(session_factory)
 
-    def boom(chunks, study_id, blocks=None):
+    def boom(chunks, study_id, blocks=None, **kwargs):
         raise BackendUnavailable(
             "extraction aborted after 3 consecutive backend failures "
             "(circuit breaker): ANTHROPIC_API_KEY not set",

@@ -258,7 +258,7 @@ def _run_extraction(
     Any failure flips the questionnaire to 'error' with a logged reason rather
     than leaving it stuck on 'processing' forever.
     """
-    from api.db import SessionLocal
+    from api.db import SessionLocal, active_rules_for_profile
 
     job_db = SessionLocal()
     try:
@@ -269,7 +269,17 @@ def _run_extraction(
             blocks = load_pdf(file_path)
 
         chunks = segment_into_questions(blocks)
-        survey = extract_survey_definition(chunks, study_id=study_id, blocks=blocks)
+        # Founder-taught rules for whichever profile this document turns out to
+        # be (correction loop). Passed as a provider because only detection —
+        # inside the extractor — knows the slug. This is the line that makes a
+        # correction compound: a rule approved on an earlier GBK document is
+        # applied to THIS one automatically, at upload, with no code change.
+        survey = extract_survey_definition(
+            chunks,
+            study_id=study_id,
+            blocks=blocks,
+            rules_for_profile=lambda slug: active_rules_for_profile(job_db, slug),
+        )
         # Title from the original upload name, not the on-disk path (which is
         # renamed to the questionnaire id to avoid collisions).
         survey.title = Path(source_filename).stem

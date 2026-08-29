@@ -649,3 +649,73 @@ export const chatApi = {
 }
 
 export default api
+
+// --- Correction loop (founders teach the questionnaire parser) ---
+
+export interface CorrectionSuggestion {
+  source: 'flagged' | 'learned' | 'common'
+  text: string
+  flag: string | null
+}
+
+export interface SuggestionsResponse {
+  study_id: string
+  question_id: string | null
+  profile_slug: string | null
+  suggestions: CorrectionSuggestion[]
+}
+
+export interface CorrectionResult {
+  id: string
+  study_id: string
+  question_id: string | null
+  instruction: string
+  scope: string
+  profile_slug: string | null
+  status: string
+  lane: 'live' | 'proposal'
+  rule_text: string
+  rationale: string
+  degraded: boolean
+  created_at: string | null
+}
+
+export interface ProfileRule {
+  id: string
+  profile_slug: string
+  rule_text: string
+  scope: string
+  ordinal: number
+  active: boolean
+  approved_by: string | null
+  approved_at: string | null
+  created_at: string | null
+}
+
+export const correctionsApi = {
+  suggestions: async (studyId: string, questionId?: string) =>
+    api.get<SuggestionsResponse>(`/studies/${studyId}/corrections/suggestions`, {
+      params: questionId ? { question_id: questionId } : undefined,
+    }),
+
+  create: async (
+    studyId: string,
+    body: { instruction: string; question_id?: string; scope?: string; suggested_from?: string },
+  ) => api.post<CorrectionResult>(`/studies/${studyId}/corrections`, body),
+
+  list: async (studyId: string) =>
+    api.get<{ study_id: string; corrections: Record<string, unknown>[] }>(
+      `/studies/${studyId}/corrections`,
+    ),
+
+  rules: async (profileSlug: string) =>
+    api.get<{ profile_slug: string; rules: ProfileRule[] }>(`/profiles/${profileSlug}/rules`),
+
+  applyRule: async (
+    profileSlug: string,
+    body: { rule_text: string; scope?: string; correction_id?: string },
+  ) => api.post<ProfileRule>(`/profiles/${profileSlug}/rules`, body),
+
+  toggleRule: async (profileSlug: string, ruleId: string) =>
+    api.post<ProfileRule>(`/profiles/${profileSlug}/rules/${ruleId}/toggle`),
+}

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -317,13 +318,18 @@ def _extraction_flag_for(exc: Exception) -> str:
 
 
 def extract_question(
-    chunk: QuestionChunk, profile_hint: str | None = None
+    chunk: QuestionChunk,
+    profile_hint: str | None = None,
+    learned_rules: list[str] | None = None,
 ) -> ExtractionResult:
     """Extract one chunk into a structured Question + confidence + flags.
 
     `profile_hint` is the document's detected format hint (see
     profiles.detect_profile); it selects the per-profile extraction guidance in
     build_extraction_prompt. None keeps the current (pre-profile) prompt.
+
+    `learned_rules` are founder-taught rules for that profile (correction loop).
+    None/empty keeps the prompt byte-identical to the pre-loop one.
 
     Never raises on a backend/model failure: a failed chunk comes back flagged
     (CONFIG_ERROR / UNAVAILABLE / MODEL_ERROR by actionability) with a minimal
@@ -336,7 +342,7 @@ def extract_question(
     `_is_backend_unavailable_result`.
     """
     prompt = schema.build_extraction_prompt(
-        chunk.chunk_text, chunk.candidate_qid, profile_hint
+        chunk.chunk_text, chunk.candidate_qid, profile_hint, learned_rules
     )
     try:
         response: AIResponse = run_task(
@@ -507,6 +513,7 @@ def extract_survey_definition(
     chunks: list[QuestionChunk],
     study_id: str,
     blocks: list[DocumentBlock] | None = None,
+    rules_for_profile: Callable[[str], list[str]] | None = None,
 ) -> SurveyDefinition:
     """Extract + verify every chunk and assemble one draft SurveyDefinition.
 
@@ -530,13 +537,21 @@ def extract_survey_definition(
     # unchanged from today.
     detection = detect_profile(blocks) if blocks is not None else None
     profile_hint = detection.profile.prompt_hint if detection else None
+    # Founder-taught rules for the DETECTED profile (correction loop). Resolved
+    # through a callable so this engine never imports api.db — only detection
+    # knows the slug, so the caller can't look the rules up ahead of time. No
+    # provider, or a profile nobody has corrected, yields [] and the prompt is
+    # byte-identical to the pre-correction-loop one (the T32 no-op guarantee).
+    learned_rules: list[str] = []
+    if detection is not None and rules_for_profile is not None:
+        learned_rules = list(rules_for_profile(detection.profile.slug) or [])
     if blocks is not None:
         chunks = reconcile_segmentation(blocks, chunks, reconcile_meta)
 
     results: list[ExtractionResult] = []
     consecutive_backend_failures = 0
     for chunk in chunks:
-        result = extract_question(chunk, profile_hint)
+        result = extract_question(chunk, profile_hint, learned_rules)
 
         if _is_backend_unavailable_result(result):
             consecutive_backend_failures += 1

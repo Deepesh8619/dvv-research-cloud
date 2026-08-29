@@ -419,3 +419,68 @@ class FieldingLinkCreateRequest(FieldingRedirectsRequest):
     presentation choice, not an instrument edit)."""
 
     theme: str | None = None
+
+
+# --- Correction loop (founders teach the questionnaire parser) ---
+
+
+class CorrectionRequest(BaseModel):
+    """A founder's plain-language correction against an extracted questionnaire.
+
+    `question_id` is optional because a correction anchored on one question is
+    very often a statement about the whole document. `scope` is what the author
+    CONFIRMED in the UI (the chip); when omitted the model's inference is used.
+    """
+
+    instruction: str
+    question_id: str | None = None
+    scope: str | None = None
+    suggested_from: str | None = None
+
+
+class CorrectionResponse(BaseModel):
+    """A stored correction plus the rule drafted from it. Nothing is applied yet."""
+
+    id: str
+    study_id: str
+    question_id: str | None = None
+    instruction: str
+    scope: str
+    profile_slug: str | None = None
+    status: str
+    lane: str
+    rule_text: str
+    rationale: str
+    degraded: bool = False
+    created_at: str | None = None
+
+
+class SuggestionResponse(BaseModel):
+    """Ranked opening sentences for the instruction box (flagged/learned/common)."""
+
+    study_id: str
+    question_id: str | None = None
+    profile_slug: str | None = None
+    suggestions: list[dict]
+
+
+class ApplyRuleRequest(BaseModel):
+    """Approve a drafted rule onto a format profile. `scope` 'global' needs owner."""
+
+    rule_text: str
+    scope: str | None = None
+    correction_id: str | None = None
+
+
+class ProfileRuleResponse(BaseModel):
+    """One learned rule in a profile's registry."""
+
+    id: str
+    profile_slug: str
+    rule_text: str
+    scope: str
+    ordinal: int
+    active: bool
+    approved_by: str | None = None
+    approved_at: str | None = None
+    created_at: str | None = None

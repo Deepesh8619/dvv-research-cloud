@@ -299,8 +299,37 @@ def _has_field_spec(text: str) -> bool:
     return "q name:" in low or "among who:" in low or "other details:" in low
 
 
+def build_learned_rules_block(learned_rules: list[str] | None) -> str:
+    """Render founder-taught extraction rules as a prompt block.
+
+    Empty/None -> empty string, so a profile nobody has corrected yet produces a
+    prompt byte-identical to the pre-correction-loop one. That no-op property is
+    what lets the correction loop ship without putting existing extraction at
+    risk, and it is asserted directly in the tests.
+
+    Rules are numbered in their stored order because order carries meaning: a
+    later rule is allowed to override an earlier one, and the model is told so.
+    """
+    rules = [r.strip() for r in (learned_rules or []) if r and r.strip()]
+    if not rules:
+        return ""
+    body = "\n".join(f"{i}. {r}" for i, r in enumerate(rules, 1))
+    return (
+        "----- CLIENT-SPECIFIC RULES -----\n"
+        "Our researchers taught us how THIS client writes questionnaires. These "
+        "rules describe the actual document convention and override the general "
+        "guidance above where they conflict. A later rule wins over an earlier "
+        "one.\n"
+        f"{body}\n"
+        "----- END CLIENT-SPECIFIC RULES -----\n"
+    )
+
+
 def build_extraction_prompt(
-    chunk_text: str, candidate_qid: str | None, profile_hint: str | None = None
+    chunk_text: str,
+    candidate_qid: str | None,
+    profile_hint: str | None = None,
+    learned_rules: list[str] | None = None,
 ) -> str:
     """Prompt for the single-chunk extraction pass.
 
@@ -310,11 +339,17 @@ def build_extraction_prompt(
     appends the unknown-format note, 'prose'/None append neither. The per-chunk
     `_has_field_spec` check still fires independently (belt and suspenders) so a
     stray spec-table chunk is handled even if whole-doc detection guessed wrong.
+
+    `learned_rules` are the founder-approved rules stored against that profile
+    (see api.db.active_rules_for_profile). The hint SELECTS a canned block; the
+    rules CARRY taught content — that split is the whole widening the correction
+    loop needed. An empty rule list changes nothing about the prompt.
     """
     want_field_spec = profile_hint == "field_spec" or _has_field_spec(chunk_text)
     spec = f"{_FIELD_SPEC_GUIDANCE}\n" if want_field_spec else ""
     if profile_hint == "conservative":
         spec = f"{_UNKNOWN_FORMAT_GUIDANCE}\n{spec}"
+    spec = f"{spec}{build_learned_rules_block(learned_rules)}"
     hint = (
         f"The document segmenter tagged this chunk's question id as: {candidate_qid}. "
         "Use it unless the text clearly shows a different id.\n\n"

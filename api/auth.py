@@ -26,6 +26,11 @@ class UserRole(StrEnum):
     """User roles with permissions."""
 
     OWNER = "owner"
+    # Founders' lane (correction loop): may write corrections against an
+    # extracted questionnaire and approve profile-scoped rules. Deliberately
+    # NOT a superset of ANALYST — it grants the correction surface only, and
+    # `global`-scope rules still require OWNER (see routes/corrections.py).
+    FOUNDER = "founder"
     ANALYST = "analyst"
     REVIEWER = "reviewer"
 

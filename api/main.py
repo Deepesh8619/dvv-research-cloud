@@ -99,6 +99,7 @@ try:
     from api.routes import (
         auth,
         chat,
+        corrections,
         fielding,
         materialize,
         public,
@@ -126,6 +127,9 @@ try:
 
     app.include_router(materialize.router, prefix="/api")
     logger.info("✅ Materialize routes loaded")
+
+    app.include_router(corrections.router, prefix="/api")
+    logger.info("✅ Correction-loop routes loaded")
 except Exception as e:
     logger.warning(f"Routes not yet available: {e}")
 

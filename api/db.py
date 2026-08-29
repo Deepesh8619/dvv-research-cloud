@@ -278,6 +278,81 @@ class QuotaCellDB(Base):
     count = Column(Integer, default=0)
 
 
+class CorrectionDB(Base):
+    """One plain-language correction written by a founder against extraction.
+
+    The correction is what a person *said* ("terminates live in the TERM row"),
+    kept separate from any rule drafted out of it (`ProfileRuleDB`) so one
+    instruction can be re-resolved several times without losing the original
+    words. `question_id` is nullable on purpose: a correction anchored on Q12 is
+    very often a statement about the whole document.
+
+    New table -> `Base.metadata.create_all` provisions it; no
+    `_ensure_new_columns` entry needed.
+    """
+
+    __tablename__ = "corrections"
+
+    id = Column(String, primary_key=True, index=True)
+    study_id = Column(String, index=True)
+    question_id = Column(String, nullable=True)
+    author_id = Column(String, index=True)
+    instruction = Column(Text)
+    # Where the suggestion came from: flagged | common | learned | freeform.
+    # Tracked so we can see which suggestion sources actually get used.
+    suggested_from = Column(String, default="freeform")
+    # question | document | profile | global — confirmed by the author, not
+    # silently inferred. Drives who may approve (global => OWNER only).
+    scope = Column(String, default="document")
+    profile_slug = Column(String, index=True, nullable=True)
+    status = Column(String, default="drafted")
+    created_at = Column(String)
+
+
+class ProfileRuleDB(Base):
+    """A learned extraction rule attached to one questionnaire format profile.
+
+    This is the table that makes corrections compound: an active rule is
+    appended to the extraction prompt for EVERY document detected as
+    `profile_slug`, so a rule approved once keeps applying to future client
+    documents. Ordering matters (later rules win on conflict), hence `ordinal`.
+
+    Rules are retired, never deleted — "why did we stop doing that" is a
+    question that gets asked. `active=False` takes a rule out of the prompt
+    while leaving it readable.
+    """
+
+    __tablename__ = "profile_rules"
+
+    id = Column(String, primary_key=True, index=True)
+    profile_slug = Column(String, index=True)
+    rule_text = Column(Text)
+    source_correction_id = Column(String, nullable=True)
+    scope = Column(String, default="profile")
+    ordinal = Column(Integer, default=0)
+    active = Column(Boolean, default=True)
+    approved_by = Column(String, nullable=True)
+    approved_at = Column(String, nullable=True)
+    created_at = Column(String)
+
+
+def active_rules_for_profile(db, profile_slug: str) -> list[str]:
+    """Ordered active rule texts for one profile — the prompt-ready rule set.
+
+    Returns `[]` for an unknown slug or a profile nobody has taught yet, which
+    is what keeps the T32 guarantee intact: no rules == byte-identical prompt
+    to today. Callers pass this into the extractor as `rules_for_profile`.
+    """
+    rows = (
+        db.query(ProfileRuleDB)
+        .filter(ProfileRuleDB.profile_slug == profile_slug)
+        .filter(ProfileRuleDB.active.is_(True))
+        .order_by(ProfileRuleDB.ordinal)
+        .all()
+    )
+    return [r.rule_text for r in rows if r.rule_text]
+
+
 def init_db():
     """Initialize database tables."""
     Base.metadata.create_all(bind=engine)

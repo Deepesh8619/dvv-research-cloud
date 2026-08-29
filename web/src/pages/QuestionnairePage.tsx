@@ -14,9 +14,14 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import { TableSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import { flagInfo } from '../components/questionnaireFlags'
+import CorrectionBox from '../components/CorrectionBox'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
 const WRITE_ROLES = new Set(['owner', 'analyst'])
+// Correction loop: founders teach the parser. Deliberately NOT the same set as
+// WRITE_ROLES — an analyst may edit a question, but only a founder may write a
+// rule that changes how every future document of that format is read.
+const CORRECTION_ROLES = new Set(['owner', 'founder'])
 
 // --- Small presentational helpers -------------------------------------------
 
@@ -178,6 +183,8 @@ function QuestionDetail({
   q,
   priorQids,
   canWrite,
+  canCorrect,
+  profile,
   onSaved,
   onApproved,
 }: {
@@ -185,6 +192,9 @@ function QuestionDetail({
   q: Question
   priorQids: string[]
   canWrite: boolean
+  /** Founders' lane — the correction surface renders only for them. */
+  canCorrect: boolean
+  profile?: { slug?: string; label?: string } | null
   onSaved: (updated: Question) => void
   onApproved: (qid: string) => void
 }) {
@@ -281,6 +291,14 @@ function QuestionDetail({
           </h2>
           {q.approved && <span className="text-xs text-emerald-600">✓ approved</span>}
         </div>
+        {canCorrect && (
+          <CorrectionBox
+            studyId={studyId}
+            questionId={q.qid}
+            profileSlug={profile?.slug}
+            profileLabel={profile?.label}
+          />
+        )}
       </div>
 
       {q.flags.length > 0 && (
@@ -493,6 +511,10 @@ export default function QuestionnairePage() {
   const { id: studyId } = useParams<{ id: string }>()
   const { user } = useAuth()
   const canWrite = !!user && WRITE_ROLES.has(user.role)
+  // The founders' correction lane. Mirrors the server-side gate in
+  // routes/corrections.py — the server refuses regardless, this only decides
+  // whether the affordance renders.
+  const canCorrect = !!user && CORRECTION_ROLES.has(user.role)
 
   const [status, setStatus] = useState<QuestionnaireStatus | null>(null)
   const [questions, setQuestions] = useState<Question[]>([])
@@ -798,6 +820,8 @@ export default function QuestionnairePage() {
                   q={selected}
                   priorQids={questions.map((qq) => qq.qid)}
                   canWrite={canWrite}
+                  canCorrect={canCorrect}
+                  profile={status?.profile}
                   onSaved={onQuestionSaved}
                   onApproved={onQuestionApproved}
                 />
