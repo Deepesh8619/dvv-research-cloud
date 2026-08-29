@@ -719,3 +719,48 @@ export const correctionsApi = {
   toggleRule: async (profileSlug: string, ruleId: string) =>
     api.post<ProfileRule>(`/profiles/${profileSlug}/rules/${ruleId}/toggle`),
 }
+
+export interface FieldChange {
+  field: string
+  verdict: 'improved' | 'regressed' | 'changed'
+  before: unknown
+  after: unknown
+}
+
+export interface QuestionDiff {
+  qid: string
+  verdict: 'improved' | 'regressed' | 'changed' | 'unchanged'
+  only_in: 'before' | 'after' | null
+  flags_cleared: string[]
+  flags_added: string[]
+  changes: FieldChange[]
+}
+
+export interface ExtractionDiff {
+  counts: { improved: number; regressed: number; changed: number; unchanged: number }
+  n_questions: number
+  questions: QuestionDiff[]
+}
+
+export interface PreviewState {
+  preview_id: string
+  status: 'running' | 'ready' | 'error'
+  error_detail: string | null
+  model_calls: number
+  diff: ExtractionDiff | null
+}
+
+export const previewApi = {
+  start: async (studyId: string, correctionId: string) =>
+    api.post<{ preview_id: string; status: string; estimated_model_calls?: number }>(
+      `/studies/${studyId}/corrections/${correctionId}/preview`,
+    ),
+
+  get: async (studyId: string, correctionId: string) =>
+    api.get<PreviewState>(`/studies/${studyId}/corrections/${correctionId}/preview`),
+
+  approve: async (studyId: string, correctionId: string) =>
+    api.post<{ rule: ProfileRule; applied: boolean }>(
+      `/studies/${studyId}/corrections/${correctionId}/preview/approve`,
+    ),
+}

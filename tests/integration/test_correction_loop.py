@@ -6,6 +6,7 @@ the prompt it produced before this feature existed — if that ever breaks, the
 correction loop has silently changed extraction for every existing client.
 """
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -16,6 +17,7 @@ from sqlalchemy.orm import sessionmaker
 from api.auth import UserRole
 from api.db import (
     Base,
+    CorrectionDB,
     ProfileRuleDB,
     UserDB,
     active_rules_for_profile,
@@ -23,6 +25,7 @@ from api.db import (
 )
 from api.main import app
 from api.routes.corrections import require_correction_access
+from src.ai.router import AIResponse
 from src.engines.questionnaire import schema
 
 # --------------------------------------------------------------------------
@@ -228,13 +231,58 @@ def test_classification_failure_routes_to_proposal():
 def test_unrecognised_lane_falls_back_to_proposal():
     from api.routes.corrections import _classify
 
-    class _R:
-        data = {"lane": "yolo", "scope": "nonsense", "rule_text": "r", "rationale": ""}
-
-    with patch("api.routes.corrections.run_task", return_value=_R()):
+    # The REAL AIResponse, not a hand-rolled stub. An earlier version of this
+    # test used a fake class exposing `.data`; the production code read `.data`
+    # too, so the test passed green while the live endpoint 500'd on
+    # AIResponse's actual `.content`. A double that does not match the real
+    # object is worse than no test at all.
+    response = AIResponse(
+        content={"lane": "yolo", "scope": "nonsense", "rule_text": "r", "rationale": ""},
+        backend="ollama",
+        model="test",
+    )
+    with patch("api.routes.corrections.run_task", return_value=response):
         verdict = _classify("x", None, None)
     assert verdict["lane"] == "proposal"
     assert verdict["scope"] == "document"
+
+
+def test_classifier_reads_the_real_aiproxy_content_field():
+    """A well-formed classification must actually be honoured end to end.
+
+    Pairs with the test above: that one proves bad output degrades safely, this
+    one proves good output is not ALSO silently degraded — which is what the
+    `.data`/`.content` bug did in production.
+    """
+    from api.routes.corrections import _classify
+
+    response = AIResponse(
+        content={
+            "lane": "live",
+            "scope": "profile",
+            "rule_text": "Terminates sit in the TERM row.",
+            "rationale": "A client convention.",
+        },
+        backend="ollama",
+        model="test",
+    )
+    with patch("api.routes.corrections.run_task", return_value=response):
+        verdict = _classify("terminates are in the TERM row", None, "gbk_spec_table")
+    assert verdict["lane"] == "live"
+    assert verdict["scope"] == "profile"
+    assert verdict["rule_text"] == "Terminates sit in the TERM row."
+    assert verdict["degraded"] is False
+
+
+def test_any_unexpected_classifier_failure_still_degrades_safely():
+    """Never 500: a correction a founder wrote must not be lost to a crash."""
+    from api.routes.corrections import _classify
+
+    with patch("api.routes.corrections.run_task", side_effect=AttributeError("boom")):
+        verdict = _classify("something", None, None)
+    assert verdict["lane"] == "proposal"
+    assert verdict["degraded"] is True
+    assert verdict["rule_text"] == "something"
 
 
 # --------------------------------------------------------------------------
@@ -294,3 +342,151 @@ def test_suggestions_lead_with_the_extractors_own_flags():
     assert any("terminate" in t.lower() for t in texts)
     assert any("option" in t.lower() for t in texts)
     assert all(s["source"] == "flagged" for s in out)
+
+
+# --------------------------------------------------------------------------
+# Preview (P4) — re-read the document under a candidate rule, then diff
+# --------------------------------------------------------------------------
+
+
+def _seed_study_with_questionnaire(Session, definition: dict):
+    from api.db import QuestionnaireDB, StudyDB
+
+    s = Session()
+    s.add(StudyDB(id="s1", client_name="T", status="draft", created_at="2026-01-01"))
+    s.add(
+        QuestionnaireDB(
+            id="qn1",
+            study_id="s1",
+            status="draft",
+            source_filename="gbk.docx",
+            definition_json=json.dumps(definition),
+            created_at="2026-01-01",
+        )
+    )
+    s.commit()
+    s.close()
+
+
+def test_preview_refuses_when_source_document_is_gone(client):
+    """Render's disk is ephemeral: the definition survives a restart, the .docx does not.
+
+    That must produce an actionable 409, not a 500 — the reviewer needs to be
+    told to re-upload, not shown a stack trace.
+    """
+    c, Session = client
+    _seed_study_with_questionnaire(Session, {"questions": [{"qid": "Q1"}]})
+    s = Session()
+    s.add(
+        CorrectionDB(
+            id="corr1", study_id="s1", author_id="u", instruction="fix terminates",
+            scope="profile", profile_slug="gbk_spec_table", status="resolved",
+            created_at="2026-01-01",
+        )
+    )
+    s.commit()
+    s.close()
+
+    app.dependency_overrides[require_correction_access] = lambda: _as("founder")
+    r = c.post("/api/studies/s1/corrections/corr1/preview")
+    assert r.status_code == 409
+    assert "re-upload" in r.json()["detail"].lower()
+
+
+def test_preview_requires_an_existing_correction(client):
+    c, Session = client
+    _seed_study_with_questionnaire(Session, {"questions": []})
+    app.dependency_overrides[require_correction_access] = lambda: _as("founder")
+    assert c.post("/api/studies/s1/corrections/nope/preview").status_code == 404
+
+
+def test_approve_refuses_without_a_completed_preview(client):
+    """Nothing may become current until a human has actually seen a diff."""
+    c, Session = client
+    _seed_study_with_questionnaire(Session, {"questions": []})
+    s = Session()
+    s.add(
+        CorrectionDB(
+            id="corr1", study_id="s1", author_id="u", instruction="x",
+            scope="profile", profile_slug="gbk_spec_table", status="resolved",
+            created_at="2026-01-01",
+        )
+    )
+    s.commit()
+    s.close()
+
+    app.dependency_overrides[require_correction_access] = lambda: _as("founder")
+    r = c.post("/api/studies/s1/corrections/corr1/preview/approve")
+    assert r.status_code == 409
+
+
+def test_approving_a_ready_preview_applies_rule_and_new_definition(client):
+    """The one path where a correction changes what the study holds."""
+    from api.db import CorrectionPreviewDB, ProfileRuleDB, QuestionnaireDB
+
+    c, Session = client
+    _seed_study_with_questionnaire(Session, {"questions": [{"qid": "Q1"}]})
+    candidate = json.dumps({"questions": [{"qid": "Q1", "terminate_if": {"op": "eq"}}]})
+    s = Session()
+    s.add(
+        CorrectionDB(
+            id="corr1", study_id="s1", author_id="u",
+            instruction="terminates live in the TERM row",
+            scope="profile", profile_slug="gbk_spec_table", status="resolved",
+            created_at="2026-01-01",
+        )
+    )
+    s.add(
+        CorrectionPreviewDB(
+            id="prev1", correction_id="corr1", study_id="s1",
+            rule_text="terminates live in the TERM row", status="ready",
+            candidate_json=candidate, diff_json=json.dumps({"counts": {}}),
+            created_at="2026-01-01",
+        )
+    )
+    s.commit()
+    s.close()
+
+    app.dependency_overrides[require_correction_access] = lambda: _as("founder")
+    r = c.post("/api/studies/s1/corrections/corr1/preview/approve")
+    assert r.status_code == 200, r.text
+    assert r.json()["applied"] is True
+
+    s = Session()
+    # The rule persisted so it applies to FUTURE documents of this format...
+    rule = s.query(ProfileRuleDB).filter_by(profile_slug="gbk_spec_table").first()
+    assert rule is not None and rule.active is True
+    # ...and the previewed extraction became the study's current definition.
+    qn = s.query(QuestionnaireDB).filter_by(id="qn1").first()
+    assert json.loads(qn.definition_json)["questions"][0]["terminate_if"] == {"op": "eq"}
+    s.close()
+
+
+def test_founder_cannot_approve_a_global_scoped_preview(client):
+    """The owner-only gate must hold on the approve path too, not just apply-rule."""
+    from api.db import CorrectionPreviewDB
+
+    c, Session = client
+    _seed_study_with_questionnaire(Session, {"questions": []})
+    s = Session()
+    s.add(
+        CorrectionDB(
+            id="corr1", study_id="s1", author_id="u", instruction="x",
+            scope="global", profile_slug="gbk_spec_table", status="resolved",
+            created_at="2026-01-01",
+        )
+    )
+    s.add(
+        CorrectionPreviewDB(
+            id="prev1", correction_id="corr1", study_id="s1", rule_text="x",
+            status="ready", candidate_json='{"questions": []}',
+            diff_json="{}", created_at="2026-01-01",
+        )
+    )
+    s.commit()
+    s.close()
+
+    app.dependency_overrides[require_correction_access] = lambda: _as("founder")
+    r = c.post("/api/studies/s1/corrections/corr1/preview/approve")
+    assert r.status_code == 403
+    assert "owner" in r.json()["detail"].lower()

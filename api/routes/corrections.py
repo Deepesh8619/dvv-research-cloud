@@ -20,20 +20,26 @@ trust in the whole system. That asymmetry is not close.
 
 import json
 import logging
+import threading
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from api.auth import UserRole, get_current_user
+from api.config import STUDIES_DIR
 from api.db import (
     CorrectionDB,
+    CorrectionPreviewDB,
     ProfileRuleDB,
     UserDB,
     get_db,
+    get_questionnaire,
     get_study,
     list_questionnaires_for_study,
+    set_questionnaire_definition,
 )
 from api.models import (
     ApplyRuleRequest,
@@ -42,7 +48,14 @@ from api.models import (
     ProfileRuleResponse,
     SuggestionResponse,
 )
-from src.ai.router import BackendUnavailable, ModelOutputError, run_task
+from src.ai.router import ModelOutputError, run_task
+from src.engines.questionnaire.diffing import diff_extractions
+from src.engines.questionnaire.extractor import extract_survey_definition
+from src.intake.questionnaire_loader import (
+    load_docx,
+    load_pdf,
+    segment_into_questions,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -277,9 +290,12 @@ def _classify(instruction: str, question: dict | None, profile: str | None) -> d
             _classify_prompt(instruction, question, profile),
             _CLASSIFY_SCHEMA,
         )
-        data = response.data if hasattr(response, "data") else response
+        # run_task returns AIResponse, whose parsed payload is `.content`.
+        data = response.content
         if isinstance(data, str):
             data = json.loads(data)
+        if not isinstance(data, dict):
+            raise ModelOutputError(f"classifier returned {type(data).__name__}, not an object")
         lane = data.get("lane")
         scope = data.get("scope")
         return {
@@ -290,8 +306,15 @@ def _classify(instruction: str, question: dict | None, profile: str | None) -> d
             "confidence": data.get("confidence"),
             "degraded": False,
         }
-    except (BackendUnavailable, ModelOutputError, KeyError, json.JSONDecodeError) as exc:
-        logger.warning(f"Correction classification unavailable, queuing: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        # Deliberately catch EVERYTHING. The point of this function is that a
+        # correction is never lost and never auto-applied on a bad
+        # classification — a 500 here throws away what a founder wrote, which
+        # is worse than any degraded verdict. (An earlier narrow `except` let
+        # an AttributeError through and did exactly that.)
+        logger.warning(
+            f"Correction classification failed ({type(exc).__name__}), queuing: {exc}"
+        )
         return {
             "lane": "proposal",
             "scope": "document",
@@ -535,3 +558,253 @@ def _rule_response(rule: ProfileRuleDB) -> ProfileRuleResponse:
         approved_at=rule.approved_at,
         created_at=rule.created_at,
     )
+
+
+# --------------------------------------------------------------------------
+# Preview (P4) — re-read the WHOLE document under a candidate rule and diff
+# --------------------------------------------------------------------------
+
+
+def _source_document(study_id: str, questionnaire_id: str) -> Path | None:
+    """The uploaded .docx/.pdf, if it still exists.
+
+    Lives on Render's EPHEMERAL disk, so it is gone after any restart even
+    though the extracted definition survives in Postgres. Callers must treat
+    None as "cannot preview, ask for a re-upload" rather than an error.
+    """
+    directory = STUDIES_DIR / study_id / "questionnaires"
+    for suffix in (".docx", ".pdf"):
+        candidate = directory / f"{questionnaire_id}{suffix}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _run_preview(preview_id: str, study_id: str, questionnaire_id: str,
+                 source: Path, rule_text: str, profile_slug: str) -> None:
+    """Re-extract the document under `rule_text` and store the diff.
+
+    Runs on a daemon thread (matching questionnaire.py's upload pattern) with a
+    fresh session — one LLM call per chunk is far too slow to hold a request
+    open. Writes ONLY to correction_previews: the questionnaire's live
+    definition is never touched here, so a bad rule cannot damage anything
+    before a human has looked at the diff.
+    """
+    from api.db import SessionLocal, active_rules_for_profile
+
+    job_db = SessionLocal()
+    try:
+        blocks = (
+            load_docx(source) if source.suffix.lower() == ".docx" else load_pdf(source)
+        )
+        chunks = segment_into_questions(blocks)
+
+        # Candidate rule set = what is already active, plus the one under review
+        # appended last so it wins on conflict — the same ordering the prompt
+        # promises the model.
+        candidate_rules = [*active_rules_for_profile(job_db, profile_slug), rule_text]
+
+        survey = extract_survey_definition(
+            chunks,
+            study_id=study_id,
+            blocks=blocks,
+            rules_for_profile=lambda _slug: candidate_rules,
+        )
+        after = json.loads(survey.to_json()).get("questions", [])
+
+        questionnaire = get_questionnaire(job_db, questionnaire_id)
+        before = json.loads(questionnaire.definition_json or "{}").get("questions", [])
+
+        diff = diff_extractions(before, after)
+        row = (
+            job_db.query(CorrectionPreviewDB)
+            .filter(CorrectionPreviewDB.id == preview_id)
+            .first()
+        )
+        if row:
+            row.status = "ready"
+            row.candidate_json = survey.to_json()
+            row.diff_json = json.dumps(diff.to_dict())
+            row.model_calls = len(chunks)
+            row.completed_at = _now()
+            job_db.commit()
+        counts = diff.counts()
+        logger.info(
+            f"[{study_id}] preview {preview_id}: {counts['improved']} improved, "
+            f"{counts['regressed']} regressed over {len(chunks)} chunks"
+        )
+    except Exception as exc:  # noqa: BLE001 - must not kill the thread silently
+        logger.error(f"[{study_id}] preview {preview_id} failed: {exc}", exc_info=True)
+        row = (
+            job_db.query(CorrectionPreviewDB)
+            .filter(CorrectionPreviewDB.id == preview_id)
+            .first()
+        )
+        if row:
+            row.status = "error"
+            row.error_detail = str(exc)
+            row.completed_at = _now()
+            job_db.commit()
+    finally:
+        job_db.close()
+
+
+@router.post("/studies/{study_id}/corrections/{correction_id}/preview")
+async def start_preview(
+    study_id: str,
+    correction_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_correction_access),
+):
+    """Re-read the whole document under this correction's rule. Applies nothing.
+
+    Costs one LLM call per chunk, so it is an explicit action and the response
+    reports the call count up front rather than surprising anyone with it.
+    """
+    correction = (
+        db.query(CorrectionDB).filter(CorrectionDB.id == correction_id).first()
+    )
+    if not correction or correction.study_id != study_id:
+        raise HTTPException(status_code=404, detail="Correction not found")
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    if not questionnaire or not questionnaire.definition_json:
+        raise HTTPException(
+            status_code=400, detail="This study has no extracted questionnaire to compare against."
+        )
+
+    source = _source_document(study_id, questionnaire.id)
+    if source is None:
+        raise HTTPException(
+            status_code=409,
+            detail="The original document is no longer on disk (it does not survive a "
+            "server restart), so it cannot be re-read. Re-upload it to preview this rule.",
+        )
+
+    existing = (
+        db.query(CorrectionPreviewDB)
+        .filter(CorrectionPreviewDB.correction_id == correction_id)
+        .filter(CorrectionPreviewDB.status == "running")
+        .first()
+    )
+    if existing:
+        return {"preview_id": existing.id, "status": "running", "reused": True}
+
+    preview = CorrectionPreviewDB(
+        id=f"prev_{uuid4().hex[:12]}",
+        correction_id=correction_id,
+        study_id=study_id,
+        rule_text=correction.instruction,
+        status="running",
+        created_at=_now(),
+    )
+    db.add(preview)
+    db.commit()
+
+    threading.Thread(
+        target=_run_preview,
+        args=(preview.id, study_id, questionnaire.id, source,
+              correction.instruction, correction.profile_slug or ""),
+        daemon=True,
+    ).start()
+
+    n_chunks = len(segment_into_questions(
+        load_docx(source) if source.suffix.lower() == ".docx" else load_pdf(source)
+    ))
+    logger.info(f"[{study_id}] preview {preview.id} started by {user.email}")
+    return {"preview_id": preview.id, "status": "running", "estimated_model_calls": n_chunks}
+
+
+@router.get("/studies/{study_id}/corrections/{correction_id}/preview")
+async def get_preview(
+    study_id: str,
+    correction_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_correction_access),
+):
+    """Latest preview for a correction: status, and the diff once ready."""
+    preview = (
+        db.query(CorrectionPreviewDB)
+        .filter(CorrectionPreviewDB.correction_id == correction_id)
+        .order_by(CorrectionPreviewDB.created_at.desc())
+        .first()
+    )
+    if not preview:
+        raise HTTPException(status_code=404, detail="No preview for this correction yet")
+    return {
+        "preview_id": preview.id,
+        "status": preview.status,
+        "error_detail": preview.error_detail,
+        "model_calls": preview.model_calls,
+        "diff": json.loads(preview.diff_json) if preview.diff_json else None,
+    }
+
+
+@router.post("/studies/{study_id}/corrections/{correction_id}/preview/approve")
+async def approve_preview(
+    study_id: str,
+    correction_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_correction_access),
+):
+    """Accept the previewed re-extraction: persist the rule AND make it current.
+
+    This is the only path where a correction changes what the study actually
+    holds, and it is reachable only after a human has seen the diff — including
+    the regressions, which the diff refuses to hide.
+    """
+    preview = (
+        db.query(CorrectionPreviewDB)
+        .filter(CorrectionPreviewDB.correction_id == correction_id)
+        .order_by(CorrectionPreviewDB.created_at.desc())
+        .first()
+    )
+    if not preview or preview.status != "ready":
+        raise HTTPException(
+            status_code=409, detail="No completed preview to approve for this correction."
+        )
+    correction = (
+        db.query(CorrectionDB).filter(CorrectionDB.id == correction_id).first()
+    )
+    if not correction:
+        raise HTTPException(status_code=404, detail="Correction not found")
+
+    scope = correction.scope if correction.scope in VALID_SCOPES else "profile"
+    if scope in _OWNER_ONLY_SCOPES and UserRole(user.role) != UserRole.OWNER:
+        raise HTTPException(
+            status_code=403,
+            detail="A global rule changes extraction for every client format, "
+            "so it needs owner approval.",
+        )
+
+    profile_slug = correction.profile_slug or ""
+    highest = (
+        db.query(ProfileRuleDB)
+        .filter(ProfileRuleDB.profile_slug == profile_slug)
+        .order_by(ProfileRuleDB.ordinal.desc())
+        .first()
+    )
+    rule = ProfileRuleDB(
+        id=f"rule_{uuid4().hex[:12]}",
+        profile_slug=profile_slug,
+        rule_text=preview.rule_text,
+        source_correction_id=correction_id,
+        scope=scope,
+        ordinal=(highest.ordinal + 1) if highest else 0,
+        active=True,
+        approved_by=user.id,
+        approved_at=_now(),
+        created_at=_now(),
+    )
+    db.add(rule)
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    if questionnaire and preview.candidate_json:
+        set_questionnaire_definition(db, questionnaire.id, preview.candidate_json)
+    correction.status = "applied"
+    db.commit()
+    db.refresh(rule)
+    logger.info(
+        f"[{study_id}] preview {preview.id} approved by {user.email} -> rule {rule.id}"
+    )
+    return {"rule": _rule_response(rule).model_dump(), "applied": True}

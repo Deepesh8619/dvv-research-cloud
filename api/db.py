@@ -336,6 +336,36 @@ class ProfileRuleDB(Base):
     created_at = Column(String)
 
 
+class CorrectionPreviewDB(Base):
+    """A candidate re-extraction run for one correction, plus its diff.
+
+    Separate table rather than columns on `corrections` because
+    `Base.metadata.create_all` only creates MISSING TABLES — it never adds a
+    column to a table that already exists (see `_ensure_new_columns`), and
+    `corrections` is already provisioned wherever this has run once.
+
+    Holds the candidate extraction WITHOUT applying it: a preview is a
+    proposal, and the questionnaire's live definition is untouched until a
+    human approves. That separation is the whole safety property of the live
+    lane.
+    """
+
+    __tablename__ = "correction_previews"
+
+    id = Column(String, primary_key=True, index=True)
+    correction_id = Column(String, index=True)
+    study_id = Column(String, index=True)
+    rule_text = Column(Text)
+    # running | ready | error
+    status = Column(String, default="running", index=True)
+    error_detail = Column(Text, nullable=True)
+    candidate_json = Column(Text, nullable=True)  # the re-extracted definition
+    diff_json = Column(Text, nullable=True)  # diffing.ExtractionDiff.to_dict()
+    model_calls = Column(Integer, default=0)
+    created_at = Column(String)
+    completed_at = Column(String, nullable=True)
+
+
 def active_rules_for_profile(db, profile_slug: str) -> list[str]:
     """Ordered active rule texts for one profile — the prompt-ready rule set.
 

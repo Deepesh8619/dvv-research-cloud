@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import PreviewDiff from './PreviewDiff'
 import {
   correctionsApi,
   type CorrectionResult,
@@ -98,28 +99,6 @@ export default function CorrectionBox({
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setError(detail ?? 'Could not send that correction. Try again.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const approveRule = async () => {
-    if (!result || !slug) return
-    setBusy(true)
-    setError(null)
-    try {
-      await correctionsApi.applyRule(slug, {
-        rule_text: result.rule_text,
-        scope: result.scope,
-        correction_id: result.id,
-      })
-      setResult(null)
-      setInstruction('')
-      loadRules()
-      onApplied?.()
-    } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(detail ?? 'Could not apply that rule.')
     } finally {
       setBusy(false)
     }
@@ -289,17 +268,6 @@ export default function CorrectionBox({
           {error && <p className="text-xs text-rose-700">{error}</p>}
 
           <div className="flex gap-2">
-            {result.lane === 'live' && slug && (
-              <button
-                onClick={approveRule}
-                disabled={busy}
-                className="text-sm font-medium bg-emerald-700 text-white px-4 py-1.5 rounded
-                           hover:bg-emerald-800 disabled:opacity-40 active:scale-[0.98] transition
-                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-              >
-                {busy ? 'Applying…' : 'Approve & teach the parser'}
-              </button>
-            )}
             <button
               onClick={() => setResult(null)}
               className="text-sm text-slate-600 px-3 py-1.5 rounded border border-slate-300
@@ -308,6 +276,22 @@ export default function CorrectionBox({
               Rewrite it
             </button>
           </div>
+
+          {/* Live-lane rules are approved from the DIFF, never blind: the
+              preview re-reads the whole document and shows what got worse as
+              well as what got better. */}
+          {result.lane === 'live' && (
+            <PreviewDiff
+              studyId={studyId}
+              correctionId={result.id}
+              onApplied={() => {
+                setResult(null)
+                setInstruction('')
+                loadRules()
+                onApplied?.()
+              }}
+            />
+          )}
         </div>
       )}
 
