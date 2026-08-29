@@ -4,6 +4,12 @@ import os
 import secrets
 from pathlib import Path
 
+from src.env import load_env
+
+# Before ANY os.getenv below — a local .env is otherwise silently ignored.
+# Real environment variables still win (load_env uses setdefault).
+load_env()
+
 PROJECT_ROOT = Path(__file__).parent.parent
 
 # Database

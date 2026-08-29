@@ -20,6 +20,12 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from src.env import load_env
+
+# _EXTRACTION_MODELS and the key-presence checks read os.environ at import
+# time, so a local .env has to be in place before this module finishes loading.
+load_env()
+
 # Groq's Cloudflare front rejects urllib's default "Python-urllib/3.x" User-Agent
 # with a 403 (Cloudflare error 1010, generic bot-signature block) — reproduced by
 # swapping in curl's UA and getting 200. Anthropic hasn't been observed to block
