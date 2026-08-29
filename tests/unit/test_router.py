@@ -132,7 +132,10 @@ def test_openai_generate_no_tool_call_raises_model_error(monkeypatch):
 
 
 def test_chain_is_ollama_first_then_configured_cloud(monkeypatch):
+    # Opt out of open-weights-only mode (the default) to see the full chain.
+    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
     monkeypatch.setenv("GROQ_API_KEY", "gk")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
     order = [c["backend"] for c in _extraction_chain()]
@@ -148,7 +151,9 @@ def test_chain_omits_cloud_backends_without_keys(monkeypatch):
 
 
 def test_chain_includes_only_configured_cloud(monkeypatch):
+    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert [c["backend"] for c in _extraction_chain()] == ["ollama", "openai"]
@@ -159,8 +164,10 @@ def test_chain_includes_only_configured_cloud(monkeypatch):
 
 def test_run_task_auto_falls_through_ollama_to_openai(monkeypatch):
     """Ollama unreachable -> chain escalates to the configured OpenAI backend."""
+    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
 
     def fake_http_json(request, timeout):
@@ -211,3 +218,46 @@ def test_run_task_unknown_backend_raises(monkeypatch):
     routes = {"x.y": {"backend": "nope", "model": "m"}}
     with pytest.raises(ValueError):
         run_task("x.y", "p", _SCHEMA, routes=routes)
+
+
+# --- open-weights-only mode -------------------------------------------------
+
+
+def test_open_weights_only_drops_proprietary_backends(monkeypatch):
+    """A stray proprietary key must not route client questionnaires off-catalog.
+
+    This is a contractual constraint in market research (client NDAs), not a
+    preference, so the guarantee is asserted rather than assumed.
+    """
+    from src.ai.router import _extraction_chain
+
+    for k in ("GROQ_API_KEY", "HF_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.setenv(k, "x")
+    monkeypatch.delenv("LLM_OPEN_WEIGHTS_ONLY", raising=False)  # default is ON
+
+    backends = [step["backend"] for step in _extraction_chain()]
+    assert "openai" not in backends
+    assert "claude" not in backends
+    assert backends == ["ollama", "groq", "huggingface"]
+
+
+def test_opting_out_restores_the_proprietary_tail(monkeypatch):
+    from src.ai.router import _extraction_chain
+
+    for k in ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.setenv(k, "x")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
+
+    backends = [step["backend"] for step in _extraction_chain()]
+    assert backends == ["ollama", "groq", "openai", "claude"]
+
+
+def test_huggingface_backend_needs_a_token(monkeypatch):
+    from src.ai.router import BackendUnavailable, _huggingface_generate
+
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGINGFACE_API_KEY", raising=False)
+    with pytest.raises(BackendUnavailable) as exc:
+        _huggingface_generate("Qwen/Qwen3-32B", "hi", {}, 5)
+    assert exc.value.config_error is True

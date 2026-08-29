@@ -612,14 +612,20 @@ def test_extract_question_resolves_to_openai_with_only_openai_key(monkeypatch):
     Ollama first (unreachable here), fall through to OpenAI, and drive
     extraction end-to-end. Only the network boundary (router.http_json) is
     stubbed, so this proves the chain wiring, backend dispatch, and result
-    assembly all agree — the production state on Render (no local Ollama,
-    a cloud key configured)."""
+    assembly all agree.
+
+    Requires opting OUT of open-weights-only mode: that mode is the default and
+    deliberately refuses the proprietary tail, so reaching OpenAI at all is now
+    an explicit choice. The open-weights production path is covered by
+    `test_extract_question_resolves_to_groq_under_open_weights_default`."""
     import urllib.error
 
     from src.ai import router as _router
 
+    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
 
     content = _extraction_content(qid="Q1")
@@ -638,3 +644,44 @@ def test_extract_question_resolves_to_openai_with_only_openai_key(monkeypatch):
 
     assert result.question.qid == "Q1"
     assert result.question.type == QuestionType.SINGLE
+
+
+def test_extract_question_resolves_to_groq_under_open_weights_default(monkeypatch):
+    """The open-weights production path, end to end, with run_task NOT patched.
+
+    Sibling of the OpenAI smoke test above, for what actually runs now: with
+    open-weights-only mode at its default (ON) and a proprietary key present,
+    the chain must fall through Ollama to GROQ and never touch OpenAI. Proves
+    both the chain wiring and that the guarantee holds through the real
+    dispatch path, not just in `_extraction_chain`.
+    """
+    import urllib.error
+
+    from src.ai import router as _router
+
+    monkeypatch.delenv("LLM_OPEN_WEIGHTS_ONLY", raising=False)  # default: ON
+    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    # Present but must be ignored — the whole point of the guarantee.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
+
+    content = _extraction_content(qid="Q1")
+    seen: list[str] = []
+
+    def fake_http_json(request, timeout):
+        seen.append(request.full_url)
+        if "11434" in request.full_url:  # the Ollama-first attempt
+            raise urllib.error.URLError("connection refused")
+        assert "api.groq.com" in request.full_url
+        arguments = __import__("json").dumps(content)
+        call = {"function": {"name": "emit", "arguments": arguments}}
+        return {"choices": [{"message": {"tool_calls": [call]}}]}
+
+    monkeypatch.setattr(_router, "http_json", fake_http_json)
+
+    result = extract_question(_chunk("Q1"))
+
+    assert result.question.qid == "Q1"
+    assert not any("api.openai.com" in u for u in seen), (
+        "a confidential questionnaire reached OpenAI despite open-weights-only mode"
+    )

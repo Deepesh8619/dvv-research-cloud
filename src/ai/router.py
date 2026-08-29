@@ -302,6 +302,30 @@ def _groq_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
     )
 
 
+def _huggingface_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
+    """Structured extraction via Hugging Face Inference Providers.
+
+    HF's router is OpenAI-compatible and fans out to the provider actually
+    serving a model (Cerebras, Together, Novita, Fireworks, ...), so ONE key
+    reaches the whole open-weight catalog instead of one key per vendor. That
+    matters here because it makes swapping the extraction model a config change
+    rather than a new backend: any open model HF serves is reachable by putting
+    its repo id in HF_MODEL.
+    """
+    api_key = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY")
+    if not api_key:
+        raise BackendUnavailable("HF_TOKEN not set", config_error=True)
+    return _openai_compatible_generate(
+        "https://router.huggingface.co/v1/chat/completions",
+        api_key,
+        model,
+        prompt,
+        schema,
+        timeout,
+        "HuggingFace",
+    )
+
+
 def _openai_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
     """Structured extraction via OpenAI chat-completions function calling.
 
@@ -362,7 +386,7 @@ def _openai_generate(model: str, prompt: str, schema: dict, timeout: int) -> dic
 # Env vars that gate the cloud AI backends. Reported as presence booleans by the
 # health/startup preflight so a missing key is caught at deploy — not at the
 # first client upload (the production incident this preflight exists to prevent).
-_LLM_KEY_ENV_VARS = ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+_LLM_KEY_ENV_VARS = ("GROQ_API_KEY", "HF_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
 
 
 def llm_key_presence() -> dict[str, bool]:
@@ -386,10 +410,29 @@ def llm_key_presence() -> dict[str, bool]:
 # warrants the stronger model.
 _EXTRACTION_MODELS = {
     "ollama": os.environ.get("OLLAMA_EXTRACT_MODEL", "llama3.2:3b"),
-    "groq": os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+    # Groq's catalog is entirely open-weight. gpt-oss-120b (Apache 2.0) is the
+    # default because it is both cheaper and stronger on schema-constrained
+    # extraction than the llama-3.3-70b it replaces; override per-deployment
+    # with GROQ_MODEL after benchmarking against a real client document.
+    "groq": os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
+    "huggingface": os.environ.get("HF_MODEL", "Qwen/Qwen3-32B"),
     "openai": "gpt-4o",
     "claude": "claude-fable-5",
 }
+
+# Open-weight-only mode. When on, the proprietary steps (OpenAI, Anthropic) are
+# dropped from every fallback chain even if their keys happen to be present —
+# so a stray key in the environment cannot silently route confidential client
+# questionnaires to a proprietary vendor. Defaults ON: for market research the
+# constraint is contractual (client NDAs), not a preference, and a default that
+# has to be remembered is a default that gets forgotten.
+def open_weights_only() -> bool:
+    """True when only open-weight backends may serve LLM tasks."""
+    return os.environ.get("LLM_OPEN_WEIGHTS_ONLY", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+    )
 
 # Ollama gets a short per-attempt timeout inside the fallback chain: a local
 # model that hangs must not stall the whole request when a cloud backend could
@@ -415,10 +458,16 @@ def _extraction_chain() -> list[dict[str, str]]:
     ]
     if keys.get("GROQ_API_KEY"):
         chain.append({"backend": "groq", "model": _EXTRACTION_MODELS["groq"]})
-    if keys.get("OPENAI_API_KEY"):
-        chain.append({"backend": "openai", "model": _EXTRACTION_MODELS["openai"]})
-    if keys.get("ANTHROPIC_API_KEY"):
-        chain.append({"backend": "claude", "model": _EXTRACTION_MODELS["claude"]})
+    if keys.get("HF_TOKEN"):
+        chain.append(
+            {"backend": "huggingface", "model": _EXTRACTION_MODELS["huggingface"]}
+        )
+    # Proprietary tail — skipped entirely in open-weights-only mode (the default).
+    if not open_weights_only():
+        if keys.get("OPENAI_API_KEY"):
+            chain.append({"backend": "openai", "model": _EXTRACTION_MODELS["openai"]})
+        if keys.get("ANTHROPIC_API_KEY"):
+            chain.append({"backend": "claude", "model": _EXTRACTION_MODELS["claude"]})
     return chain
 
 
@@ -448,6 +497,8 @@ def _run_one(
         content = _ollama_generate(model, prompt, schema, timeout)
     elif backend == "groq":
         content = _groq_generate(model, prompt, schema, timeout)
+    elif backend == "huggingface":
+        content = _huggingface_generate(model, prompt, schema, timeout)
     elif backend == "openai":
         content = _openai_generate(model, prompt, schema, timeout)
     elif backend == "claude":
