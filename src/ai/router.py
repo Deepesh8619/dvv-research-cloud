@@ -311,10 +311,13 @@ def _groq_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
 def _cerebras_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
     """Structured extraction via Cerebras' OpenAI-compatible API.
 
-    Worth its own backend rather than reaching Cerebras through the HF router:
-    HF bills its own credits (~$0.10/month free), whereas a direct Cerebras key
-    gets Cerebras' own far larger free daily allowance — the difference between
-    finishing a full-document benchmark and running out mid-run.
+    Its own backend rather than reaching Cerebras through the HF router, since
+    HF bills its own (very small) credits either way.
+
+    Do NOT assume a free tier: verified 2026-08-29 that a fresh account returns
+    HTTP 402 `payment_required` (param: quota) for every served model, contrary
+    to third-party "free LLM API" roundups. Groq is the backend with a free tier
+    that actually works today.
 
     Free tiers vary in whether they train on submitted data. Client
     questionnaires are NDA-bound, so check the current terms before pointing
@@ -464,7 +467,7 @@ _EXTRACTION_MODELS = {
     # with GROQ_MODEL after benchmarking against a real client document.
     "groq": os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
     "huggingface": os.environ.get("HF_MODEL", "Qwen/Qwen3-32B"),
-    "cerebras": os.environ.get("CEREBRAS_MODEL", "llama-3.3-70b"),
+    "cerebras": os.environ.get("CEREBRAS_MODEL", "gpt-oss-120b"),
     "openai": "gpt-4o",
     "claude": "claude-fable-5",
 }
