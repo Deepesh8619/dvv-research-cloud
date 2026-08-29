@@ -172,7 +172,18 @@ def _question_from_raw(content: dict, chunk: QuestionChunk) -> tuple[Question, d
     Returns (question, routing_dict) so the caller can inspect the raw routing
     block (ambiguous flag, verbatim) during validation without re-reading it.
     """
-    routing = content.get("routing") or {}
+    # A weaker model sometimes emits `routing` as a bare STRING (the routing
+    # sentence) instead of the object the schema asks for. Treat that string as
+    # the verbatim rather than discarding it: it is exactly the sentence a
+    # reviewer needs to resolve the routing by hand, and crashing here would
+    # break extract_question's contract of never raising on model output.
+    raw_routing = content.get("routing")
+    if isinstance(raw_routing, str):
+        routing: dict = {"verbatim_text": raw_routing, "ambiguous": True}
+    elif isinstance(raw_routing, dict):
+        routing = raw_routing
+    else:
+        routing = {}
     verbatim = (routing.get("verbatim_text") or "").strip() or None
 
     try:

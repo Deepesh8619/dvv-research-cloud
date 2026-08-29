@@ -685,3 +685,34 @@ def test_extract_question_resolves_to_groq_under_open_weights_default(monkeypatc
     assert not any("api.openai.com" in u for u in seen), (
         "a confidential questionnaire reached OpenAI despite open-weights-only mode"
     )
+
+
+def test_routing_returned_as_a_bare_string_does_not_crash():
+    """A weak model emitting `routing` as a string must not break extraction.
+
+    Found by scripts/benchmark_extraction.py against a real client document on
+    llama3.2:3b: the string form raised AttributeError out of
+    _question_from_raw, violating extract_question's contract of never raising
+    on model output. The sentence is kept as the routing verbatim (it is what a
+    reviewer needs to resolve routing by hand) and flagged ambiguous.
+    """
+    content = _extraction_content(qid="Q4")
+    content["routing"] = "TERMINATE IF Q3 = 5"
+
+    with patch(_EXTRACT, return_value=_response(content)):
+        result = extract_question(_chunk("Q4"))
+
+    assert result.question.qid == "Q4"
+    assert result.question.show_if is None
+    assert result.question.validation["routing_verbatim"] == "TERMINATE IF Q3 = 5"
+    assert schema.FLAG_AMBIGUOUS_ROUTING in result.flags
+
+
+def test_routing_of_an_unexpected_type_is_ignored_not_fatal():
+    content = _extraction_content(qid="Q5")
+    content["routing"] = ["unexpected", "list"]
+
+    with patch(_EXTRACT, return_value=_response(content)):
+        result = extract_question(_chunk("Q5"))
+
+    assert result.question.qid == "Q5"
