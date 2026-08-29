@@ -302,6 +302,32 @@ def _groq_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
     )
 
 
+def _cerebras_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
+    """Structured extraction via Cerebras' OpenAI-compatible API.
+
+    Worth its own backend rather than reaching Cerebras through the HF router:
+    HF bills its own credits (~$0.10/month free), whereas a direct Cerebras key
+    gets Cerebras' own far larger free daily allowance — the difference between
+    finishing a full-document benchmark and running out mid-run.
+
+    Free tiers vary in whether they train on submitted data. Client
+    questionnaires are NDA-bound, so check the current terms before pointing
+    this at real client work; benchmarking with test documents is the safe use.
+    """
+    api_key = os.environ.get("CEREBRAS_API_KEY")
+    if not api_key:
+        raise BackendUnavailable("CEREBRAS_API_KEY not set", config_error=True)
+    return _openai_compatible_generate(
+        "https://api.cerebras.ai/v1/chat/completions",
+        api_key,
+        model,
+        prompt,
+        schema,
+        timeout,
+        "Cerebras",
+    )
+
+
 def _huggingface_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
     """Structured extraction via Hugging Face Inference Providers.
 
@@ -315,8 +341,18 @@ def _huggingface_generate(model: str, prompt: str, schema: dict, timeout: int) -
     api_key = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_API_KEY")
     if not api_key:
         raise BackendUnavailable("HF_TOKEN not set", config_error=True)
+    # HF's own docs recommend PINNING a provider for structured output, because
+    # schema support varies between the providers behind the auto-router and a
+    # mismatch shows up as a malformed/absent tool call rather than a clean
+    # error. HF_PROVIDER pins it (e.g. "cerebras", "together", "fireworks-ai");
+    # unset keeps auto-routing, which is fine for chat but is the first thing to
+    # change if extraction starts returning no structured output.
+    provider = os.environ.get("HF_PROVIDER", "").strip()
+    base = f"https://router.huggingface.co/{provider}/v1" if provider else (
+        "https://router.huggingface.co/v1"
+    )
     return _openai_compatible_generate(
-        "https://router.huggingface.co/v1/chat/completions",
+        f"{base}/chat/completions",
         api_key,
         model,
         prompt,
@@ -386,7 +422,13 @@ def _openai_generate(model: str, prompt: str, schema: dict, timeout: int) -> dic
 # Env vars that gate the cloud AI backends. Reported as presence booleans by the
 # health/startup preflight so a missing key is caught at deploy — not at the
 # first client upload (the production incident this preflight exists to prevent).
-_LLM_KEY_ENV_VARS = ("GROQ_API_KEY", "HF_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+_LLM_KEY_ENV_VARS = (
+    "GROQ_API_KEY",
+    "CEREBRAS_API_KEY",
+    "HF_TOKEN",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+)
 
 
 def llm_key_presence() -> dict[str, bool]:
@@ -416,6 +458,7 @@ _EXTRACTION_MODELS = {
     # with GROQ_MODEL after benchmarking against a real client document.
     "groq": os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
     "huggingface": os.environ.get("HF_MODEL", "Qwen/Qwen3-32B"),
+    "cerebras": os.environ.get("CEREBRAS_MODEL", "llama-3.3-70b"),
     "openai": "gpt-4o",
     "claude": "claude-fable-5",
 }
@@ -458,6 +501,8 @@ def _extraction_chain() -> list[dict[str, str]]:
     ]
     if keys.get("GROQ_API_KEY"):
         chain.append({"backend": "groq", "model": _EXTRACTION_MODELS["groq"]})
+    if keys.get("CEREBRAS_API_KEY"):
+        chain.append({"backend": "cerebras", "model": _EXTRACTION_MODELS["cerebras"]})
     if keys.get("HF_TOKEN"):
         chain.append(
             {"backend": "huggingface", "model": _EXTRACTION_MODELS["huggingface"]}
@@ -497,6 +542,8 @@ def _run_one(
         content = _ollama_generate(model, prompt, schema, timeout)
     elif backend == "groq":
         content = _groq_generate(model, prompt, schema, timeout)
+    elif backend == "cerebras":
+        content = _cerebras_generate(model, prompt, schema, timeout)
     elif backend == "huggingface":
         content = _huggingface_generate(model, prompt, schema, timeout)
     elif backend == "openai":

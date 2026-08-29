@@ -626,6 +626,7 @@ def test_extract_question_resolves_to_openai_with_only_openai_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
 
     content = _extraction_content(qid="Q1")
@@ -662,6 +663,7 @@ def test_extract_question_resolves_to_groq_under_open_weights_default(monkeypatc
     monkeypatch.delenv("LLM_OPEN_WEIGHTS_ONLY", raising=False)  # default: ON
     monkeypatch.setenv("GROQ_API_KEY", "gk")
     monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     # Present but must be ignored — the whole point of the guarantee.
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
 

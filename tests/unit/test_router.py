@@ -136,6 +136,7 @@ def test_chain_is_ollama_first_then_configured_cloud(monkeypatch):
     monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
     monkeypatch.setenv("GROQ_API_KEY", "gk")
     monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
     order = [c["backend"] for c in _extraction_chain()]
@@ -144,6 +145,8 @@ def test_chain_is_ollama_first_then_configured_cloud(monkeypatch):
 
 def test_chain_omits_cloud_backends_without_keys(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     # Ollama is always attempted (may be reachable locally; fails fast if not).
@@ -154,6 +157,7 @@ def test_chain_includes_only_configured_cloud(monkeypatch):
     monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert [c["backend"] for c in _extraction_chain()] == ["ollama", "openai"]
@@ -168,6 +172,7 @@ def test_run_task_auto_falls_through_ollama_to_openai(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
 
     def fake_http_json(request, timeout):
@@ -231,14 +236,23 @@ def test_open_weights_only_drops_proprietary_backends(monkeypatch):
     """
     from src.ai.router import _extraction_chain
 
-    for k in ("GROQ_API_KEY", "HF_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+    # Every key set explicitly — including CEREBRAS_API_KEY, so this asserts the
+    # full open-weight chain rather than passing by accident on a machine that
+    # happens not to have one of them configured.
+    for k in (
+        "GROQ_API_KEY",
+        "CEREBRAS_API_KEY",
+        "HF_TOKEN",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+    ):
         monkeypatch.setenv(k, "x")
     monkeypatch.delenv("LLM_OPEN_WEIGHTS_ONLY", raising=False)  # default is ON
 
     backends = [step["backend"] for step in _extraction_chain()]
     assert "openai" not in backends
     assert "claude" not in backends
-    assert backends == ["ollama", "groq", "huggingface"]
+    assert backends == ["ollama", "groq", "cerebras", "huggingface"]
 
 
 def test_opting_out_restores_the_proprietary_tail(monkeypatch):
@@ -247,6 +261,7 @@ def test_opting_out_restores_the_proprietary_tail(monkeypatch):
     for k in ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.setenv(k, "x")
     monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
 
     backends = [step["backend"] for step in _extraction_chain()]
@@ -257,6 +272,7 @@ def test_huggingface_backend_needs_a_token(monkeypatch):
     from src.ai.router import BackendUnavailable, _huggingface_generate
 
     monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.delenv("HUGGINGFACE_API_KEY", raising=False)
     with pytest.raises(BackendUnavailable) as exc:
         _huggingface_generate("Qwen/Qwen3-32B", "hi", {}, 5)
