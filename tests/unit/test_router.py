@@ -277,3 +277,105 @@ def test_huggingface_backend_needs_a_token(monkeypatch):
     with pytest.raises(BackendUnavailable) as exc:
         _huggingface_generate("Qwen/Qwen3-32B", "hi", {}, 5)
     assert exc.value.config_error is True
+
+
+# --- 429 handling: rate limits are transient, not "backend unavailable" -----
+
+
+def _http_error(code, body, headers=None):
+    import io
+
+    return urllib.error.HTTPError(
+        "https://api.groq.com/x", code, "Too Many Requests",
+        headers or {}, io.BytesIO(json.dumps(body).encode()),
+    )
+
+
+def test_429_is_retried_using_the_providers_own_wait_hint(monkeypatch):
+    """Groq's free tier caps TPM and one extraction prompt can exhaust it.
+
+    Treating that as a dead backend burned the fallback chain and landed on a
+    WEAKER model for work the good one would do seconds later — in a real run
+    this failed 10 of 12 extractions.
+    """
+    slept = []
+    monkeypatch.setattr(router.time, "sleep", lambda s: slept.append(s))
+
+    calls = {"n": 0}
+
+    def flaky(request, timeout, context=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _http_error(
+                429,
+                {"error": {"message": "Rate limit reached. Please try again in 14.69s."}},
+            )
+        raise AssertionError("should not reach here in this stub")
+
+    # Drive http_json's real retry loop with a urlopen that 429s once.
+    import urllib.request as _req
+
+    def fake_urlopen(request, timeout=None, context=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _http_error(
+                429,
+                {"error": {"message": "Rate limit reached. Please try again in 14.69s."}},
+            )
+
+        class _R:
+            def read(self):
+                return json.dumps({"ok": True}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return _R()
+
+    monkeypatch.setattr(_req, "urlopen", fake_urlopen)
+    out = router.http_json(_req.Request("https://api.groq.com/x"), timeout=10)
+
+    assert out == {"ok": True}
+    # Waited the amount the provider asked for, rather than guessing.
+    assert slept == [14.69]
+
+
+def test_429_gives_up_after_bounded_retries(monkeypatch):
+    """A genuinely exhausted quota must still fail, not hang forever."""
+    monkeypatch.setattr(router.time, "sleep", lambda s: None)
+    import urllib.request as _req
+
+    def always_429(request, timeout=None, context=None):
+        raise _http_error(429, {"error": {"message": "Rate limit reached."}})
+
+    monkeypatch.setattr(_req, "urlopen", always_429)
+    with pytest.raises(urllib.error.URLError) as exc:
+        router.http_json(_req.Request("https://api.groq.com/x"), timeout=10)
+    assert "429" in str(exc.value)
+
+
+def test_non_429_errors_are_not_retried(monkeypatch):
+    """A 402 or 401 is not transient — retrying wastes time and hides the cause."""
+    sleeps = []
+    monkeypatch.setattr(router.time, "sleep", lambda s: sleeps.append(s))
+    import urllib.request as _req
+
+    def payment_required(request, timeout=None, context=None):
+        raise _http_error(402, {"error": {"message": "Payment required"}})
+
+    monkeypatch.setattr(_req, "urlopen", payment_required)
+    with pytest.raises(urllib.error.URLError) as exc:
+        router.http_json(_req.Request("https://api.cerebras.ai/x"), timeout=10)
+    assert "402" in str(exc.value)
+    assert sleeps == []
+
+
+def test_retry_after_header_wins_over_message_text(monkeypatch):
+    monkeypatch.setattr(router.time, "sleep", lambda s: None)
+    err = _http_error(
+        429, {"error": {"message": "try again in 99s"}}, headers={"Retry-After": "3"}
+    )
+    assert router._retry_after_seconds(err, "try again in 99s") == 3.0

@@ -13,8 +13,11 @@ ModelOutputError so callers can escalate or degrade.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import ssl
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -33,6 +36,8 @@ load_env()
 # scraper, so every non-local request sends this.
 USER_AGENT = "dvv-research-cloud/1.0"
 
+logger = logging.getLogger(__name__)
+
 
 def _ssl_context() -> ssl.SSLContext | None:
     """SSL context with certifi's CA bundle when available.
@@ -50,23 +55,68 @@ def _ssl_context() -> ssl.SSLContext | None:
         return None
 
 
+# A 429 is not "this backend is broken", it is "wait a moment". Providers say
+# how long, either in Retry-After or inside the message ("try again in 14.69s").
+_RETRY_AFTER_RE = re.compile(r"try again in ([\d.]+)\s*s", re.IGNORECASE)
+
+# Bounded so a genuinely exhausted quota still fails instead of hanging forever.
+_RATE_LIMIT_RETRIES = 3
+_RATE_LIMIT_MAX_WAIT = 30.0
+
+
+def _retry_after_seconds(exc: urllib.error.HTTPError, detail: str) -> float | None:
+    """How long the provider asked us to wait, if it said."""
+    header = exc.headers.get("Retry-After") if exc.headers else None
+    if header:
+        try:
+            return float(header)
+        except ValueError:
+            pass
+    match = _RETRY_AFTER_RE.search(detail or "")
+    return float(match.group(1)) if match else None
+
+
 def http_json(request: urllib.request.Request, timeout: int) -> dict:
     """urlopen with the certifi SSL context, returning parsed JSON.
 
     HTTP error responses re-raise as URLError with the API's own error
     message — "credit balance is too low" is actionable, "HTTP 400" is not.
+
+    A 429 is retried in place rather than raised. Rate limits are TRANSIENT and
+    self-describing: Groq's free tier caps tokens-per-minute, and one
+    ~6k-token extraction prompt can exhaust an 8k/min budget, so a 75-question
+    document rate-limits constantly. Treating that as "backend unavailable"
+    burned the whole fallback chain and landed on a WEAKER model (or a dead
+    one) for work the good model would happily have done a few seconds later.
+    We honour the provider's own wait hint, bounded, then give up honestly.
     """
-    try:
-        with urllib.request.urlopen(
-            request, timeout=timeout, context=_ssl_context()
-        ) as response:
-            return json.loads(response.read())
-    except urllib.error.HTTPError as exc:
+    attempt = 0
+    while True:
         try:
-            detail = json.loads(exc.read()).get("error", {}).get("message", "")
-        except Exception:
-            detail = ""
-        raise urllib.error.URLError(f"HTTP {exc.code}: {detail or exc.reason}") from exc
+            with urllib.request.urlopen(
+                request, timeout=timeout, context=_ssl_context()
+            ) as response:
+                return json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            try:
+                detail = json.loads(exc.read()).get("error", {}).get("message", "")
+            except Exception:
+                detail = ""
+            if exc.code == 429 and attempt < _RATE_LIMIT_RETRIES:
+                wait = _retry_after_seconds(exc, detail)
+                # No hint -> exponential backoff from 2s.
+                wait = min(wait if wait is not None else 2.0 * (2**attempt),
+                           _RATE_LIMIT_MAX_WAIT)
+                attempt += 1
+                logger.info(
+                    f"rate limited, waiting {wait:.1f}s "
+                    f"(attempt {attempt}/{_RATE_LIMIT_RETRIES})"
+                )
+                time.sleep(wait)
+                continue
+            raise urllib.error.URLError(
+                f"HTTP {exc.code}: {detail or exc.reason}"
+            ) from exc
 
 
 DEFAULT_ROUTES: dict[str, dict[str, str]] = {
