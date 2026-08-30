@@ -154,3 +154,108 @@ def test_alias_registry_has_no_duplicate_across_fields():
         for alias in aliases:
             assert alias not in seen, f"{alias!r} maps to both {seen.get(alias)} and {field_name}"
             seen[alias] = field_name
+
+
+# --- wiring into extraction -------------------------------------------------
+
+
+def test_a_complete_spec_table_costs_no_llm_call():
+    """The headline: everything stated by the table needs no model at all."""
+    from unittest.mock import patch
+
+    from src.engines.questionnaire import extractor
+    from src.intake.questionnaire_loader import QuestionChunk
+
+    block = _table(GBK)
+    chunk = QuestionChunk(chunk_text="x", candidate_qid="SS_RESP",
+                          source_blocks=[block], provenance="p1")
+
+    with patch.object(extractor, "run_task") as run:
+        result = extractor.extract_question(chunk, "field_spec")
+
+    run.assert_not_called()
+    assert result.question.qid == "SS_RESP"
+    assert result.question.type is QuestionType.MULTI
+    assert len(result.question.options) == 3
+    assert result.question.terminate_if is not None
+
+
+def test_an_incomplete_table_asks_only_about_the_residue():
+    """A missing Q Type must not re-send the whole ten-field schema."""
+    from unittest.mock import patch
+
+    from src.ai.router import AIResponse
+    from src.engines.questionnaire import extractor
+    from src.intake.questionnaire_loader import QuestionChunk
+
+    rows = [r for r in GBK if r[0] != "Q type"]        # type not stated
+    chunk = QuestionChunk(chunk_text="x", candidate_qid="SS_RESP",
+                          source_blocks=[_table(rows)], provenance="p1")
+
+    seen = {}
+
+    def fake(task, prompt, schema_arg, *a, **k):
+        seen["prompt"] = prompt
+        seen["asked"] = schema_arg.get("required")
+        return AIResponse(content={"type": "multi"}, backend="t", model="t")
+
+    with patch.object(extractor, "run_task", side_effect=fake):
+        result = extractor.extract_question(chunk, "field_spec")
+
+    assert seen["asked"] == ["type"]                   # ONLY the missing field
+    assert len(seen["prompt"]) < 1500                  # not the full prompt
+    assert "already been read" in seen["prompt"]       # states what is known
+    # Options came from the table, not the model.
+    assert [o.code for o in result.question.options] == [1, 2, 99]
+    assert result.question.type is QuestionType.MULTI
+
+
+def test_a_failed_residue_call_falls_back_to_full_extraction():
+    """Better to pay twice than to ship a half-read question."""
+    from unittest.mock import patch
+
+    from src.engines.questionnaire import extractor
+    from src.intake.questionnaire_loader import QuestionChunk
+
+    rows = [r for r in GBK if r[0] != "Q type"]
+    chunk = QuestionChunk(chunk_text="Q. text", candidate_qid="SS_RESP",
+                          source_blocks=[_table(rows)], provenance="p1")
+
+    calls = []
+
+    def fake(task, prompt, schema_arg, *a, **k):
+        calls.append(schema_arg.get("required"))
+        raise KeyError("no backend")
+
+    with patch.object(extractor, "run_task", side_effect=fake):
+        result = extractor.extract_question(chunk, "field_spec")
+
+    assert len(calls) == 2                    # residue, then the full prompt
+    assert calls[0] == ["type"]
+    assert result.question.qid == "SS_RESP"   # still returns something usable
+
+
+def test_a_non_table_chunk_is_untouched_by_this_path():
+    """Prose questionnaires must keep working exactly as before."""
+    from unittest.mock import patch
+
+    from src.ai.router import AIResponse
+    from src.engines.questionnaire import extractor
+    from src.intake.questionnaire_loader import QuestionChunk
+
+    chunk = QuestionChunk(chunk_text="Q5. How old are you?", candidate_qid="Q5",
+                          source_blocks=[], provenance="p1")
+
+    with patch.object(extractor, "run_task") as run:
+        run.return_value = AIResponse(
+            content={"qid": "Q5", "text": "How old are you?", "type": "numeric",
+                     "options": [], "routing": {"verbatim_text": "", "ambiguous": False,
+                                                "show_if": None, "terminate_if": None},
+                     "confidence": {"text": 0.9, "type": 0.9, "options": 0.9,
+                                    "routing": 0.9}},
+            backend="t", model="t")
+        extractor.extract_question(chunk, "prose")
+
+    # The full ten-field schema, i.e. the original path.
+    assert run.call_args[0][2] is not None
+    assert "qid" in run.call_args[0][2].get("properties", {})

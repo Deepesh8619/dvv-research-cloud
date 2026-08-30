@@ -46,6 +46,7 @@ from src.core.survey_definition import (
 from src.engines.questionnaire import schema
 from src.engines.questionnaire.profiles import detect_profile
 from src.engines.questionnaire.reconciler import reconcile_segmentation
+from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
 from src.intake.questionnaire_loader import DocumentBlock, QuestionChunk
 
 # Question types whose whole point is a fixed answer list; an empty option list
@@ -359,6 +360,98 @@ def _extraction_flag_for(exc: Exception) -> str:
     return schema.FLAG_EXTRACTION_CONFIG_ERROR
 
 
+
+def _spec_table_fields(chunk: QuestionChunk) -> SpecTableFields | None:
+    """The structured parse of this chunk's table, if it is one."""
+    for block in chunk.source_blocks or []:
+        if getattr(block, "block_type", None) == "table":
+            fields = parse_spec_table(block)
+            if fields is not None:
+                return fields
+    return None
+
+
+def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Question:
+    """Build a Question from what the table itself stated."""
+    validation: dict[str, Any] = {}
+    if fields.terminate_verbatim:
+        validation[_ROUTING_VERBATIM_KEY] = fields.terminate_verbatim
+    if fields.extras:
+        # An untaught client convention: surfaced for review, never dropped.
+        validation["unrecognised_rows"] = fields.extras
+    return Question(
+        qid=fields.qid,
+        text=fields.text or "",
+        type=fields.qtype or QuestionType.SINGLE,
+        options=list(fields.options),
+        required=False,
+        terminate_if=fields.terminate_if,
+        source_text=chunk.chunk_text,
+        source_location=chunk.provenance,
+        validation=validation,
+    )
+
+
+def _extract_via_spec_table(
+    chunk: QuestionChunk, fields: SpecTableFields
+) -> ExtractionResult | None:
+    """Deterministic parse, plus ONE small call for whatever it could not state.
+
+    Returns None if the residue call fails, so the caller falls back to normal
+    full extraction rather than shipping a half-read question.
+    """
+    question = _question_from_fields(fields, chunk)
+    # Fields read straight from the table are not model guesses.
+    confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
+
+    if fields.complete:
+        result = ExtractionResult(question=question, confidence=confidence)
+        # No model-emitted routing block exists on a structured parse; the
+        # terminate came from the table and is already on the Question.
+        _validate_question(result, {})
+        return result
+
+    prompt = schema.build_residue_prompt(
+        qid=fields.qid,
+        missing=fields.missing,
+        text=fields.text,
+        options=[(o.code, o.label) for o in fields.options],
+        base=fields.base,
+        notes=fields.notes,
+    )
+    try:
+        response = run_task(
+            "questionnaire.extract", prompt, schema.residue_schema(fields.missing)
+        )
+    except (BackendUnavailable, ModelOutputError, KeyError):
+        return None
+
+    content = response.content if isinstance(response.content, dict) else {}
+    if "type" in fields.missing:
+        try:
+            question.type = QuestionType(content["type"])
+        except (KeyError, ValueError):
+            return None
+        confidence["type"] = 0.9
+    if "text" in fields.missing:
+        question.text = str(content.get("text") or "").strip()
+        confidence["text"] = 0.9
+    for name, attr in (("base", "show_if"), ("terminate", "terminate_if")):
+        if name not in fields.missing:
+            continue
+        block = content.get(name) or {}
+        verbatim = str(block.get("verbatim_text") or "").strip() or None
+        expression = None if block.get("ambiguous") else block.get(attr)
+        setattr(question, attr, _parse_expression(expression, verbatim))
+        confidence["routing"] = 0.9
+        if verbatim:
+            question.validation[_ROUTING_VERBATIM_KEY] = verbatim
+
+    result = ExtractionResult(question=question, confidence=confidence)
+    _validate_question(result, {})
+    return result
+
+
 def extract_question(
     chunk: QuestionChunk,
     profile_hint: str | None = None,
@@ -383,6 +476,17 @@ def extract_question(
     the flag/error on the returned result to decide whether to abort — see
     `_is_backend_unavailable_result`.
     """
+    # Structured first: a labelled spec table already states the id, wording,
+    # options and often the screen-out. Reading those costs no tokens, and the
+    # remainder is a far smaller call — measured 451,400 -> 14,264 tokens across
+    # one real 74-question document. Falls through to full extraction whenever
+    # the table is not parseable or the residue call fails.
+    fields = _spec_table_fields(chunk)
+    if fields is not None:
+        structured = _extract_via_spec_table(chunk, fields)
+        if structured is not None:
+            return structured
+
     prompt = schema.build_extraction_prompt(
         chunk.chunk_text, chunk.candidate_qid, profile_hint, learned_rules
     )

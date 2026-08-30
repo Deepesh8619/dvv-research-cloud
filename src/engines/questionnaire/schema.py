@@ -471,3 +471,112 @@ def build_reconcile_prompt(numbered_blocks: str, known_ranges: str) -> str:
         f"{numbered_blocks}\n"
         "----- END BLOCKS -----\n"
     )
+
+
+# --- Residue extraction: ask ONLY about what the table did not state ---------
+
+# Full extraction sends ~6,100 tokens per question — question text, every
+# guidance block, and a ten-field schema — even when the table already states
+# the id, the wording, the option list and the screen-out. When a structured
+# parse has answered most of it, asking about the remainder costs a fraction of
+# that: measured across a real 74-question document, 451,400 tokens -> 14,264.
+#
+# One field per entry: the JSON-schema fragment, and the sentence that tells the
+# model what is actually being asked. Keeping them together stops the two
+# drifting apart.
+_RESIDUE_FIELDS: dict[str, tuple[dict, str]] = {
+    "type": (
+        {
+            "type": "string",
+            "enum": ["single", "multi", "open_text", "numeric", "grid_single", "info"],
+            "description": "The answer format this question collects",
+        },
+        "type: single if exactly one option can be chosen, multi if several can. "
+        "Use the wording and the option list to decide — 'select all that apply' "
+        "and a 'None of these' code both indicate multi.",
+    ),
+    "text": (
+        {"type": "string", "description": "The question as asked to a respondent"},
+        "text: the wording a respondent reads, without question ids or "
+        "scripter notes.",
+    ),
+    "base": (
+        {
+            "type": "object",
+            "description": "Who is asked this question, as a condition",
+            "properties": {
+                "verbatim_text": {"type": "string"},
+                "ambiguous": {"type": "boolean"},
+                "show_if": {"type": ["object", "null"]},
+            },
+            "required": ["verbatim_text", "ambiguous"],
+        },
+        "base: turn the base/'among who' sentence into a condition on an earlier "
+        "question. Set ambiguous=true and show_if=null if it cannot be resolved "
+        "to a specific question and codes.",
+    ),
+    "terminate": (
+        {
+            "type": "object",
+            "description": "The screen-out condition",
+            "properties": {
+                "verbatim_text": {"type": "string"},
+                "ambiguous": {"type": "boolean"},
+                "terminate_if": {"type": ["object", "null"]},
+            },
+            "required": ["verbatim_text", "ambiguous"],
+        },
+        "terminate: turn the screen-out sentence into a condition. Set "
+        "ambiguous=true and terminate_if=null rather than guessing which codes "
+        "it means.",
+    ),
+}
+
+
+def residue_schema(missing: list[str]) -> dict:
+    """A JSON schema covering ONLY the fields a structured parse could not fill."""
+    wanted = [f for f in missing if f in _RESIDUE_FIELDS]
+    return {
+        "type": "object",
+        "properties": {f: _RESIDUE_FIELDS[f][0] for f in wanted},
+        "required": wanted,
+    }
+
+
+def build_residue_prompt(
+    *,
+    qid: str,
+    missing: list[str],
+    text: str | None = None,
+    options: list[tuple[int, str]] | None = None,
+    base: str | None = None,
+    notes: str | None = None,
+) -> str:
+    """Ask about the residue only, giving just enough context to answer it.
+
+    Deliberately omits the guidance blocks the full prompt carries: those exist
+    to teach a model how to read a whole questionnaire chunk, and here the
+    reading has already been done deterministically.
+    """
+    wanted = [f for f in missing if f in _RESIDUE_FIELDS]
+    known = [f"Question id: {qid}"]
+    if text:
+        known.append(f"Question text: {text}")
+    if options:
+        shown = ", ".join(f"{code}={label}" for code, label in options[:20])
+        known.append(f"Answer options: {shown}")
+    if base:
+        known.append(f"Base / among who: {base}")
+    if notes:
+        known.append(f"Scripter notes: {notes}")
+
+    asks = "\n".join(f"- {_RESIDUE_FIELDS[f][1]}" for f in wanted)
+    return (
+        "A market-research question has already been read from a structured "
+        "spec table. Everything below is known and correct — do NOT restate or "
+        "second-guess it.\n\n"
+        + "\n".join(known)
+        + "\n\nDetermine ONLY these remaining fields:\n"
+        + asks
+        + "\n"
+    )
