@@ -1380,3 +1380,19 @@ def seed_admin_user():
         )
     finally:
         db.close()
+
+
+def touch_questionnaire(db: Session, questionnaire_id: str) -> None:
+    """Mark a questionnaire as still being worked on.
+
+    The staleness guard treats a row that has not moved for a while as dead.
+    Extraction is legitimately slow on a rate-limited tier — minutes of waiting
+    between calls — so without a heartbeat a healthy long run is indistinguishable
+    from a killed worker, and gets reported as an error while it is still going.
+    """
+    questionnaire = db.query(QuestionnaireDB).filter(
+        QuestionnaireDB.id == questionnaire_id
+    ).first()
+    if questionnaire:
+        questionnaire.updated_at = datetime.utcnow().isoformat()
+        db.commit()

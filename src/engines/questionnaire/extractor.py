@@ -675,6 +675,7 @@ def extract_survey_definition(
     study_id: str,
     blocks: list[DocumentBlock] | None = None,
     rules_for_profile: Callable[[str], list[str]] | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> SurveyDefinition:
     """Extract + verify every chunk and assemble one draft SurveyDefinition.
 
@@ -685,10 +686,16 @@ def extract_survey_definition(
     Omitting `blocks` skips reconciliation — kept optional so unit tests that
     hand-build chunk lists don't need real blocks (and don't pay an LLM call).
 
-    Sequential per chunk (v1). Parallelising the per-chunk extract+verify calls
-    is a reasonable follow-up once this runs against large real documents (each
-    chunk is independent until the cross-chunk routing pass), but is not built
-    here to keep the first version simple and its failure modes obvious.
+    Sequential per chunk. Parallelising would NOT help on a token-capped tier:
+    the limit is tokens per minute, not concurrency, so running chunks at once
+    just reaches the ceiling faster.
+
+    `on_progress(done, total)` fires after each chunk so the caller can persist
+    partial work. Without it a 75-question document that dies at question 70 —
+    to a restart, a deploy, or an idle spin-down — loses all seventy. Reported
+    from the real thing: a full document ran 15 minutes and persisted ZERO
+    questions. The callback keeps this engine free of the database while making
+    the work durable.
     """
     reconcile_meta: dict = {}
     # Recognize the document's authoring convention (GBK spec-table / prose /
@@ -724,6 +731,8 @@ def extract_survey_definition(
             # the verify call for a failed-extract chunk regardless, so each
             # doomed chunk costs one attempt, not two.
             results.append(result)
+            if on_progress:
+                on_progress(len(results), len(chunks))
             if (
                 len(results) == consecutive_backend_failures
                 and consecutive_backend_failures >= _CIRCUIT_BREAKER_CHUNKS
@@ -750,6 +759,8 @@ def extract_survey_definition(
         if _needs_verification(result):
             result = verify_question(chunk, result)
         results.append(result)
+        if on_progress:
+            on_progress(len(results), len(chunks))
 
     known_qids = {r.question.qid for r in results}
     _resolve_cross_chunk_routing(results, known_qids)

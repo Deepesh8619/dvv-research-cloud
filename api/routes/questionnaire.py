@@ -87,12 +87,22 @@ _BLOCKING_FLAGS = frozenset(
 # reports it as an error (T18 staleness guard). Render's free tier restarts
 # routinely kill the daemon extraction thread mid-run, and the row's `error`
 # flip only fires on an *in-process* exception — a killed thread leaves the row
-# stuck on 'processing' with no feedback forever. 15 minutes is comfortably
-# above a legitimate worst case (even ~80 chunks × 2 sequential LLM calls
-# complete in a few minutes) while still failing fast enough for a reviewer to
-# retry the same session. This is a read-time computation (created_at/updated_at
-# vs. now), not a background sweep — no scheduler, no new infrastructure.
-_PROCESSING_STALE_AFTER = timedelta(minutes=15)
+# stuck on 'processing' with no feedback forever. This is a read-time
+# computation (created_at/updated_at vs. now), not a background sweep — no
+# scheduler, no new infrastructure.
+#
+# The original 15 minutes assumed "even ~80 chunks x 2 sequential LLM calls
+# complete in a few minutes". That stopped being true once rate limits became
+# the binding constraint: on a free tier capped at 8k tokens/minute a real
+# 75-question document spends most of its time waiting, and a HEALTHY run was
+# being reported as an error at minute 15.
+#
+# The window is now measured against `updated_at`, which the extractor
+# heartbeats every few questions — so this asks "has it made progress
+# recently?" rather than "has it been going a long time?". A genuinely killed
+# worker still stops updating and is caught; a slow one is not punished for
+# being slow.
+_PROCESSING_STALE_AFTER = timedelta(minutes=10)
 
 
 def _is_stale_processing(questionnaire) -> bool:
@@ -259,7 +269,7 @@ def _run_extraction(
     Any failure flips the questionnaire to 'error' with a logged reason rather
     than leaving it stuck on 'processing' forever.
     """
-    from api.db import SessionLocal, active_rules_for_profile
+    from api.db import SessionLocal, active_rules_for_profile, touch_questionnaire
 
     job_db = SessionLocal()
     try:
@@ -275,11 +285,27 @@ def _run_extraction(
         # inside the extractor — knows the slug. This is the line that makes a
         # correction compound: a rule approved on an earlier GBK document is
         # applied to THIS one automatically, at upload, with no code change.
+        # Heartbeat every few questions. A long extraction is minutes of
+        # rate-limit waiting, and a restart, a deploy or an idle spin-down kills
+        # the thread — a real 75-question run died at 15 minutes having
+        # persisted NOTHING. Touching updated_at makes progress visible to the
+        # staleness check, so "slow but working" stops looking like "dead".
+        def _heartbeat(done: int, total: int) -> None:
+            if done % 5 and done != total:
+                return
+            try:
+                touch_questionnaire(job_db, questionnaire_id)
+                logger.info(f"[{study_id}] extraction progress {done}/{total}")
+            except Exception as beat_exc:  # noqa: BLE001
+                # Never let bookkeeping kill the extraction it is measuring.
+                logger.warning(f"[{study_id}] progress heartbeat failed: {beat_exc}")
+
         survey = extract_survey_definition(
             chunks,
             study_id=study_id,
             blocks=blocks,
             rules_for_profile=lambda slug: active_rules_for_profile(job_db, slug),
+            on_progress=_heartbeat,
         )
         # Title from the original upload name, not the on-disk path (which is
         # renamed to the questionnaire id to avoid collisions).

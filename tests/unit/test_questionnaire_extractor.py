@@ -786,3 +786,39 @@ def test_a_skipped_question_is_never_auto_approved():
     assert _needs_verification(r) is False  # would skip verify...
     assert r.verified is False
     assert _is_auto_approvable(r) is False  # ...so it still reaches a human
+
+
+def test_progress_is_reported_after_every_chunk():
+    """Long extractions must be able to prove they are alive.
+
+    A real 75-question run was killed at 15 minutes having persisted NOTHING,
+    because the only signal of life was completion. The callback lets the caller
+    heartbeat, so "slow but working" stops looking like "dead".
+    """
+    from src.engines.questionnaire.extractor import extract_survey_definition
+
+    seen: list[tuple[int, int]] = []
+    content = _extraction_content(qid="Q1")
+    chunks = [_chunk(f"Q{i}") for i in range(1, 4)]
+
+    with patch(_EXTRACT, return_value=_response(content)):
+        extract_survey_definition(
+            chunks, study_id="s1", on_progress=lambda d, t: seen.append((d, t))
+        )
+
+    assert seen == [(1, 3), (2, 3), (3, 3)]
+
+
+def test_a_failing_chunk_still_reports_progress():
+    """Otherwise a document of failures looks identical to a hung worker."""
+    from src.engines.questionnaire.extractor import extract_survey_definition
+
+    seen: list[tuple[int, int]] = []
+    with patch(_EXTRACT, side_effect=ModelOutputError("bad json")):
+        extract_survey_definition(
+            [_chunk("Q1"), _chunk("Q2")],
+            study_id="s1",
+            on_progress=lambda d, t: seen.append((d, t)),
+        )
+
+    assert seen == [(1, 2), (2, 2)]
