@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from api.auth import UserRole, get_current_user
 from api.config import STUDIES_DIR
 from api.db import (
+    AuditLogDB,
     CorrectionDB,
     CorrectionPreviewDB,
     ProfileRuleDB,
@@ -39,6 +40,7 @@ from api.db import (
     get_questionnaire,
     get_study,
     list_questionnaires_for_study,
+    record_audit,
     set_questionnaire_definition,
 )
 from api.models import (
@@ -46,6 +48,8 @@ from api.models import (
     CorrectionRequest,
     CorrectionResponse,
     ProfileRuleResponse,
+    ReorderRulesRequest,
+    ReviseRequest,
     SuggestionResponse,
 )
 from src.ai.router import ModelOutputError, run_task
@@ -243,7 +247,12 @@ _CLASSIFY_SCHEMA = {
 }
 
 
-def _classify_prompt(instruction: str, question: dict | None, profile: str | None) -> str:
+def _classify_prompt(
+    instruction: str,
+    question: dict | None,
+    profile: str | None,
+    revise_note: str | None = None,
+) -> str:
     ctx = ""
     if question:
         ctx = (
@@ -257,6 +266,13 @@ def _classify_prompt(instruction: str, question: dict | None, profile: str | Non
         f"Detected document format profile: {profile or 'unknown'}\n\n"
         f"{ctx}"
         f"----- THEIR CORRECTION -----\n{instruction}\n----- END -----\n\n"
+        + (
+            "A previous attempt at this was REJECTED by the reviewer with this "
+            f"note. Address it specifically:\n{revise_note}\n\n"
+            if revise_note
+            else ""
+        )
+        +
         "lane:\n"
         "  'live'     = this is about how to READ the document (where terminates, "
         "question text, options, types, routing or scales live). It can be fixed by "
@@ -277,7 +293,12 @@ def _classify_prompt(instruction: str, question: dict | None, profile: str | Non
     )
 
 
-def _classify(instruction: str, question: dict | None, profile: str | None) -> dict:
+def _classify(
+    instruction: str,
+    question: dict | None,
+    profile: str | None,
+    revise_note: str | None = None,
+) -> dict:
     """Ask the model for lane + scope + rule text. Fails safe to the proposal lane.
 
     Any backend/model failure returns a proposal-lane result carrying the raw
@@ -287,7 +308,7 @@ def _classify(instruction: str, question: dict | None, profile: str | None) -> d
     try:
         response = run_task(
             "questionnaire.extract",
-            _classify_prompt(instruction, question, profile),
+            _classify_prompt(instruction, question, profile, revise_note),
             _CLASSIFY_SCHEMA,
         )
         # run_task returns AIResponse, whose parsed payload is `.content`.
@@ -375,9 +396,18 @@ async def create_correction(
         scope=scope,
         profile_slug=profile_slug,
         status="resolved" if verdict["lane"] == "live" else "queued",
+        lane=verdict["lane"],
+        resolution_json=json.dumps(verdict),
+        attempt_no=1,
         created_at=_now(),
     )
     db.add(correction)
+    record_audit(
+        db, entity="correction", entity_id=correction.id, action="created",
+        actor_id=user.id, study_id=study_id,
+        summary=f"{verdict['lane']} / {scope}: {instruction[:120]}",
+        after={"lane": verdict["lane"], "scope": scope, "rule_text": verdict["rule_text"]},
+    )
     db.commit()
     db.refresh(correction)
 
@@ -486,6 +516,12 @@ async def apply_rule(
         created_at=_now(),
     )
     db.add(rule)
+    record_audit(
+        db, entity="profile_rule", entity_id=rule.id, action="applied",
+        actor_id=user.id,
+        summary=f"{profile_slug} ({scope}): {rule_text[:120]}",
+        after={"profile_slug": profile_slug, "scope": scope, "rule_text": rule_text},
+    )
     if request.correction_id:
         correction = (
             db.query(CorrectionDB)
@@ -539,7 +575,15 @@ async def toggle_rule(
     )
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
-    rule.active = not bool(rule.active)
+    was_active = bool(rule.active)
+    rule.active = not was_active
+    record_audit(
+        db, entity="profile_rule", entity_id=rule.id,
+        action="enabled" if rule.active else "disabled",
+        actor_id=user.id,
+        summary=f"{profile_slug}: {(rule.rule_text or '')[:120]}",
+        before={"active": was_active}, after={"active": bool(rule.active)},
+    )
     db.commit()
     db.refresh(rule)
     logger.info(f"Rule {rule.id} active={rule.active} by {user.email}")
@@ -802,9 +846,211 @@ async def approve_preview(
     if questionnaire and preview.candidate_json:
         set_questionnaire_definition(db, questionnaire.id, preview.candidate_json)
     correction.status = "applied"
+    counts = {}
+    try:
+        counts = json.loads(preview.diff_json or "{}").get("counts", {})
+    except json.JSONDecodeError:
+        pass
+    record_audit(
+        db, entity="preview", entity_id=preview.id, action="approved",
+        actor_id=user.id, study_id=study_id,
+        summary=(
+            f"applied rule {rule.id} to {profile_slug}; "
+            f"{counts.get('improved', 0)} improved, {counts.get('regressed', 0)} regressed"
+        ),
+        after={"rule_id": rule.id, "counts": counts},
+    )
     db.commit()
     db.refresh(rule)
     logger.info(
         f"[{study_id}] preview {preview.id} approved by {user.email} -> rule {rule.id}"
     )
     return {"rule": _rule_response(rule).model_dump(), "applied": True}
+
+
+# --------------------------------------------------------------------------
+# Revise, reorder, proposal queue, audit — closing the loop's remaining gaps
+# --------------------------------------------------------------------------
+
+
+@router.post("/studies/{study_id}/corrections/{correction_id}/revise")
+async def revise_correction(
+    study_id: str,
+    correction_id: str,
+    request: ReviseRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_correction_access),
+):
+    """Send a correction back to the model with a note. Makes revising a LOOP.
+
+    Without this, a founder whose rule broke Q31 can only rewrite from scratch,
+    throwing away everything the model already understood. The note ("this broke
+    Q31, that one uses a different row label") rides into the next
+    classification, so the second attempt starts from the first rather than
+    beside it.
+    """
+    note = (request.note or "").strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="Say what was wrong with it.")
+
+    correction = (
+        db.query(CorrectionDB).filter(CorrectionDB.id == correction_id).first()
+    )
+    if not correction or correction.study_id != study_id:
+        raise HTTPException(status_code=404, detail="Correction not found")
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    question = (
+        _find_question(questionnaire.definition_json, correction.question_id)
+        if correction.question_id and questionnaire and questionnaire.definition_json
+        else None
+    )
+
+    verdict = _classify(
+        correction.instruction, question, correction.profile_slug, revise_note=note
+    )
+    correction.revise_note = note
+    correction.attempt_no = (correction.attempt_no or 1) + 1
+    correction.lane = verdict["lane"]
+    correction.resolution_json = json.dumps(verdict)
+    correction.status = "resolved" if verdict["lane"] == "live" else "queued"
+
+    # A revision invalidates any preview built from the previous attempt —
+    # showing a stale diff next to a new rule would be actively misleading.
+    db.query(CorrectionPreviewDB).filter(
+        CorrectionPreviewDB.correction_id == correction_id
+    ).delete(synchronize_session=False)
+
+    record_audit(
+        db, entity="correction", entity_id=correction_id, action="revised",
+        actor_id=user.id, study_id=study_id,
+        summary=f"attempt {correction.attempt_no}: {note[:120]}",
+        after={"note": note, "lane": verdict["lane"], "rule_text": verdict["rule_text"]},
+    )
+    db.commit()
+    db.refresh(correction)
+    return _correction_response(correction, verdict)
+
+
+@router.post("/profiles/{profile_slug}/rules/reorder")
+async def reorder_rules(
+    profile_slug: str,
+    request: ReorderRulesRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_correction_access),
+):
+    """Set the order rules are applied in. Later rules win on conflict.
+
+    Order is not cosmetic here — `build_learned_rules_block` tells the model
+    explicitly that a later rule overrides an earlier one, so this is how two
+    rules that disagree get resolved without deleting either.
+    """
+    rows = {
+        r.id: r
+        for r in db.query(ProfileRuleDB)
+        .filter(ProfileRuleDB.profile_slug == profile_slug)
+        .all()
+    }
+    unknown = [rid for rid in request.rule_ids if rid not in rows]
+    if unknown:
+        raise HTTPException(
+            status_code=400, detail=f"Not rules of this profile: {', '.join(unknown)}"
+        )
+    before = {rid: rows[rid].ordinal for rid in request.rule_ids}
+    for position, rule_id in enumerate(request.rule_ids):
+        rows[rule_id].ordinal = position
+    record_audit(
+        db, entity="profile_rule", entity_id=profile_slug, action="reordered",
+        actor_id=user.id, summary=f"{len(request.rule_ids)} rules reordered",
+        before=before, after={rid: i for i, rid in enumerate(request.rule_ids)},
+    )
+    db.commit()
+    return {
+        "profile_slug": profile_slug,
+        "rules": [
+            _rule_response(rows[rid]).model_dump() for rid in request.rule_ids
+        ],
+    }
+
+
+@router.get("/corrections/proposals")
+async def list_proposals(
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_correction_access),
+):
+    """Corrections that need engineering, across every study — the owner's queue.
+
+    Proposal-lane corrections previously landed in the database and were never
+    surfaced anywhere, which made the "it queues for the owner" half of the
+    two-lane design a claim rather than a feature.
+    """
+    rows = (
+        db.query(CorrectionDB)
+        .filter(CorrectionDB.lane == "proposal")
+        .filter(CorrectionDB.status != "applied")
+        .order_by(CorrectionDB.created_at.desc())
+        .all()
+    )
+    out = []
+    for c in rows:
+        try:
+            resolution = json.loads(c.resolution_json or "{}")
+        except json.JSONDecodeError:
+            resolution = {}
+        out.append(
+            {
+                "id": c.id,
+                "study_id": c.study_id,
+                "question_id": c.question_id,
+                "instruction": c.instruction,
+                "scope": c.scope,
+                "profile_slug": c.profile_slug,
+                "status": c.status,
+                "attempt_no": c.attempt_no,
+                "rule_text": resolution.get("rule_text"),
+                "rationale": resolution.get("rationale"),
+                # True when the model was unreachable, so this was queued by
+                # fallback rather than judged to need code.
+                "degraded": resolution.get("degraded", False),
+                "created_at": c.created_at,
+            }
+        )
+    return {"proposals": out, "count": len(out)}
+
+
+@router.get("/corrections/audit")
+async def read_audit(
+    study_id: str | None = None,
+    entity_id: str | None = None,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_correction_access),
+):
+    """The correction loop's audit trail, newest first.
+
+    Answers "who approved the rule that broke extraction, and when" — the
+    question that only gets asked after something has already gone wrong, which
+    is why it has to have been recorded all along.
+    """
+    q = db.query(AuditLogDB)
+    if study_id:
+        q = q.filter(AuditLogDB.study_id == study_id)
+    if entity_id:
+        q = q.filter(AuditLogDB.entity_id == entity_id)
+    rows = q.order_by(AuditLogDB.at.desc()).limit(min(limit, 500)).all()
+    return {
+        "entries": [
+            {
+                "id": r.id,
+                "entity": r.entity,
+                "entity_id": r.entity_id,
+                "action": r.action,
+                "actor_id": r.actor_id,
+                "study_id": r.study_id,
+                "summary": r.summary,
+                "at": r.at,
+            }
+            for r in rows
+        ],
+        "count": len(rows),
+    }

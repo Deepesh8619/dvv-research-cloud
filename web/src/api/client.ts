@@ -759,6 +759,12 @@ export const previewApi = {
   get: async (studyId: string, correctionId: string) =>
     api.get<PreviewState>(`/studies/${studyId}/corrections/${correctionId}/preview`),
 
+  revise: async (studyId: string, correctionId: string, note: string) =>
+    api.post<CorrectionResult>(
+      `/studies/${studyId}/corrections/${correctionId}/revise`,
+      { note },
+    ),
+
   approve: async (studyId: string, correctionId: string) =>
     api.post<{ rule: ProfileRule; applied: boolean }>(
       `/studies/${studyId}/corrections/${correctionId}/preview/approve`,

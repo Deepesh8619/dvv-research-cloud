@@ -484,3 +484,15 @@ class ProfileRuleResponse(BaseModel):
     approved_by: str | None = None
     approved_at: str | None = None
     created_at: str | None = None
+
+
+class ReviseRequest(BaseModel):
+    """Send a correction back to the model with what was wrong about its attempt."""
+
+    note: str
+
+
+class ReorderRulesRequest(BaseModel):
+    """New order for a profile's rules. Later rules win on conflict."""
+
+    rule_ids: list[str]

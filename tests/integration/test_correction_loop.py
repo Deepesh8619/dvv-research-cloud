@@ -490,3 +490,193 @@ def test_founder_cannot_approve_a_global_scoped_preview(client):
     r = c.post("/api/studies/s1/corrections/corr1/preview/approve")
     assert r.status_code == 403
     assert "owner" in r.json()["detail"].lower()
+
+
+# --------------------------------------------------------------------------
+# Audit trail — the spec calls this a safety property, so it is asserted
+# --------------------------------------------------------------------------
+
+
+def _seed_study(Session, sid="s1"):
+    from api.db import StudyDB
+
+    s = Session()
+    s.add(StudyDB(id=sid, client_name="T", status="draft", created_at="2026-01-01"))
+    s.commit()
+    s.close()
+
+
+def _live_verdict(rule="Terminates live in the TERM row."):
+    return {
+        "lane": "live", "scope": "profile", "rule_text": rule,
+        "rationale": "A client convention.", "confidence": 0.9, "degraded": False,
+    }
+
+
+def test_creating_a_correction_is_audited(client):
+    """'Who wrote this, and when' must be answerable without reading logs."""
+    from api.db import AuditLogDB
+
+    c, Session = client
+    _seed_study(Session)
+    app.dependency_overrides[require_correction_access] = lambda: _as("founder")
+    with patch("api.routes.corrections._classify", return_value=_live_verdict()):
+        c.post("/api/studies/s1/corrections", json={"instruction": "terminates are wrong"})
+
+    s = Session()
+    entry = s.query(AuditLogDB).filter_by(entity="correction", action="created").first()
+    assert entry is not None
+    assert entry.actor_id == "u_founder"
+    assert entry.study_id == "s1"
+    s.close()
+
+
+def test_toggling_a_rule_records_before_and_after(client):
+    """Switching a rule off is the undo for a bad rule — it must leave a trace."""
+    from api.db import AuditLogDB
+
+    c, Session = client
+    app.dependency_overrides[require_correction_access] = lambda: _as("owner")
+    rule = c.post("/api/profiles/gbk/rules", json={"rule_text": "R."}).json()
+    c.post(f"/api/profiles/gbk/rules/{rule['id']}/toggle")
+
+    s = Session()
+    entry = s.query(AuditLogDB).filter_by(entity_id=rule["id"], action="disabled").first()
+    assert entry is not None
+    assert json.loads(entry.before_json) == {"active": True}
+    assert json.loads(entry.after_json) == {"active": False}
+    s.close()
+
+
+def test_audit_endpoint_returns_newest_first(client):
+    c, Session = client
+    _seed_study(Session)
+    app.dependency_overrides[require_correction_access] = lambda: _as("founder")
+    with patch("api.routes.corrections._classify", return_value=_live_verdict()):
+        c.post("/api/studies/s1/corrections", json={"instruction": "first"})
+        c.post("/api/studies/s1/corrections", json={"instruction": "second"})
+
+    entries = c.get("/api/corrections/audit?study_id=s1").json()["entries"]
+    assert len(entries) == 2
+    assert entries[0]["at"] >= entries[1]["at"]
+
+
+def test_audit_failure_never_breaks_the_action(client):
+    """Losing an audit line is bad; failing a founder's approval is worse."""
+    from api.db import record_audit
+
+    c, Session = client
+    s = Session()
+    # A deliberately broken payload must not raise out of record_audit.
+    record_audit(
+        s, entity="x", entity_id="y", action="z", actor_id="u",
+        after={"unserializable": object()},
+    )
+    s.close()
+
+
+# --------------------------------------------------------------------------
+# Revise — the loop back to the model, carrying the reviewer's note
+# --------------------------------------------------------------------------
+
+
+def test_revise_carries_the_note_into_the_next_classification(client):
+    """Revising must start from the last attempt, not beside it."""
+    c, Session = client
+    _seed_study(Session)
+    app.dependency_overrides[require_correction_access] = lambda: _as("founder")
+    with patch("api.routes.corrections._classify", return_value=_live_verdict()):
+        made = c.post("/api/studies/s1/corrections", json={"instruction": "fix it"}).json()
+
+    with patch("api.routes.corrections._classify", return_value=_live_verdict("v2")) as cls:
+        r = c.post(
+            f"/api/studies/s1/corrections/{made['id']}/revise",
+            json={"note": "this broke Q31, that one uses a different row label"},
+        )
+    assert r.status_code == 200, r.text
+    # The reviewer's note is passed to the classifier, not silently dropped.
+    assert cls.call_args.kwargs["revise_note"].startswith("this broke Q31")
+    assert r.json()["rule_text"] == "v2"
+
+
+def test_revise_discards_the_stale_preview(client):
+    """A diff built from the OLD rule beside a NEW rule would actively mislead."""
+    from api.db import CorrectionPreviewDB
+
+    c, Session = client
+    _seed_study(Session)
+    app.dependency_overrides[require_correction_access] = lambda: _as("founder")
+    with patch("api.routes.corrections._classify", return_value=_live_verdict()):
+        made = c.post("/api/studies/s1/corrections", json={"instruction": "fix"}).json()
+
+    s = Session()
+    s.add(CorrectionPreviewDB(id="p1", correction_id=made["id"], study_id="s1",
+                              rule_text="old", status="ready", diff_json="{}",
+                              created_at="2026-01-01"))
+    s.commit()
+    s.close()
+
+    with patch("api.routes.corrections._classify", return_value=_live_verdict("new")):
+        c.post(f"/api/studies/s1/corrections/{made['id']}/revise", json={"note": "no"})
+
+    s = Session()
+    assert s.query(CorrectionPreviewDB).filter_by(correction_id=made["id"]).count() == 0
+    s.close()
+
+
+def test_revise_requires_a_note(client):
+    c, Session = client
+    _seed_study(Session)
+    app.dependency_overrides[require_correction_access] = lambda: _as("founder")
+    with patch("api.routes.corrections._classify", return_value=_live_verdict()):
+        made = c.post("/api/studies/s1/corrections", json={"instruction": "x"}).json()
+    r = c.post(f"/api/studies/s1/corrections/{made['id']}/revise", json={"note": "  "})
+    assert r.status_code == 400
+
+
+# --------------------------------------------------------------------------
+# Reorder + proposal queue
+# --------------------------------------------------------------------------
+
+
+def test_reorder_sets_ordinals_so_later_rules_win(client):
+    """Order is not cosmetic — the prompt tells the model later rules override."""
+    c, _ = client
+    app.dependency_overrides[require_correction_access] = lambda: _as("owner")
+    a = c.post("/api/profiles/gbk/rules", json={"rule_text": "A."}).json()
+    b = c.post("/api/profiles/gbk/rules", json={"rule_text": "B."}).json()
+    assert (a["ordinal"], b["ordinal"]) == (0, 1)
+
+    out = c.post("/api/profiles/gbk/rules/reorder", json={"rule_ids": [b["id"], a["id"]]})
+    assert out.status_code == 200
+    assert [r["rule_text"] for r in out.json()["rules"]] == ["B.", "A."]
+
+    listed = c.get("/api/profiles/gbk/rules").json()["rules"]
+    assert [r["rule_text"] for r in listed] == ["B.", "A."]
+
+
+def test_reorder_rejects_rules_from_another_profile(client):
+    c, _ = client
+    app.dependency_overrides[require_correction_access] = lambda: _as("owner")
+    other = c.post("/api/profiles/prose/rules", json={"rule_text": "X."}).json()
+    r = c.post("/api/profiles/gbk/rules/reorder", json={"rule_ids": [other["id"]]})
+    assert r.status_code == 400
+
+
+def test_proposal_queue_lists_only_unapplied_proposals(client):
+    """The 'it queues for the owner' half of the two-lane design, made real."""
+    c, Session = client
+    _seed_study(Session)
+    app.dependency_overrides[require_correction_access] = lambda: _as("founder")
+
+    proposal = {**_live_verdict("needs code"), "lane": "proposal"}
+    with patch("api.routes.corrections._classify", return_value=proposal):
+        c.post("/api/studies/s1/corrections", json={"instruction": "add a new question type"})
+    with patch("api.routes.corrections._classify", return_value=_live_verdict()):
+        c.post("/api/studies/s1/corrections", json={"instruction": "a live one"})
+
+    body = c.get("/api/corrections/proposals").json()
+    assert body["count"] == 1
+    assert body["proposals"][0]["instruction"] == "add a new question type"
+    # The model's structured resolution survives, not just the raw instruction.
+    assert body["proposals"][0]["rule_text"] == "needs code"

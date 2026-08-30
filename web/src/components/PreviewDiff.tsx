@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { previewApi, type ExtractionDiff, type PreviewState, type QuestionDiff } from '../api/client'
+import {
+  previewApi,
+  type CorrectionResult,
+  type ExtractionDiff,
+  type PreviewState,
+  type QuestionDiff,
+} from '../api/client'
 
 /**
  * The before/after screen (P4).
@@ -143,14 +149,18 @@ interface Props {
   studyId: string
   correctionId: string
   onApplied?: () => void
+  /** Called after a send-back, with the model's fresh attempt. */
+  onRevised?: (result: CorrectionResult) => void
 }
 
-export default function PreviewDiff({ studyId, correctionId, onApplied }: Props) {
+export default function PreviewDiff({ studyId, correctionId, onApplied, onRevised }: Props) {
   const [state, setState] = useState<PreviewState | null>(null)
   const [starting, setStarting] = useState(false)
   const [approving, setApproving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [estimate, setEstimate] = useState<number | null>(null)
+  const [note, setNote] = useState('')
+  const [sendingBack, setSendingBack] = useState(false)
   const timer = useRef<number | null>(null)
 
   const poll = useCallback(async () => {
@@ -184,6 +194,23 @@ export default function PreviewDiff({ studyId, correctionId, onApplied }: Props)
       setError(detail ?? 'Could not start the preview.')
     } finally {
       setStarting(false)
+    }
+  }
+
+  const sendBack = async () => {
+    if (!note.trim()) return
+    setSendingBack(true)
+    setError(null)
+    try {
+      const r = await previewApi.revise(studyId, correctionId, note.trim())
+      setNote('')
+      setState(null)
+      onRevised?.(r.data)
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setError(detail ?? 'Could not send it back.')
+    } finally {
+      setSendingBack(false)
     }
   }
 
@@ -282,6 +309,38 @@ export default function PreviewDiff({ studyId, correctionId, onApplied }: Props)
                          hover:bg-slate-50 active:scale-[0.98] transition"
             >
               Re-run
+            </button>
+          </div>
+
+          {/* Send back: the third spec'd review action. Without it a reviewer
+              whose rule broke Q31 could only rewrite from scratch, discarding
+              everything the model already understood. */}
+          <div className="mt-3 pt-3 border-t border-slate-200">
+            <label
+              htmlFor="revise-note"
+              className="block text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-1.5"
+            >
+              Not right? Say what's wrong and send it back
+            </label>
+            <textarea
+              id="revise-note"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={2}
+              placeholder="e.g. this broke Q31 — that question uses a different row label"
+              className="w-full text-sm rounded border border-slate-300 px-3 py-2 bg-white
+                         focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500
+                         placeholder:text-slate-400"
+            />
+            <button
+              onClick={sendBack}
+              disabled={sendingBack || !note.trim()}
+              className="mt-2 text-sm text-slate-700 px-3 py-1.5 rounded border border-slate-300
+                         hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed
+                         active:scale-[0.98] transition
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+            >
+              {sendingBack ? 'Sending back…' : 'Send back with this note'}
             </button>
           </div>
         </>

@@ -2,7 +2,7 @@
 
 import logging
 import secrets
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Boolean, Column, Integer, String, Text, create_engine
 from sqlalchemy.ext.declarative import declarative_base
@@ -306,6 +306,18 @@ class CorrectionDB(Base):
     scope = Column(String, default="document")
     profile_slug = Column(String, index=True, nullable=True)
     status = Column(String, default="drafted")
+    # live | proposal — persisted rather than inferred from status, so the
+    # owner's proposal queue is a plain filter and stays correct if the status
+    # vocabulary ever grows.
+    lane = Column(String, default="proposal", index=True)
+    # The model's verdict: rule_text, rationale, confidence, degraded. Needed by
+    # the proposal queue, which otherwise shows the raw instruction and loses
+    # the structured resolution the model actually produced.
+    resolution_json = Column(Text, nullable=True)
+    # Reviewer's note when a correction is sent back, carried into the next
+    # classification attempt so revising is a loop, not a fresh start.
+    revise_note = Column(Text, nullable=True)
+    attempt_no = Column(Integer, default=1)
     created_at = Column(String)
 
 
@@ -334,6 +346,75 @@ class ProfileRuleDB(Base):
     approved_by = Column(String, nullable=True)
     approved_at = Column(String, nullable=True)
     created_at = Column(String)
+
+
+class AuditLogDB(Base):
+    """Append-only record of every state change in the correction loop.
+
+    The spec claims "every transition is in the audit log" as a safety property
+    — this is what makes that true. Without it there is no answer to "who
+    approved the rule that broke extraction, and when", which is exactly the
+    question asked after something goes wrong.
+
+    Deliberately generic (entity + entity_id + action) rather than one table per
+    thing, so recording a new kind of event is a call site, not a migration.
+    Never updated or deleted: an audit trail that can be edited is not one.
+    """
+
+    __tablename__ = "audit_log"
+
+    id = Column(String, primary_key=True, index=True)
+    entity = Column(String, index=True)  # correction | profile_rule | preview
+    entity_id = Column(String, index=True)
+    action = Column(String, index=True)  # created | applied | toggled | approved | revised
+    actor_id = Column(String, index=True)
+    study_id = Column(String, index=True, nullable=True)
+    summary = Column(Text, nullable=True)  # human-readable, for the UI
+    before_json = Column(Text, nullable=True)
+    after_json = Column(Text, nullable=True)
+    at = Column(String, index=True)
+
+
+def record_audit(
+    db,
+    *,
+    entity: str,
+    entity_id: str,
+    action: str,
+    actor_id: str,
+    study_id: str | None = None,
+    summary: str | None = None,
+    before: dict | None = None,
+    after: dict | None = None,
+) -> None:
+    """Append one audit entry. Never raises — auditing must not break the action.
+
+    A failure to record is logged and swallowed: losing an audit line is bad,
+    but failing a founder's approval because the audit insert hiccuped is worse,
+    and would make the whole loop feel unreliable.
+    """
+    import json as _json
+    import logging as _logging
+    from datetime import datetime as _dt
+    from uuid import uuid4 as _uuid
+
+    try:
+        db.add(
+            AuditLogDB(
+                id=f"aud_{_uuid().hex[:12]}",
+                entity=entity,
+                entity_id=entity_id,
+                action=action,
+                actor_id=actor_id,
+                study_id=study_id,
+                summary=summary,
+                before_json=_json.dumps(before) if before is not None else None,
+                after_json=_json.dumps(after) if after is not None else None,
+                at=_dt.now(UTC).isoformat(),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        _logging.getLogger(__name__).warning(f"audit record failed: {exc}")
 
 
 class CorrectionPreviewDB(Base):
@@ -439,6 +520,14 @@ def _ensure_new_columns():
             "coding_json": "TEXT",
             "source_filename": "VARCHAR",
             "source_file_b64": "TEXT",
+        },
+        "corrections": {
+            # Added after `corrections` first shipped (same-day follow-up):
+            # the proposal queue and the revise loop both need these.
+            "lane": "VARCHAR",
+            "resolution_json": "TEXT",
+            "revise_note": "TEXT",
+            "attempt_no": "INTEGER DEFAULT 1",
         },
         "fielding_links": {
             # Vendor redirect templates (T10) — added after fielding_links

@@ -290,6 +290,9 @@ export default function CorrectionBox({
                 loadRules()
                 onApplied?.()
               }}
+              // A send-back returns the model's fresh attempt; show it in place
+              // so the reviewer sees the new rule without losing their thread.
+              onRevised={(revised) => setResult(revised)}
             />
           )}
         </div>
