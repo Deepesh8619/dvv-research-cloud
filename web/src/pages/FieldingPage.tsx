@@ -12,9 +12,9 @@ import { useAuth } from '../auth/AuthContext'
 import { CardListSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import ThemeSelect from '../components/ThemeSelect'
+import { canWrite as hasWriteRole } from '../auth/roles'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
-const WRITE_ROLES = new Set(['owner', 'analyst'])
 
 function errorMessage(err: unknown): string | null {
   if (axios.isAxiosError(err)) {
@@ -506,7 +506,7 @@ function CreatePanel({
 export default function FieldingPage() {
   const { id: studyId } = useParams<{ id: string }>()
   const { user } = useAuth()
-  const canWrite = !!user && WRITE_ROLES.has(user.role)
+  const canWrite = hasWriteRole(user?.role)
 
   const [links, setLinks] = useState<FieldingLink[] | null>(null)
   const [qidOptions, setQidOptions] = useState<string[]>([])

@@ -7,6 +7,7 @@ import ChatBot from '../components/ChatBot'
 import { CheckIcon, DocChartIcon, DownloadIcon, LinkIcon } from '../components/Icons'
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatusPill from '../components/StatusPill'
+import { canWrite as hasWriteRole } from '../auth/roles'
 
 const PIPELINE = [
   { key: 'classify', label: 'Intake' },
@@ -176,7 +177,7 @@ export default function ProjectPage() {
             <StatusPill status={study.status} />
           </div>
           <div className="flex items-center gap-2">
-            {(user?.role === 'owner' || user?.role === 'analyst') && (
+            {hasWriteRole(user?.role) && (
               <button
                 onClick={handleReprocess}
                 disabled={reprocessing}
@@ -186,7 +187,7 @@ export default function ProjectPage() {
                 {reprocessing ? 'Starting…' : 'Re-process'}
               </button>
             )}
-            {noQuestionnaire && (user?.role === 'owner' || user?.role === 'analyst') && (
+            {noQuestionnaire && hasWriteRole(user?.role) && (
               <Link
                 to={`/projects/${study.id}/builder`}
                 className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
@@ -232,7 +233,7 @@ export default function ProjectPage() {
                 {approving ? 'Signing off…' : 'Sign off for delivery'}
               </button>
             )}
-            {study.status === 'approved_for_delivery' && deliveryApproved && (user?.role === 'owner' || user?.role === 'analyst') && (
+            {study.status === 'approved_for_delivery' && deliveryApproved && hasWriteRole(user?.role) && (
               <button
                 onClick={() => setShowShareModal(true)}
                 className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"

@@ -13,9 +13,9 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import ThemeSelect from '../components/ThemeSelect'
 import { DEFAULT_THEME_SLUG } from '../api/themes'
+import { canWrite as hasWriteRole } from '../auth/roles'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
-const WRITE_ROLES = new Set(['owner', 'analyst'])
 
 const OPTION_TYPES = new Set(['single', 'multi', 'dropdown', 'rank'])
 
@@ -512,7 +512,7 @@ function CreatePanel({ onCreate, canWrite }: { onCreate: (title: string) => Prom
 export default function SurveyBuilderPage() {
   const { id: studyId } = useParams<{ id: string }>()
   const { user } = useAuth()
-  const canWrite = !!user && WRITE_ROLES.has(user.role)
+  const canWrite = hasWriteRole(user?.role)
 
   const [status, setStatus] = useState<QuestionnaireStatus | null>(null)
   const [questions, setQuestions] = useState<Question[]>([])

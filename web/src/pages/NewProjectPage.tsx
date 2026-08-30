@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { studiesApi } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DocChartIcon, FileIcon, PlusIcon, UploadIcon } from '../components/Icons'
+import { canWrite as hasWriteRole } from '../auth/roles'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -36,7 +37,7 @@ const CHOICES: { key: Choice; title: string; desc: string; Icon: typeof UploadIc
 
 export default function NewProjectPage() {
   const { user } = useAuth()
-  const canCreate = user?.role === 'owner' || user?.role === 'analyst'
+  const canCreate = hasWriteRole(user?.role)
 
   const [choice, setChoice] = useState<Choice>('data')
   const [projectName, setProjectName] = useState('')

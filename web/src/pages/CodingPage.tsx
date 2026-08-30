@@ -11,9 +11,9 @@ import {
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { canWrite as hasWriteRole } from '../auth/roles'
 
 // Roles allowed to resolve items (matches api require_role(OWNER, ANALYST)).
-const WRITE_ROLES = new Set(['owner', 'analyst'])
 
 function errorMessage(err: unknown): string | null {
   if (axios.isAxiosError(err)) {
@@ -227,7 +227,7 @@ function VariableQueue({
 
 export default function CodingPage() {
   const { user } = useAuth()
-  const canWrite = !!user && WRITE_ROLES.has(user.role)
+  const canWrite = hasWriteRole(user?.role)
 
   const [studies, setStudies] = useState<Study[]>([])
   const [selectedStudy, setSelectedStudy] = useState<string>('')

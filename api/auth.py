@@ -105,10 +105,24 @@ async def get_current_user(
 
 
 def require_role(*allowed_roles: UserRole):
-    """Dependency factory to enforce role-based access."""
+    """Dependency factory to enforce role-based access.
+
+    FOUNDER satisfies anything ANALYST can do. Founders are the research leads
+    — they run studies as well as correct the parser, so a role that could
+    teach the extractor but not create a project was a nonsense state (and was
+    exactly the bug: `founder` was added for the correction loop and never
+    added to the ~21 endpoints already gated on ANALYST).
+
+    Implemented here rather than by editing every call site, so the two can
+    never drift apart. Anything gated on OWNER alone stays owner-only.
+    """
 
     async def check_role(user=Depends(get_current_user)):
-        if UserRole(user.role) not in allowed_roles:
+        role = UserRole(user.role)
+        permitted = role in allowed_roles or (
+            role is UserRole.FOUNDER and UserRole.ANALYST in allowed_roles
+        )
+        if not permitted:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"This action requires one of these roles: {', '.join(allowed_roles)}",

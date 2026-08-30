@@ -16,13 +16,9 @@ import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../c
 import { flagInfo } from '../components/questionnaireFlags'
 import CorrectionBox from '../components/CorrectionBox'
 import { useLabel } from '../labels/LabelContext'
+import { canCorrect as hasCorrectRole, canWrite as hasWriteRole } from '../auth/roles'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
-const WRITE_ROLES = new Set(['owner', 'analyst'])
-// Correction loop: founders teach the parser. Deliberately NOT the same set as
-// WRITE_ROLES — an analyst may edit a question, but only a founder may write a
-// rule that changes how every future document of that format is read.
-const CORRECTION_ROLES = new Set(['owner', 'founder'])
 
 // --- Small presentational helpers -------------------------------------------
 
@@ -513,11 +509,11 @@ export default function QuestionnairePage() {
   const { user } = useAuth()
   const tTitle = useLabel('questionnaire.review.title', 'Questionnaire review')
   const tEmpty = useLabel('questionnaire.review.empty', 'Select a question to review its details.')
-  const canWrite = !!user && WRITE_ROLES.has(user.role)
+  const canWrite = hasWriteRole(user?.role)
   // The founders' correction lane. Mirrors the server-side gate in
   // routes/corrections.py — the server refuses regardless, this only decides
   // whether the affordance renders.
-  const canCorrect = !!user && CORRECTION_ROLES.has(user.role)
+  const canCorrect = hasCorrectRole(user?.role)
 
   const [status, setStatus] = useState<QuestionnaireStatus | null>(null)
   const [questions, setQuestions] = useState<Question[]>([])
