@@ -48,6 +48,7 @@ from api.models import (
     QuestionOrderRequest,
     QuestionUpdateRequest,
 )
+from src.ai.router import friendly_backend_error
 from src.core.survey_definition import (
     THEME_SLUGS,
     Block,
@@ -321,7 +322,13 @@ def _run_extraction(
         # message naming a missing ANTHROPIC_API_KEY) on the row so the status
         # endpoint reports the real root cause instead of an opaque 'error' (T16).
         update_questionnaire_status(
-            job_db, questionnaire_id, "error", error_detail=str(exc)
+            job_db,
+            questionnaire_id,
+            "error",
+            # A researcher sees this on the upload screen, so it has to be
+            # readable by someone who does not run the deployment. The raw
+            # chain summary is still in the server log above.
+            error_detail=friendly_backend_error(str(exc)),
         )
     finally:
         job_db.close()

@@ -463,3 +463,29 @@ def test_max_tokens_is_not_over_reserved(monkeypatch):
     # Comfortably above the largest observed question (493) and far below the
     # old 4096.
     assert 600 < router.MAX_OUTPUT_TOKENS < 4096
+
+
+# --- errors a researcher reads, not a deployment engineer --------------------
+
+
+def test_quota_message_tells_a_researcher_what_to_do():
+    msg = router.friendly_backend_error(
+        "all backends failed — ollama: unreachable at http://localhost:11434 "
+        "| groq: out of quota for another 20 min"
+    )
+    assert "20 minutes" in msg
+    assert "Nothing was lost" in msg
+    # None of the deployment detail leaks onto the upload screen.
+    for leak in ("ollama", "localhost", "groq", "11434", "Errno"):
+        assert leak not in msg
+
+
+def test_missing_key_is_named_as_an_admin_problem():
+    msg = router.friendly_backend_error("GROQ_API_KEY not set")
+    assert "administrator" in msg
+
+
+def test_an_unknown_failure_still_says_something_useful():
+    msg = router.friendly_backend_error("connection reset by peer")
+    assert "could not be reached" in msg
+    assert "try uploading it again" in msg.lower()

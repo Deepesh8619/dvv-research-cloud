@@ -104,6 +104,35 @@ def note_backend_exhausted(backend: str, seconds: float) -> None:
     )
 
 
+def friendly_backend_error(message: str) -> str:
+    """Turn a chain failure into something a researcher can act on.
+
+    The raw summary is written for whoever is debugging the deployment:
+    "ollama unreachable at http://localhost:11434: [Errno 111] Connection
+    refused | groq: out of quota for another 20 min". A research lead reading
+    that on an upload screen learns nothing they can use — Ollama is not
+    something they have, and "quota" is not obviously "come back later".
+    """
+    low = (message or "").lower()
+    if "out of quota" in low or "rate limit" in low or "tokens per day" in low:
+        minutes = re.search(r"another (\d+) min", low)
+        when = f" Try again in about {minutes.group(1)} minutes." if minutes else ""
+        return (
+            "The AI service has used up its allowance for now, so the document "
+            f"could not be read.{when} Nothing was lost — upload it again once "
+            "the allowance resets."
+        )
+    if "not set" in low and "key" in low:
+        return (
+            "No AI service is configured on the server, so documents cannot be "
+            "read. This needs an administrator to set an API key."
+        )
+    return (
+        "The AI service could not be reached, so the document could not be "
+        "read. Nothing was lost — try uploading it again."
+    )
+
+
 def _retry_after_seconds(exc: urllib.error.HTTPError, detail: str) -> float | None:
     """How long the provider asked us to wait, if it said."""
     header = exc.headers.get("Retry-After") if exc.headers else None

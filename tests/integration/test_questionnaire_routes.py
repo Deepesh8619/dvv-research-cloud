@@ -659,7 +659,13 @@ def test_extraction_failure_surfaces_error_detail(client, monkeypatch):
     status = _wait_error(test_client)
     assert status["status"] == "error"
     assert status["error_detail"] is not None
-    assert "ANTHROPIC_API_KEY not set" in status["error_detail"]
+    # The surfaced text is written for the RESEARCHER who uploaded the file, not
+    # for whoever runs the deployment: a missing key is their administrator's
+    # problem, and an env var name on an upload screen tells them nothing they
+    # can act on. The raw cause is still logged server-side.
+    detail = status["error_detail"]
+    assert "administrator" in detail
+    assert "ANTHROPIC_API_KEY" not in detail
 
 
 def test_health_reports_llm_key_presence_booleans(client, monkeypatch):
