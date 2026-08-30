@@ -148,3 +148,86 @@ def test_a_directive_cannot_declare_multi_without_options():
     f = parse_prose_question("Q3. Pick some\n[PN: SELECT ALL THAT APPLY]", "Q3")
     assert f.qtype is None
     assert "type" in f.missing
+
+
+# --- Conventions inventoried from the three real client questionnaires -------
+# Each case below is a shape that actually appears in Bubble / Vivo / GBK and
+# was previously escalated to a model for a type it had already stated.
+
+
+def test_textbox_directive_is_open_text():
+    fields = parse_prose_question("Q5. What did you like about it?\n[PN: TEXTBOX]", "Q5")
+    assert fields.qtype is QuestionType.OPEN_TEXT
+    assert "type" not in fields.missing
+
+
+def test_numeric_oe_beats_the_bare_oe_pattern():
+    """"NUMERIC OE" contains "OE" — order in _TYPE_PATTERNS is load-bearing."""
+    fields = parse_prose_question(
+        "Q6. How many do you buy a year?\n[NUMERIC OE: 2-DIGIT MINIMUM]", "Q6"
+    )
+    assert fields.qtype is QuestionType.NUMERIC
+
+
+def test_rotate_is_randomisation_but_keep_order_is_not():
+    assert parse_prose_question("Q1. Pick one\n[PN: ROTATE]\nA\nB", "Q1").randomize
+    assert not parse_prose_question(
+        "Q1. Pick one\n[PN: KEEP ORDER]\nA\nB", "Q1"
+    ).randomize
+
+
+def test_yes_no_pair_is_single_without_an_instruction():
+    fields = parse_prose_question("P1. Do you have children?\nYes\nNo [TERMINATE]", "P1")
+    assert fields.qtype is QuestionType.SINGLE
+    assert fields.terminate_if is not None
+
+
+def test_three_plain_options_still_escalate():
+    """The binary exception must not become a general guess at single vs multi."""
+    fields = parse_prose_question("Q2. Which brands?\nAlpha\nBeta\nGamma", "Q2")
+    assert fields.qtype is None
+    assert "type" in fields.missing
+
+
+def test_pipe_scale_row_makes_a_grid_even_after_a_wrapped_wording():
+    # The wording wraps onto a second line, which the parser reads as an option
+    # line; the scale row still has to be recognised after it.
+    fields = parse_prose_question(
+        "Q11. How important are each of the following\n"
+        "to you when choosing a brand?\n"
+        "0=Not Important At All | 1 | 2 | 3 | 4 | 5=Neutral | 6 | 7 | 8 | 9 | 10=Very\n"
+        "Price\nScent",
+        "Q11",
+    )
+    assert fields.qtype is QuestionType.GRID_SINGLE
+
+
+def test_all_caps_code_wording_is_a_derived_variable():
+    fields = parse_prose_question(
+        "C1. CODE AGE – BASED ON RESPONSES AT S1 IF PANELISTS AGES 18-25", "C1"
+    )
+    assert fields.derived is True
+    assert fields.qtype is QuestionType.INFO
+    assert "type" not in fields.missing
+
+
+def test_sentence_case_question_mentioning_a_code_is_not_derived():
+    fields = parse_prose_question("S1. Code the item you bought\nYes\nNo", "S1")
+    assert fields.derived is False
+
+
+def test_borrowed_option_list_still_yields_a_type():
+    fields = parse_prose_question(
+        "Q27. Which statement is most believable? Select one.\n[SHOW Q26 LIST. RANDOMIZE]",
+        "Q27",
+    )
+    assert fields.qtype is QuestionType.SINGLE
+    assert fields.randomize is True
+
+
+def test_rank_instruction_is_its_own_type():
+    fields = parse_prose_question(
+        "Q7. Which three brands would you choose? Rank your top three.\nAlpha\nBeta\nGamma",
+        "Q7",
+    )
+    assert fields.qtype is QuestionType.RANK

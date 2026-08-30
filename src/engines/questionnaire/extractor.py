@@ -47,6 +47,7 @@ from src.engines.questionnaire import schema
 from src.engines.questionnaire.profiles import detect_profile
 from src.engines.questionnaire.prose_directives import (
     ProseFields,
+    is_derived_wording,
     parse_prose_question,
 )
 from src.engines.questionnaire.reconciler import reconcile_segmentation
@@ -265,12 +266,13 @@ def _flag_derived_variable(result: ExtractionResult, chunk: QuestionChunk) -> No
     surfacing a mis-extracted, unanswerable question. Run BEFORE validation so
     the info type suppresses the (irrelevant) empty-options check.
 
-    Detection is by the ``HID_`` qid prefix, which is the reliable signal in real
-    GBK QREs (and the loader now strips the "provide additional scripting
-    details" boilerplate that would have been the only other, fuzzier signal).
+    Two signals, one per convention seen in real client documents: the ``HID_``
+    qid prefix (GBK), and an all-caps ``CODE ...`` wording addressed to the
+    scripter (Bubble, Vivo — "C1. CODE AGE - BASED ON RESPONSES AT S1..."). The
+    second lives in prose_directives so both parsers apply the same rule.
     """
     qid = chunk.candidate_qid or result.question.qid or ""
-    if qid.upper().startswith("HID_"):
+    if qid.upper().startswith("HID_") or is_derived_wording(result.question.text or ""):
         result.question.type = QuestionType.INFO
         result.add_flag(schema.FLAG_DERIVED_VARIABLE)
 

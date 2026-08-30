@@ -46,22 +46,87 @@ _OPTION_TAG_RE = re.compile(r"\s*\[(?P<tags>[^\]]*)\]\s*$")
 
 # Type instructions, most specific first — "select all that apply" must beat a
 # bare "select".
+# Built from an inventory of EVERY bracketed directive across the three real
+# client documents — 116 distinct shapes. Numeric forms are checked before the
+# open-text ones, because "NUMERIC OE" and "OE" both contain "OE".
 _TYPE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
     (re.compile(r"select all that apply|choose all that apply|multiple answers",
                 re.I), QuestionType.MULTI),
     (re.compile(r"select one|choose one|single answer|select your", re.I),
      QuestionType.SINGLE),
-    (re.compile(r"enter (a )?number|numeric|\byears\b|"
-                r"\bage\b.*\bnumber\b|number\s+\d+\s*-\s*\d+", re.I),
+    # NUMERIC first: "NUMERIC OE: 3-DIGIT MINIMUM" is a number, not a verbatim.
+    (re.compile(r"numeric\s*oe|record number|enter (a )?number|\bnumeric\b|"
+                r"\byears\b|\bage\b.*\bnumber\b|number\s+\d+\s*-\s*\d+|"
+                r"\d+\s*-\s*digit", re.I),
      QuestionType.NUMERIC),
-    (re.compile(r"open[- ]?end|please describe|in your own words|type your|"
-                r"enter response|verbatim", re.I), QuestionType.OPEN_TEXT),
+    (re.compile(r"\brank\b.{0,20}\b(top|first|three|order)\b|\brank \d[, \d]*and\b|"
+                r"^\s*rank\b", re.I), QuestionType.RANK),
+    # TEXTBOX (11x) and "OE: n-CHARACTER MINIMUM" (6x) are the commonest
+    # open-text declarations in these documents and were both being missed.
+    (re.compile(r"_\s*_\s*_|open[- ]?end|\btextbox\b|\boe\b|please describe|"
+                r"in your own words|type your|enter response|verbatim", re.I),
+     QuestionType.OPEN_TEXT),
 ]
+
+# The option list is not written out here — it is taken from another question
+# ("[SHOW Q26 LIST. RANDOMIZE]", "[INSERT RESPONSES FROM Q4]"). The type
+# instruction is still stated and still trustworthy; only the options are absent.
+_BORROWED_OPTIONS_RE = re.compile(
+    r"\bSHOW\s+[A-Z]{0,3}\d+[A-Z]?\s+LIST\b|"
+    r"\bINSERT\s+.{0,40}?\bFROM\s+[A-Z]{0,3}\d+", re.I
+)
+
+# A directive naming ROWS or STATEMENTS is describing a grid: the option list
+# is the row set, not the answer set. ("SHOW ONLY ITEMS SELECTED AT Q18 IN
+# ROWS", "RANDOMIZE STATEMENTS".) Unlike "each of the following", which is
+# suggestive prose, this is the scripter stating the structure outright.
+_GRID_DIRECTIVE_RE = re.compile(r"\bIN ROWS\b|\bROWS\b|\bSTATEMENTS\b", re.I)
 
 # Tags carried by an individual option.
 _TERMINATE_TAG = re.compile(r"\bTERMINATE\b|\bSCREEN\s*-?\s*OUT\b", re.I)
 _EXCLUSIVE_TAG = re.compile(r"\bEXCLUSIVE\b", re.I)
 _ANCHOR_TAG = re.compile(r"\bANCHOR\b", re.I)
+
+# A scale row: "0=Not Important At All | 1 | 2 | ... | 10=Very Important".
+# Pipe-separated points above a statement list is how these documents write a
+# rating grid; the statements below are the rows, not the answer options.
+_SCALE_ROW_RE = re.compile(r"^[^|]+(\|[^|]+){3,}$")
+
+# A wording that opens with an all-caps CODE/RECODE instruction is addressed to
+# the scripter, not the respondent: "CODE AGE - BASED ON RESPONSES AT S1...".
+# These are derived variables computed from other answers, so they have no type
+# to find and must not be counted as a question the model still has to resolve.
+_DERIVED_RE = re.compile(r"^(RE)?CODE\b")
+
+
+# Wordings that cannot be multi-select whatever the scripter left in the type
+# cell. A superlative ("best describes") admits exactly one answer by
+# construction, and "what is your <fact>" asks for one value. Deliberately does
+# NOT include "how often" or "how would you rate": those are commonly grids in
+# these documents, and guessing single there would be silently wrong.
+_SINGLE_WORDING_RE = re.compile(
+    r"\bbest (describes|represents|matches|fits|reflects)\b|"
+    r"\bwhich one\b|\bhow involved are you\b|\bwhat is your\b",
+    re.I,
+)
+
+
+def is_single_select_wording(text: str) -> bool:
+    """True when the wording itself rules out a multi-select answer."""
+    return bool(_SINGLE_WORDING_RE.search(text or ""))
+
+
+def is_derived_wording(text: str) -> bool:
+    """All-caps CODE/RECODE wording = an instruction to the scripter.
+
+    The "no lowercase" test is what keeps this from swallowing a real question
+    ("Code the item you bought"): these documents shout scripter instructions
+    and speak to respondents in sentence case. Punctuation varies (en dashes,
+    ampersands, brackets), so testing case is more portable than enumerating
+    the allowed characters — which is how the first version missed most of them.
+    """
+    stripped = text.strip()
+    return bool(_DERIVED_RE.match(stripped)) and not any(c.islower() for c in stripped)
 
 # A line that continues the question rather than starting the answer list —
 # these read as instructions to the respondent, not as options.
@@ -85,6 +150,8 @@ class ProseFields:
     terminate_if: Expression | None = None
     terminate_verbatim: str | None = None
     randomize: bool = False
+    # A scripter-computed variable ("CODE AGE - BASED ON S1..."), not a question.
+    derived: bool = False
     # Directives we recognised but do not model yet — kept visible, never
     # silently dropped, so an unhandled convention is discoverable.
     directives: list[str] = field(default_factory=list)
@@ -99,8 +166,26 @@ def _strip_label(line: str) -> str:
     return _LABEL_RE.sub("", line, count=1).strip()
 
 
+def _is_binary_choice(options: list[Option]) -> bool:
+    """Exactly Yes/No — the one option shape whose type is not a judgement call.
+
+    `_infer_type` deliberately refuses to guess single vs multi from options
+    alone, because that choice changes the stored data structure. A two-option
+    yes/no list is the documented exception: it cannot be multi-select in any
+    questionnaire convention, and it is the commonest shape in these documents'
+    screener sections.
+    """
+    if len(options) != 2:
+        return False
+    labels = {re.sub(r"[^a-z]", "", o.label.lower()) for o in options}
+    return labels in ({"yes", "no"}, {"yesnoperm"}) or labels == {"no", "yes"}
+
+
 def _infer_type(
-    text: str, options: list[Option], directives: list[str] | None = None
+    text: str,
+    options: list[Option],
+    directives: list[str] | None = None,
+    borrowed_options: bool = False,
 ) -> QuestionType | None:
     """Type from the instruction line OR a scripter directive.
 
@@ -120,20 +205,28 @@ def _infer_type(
             if pattern.search(directive):
                 # A directive is an explicit scripter instruction, so it is
                 # trusted even without options — "[PN: OPEN END]" IS the type.
-                if qtype in (QuestionType.MULTI, QuestionType.SINGLE) and not options:
+                if (
+                    qtype in (QuestionType.MULTI, QuestionType.SINGLE)
+                    and not options
+                    and not borrowed_options
+                ):
                     continue
                 return qtype
     for pattern, qtype in _TYPE_PATTERNS:
         if pattern.search(text):
             # "Select all that apply" with no options is a contradiction; trust
             # the instruction only when the shape agrees with it.
-            if qtype in (QuestionType.MULTI, QuestionType.SINGLE) and not options:
+            if (
+                qtype in (QuestionType.MULTI, QuestionType.SINGLE)
+                and not options
+                and not borrowed_options
+            ):
                 continue
             return qtype
-    if options:
-        # Options but no instruction: single vs multi changes the data
-        # structure, so this is a real question for a model, not a guess.
-        return None
+    if _is_binary_choice(options) or (options and is_single_select_wording(text)):
+        return QuestionType.SINGLE
+    # Options but no instruction: single vs multi changes the data structure,
+    # so this is a real question for a model, not a guess.
     return None
 
 
@@ -163,13 +256,16 @@ def parse_prose_question(chunk_text: str, candidate_qid: str | None) -> ProseFie
     terminate_codes: list[int] = []
     terminate_lines: list[str] = []
     randomize = False
+    scale_row: str | None = None
 
     for line in lines[1:]:
         directive = _DIRECTIVE_LINE_RE.match(line)
         if directive:
             body = directive.group("body").strip()
             directives.append(body)
-            if re.search(r"RANDOMI[SZ]E", body, re.I):
+            if re.search(r"RANDOMI[SZ]E|\bROTATE\b", body, re.I) and not re.search(
+                r"KEEP ORDER|DO NOT RANDOMI[SZ]E", body, re.I
+            ):
                 randomize = True
             if _TERMINATE_TAG.search(body):
                 # A document-level terminate rule ("CONTINUE IF AGES 18-60,
@@ -181,6 +277,14 @@ def parse_prose_question(chunk_text: str, candidate_qid: str | None) -> ProseFie
         if _SECTION_ROUTING_RE.search(line):
             # Belongs to the next section's routing, not this option list.
             directives.append(line)
+            continue
+
+        if _SCALE_ROW_RE.match(line):
+            # The scale points define a rating grid; the lines after it are the
+            # statements being rated. Record the scale, do not treat the points
+            # as this question's answer options.
+            directives.append(line)
+            scale_row = line
             continue
 
         if _INSTRUCTION_RE.match(line) and not options:
@@ -213,7 +317,22 @@ def parse_prose_question(chunk_text: str, candidate_qid: str | None) -> ProseFie
         randomize=randomize,
         directives=directives,
     )
-    fields.qtype = _infer_type(instruction_text, options, directives)
+    if question_text and is_derived_wording(question_text):
+        # Scripter-computed, not asked. Labelled the same way the extractor
+        # labels a HID_ variable, so the review UI says "needs manual setup".
+        fields.derived = True
+        fields.qtype = QuestionType.INFO
+    elif scale_row or (
+        options and any(_GRID_DIRECTIVE_RE.search(d) for d in directives)
+    ):
+        fields.qtype = QuestionType.GRID_SINGLE
+    else:
+        fields.qtype = _infer_type(
+            instruction_text,
+            options,
+            directives,
+            borrowed_options=any(_BORROWED_OPTIONS_RE.search(d) for d in directives),
+        )
 
     if terminate_codes:
         fields.terminate_if = Expression.from_dict(

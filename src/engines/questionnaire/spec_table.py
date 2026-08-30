@@ -29,6 +29,7 @@ import re
 from dataclasses import dataclass, field
 
 from src.core.survey_definition import Expression, Option, QuestionType
+from src.engines.questionnaire.prose_directives import is_single_select_wording
 from src.intake.questionnaire_loader import DocumentBlock
 
 # Row-label synonyms, by the field they populate. ADD A CLIENT'S WORDING HERE —
@@ -214,6 +215,12 @@ def _infer_type(stated: str, options: list[Option], text: str | None) -> Questio
         return None  # said something unrecognised — ask rather than assume
     if not options:
         return QuestionType.OPEN_TEXT if text else None
+    if is_single_select_wording(text or ""):
+        # The type cell is blank but the wording settles it: a superlative or a
+        # single-fact question cannot be multi-select. This is the commonest
+        # remaining gap in spec-table documents, where "Q type: (blank)" is
+        # routine and the wording is the only statement of intent.
+        return QuestionType.SINGLE
     # Has options but no stated type: single vs multi changes the data
     # structure, so this is a real question, not a guess.
     return None

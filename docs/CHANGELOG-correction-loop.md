@@ -302,3 +302,36 @@ never delay or break the screen it watches.
 Free LLM tiers differ on whether they train on submitted data — Mistral's
 requires opting in. Client questionnaires are NDA-bound. **Free tiers are for
 benchmarking with test documents, not client work.**
+
+## Directive vocabulary from a full inventory of the three client documents
+
+Rather than sampling patterns, every bracketed directive across all three real
+client questionnaires was inventoried: **116 distinct shapes**. Acting on the
+dominant unhandled families raised deterministic (zero-LLM) extraction from
+**37% to 64%** of questions across the three documents.
+
+| Convention | Seen | Now yields |
+|---|---|---|
+| `TEXTBOX`, `OE: n-CHARACTER MINIMUM`, `_ _ _ _` blanks | 17x | `open_text` |
+| `NUMERIC OE`, `RECORD NUMBER n TO n` | 4x | `numeric` (ordered before `OE`) |
+| `ROTATE` / `KEEP ORDER` | 3x | randomize on / off |
+| `0=Low \| 1 \| ... \| 10=High` scale row | 27x | `grid_single` + scale recorded |
+| `IN ROWS`, `RANDOMIZE STATEMENTS` | 8x | `grid_single` |
+| `Rank your top three`, `RANK 1,2,3` | 5x | `rank` |
+| `[SHOW Q26 LIST]`, `INSERT ... FROM Q4` | 6x | type trusted despite no local options |
+| All-caps `CODE ... BASED ON S1` wording | 12x | derived variable, `info` + flag |
+| Yes / No option pair | 30x+ | `single` |
+| `best describes` / `which one` / `what is your` | 18x | `single` |
+
+Per document: Bubble 26 -> 73 of 90, Vivo 22 -> 60 of 80, Google Ads 19 -> 24 of 75.
+
+**Deliberately not guessed.** The Google Ads document writes `Q type: (blank)`
+on 50 questions whose wording is genuinely ambiguous ("Which of the following
+are you responsible for" is single or multi depending on client intent). Those
+still escalate, on a ~250-token residue prompt asking only for the type. A
+wrong deterministic answer is silent and looks authoritative; an escalation is
+visible and cheap.
+
+Two rules are shared by both parsers (`is_derived_wording`,
+`is_single_select_wording`) so a spec-table document and a prose document
+cannot disagree about the same sentence.
