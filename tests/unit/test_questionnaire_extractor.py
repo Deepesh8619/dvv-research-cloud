@@ -579,7 +579,27 @@ def test_gbk_document_detection_appends_field_spec_end_to_end():
 
     assert survey.metadata["profile"]["slug"] == "gbk_spec_table"
     assert survey.metadata["profile"]["confidence"] >= 0.9
-    assert all("PROGRAMMING-SPEC TABLE" in p for p in seen_prompts)
+    # This used to assert every prompt carried the field-spec guidance. It no
+    # longer can, and for a GOOD reason: a labelled spec table is now read
+    # deterministically, so these questions reach a model only as a small
+    # residue prompt — or not at all. The guidance itself is still asserted
+    # directly in test_field_spec_guidance_appended_for_the_profile.
+    assert not any("SOURCE CHUNK" in p for p in seen_prompts), (
+        "spec-table questions should not need the full extraction prompt"
+    )
+    assert all("already been read" in p for p in seen_prompts), (
+        "every remaining prompt should be a small residue prompt"
+    )
+
+
+def test_field_spec_guidance_appended_for_the_profile():
+    """The prompt-level assertion the end-to-end test used to carry.
+
+    Kept as a direct check so profile-specific guidance stays covered even
+    though the deterministic parser means it is rarely reached in practice.
+    """
+    prompt = schema.build_extraction_prompt("Q Name | X", "X", "field_spec")
+    assert "PROGRAMMING-SPEC TABLE" in prompt
 
 
 def test_extraction_prompt_teaches_field_spec_when_convention_present():

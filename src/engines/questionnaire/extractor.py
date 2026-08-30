@@ -45,6 +45,10 @@ from src.core.survey_definition import (
 )
 from src.engines.questionnaire import schema
 from src.engines.questionnaire.profiles import detect_profile
+from src.engines.questionnaire.prose_directives import (
+    ProseFields,
+    parse_prose_question,
+)
 from src.engines.questionnaire.reconciler import reconcile_segmentation
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
 from src.intake.questionnaire_loader import DocumentBlock, QuestionChunk
@@ -406,6 +410,10 @@ def _extract_via_spec_table(
 
     if fields.complete:
         result = ExtractionResult(question=question, confidence=confidence)
+        # A HID_* variable is programmer-computed, not respondent-facing. The
+        # full-extraction path runs this before validation; the deterministic
+        # paths must too, or a derived variable surfaces as a real question.
+        _flag_derived_variable(result, chunk)
         # No model-emitted routing block exists on a structured parse; the
         # terminate came from the table and is already on the Question.
         _validate_question(result, {})
@@ -459,6 +467,88 @@ def _extract_via_spec_table(
             question.validation[_ROUTING_VERBATIM_KEY] = verbatim
 
     result = ExtractionResult(question=question, confidence=confidence)
+    _flag_derived_variable(result, chunk)
+    _validate_question(result, {})
+    return result
+
+
+
+def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
+    """Build a Question from what a prose question's own directives state."""
+    validation: dict[str, Any] = {}
+    if fields.terminate_verbatim:
+        validation[_ROUTING_VERBATIM_KEY] = fields.terminate_verbatim
+    if fields.directives:
+        # Scripter notes we recognised but do not model (SHOW IMAGE, quota
+        # instructions). Surfaced for review rather than dropped.
+        validation["scripter_directives"] = fields.directives
+    if fields.randomize:
+        validation["randomize"] = True
+    return Question(
+        qid=fields.qid,
+        text=fields.text or "",
+        type=fields.qtype or QuestionType.SINGLE,
+        options=list(fields.options),
+        required=False,
+        terminate_if=fields.terminate_if,
+        source_text=chunk.chunk_text,
+        source_location=chunk.provenance,
+        validation=validation,
+    )
+
+
+def _extract_via_prose(
+    chunk: QuestionChunk, fields: ProseFields
+) -> ExtractionResult | None:
+    """Prose directives, plus one small call for what they do not state.
+
+    Mirrors the spec-table path. Returns None so the caller falls back to full
+    extraction rather than shipping a half-read question.
+    """
+    question = _question_from_prose(fields, chunk)
+    confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
+
+    if fields.complete:
+        result = ExtractionResult(question=question, confidence=confidence)
+        _validate_question(result, {})
+        return result
+
+    prompt = schema.build_residue_prompt(
+        qid=fields.qid,
+        missing=fields.missing,
+        text=fields.text,
+        options=[(o.code, o.label) for o in fields.options],
+        notes=fields.terminate_verbatim,
+    )
+    try:
+        response = run_task(
+            "questionnaire.extract", prompt, schema.residue_schema(fields.missing)
+        )
+    except (BackendUnavailable, ModelOutputError, KeyError):
+        return None
+
+    content = response.content if isinstance(response.content, dict) else {}
+    if "type" in fields.missing:
+        try:
+            question.type = QuestionType(content["type"])
+        except (KeyError, ValueError):
+            return None
+        confidence["type"] = 0.9
+    if "text" in fields.missing:
+        question.text = str(content.get("text") or "").strip()
+        confidence["text"] = 0.9
+    if "terminate" in fields.missing:
+        raw = content.get("terminate")
+        block = ({"verbatim_text": raw, "ambiguous": True} if isinstance(raw, str)
+                 else raw if isinstance(raw, dict) else {})
+        verbatim = str(block.get("verbatim_text") or "").strip() or None
+        expression = None if block.get("ambiguous") else block.get("terminate_if")
+        question.terminate_if = _parse_expression(expression, verbatim)
+        confidence["routing"] = 0.9
+
+    question.validation["extracted_by"] = f"{response.backend}:{response.model}"
+    result = ExtractionResult(question=question, confidence=confidence)
+    _flag_derived_variable(result, chunk)
     _validate_question(result, {})
     return result
 
@@ -497,6 +587,16 @@ def extract_question(
         structured = _extract_via_spec_table(chunk, fields)
         if structured is not None:
             return structured
+
+    # Prose questionnaires have no tables, but their scripter directives are
+    # exact where present: "Select all that apply" is the type, "[TERMINATE]"
+    # on an option is a screen-out, "[PN: RANDOMIZE]" is randomisation. Two of
+    # the three real client documents are prose, so this is not a niche path.
+    prose = parse_prose_question(chunk.chunk_text, chunk.candidate_qid)
+    if prose is not None and (prose.options or prose.terminate_if):
+        via_prose = _extract_via_prose(chunk, prose)
+        if via_prose is not None:
+            return via_prose
 
     prompt = schema.build_extraction_prompt(
         chunk.chunk_text, chunk.candidate_qid, profile_hint, learned_rules
