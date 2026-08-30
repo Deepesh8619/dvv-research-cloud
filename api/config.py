@@ -13,7 +13,22 @@ load_env()
 PROJECT_ROOT = Path(__file__).parent.parent
 
 # Database
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dvv_research.db")
+def _normalize_db_url(url: str) -> str:
+    """Accept the `postgres://` form some providers still hand out.
+
+    Neon, Supabase and Heroku-style dashboards copy connection strings starting
+    `postgres://`, but SQLAlchemy 2.x only registers the `postgresql://`
+    dialect and raises `Can't load plugin: sqlalchemy.dialects:postgres` — an
+    error that reads like a missing driver, not a one-word URL difference.
+    Normalising here costs nothing and removes a genuinely confusing failure
+    from the very first minute of a deploy.
+    """
+    if url.startswith("postgres://"):
+        return "postgresql://" + url[len("postgres://") :]
+    return url
+
+
+DATABASE_URL = _normalize_db_url(os.getenv("DATABASE_URL", "sqlite:///./dvv_research.db"))
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", PROJECT_ROOT / "dvv_research.db"))
 
 # Storage
