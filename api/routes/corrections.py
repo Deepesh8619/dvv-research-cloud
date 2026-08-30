@@ -1032,7 +1032,10 @@ async def read_audit(
     question that only gets asked after something has already gone wrong, which
     is why it has to have been recorded all along.
     """
-    q = db.query(AuditLogDB)
+    # Intent telemetry (searches, views) lives in the same table but is NOT
+    # change history — including it here would drown "what changed" in "what
+    # was typed". Read those via GET /api/ui/activity instead.
+    q = db.query(AuditLogDB).filter(~AuditLogDB.entity.like("activity.%"))
     if study_id:
         q = q.filter(AuditLogDB.study_id == study_id)
     if entity_id:

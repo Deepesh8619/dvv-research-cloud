@@ -26,13 +26,14 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from api.db import (
+    AuditLogDB,
     UIOverrideDB,
     UserDB,
     active_ui_overrides,
     get_db,
     record_audit,
 )
-from api.models import UIOverrideRequest
+from api.models import ActivityRequest, UIOverrideRequest
 from api.routes.corrections import require_correction_access
 
 logger = logging.getLogger(__name__)
@@ -267,3 +268,97 @@ async def revert_override(
     db.commit()
     logger.info(f"UI override {key} reverted by {user.email}")
     return {"key": key, "value": _KEYS_BY_ID[key]["default"], "overridden": False}
+
+
+# --------------------------------------------------------------------------
+# Activity — what founders LOOKED FOR, not just what they changed
+# --------------------------------------------------------------------------
+
+# A search is intent. "Vishal searched 'terminate' four times this week and
+# changed nothing" says the wording he needs does not exist yet — which no
+# record of completed changes would ever reveal. Cheap to record, and the only
+# signal we get about the gap between what they wanted and what they found.
+#
+# Kept out of the audit trail's change history by using its own entity, so
+# reading "what changed" is never drowned in "what was typed".
+_ACTIVITY_ACTIONS = {"searched", "viewed", "opened", "abandoned"}
+
+# Below this a "search" is a keystroke, not an intent.
+MIN_SEARCH_CHARS = 3
+
+
+@router.post("/ui/activity")
+async def record_activity(
+    request: ActivityRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_correction_access),
+):
+    """Record what a founder searched for or looked at. Never fails the caller.
+
+    Deliberately permissive about being ignored: telemetry must never break the
+    screen it is watching, so an unknown action or a too-short query is a quiet
+    no-op rather than a 400 the frontend has to handle.
+    """
+    action = (request.action or "").strip().lower()
+    detail = (request.detail or "").strip()
+    if action not in _ACTIVITY_ACTIONS:
+        return {"recorded": False, "reason": "unknown action"}
+    if action == "searched" and len(detail) < MIN_SEARCH_CHARS:
+        return {"recorded": False, "reason": "too short to be intent"}
+
+    record_audit(
+        db,
+        entity=f"activity.{request.surface or 'app'}",
+        entity_id=detail[:120] or action,
+        action=action,
+        actor_id=user.id,
+        study_id=request.study_id,
+        summary=f"{action} on {request.surface or 'app'}: {detail[:160]}",
+        after={"surface": request.surface, "detail": detail, "found": request.found},
+    )
+    db.commit()
+    return {"recorded": True}
+
+
+@router.get("/ui/activity")
+async def read_activity(
+    surface: str | None = None,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_correction_access),
+):
+    """Recent founder activity, newest first — searches included.
+
+    Separate from /corrections/audit so the change history stays readable:
+    this answers "what were they trying to do", that one answers "what
+    actually changed".
+    """
+    q = db.query(AuditLogDB).filter(AuditLogDB.entity.like("activity.%"))
+    if surface:
+        q = q.filter(AuditLogDB.entity == f"activity.{surface}")
+    rows = q.order_by(AuditLogDB.at.desc()).limit(min(limit, 500)).all()
+
+    # Searches that recur are the loudest signal in here, so they are counted
+    # rather than left for someone to spot by eye in a long list.
+    counts: dict[str, int] = {}
+    for r in rows:
+        if r.action == "searched" and r.entity_id:
+            counts[r.entity_id] = counts.get(r.entity_id, 0) + 1
+    return {
+        "entries": [
+            {
+                "action": r.action,
+                "surface": (r.entity or "").removeprefix("activity."),
+                "detail": r.entity_id,
+                "actor_id": r.actor_id,
+                "study_id": r.study_id,
+                "at": r.at,
+            }
+            for r in rows
+        ],
+        "repeated_searches": sorted(
+            ({"query": q, "times": n} for q, n in counts.items() if n > 1),
+            key=lambda x: -x["times"],
+        ),
+        "count": len(rows),
+    }

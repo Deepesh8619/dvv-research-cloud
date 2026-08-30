@@ -504,3 +504,13 @@ class UIOverrideRequest(BaseModel):
     key: str
     value: str
     note: str | None = None
+
+
+class ActivityRequest(BaseModel):
+    """A founder's search or view. Intent telemetry, never load-bearing."""
+
+    action: str  # searched | viewed | opened | abandoned
+    surface: str | None = None  # wording | corrections | questionnaire
+    detail: str | None = None  # the query, or what was viewed
+    study_id: str | None = None
+    found: int | None = None  # result count, so "searched and found nothing" is visible

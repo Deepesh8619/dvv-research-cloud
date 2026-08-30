@@ -5,6 +5,7 @@ import { AuthProvider } from './auth/AuthContext'
 import { LabelProvider } from './labels/LabelContext'
 import Shell from './components/Shell'
 import WordingPage from './pages/WordingPage'
+import ActivityPage from './pages/ActivityPage'
 import RequireAuth from './components/RequireAuth'
 import AdminPage from './pages/AdminPage'
 import CodingPage from './pages/CodingPage'
@@ -50,6 +51,7 @@ export default function App() {
             <Route path="/coding" element={<CodingPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/wording" element={<WordingPage />} />
+            <Route path="/activity" element={<ActivityPage />} />
             {/* Legacy routes */}
             <Route path="/upload" element={<Navigate to="/projects/new" replace />} />
             <Route path="/studies" element={<Navigate to="/projects" replace />} />

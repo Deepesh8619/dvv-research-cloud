@@ -14,6 +14,7 @@ const NAV = [
   { to: '/admin', label: 'Admin', icon: ShieldIcon },
   // Founders' wording console — gated below, same roles as the correction loop.
   { to: '/wording', label: 'Wording', icon: ChatIcon, roles: ['owner', 'founder'] },
+  { to: '/activity', label: 'Activity', icon: DocChartIcon, roles: ['owner', 'founder'] },
 ]
 
 export default function Shell() {

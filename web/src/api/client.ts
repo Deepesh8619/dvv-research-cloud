@@ -800,3 +800,46 @@ export const uiApi = {
       `/ui/overrides/${encodeURIComponent(key)}/revert`,
     ),
 }
+
+export interface ActivityEntry {
+  action: string
+  surface: string
+  detail: string | null
+  actor_id: string | null
+  study_id: string | null
+  at: string
+}
+
+export interface AuditEntry {
+  id: string
+  entity: string
+  entity_id: string
+  action: string
+  actor_id: string
+  study_id: string | null
+  summary: string | null
+  at: string
+}
+
+export const activityApi = {
+  /** Fire-and-forget intent telemetry. Never awaited by anything user-visible. */
+  record: (body: {
+    action: string
+    surface?: string
+    detail?: string
+    study_id?: string
+    found?: number
+  }) => api.post('/ui/activity', body).catch(() => undefined),
+
+  list: async (surface?: string) =>
+    api.get<{
+      entries: ActivityEntry[]
+      repeated_searches: { query: string; times: number }[]
+      count: number
+    }>('/ui/activity', { params: surface ? { surface } : undefined }),
+
+  audit: async (studyId?: string) =>
+    api.get<{ entries: AuditEntry[]; count: number }>('/corrections/audit', {
+      params: studyId ? { study_id: studyId } : undefined,
+    }),
+}

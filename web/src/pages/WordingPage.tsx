@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { uiApi, type UIKey } from '../api/client'
+import { activityApi, uiApi, type UIKey } from '../api/client'
 import { useReloadLabels } from '../labels/LabelContext'
 import { CardListSkeleton } from '../components/Skeleton'
 
@@ -25,6 +25,7 @@ export default function WordingPage() {
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const reloadLabels = useReloadLabels()
+
 
   const load = useCallback(() => {
     uiApi
@@ -54,6 +55,22 @@ export default function WordingPage() {
     }
     return [...out.entries()]
   }, [keys, filter])
+
+  // Record what they SEARCHED FOR, debounced so a keystroke isn't an event.
+  // Fire-and-forget: telemetry must never delay or break the screen it watches.
+  useEffect(() => {
+    const q = filter.trim()
+    if (q.length < 3) return
+    const t = window.setTimeout(() => {
+      activityApi.record({
+        action: 'searched',
+        surface: 'wording',
+        detail: q,
+        found: grouped.reduce((n, [, rows]) => n + rows.length, 0),
+      })
+    }, 900)
+    return () => window.clearTimeout(t)
+  }, [filter, grouped])
 
   const save = async (k: UIKey) => {
     const value = (drafts[k.key] ?? k.current).trim()

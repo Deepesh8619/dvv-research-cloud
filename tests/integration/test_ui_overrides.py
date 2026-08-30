@@ -202,3 +202,67 @@ def test_setting_an_override_is_audited(client):
     assert entry is not None
     assert entry.actor_id == "u_founder"
     s.close()
+
+
+# --------------------------------------------------------------------------
+# Activity — searches are intent, and must never break the screen
+# --------------------------------------------------------------------------
+
+
+def test_a_search_is_recorded_with_its_result_count(client):
+    """'Searched X and found nothing' is the signal; the count carries it."""
+    c, _ = client
+    _founder()
+    r = c.post(
+        "/api/ui/activity",
+        json={"action": "searched", "surface": "wording", "detail": "terminate", "found": 0},
+    )
+    assert r.json()["recorded"] is True
+
+    body = c.get("/api/ui/activity").json()
+    assert body["entries"][0]["detail"] == "terminate"
+    assert body["entries"][0]["action"] == "searched"
+
+
+def test_keystroke_length_searches_are_ignored(client):
+    """Two characters is a keystroke, not an intent — recording it is noise."""
+    c, _ = client
+    _founder()
+    r = c.post("/api/ui/activity", json={"action": "searched", "detail": "te"})
+    assert r.json()["recorded"] is False
+    assert c.get("/api/ui/activity").json()["count"] == 0
+
+
+def test_unknown_action_is_a_quiet_no_op_not_an_error(client):
+    """Telemetry must never fail the caller — the frontend has no handler for it."""
+    c, _ = client
+    _founder()
+    r = c.post("/api/ui/activity", json={"action": "teleported", "detail": "somewhere"})
+    assert r.status_code == 200
+    assert r.json()["recorded"] is False
+
+
+def test_repeated_searches_are_counted(client):
+    """A query someone kept retrying is the loudest signal in the log."""
+    c, _ = client
+    _founder()
+    for _ in range(3):
+        c.post("/api/ui/activity", json={"action": "searched", "detail": "quota"})
+    c.post("/api/ui/activity", json={"action": "searched", "detail": "banner"})
+
+    repeated = c.get("/api/ui/activity").json()["repeated_searches"]
+    assert repeated[0] == {"query": "quota", "times": 3}
+    # Searched once is not a signal.
+    assert all(r["query"] != "banner" for r in repeated)
+
+
+def test_activity_is_kept_out_of_the_change_log(client):
+    """Reading 'what changed' must not be drowned in 'what was typed'."""
+    c, _ = client
+    _founder()
+    c.post("/api/ui/activity", json={"action": "searched", "detail": "terminate"})
+    c.post("/api/ui/overrides", json={"key": "dashboard.title", "value": "Studies"})
+
+    changes = c.get("/api/corrections/audit").json()["entries"]
+    assert all(not e["entity"].startswith("activity.") for e in changes)
+    assert any(e["entity"] == "ui_override" for e in changes)
