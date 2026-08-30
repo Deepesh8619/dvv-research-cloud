@@ -273,3 +273,34 @@ def test_a_terminate_references_its_own_question_not_a_placeholder():
     expr = f.terminate_if.to_dict()
     assert expr["qid"] == "SS_RESP"
     assert not expr["qid"].startswith("__")
+
+
+def test_a_string_where_the_residue_expects_an_object_does_not_crash():
+    """Same failure already fixed on the full-extraction path.
+
+    A model can answer the residue with a bare string instead of the
+    {verbatim_text, ambiguous, ...} object. That crashed with AttributeError
+    mid-document. The string is kept as the verbatim — it is the sentence a
+    reviewer needs to resolve the condition by hand — and flagged ambiguous.
+    """
+    from unittest.mock import patch
+
+    from src.ai.router import AIResponse
+    from src.engines.questionnaire import extractor
+    from src.intake.questionnaire_loader import QuestionChunk
+
+    rows = [r for r in GBK if r[0] not in ("Q type", "Among who")]
+    rows.append(["Among who", "those aware of the brand (see Q3)"])
+    chunk = QuestionChunk(chunk_text="x", candidate_qid="SS_RESP",
+                          source_blocks=[_table(rows)], provenance="p1")
+
+    with patch.object(extractor, "run_task") as run:
+        run.return_value = AIResponse(
+            content={"type": "multi", "base": "ask only aware respondents"},
+            backend="t", model="t")
+        result = extractor.extract_question(chunk, "field_spec")
+
+    assert result.question.qid == "SS_RESP"
+    assert result.question.type is QuestionType.MULTI
+    # The sentence survived rather than being lost to a crash.
+    assert "aware" in result.question.validation.get("routing_verbatim", "")

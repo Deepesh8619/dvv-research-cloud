@@ -269,7 +269,12 @@ def _run_extraction(
     Any failure flips the questionnaire to 'error' with a logged reason rather
     than leaving it stuck on 'processing' forever.
     """
-    from api.db import SessionLocal, active_rules_for_profile, touch_questionnaire
+    from api.db import (
+        SessionLocal,
+        active_rules_for_profile,
+        set_questionnaire_definition,
+        touch_questionnaire,
+    )
 
     job_db = SessionLocal()
     try:
@@ -300,12 +305,24 @@ def _run_extraction(
                 # Never let bookkeeping kill the extraction it is measuring.
                 logger.warning(f"[{study_id}] progress heartbeat failed: {beat_exc}")
 
+        def _checkpoint(done: int, total: int, partial) -> None:
+            """Persist the questions done so far.
+
+            The row stays on 'processing' — this is a crash-safety snapshot, not
+            a finished extraction. If the worker is killed (restart, deploy,
+            idle spin-down), a reviewer still finds the questions completed up
+            to that point instead of an empty questionnaire.
+            """
+            set_questionnaire_definition(job_db, questionnaire_id, partial.to_json())
+            logger.info(f"[{study_id}] checkpoint saved {done}/{total}")
+
         survey = extract_survey_definition(
             chunks,
             study_id=study_id,
             blocks=blocks,
             rules_for_profile=lambda slug: active_rules_for_profile(job_db, slug),
             on_progress=_heartbeat,
+            on_checkpoint=_checkpoint,
         )
         # Title from the original upload name, not the on-disk path (which is
         # renamed to the questionnaire id to avoid collisions).

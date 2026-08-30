@@ -439,7 +439,18 @@ def _extract_via_spec_table(
     for name, attr in (("base", "show_if"), ("terminate", "terminate_if")):
         if name not in fields.missing:
             continue
-        block = content.get(name) or {}
+        raw = content.get(name)
+        # A model can return a bare STRING here instead of the object the
+        # residue schema asks for — same failure already seen and fixed on the
+        # full-extraction path. Treat the string as the verbatim rather than
+        # crashing: it is exactly the sentence a reviewer needs to resolve the
+        # condition by hand.
+        if isinstance(raw, str):
+            block = {"verbatim_text": raw, "ambiguous": True}
+        elif isinstance(raw, dict):
+            block = raw
+        else:
+            block = {}
         verbatim = str(block.get("verbatim_text") or "").strip() or None
         expression = None if block.get("ambiguous") else block.get(attr)
         setattr(question, attr, _parse_expression(expression, verbatim))
@@ -670,12 +681,43 @@ def _extraction_summary(results: list[ExtractionResult]) -> dict[str, Any]:
     }
 
 
+
+def _maybe_checkpoint(
+    results: list[ExtractionResult],
+    chunks: list[QuestionChunk],
+    study_id: str,
+    detection,
+    reconcile_meta: dict | None,
+    on_checkpoint: Callable[[int, int, SurveyDefinition], None] | None,
+    every: int,
+) -> None:
+    """Hand the caller a persistable snapshot, every `every` chunks.
+
+    Never lets a checkpoint failure kill the extraction it is protecting: the
+    point is to lose less work, so a broken save must cost one snapshot, not the
+    whole run.
+    """
+    if not on_checkpoint or not results:
+        return
+    done, total = len(results), len(chunks)
+    if done % every and done != total:
+        return
+    try:
+        on_checkpoint(done, total, _assemble_survey(
+            list(results), study_id, detection, reconcile_meta, partial=True
+        ))
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"[{study_id}] checkpoint failed at {done}/{total}: {exc}\n")
+
+
 def extract_survey_definition(
     chunks: list[QuestionChunk],
     study_id: str,
     blocks: list[DocumentBlock] | None = None,
     rules_for_profile: Callable[[str], list[str]] | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    on_checkpoint: Callable[[int, int, SurveyDefinition], None] | None = None,
+    checkpoint_every: int = 5,
 ) -> SurveyDefinition:
     """Extract + verify every chunk and assemble one draft SurveyDefinition.
 
@@ -690,12 +732,15 @@ def extract_survey_definition(
     the limit is tokens per minute, not concurrency, so running chunks at once
     just reaches the ceiling faster.
 
-    `on_progress(done, total)` fires after each chunk so the caller can persist
-    partial work. Without it a 75-question document that dies at question 70 —
-    to a restart, a deploy, or an idle spin-down — loses all seventy. Reported
-    from the real thing: a full document ran 15 minutes and persisted ZERO
-    questions. The callback keeps this engine free of the database while making
-    the work durable.
+    `on_progress(done, total)` fires after each chunk so the caller can show a
+    heartbeat.
+
+    `on_checkpoint(done, total, partial_survey)` fires every `checkpoint_every`
+    chunks with a REAL SurveyDefinition covering the work done so far, so the
+    caller can persist it. This is the difference between a run killed at
+    question 70 of 75 leaving seventy usable questions and leaving nothing —
+    which is exactly what happened in production: a 15-minute run persisted
+    ZERO. Both callbacks keep this engine free of the database.
     """
     reconcile_meta: dict = {}
     # Recognize the document's authoring convention (GBK spec-table / prose /
@@ -733,6 +778,10 @@ def extract_survey_definition(
             results.append(result)
             if on_progress:
                 on_progress(len(results), len(chunks))
+            _maybe_checkpoint(
+                results, chunks, study_id, detection, reconcile_meta,
+                on_checkpoint, checkpoint_every,
+            )
             if (
                 len(results) == consecutive_backend_failures
                 and consecutive_backend_failures >= _CIRCUIT_BREAKER_CHUNKS
@@ -761,7 +810,31 @@ def extract_survey_definition(
         results.append(result)
         if on_progress:
             on_progress(len(results), len(chunks))
+        _maybe_checkpoint(
+            results, chunks, study_id, detection, reconcile_meta,
+            on_checkpoint, checkpoint_every,
+        )
 
+    return _assemble_survey(results, study_id, detection, reconcile_meta)
+
+
+def _assemble_survey(
+    results: list[ExtractionResult],
+    study_id: str,
+    detection=None,
+    reconcile_meta: dict | None = None,
+    partial: bool = False,
+) -> SurveyDefinition:
+    """Build a SurveyDefinition from however many results exist.
+
+    Split out so a CHECKPOINT can persist the same shape mid-run. A partial
+    survey is a real, reviewable questionnaire covering the questions done so
+    far — the alternative, which is what used to happen, is that a worker killed
+    at question 70 of 75 left absolutely nothing behind.
+
+    `partial=True` marks it so the UI and the route can tell an in-progress
+    snapshot from a finished extraction.
+    """
     known_qids = {r.question.qid for r in results}
     _resolve_cross_chunk_routing(results, known_qids)
 
@@ -797,6 +870,11 @@ def extract_survey_definition(
     survey.metadata["auto_approved_qids"] = [
         r.question.qid for r in results if _is_auto_approvable(r)
     ]
+    # A checkpoint is explicitly incomplete: cross-chunk routing has only seen
+    # the qids extracted SO FAR, so a reference to a later question looks
+    # unresolvable until the run finishes. Marking it stops a snapshot being
+    # mistaken for a finished extraction.
+    survey.metadata["partial"] = partial
     return survey
 
 

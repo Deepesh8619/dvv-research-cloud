@@ -822,3 +822,109 @@ def test_a_failing_chunk_still_reports_progress():
         )
 
     assert seen == [(1, 2), (2, 2)]
+
+
+# --- checkpointing: a killed worker must not lose everything -----------------
+
+
+def test_a_killed_worker_leaves_the_finished_questions_behind():
+    """THE point of checkpointing.
+
+    A real 75-question run was killed at 15 minutes having persisted ZERO
+    questions, because results were only written at the end. Now a worker that
+    dies partway leaves the completed questions as a reviewable questionnaire.
+    """
+    from src.engines.questionnaire.extractor import extract_survey_definition
+
+    saved = {}
+
+    def checkpoint(done, total, partial):
+        saved["done"] = done
+        saved["survey"] = partial
+
+    class _Killed(Exception):
+        pass
+
+    calls = {"n": 0}
+
+    # Maximally confident, so verification is skipped and each question is
+    # exactly ONE call — otherwise "die on call 7" is an ambiguous number of
+    # questions.
+    perfect = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
+
+    def die_on_the_seventh(task, prompt, schema_arg, *a, **k):
+        calls["n"] += 1
+        if calls["n"] > 6:
+            raise _Killed("worker killed")   # simulates a restart mid-run
+        return _response(
+            _extraction_content(qid=f"Q{calls['n']}", confidence=perfect)
+        )
+
+    chunks = [_chunk(f"Q{i}") for i in range(1, 11)]
+    with patch(_EXTRACT, side_effect=die_on_the_seventh):
+        try:
+            extract_survey_definition(chunks, study_id="s1", on_checkpoint=checkpoint,
+                                      checkpoint_every=5)
+        except _Killed:
+            pass
+
+    # Five questions were checkpointed before the worker died.
+    assert saved["done"] == 5
+    assert len(saved["survey"].questions) == 5
+    # And it is a real, reviewable questionnaire, not a fragment.
+    assert saved["survey"].blocks
+    assert saved["survey"].study_id == "s1"
+
+
+def test_a_checkpoint_is_marked_partial():
+    """Cross-chunk routing has only seen the qids done so far, so a snapshot
+    must not be mistaken for a finished extraction."""
+    from src.engines.questionnaire.extractor import extract_survey_definition
+
+    seen = []
+    with patch(_EXTRACT, return_value=_response(_extraction_content())):
+        extract_survey_definition(
+            [_chunk(f"Q{i}") for i in range(1, 7)],
+            study_id="s1",
+            on_checkpoint=lambda d, t, p: seen.append(p.metadata.get("partial")),
+            checkpoint_every=5,
+        )
+
+    assert seen[0] is True                       # the mid-run snapshot
+    # And the FINAL survey is not marked partial.
+    with patch(_EXTRACT, return_value=_response(_extraction_content())):
+        final = extract_survey_definition([_chunk("Q1")], study_id="s1")
+    assert final.metadata.get("partial") is False
+
+
+def test_a_failing_checkpoint_never_kills_the_extraction():
+    """Checkpointing exists to lose LESS work — it must not cost the whole run."""
+    from src.engines.questionnaire.extractor import extract_survey_definition
+
+    def broken(done, total, partial):
+        raise RuntimeError("database is down")
+
+    with patch(_EXTRACT, return_value=_response(_extraction_content())):
+        survey = extract_survey_definition(
+            [_chunk(f"Q{i}") for i in range(1, 4)],
+            study_id="s1", on_checkpoint=broken, checkpoint_every=1,
+        )
+
+    assert len(survey.questions) == 3   # completed despite every save failing
+
+
+def test_checkpoints_fire_on_a_cadence_not_every_question():
+    """Persisting on every question would be a write per LLM call."""
+    from src.engines.questionnaire.extractor import extract_survey_definition
+
+    at = []
+    with patch(_EXTRACT, return_value=_response(_extraction_content())):
+        extract_survey_definition(
+            [_chunk(f"Q{i}") for i in range(1, 12)],
+            study_id="s1",
+            on_checkpoint=lambda d, t, p: at.append(d),
+            checkpoint_every=5,
+        )
+
+    # Every 5th, plus a final one so the last few are never lost.
+    assert at == [5, 10, 11]
