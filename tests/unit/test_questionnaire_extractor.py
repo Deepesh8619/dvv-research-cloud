@@ -718,3 +718,71 @@ def test_routing_of_an_unexpected_type_is_ignored_not_fatal():
         result = extract_question(_chunk("Q5"))
 
     assert result.question.qid == "Q5"
+
+
+# --- verify-skip: halve the LLM calls without weakening review ---------------
+
+
+def _result(confidences: dict, flags=None):
+    from src.engines.questionnaire.extractor import ExtractionResult
+
+    r = ExtractionResult(question=_empty_q(), confidence=confidences)
+    for f in flags or []:
+        r.add_flag(f)
+    return r
+
+
+def _empty_q():
+    from src.core.survey_definition import Question, QuestionType
+
+    return Question(qid="Q1", text="t", type=QuestionType.SINGLE, options=[])
+
+
+def test_maximally_confident_clean_extraction_skips_verification():
+    """The point: verify is a SECOND LLM call, and doubles wall time on a
+    token-capped tier."""
+    from src.engines.questionnaire.extractor import _needs_verification
+
+    clean = {"text": 1.0, "type": 1.0, "options": 0.98, "routing": 0.96}
+    assert _needs_verification(_result(clean)) is False
+
+
+def test_any_flag_forces_verification():
+    from src.engines.questionnaire.extractor import _needs_verification
+
+    r = _result({"text": 1.0, "type": 1.0}, flags=[schema.FLAG_AMBIGUOUS_ROUTING])
+    assert _needs_verification(r) is True
+
+
+def test_one_merely_good_field_forces_verification():
+    """The skip floor is deliberately higher than the auto-approve floor."""
+    from src.engines.questionnaire.extractor import _needs_verification
+
+    assert _needs_verification(_result({"text": 1.0, "options": 0.9})) is True
+
+
+def test_missing_confidence_forces_verification():
+    from src.engines.questionnaire.extractor import _needs_verification
+
+    assert _needs_verification(_result({})) is True
+
+
+def test_env_flag_forces_verification_everywhere(monkeypatch):
+    from src.engines.questionnaire.extractor import _needs_verification
+
+    monkeypatch.setenv("QRE_VERIFY_ALWAYS", "1")
+    assert _needs_verification(_result({"text": 1.0, "type": 1.0})) is True
+
+
+def test_a_skipped_question_is_never_auto_approved():
+    """THE safety property. Skipping verification trades speed for a human
+    review, never for an unreviewed auto-approval."""
+    from src.engines.questionnaire.extractor import (
+        _is_auto_approvable,
+        _needs_verification,
+    )
+
+    r = _result({"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0})
+    assert _needs_verification(r) is False  # would skip verify...
+    assert r.verified is False
+    assert _is_auto_approvable(r) is False  # ...so it still reaches a human

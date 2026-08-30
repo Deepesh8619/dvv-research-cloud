@@ -23,6 +23,7 @@ of the whole document's qid set. See the note in `_validate_question`.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -90,6 +91,36 @@ _CIRCUIT_BREAKER_CHUNKS = 3
 # ZERO flags, and the LOWEST per-field confidence the model reported is at or
 # above this floor. Anything short of all three stays unapproved for human eyes.
 AUTO_APPROVE_CONFIDENCE_FLOOR = 0.85
+
+# Skip the grounded verify pass when the extraction is already unambiguous.
+#
+# Verify is a SECOND LLM call per question, so it doubles both cost and — on a
+# token-capped tier — wall time. Measured on Groq's free tier (8k tokens/min):
+# ~6.1k tokens per call, two calls per question, so a 75-question document
+# spends ~38 minutes almost entirely waiting on the rate limit.
+#
+# The floor here is deliberately HIGHER than the auto-approve floor. Verify
+# exists to catch hallucination, so skipping it is only defensible where the
+# model was maximally confident on EVERY field and nothing was flagged — and
+# even then a skipped question is NOT auto-approved (see `_is_auto_approvable`,
+# which still requires `verified`), so a human reviews it. The trade is
+# "unverified but human-reviewed" against "verified but 2x slower", never
+# "unverified and auto-approved".
+#
+# Set QRE_VERIFY_ALWAYS=1 to force verification on every question.
+SKIP_VERIFY_CONFIDENCE_FLOOR = 0.95
+
+
+def _needs_verification(result: ExtractionResult) -> bool:
+    """False only when extraction was flawless and maximally confident."""
+    if os.environ.get("QRE_VERIFY_ALWAYS", "").strip().lower() in ("1", "true", "yes"):
+        return True
+    if result.flags:
+        return True
+    confidences = result.confidence.values()
+    if not confidences:
+        return True
+    return min(confidences) < SKIP_VERIFY_CONFIDENCE_FLOOR
 
 
 def _is_auto_approvable(result: ExtractionResult) -> bool:
@@ -517,6 +548,13 @@ def _extraction_summary(results: list[ExtractionResult]) -> dict[str, Any]:
         "failure_reasons": failure_reasons,
         "average_confidence": round(conf_sum / conf_n, 4) if conf_n else 0.0,
         "verified_chunks": sum(1 for r in results if r.verified),
+        # Derived, not counted: a question that skipped verification is
+        # unverified AND unflagged. A verify FAILURE always sets a flag, so the
+        # two cases stay distinguishable. Surfaced so "why was this not
+        # verified" is answerable without reading logs.
+        "skipped_verification": sum(
+            1 for r in results if not r.verified and not r.flags
+        ),
     }
 
 
@@ -594,7 +632,11 @@ def extract_survey_definition(
         # the backend is reachable, so reset the consecutive-failure streak and
         # run the grounded verify pass as normal.
         consecutive_backend_failures = 0
-        result = verify_question(chunk, result)
+        # Halves LLM calls on clean questions — see SKIP_VERIFY_CONFIDENCE_FLOOR.
+        # A skipped question stays `verified=False`, so it is never
+        # auto-approved and always reaches a human.
+        if _needs_verification(result):
+            result = verify_question(chunk, result)
         results.append(result)
 
     known_qids = {r.question.qid for r in results}
