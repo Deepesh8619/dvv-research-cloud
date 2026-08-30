@@ -929,10 +929,17 @@ async def approve_question(
     if qid not in survey:
         raise HTTPException(status_code=404, detail=f"Question {qid} not found")
 
-    question = survey[qid]
-    cleared = [f for f in question.flags if f in _BLOCKING_FLAGS]
+    # EVERY question carrying this qid, not just the first. Extraction now
+    # de-duplicates qids, but a questionnaire extracted BEFORE that fix can
+    # still hold duplicates — and `survey[qid]` returns only the first match, so
+    # the second copy's blocking flag could never be cleared and the
+    # questionnaire could never be finalised. A reviewer hit exactly that dead
+    # end: "81/81 approved" beside "cannot approve, S6 unresolved".
+    matching = [q for q in survey.questions if q.qid == qid]
+    cleared = sorted({f for q in matching for f in q.flags if f in _BLOCKING_FLAGS})
     if cleared:
-        question.flags = [f for f in question.flags if f not in _BLOCKING_FLAGS]
+        for q in matching:
+            q.flags = [f for f in q.flags if f not in _BLOCKING_FLAGS]
         _save_definition(db, questionnaire, survey)
 
     approved = set(questionnaire.approved_qids or [])

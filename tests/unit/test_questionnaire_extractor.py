@@ -948,3 +948,54 @@ def test_checkpoints_fire_on_a_cadence_not_every_question():
 
     # Every 5th, plus a final one so the last few are never lost.
     assert at == [5, 10, 11]
+
+
+# --- qid uniqueness: a qid is an ADDRESS ------------------------------------
+
+
+def test_duplicate_qids_are_made_unique():
+    """Two questions sharing a qid makes the second unreachable.
+
+    The review UI looks a question up by qid, so approving it clears flags on
+    the FIRST match only — the second's blocking flag can never be cleared and
+    the questionnaire can never be finalised. A reviewer hit exactly that:
+    "81/81 approved" beside "cannot approve, S6 unresolved".
+    """
+    from src.engines.questionnaire.extractor import extract_survey_definition
+
+    content = _extraction_content(qid="S6")
+    with patch(_EXTRACT, return_value=_response(content)):
+        survey = extract_survey_definition(
+            [_chunk("S6"), _chunk("S6"), _chunk("S6")], study_id="s1"
+        )
+
+    qids = [q.qid for q in survey.questions]
+    assert len(qids) == len(set(qids)), f"duplicates remain: {qids}"
+    assert qids[0] == "S6"          # the first keeps the original address
+
+
+def test_a_renamed_question_records_what_it_was_called():
+    """The rename must be visible, not silent — a reviewer needs to know."""
+    from src.engines.questionnaire.extractor import extract_survey_definition
+
+    with patch(_EXTRACT, return_value=_response(_extraction_content(qid="S6"))):
+        survey = extract_survey_definition(
+            [_chunk("S6"), _chunk("S6")], study_id="s1"
+        )
+
+    renamed = survey.questions[1]
+    assert renamed.qid != "S6"
+    assert renamed.validation["original_qid"] == "S6"
+
+
+def test_failed_chunks_do_not_all_collide_on_UNKNOWN():
+    """Every failed extraction is named UNKNOWN — the commonest duplicate source."""
+    from src.engines.questionnaire.extractor import extract_survey_definition
+
+    with patch(_EXTRACT, side_effect=ModelOutputError("bad")):
+        survey = extract_survey_definition(
+            [_chunk(None), _chunk(None), _chunk(None)], study_id="s1"
+        )
+
+    qids = [q.qid for q in survey.questions]
+    assert len(qids) == len(set(qids)), f"duplicates remain: {qids}"

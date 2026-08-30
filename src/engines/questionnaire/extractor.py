@@ -918,6 +918,43 @@ def extract_survey_definition(
     return _assemble_survey(results, study_id, detection, reconcile_meta)
 
 
+
+def _deduplicate_qids(results: list[ExtractionResult]) -> None:
+    """Make every qid unique, in place.
+
+    A qid is an ADDRESS: the review UI looks a question up by it, approval is
+    recorded against it, routing references it, and the data column takes its
+    name from it. Two questions sharing one makes the second unreachable —
+    approving it clears flags on the first, so its blocking flag can never be
+    cleared and the questionnaire can never be finalised. That is a real dead
+    end a reviewer hit.
+
+    Duplicates arise legitimately: every chunk whose extraction failed is named
+    UNKNOWN, and a document can repeat a label across sections.
+
+    The FIRST occurrence keeps the original qid, so existing routing references
+    still resolve to what they most likely meant. Later ones are suffixed and
+    keep their original in `validation.original_qid`, so the rename is visible
+    rather than silent.
+    """
+    seen: dict[str, int] = {}
+    for result in results:
+        qid = result.question.qid or "UNKNOWN"
+        if qid not in seen:
+            seen[qid] = 1
+            continue
+        seen[qid] += 1
+        new_qid = f"{qid}_{seen[qid]}"
+        while new_qid in seen:  # a document may already contain "S6_2"
+            seen[qid] += 1
+            new_qid = f"{qid}_{seen[qid]}"
+        if result.question.validation is None:
+            result.question.validation = {}
+        result.question.validation["original_qid"] = qid
+        result.question.qid = new_qid
+        seen[new_qid] = 1
+
+
 def _assemble_survey(
     results: list[ExtractionResult],
     study_id: str,
@@ -935,6 +972,9 @@ def _assemble_survey(
     `partial=True` marks it so the UI and the route can tell an in-progress
     snapshot from a finished extraction.
     """
+    # Before anything reads a qid as an address.
+    _deduplicate_qids(results)
+
     known_qids = {r.question.qid for r in results}
     _resolve_cross_chunk_routing(results, known_qids)
 
