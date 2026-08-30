@@ -102,7 +102,12 @@ _BLOCKING_FLAGS = frozenset(
 # recently?" rather than "has it been going a long time?". A genuinely killed
 # worker still stops updating and is caught; a slow one is not punished for
 # being slow.
-_PROCESSING_STALE_AFTER = timedelta(minutes=10)
+# 15 minutes: the worst realistic gap between two heartbeats. A single
+# question can burn several retries across several backends before it either
+# succeeds or gives up, and each retry honours the provider's own wait hint.
+# Anything shorter risks reporting a slow-but-alive run as dead, which is the
+# failure this guard has now caused twice.
+_PROCESSING_STALE_AFTER = timedelta(minutes=15)
 
 
 def _is_stale_processing(questionnaire) -> bool:
@@ -296,8 +301,11 @@ def _run_extraction(
         # persisted NOTHING. Touching updated_at makes progress visible to the
         # staleness check, so "slow but working" stops looking like "dead".
         def _heartbeat(done: int, total: int) -> None:
-            if done % 5 and done != total:
-                return
+            # EVERY question, not every fifth. A question can take minutes on a
+            # rate-limited tier, so a 5-question cadence could exceed the
+            # staleness window on its own — which is exactly what reported a
+            # healthy run as dead. One UPDATE is nothing beside an LLM call that
+            # takes tens of seconds; batching it was a premature optimisation.
             try:
                 touch_questionnaire(job_db, questionnaire_id)
                 logger.info(f"[{study_id}] extraction progress {done}/{total}")
