@@ -514,3 +514,12 @@ class ActivityRequest(BaseModel):
     detail: str | None = None  # the query, or what was viewed
     study_id: str | None = None
     found: int | None = None  # result count, so "searched and found nothing" is visible
+
+
+class SaveCodeframeRequest(BaseModel):
+    """Add an approved codeframe to the reuse library."""
+
+    question_text: str
+    codeframe: dict
+    study_id: str | None = None
+    client_name: str | None = None

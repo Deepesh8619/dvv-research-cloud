@@ -99,6 +99,7 @@ try:
     from api.routes import (
         auth,
         chat,
+        codeframes,
         corrections,
         fielding,
         materialize,
@@ -134,6 +135,9 @@ try:
 
     app.include_router(ui_overrides.router, prefix="/api")
     logger.info("✅ UI-override routes loaded")
+
+    app.include_router(codeframes.router, prefix="/api")
+    logger.info("✅ Codeframe-library routes loaded")
 except Exception as e:
     logger.warning(f"Routes not yet available: {e}")
 

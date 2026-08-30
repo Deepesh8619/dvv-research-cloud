@@ -348,6 +348,39 @@ class ProfileRuleDB(Base):
     created_at = Column(String)
 
 
+class CodeframeLibraryDB(Base):
+    """A codeframe kept for reuse on the next question like it.
+
+    Trackers ask the same questions wave after wave. Regenerating a codeframe
+    each time costs an LLM call AND produces a different set of codes, so wave 2
+    cannot be compared to wave 1 without someone reconciling by hand. Keeping
+    approved codeframes makes the second wave both cheaper and comparable.
+
+    `question_text` is stored VERBATIM, not normalised: matching normalises at
+    read time (see engines/coding/library.py), and keeping the original means a
+    researcher browsing the library sees the question as it was actually asked.
+
+    Only APPROVED codeframes land here — reusing something nobody signed off
+    would spread one person's guess across every future wave.
+    """
+
+    __tablename__ = "codeframe_library"
+
+    id = Column(String, primary_key=True, index=True)
+    question_text = Column(Text)
+    codeframe_json = Column(Text)
+    # Provenance: which study this came from, so a researcher can go and look
+    # at how it actually performed before reusing it.
+    study_id = Column(String, index=True, nullable=True)
+    client_name = Column(String, index=True, nullable=True)
+    # Reuse count doubles as a quality signal — a codeframe the team keeps
+    # choosing is the house standard, and breaks ties in the ranking.
+    times_reused = Column(Integer, default=0)
+    created_by = Column(String, nullable=True)
+    created_at = Column(String)
+    last_used_at = Column(String, nullable=True)
+
+
 class UIOverrideDB(Base):
     """A founder-edited piece of UI text, keyed by a stable label id.
 
