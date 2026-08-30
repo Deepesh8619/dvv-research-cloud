@@ -496,3 +496,11 @@ class ReorderRulesRequest(BaseModel):
     """New order for a profile's rules. Later rules win on conflict."""
 
     rule_ids: list[str]
+
+
+class UIOverrideRequest(BaseModel):
+    """Change one piece of UI copy. `key` must be in the UI_KEYS registry."""
+
+    key: str
+    value: str
+    note: str | None = None

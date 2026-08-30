@@ -2,7 +2,9 @@ import './styles/globals.css'
 
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
+import { LabelProvider } from './labels/LabelContext'
 import Shell from './components/Shell'
+import WordingPage from './pages/WordingPage'
 import RequireAuth from './components/RequireAuth'
 import AdminPage from './pages/AdminPage'
 import CodingPage from './pages/CodingPage'
@@ -27,6 +29,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <LabelProvider>
         <Routes>
           {/* Public routes (no auth required) */}
           <Route path="/login" element={<LoginPage />} />
@@ -46,6 +49,7 @@ export default function App() {
             <Route path="/projects/:id/fielding" element={<FieldingPage />} />
             <Route path="/coding" element={<CodingPage />} />
             <Route path="/admin" element={<AdminPage />} />
+            <Route path="/wording" element={<WordingPage />} />
             {/* Legacy routes */}
             <Route path="/upload" element={<Navigate to="/projects/new" replace />} />
             <Route path="/studies" element={<Navigate to="/projects" replace />} />
@@ -53,6 +57,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Routes>
+        </LabelProvider>
       </AuthProvider>
     </BrowserRouter>
   )

@@ -4,8 +4,15 @@ import { Study, studiesApi } from '../api/client'
 import { ClockIcon, DocChartIcon, FolderIcon, PlusIcon } from '../components/Icons'
 import { DashboardSkeleton } from '../components/Skeleton'
 import StatusPill from '../components/StatusPill'
+import { useLabel } from '../labels/LabelContext'
 
 export default function DashboardPage() {
+  const tDashboard = useLabel('dashboard.title', 'Dashboard')
+  const tSubtitle = useLabel('dashboard.subtitle', 'Overview of your research projects')
+  const tTotal = useLabel('dashboard.total', 'Total projects')
+  const tInProgress = useLabel('dashboard.inProgress', 'In progress')
+  const tAwaiting = useLabel('dashboard.awaiting', 'Awaiting sign-off')
+  const tDelivered = useLabel('dashboard.delivered', 'Delivered')
   const [studies, setStudies] = useState<Study[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -21,7 +28,7 @@ export default function DashboardPage() {
     return (
       <div>
         <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-slate-900">Dashboard</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">{tDashboard}</h1>
           <p className="text-sm text-slate-500 mt-1">Loading overview…</p>
         </div>
         <DashboardSkeleton />
@@ -35,18 +42,18 @@ export default function DashboardPage() {
   const recent = studies.slice(0, 6)
 
   const kpis = [
-    { label: 'Total projects', value: studies.length, icon: FolderIcon, tint: 'text-primary-500 bg-primary-50' },
-    { label: 'In progress', value: active.length, icon: ClockIcon, tint: 'text-amber-600 bg-amber-50' },
-    { label: 'Awaiting sign-off', value: awaiting.length, icon: DocChartIcon, tint: 'text-violet-600 bg-violet-50' },
-    { label: 'Delivered', value: delivered.length, icon: DocChartIcon, tint: 'text-emerald-600 bg-emerald-50' },
+    { label: tTotal, value: studies.length, icon: FolderIcon, tint: 'text-primary-500 bg-primary-50' },
+    { label: tInProgress, value: active.length, icon: ClockIcon, tint: 'text-amber-600 bg-amber-50' },
+    { label: tAwaiting, value: awaiting.length, icon: DocChartIcon, tint: 'text-violet-600 bg-violet-50' },
+    { label: tDelivered, value: delivered.length, icon: DocChartIcon, tint: 'text-emerald-600 bg-emerald-50' },
   ]
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-1">Overview of your research projects</p>
+          <h1 className="text-2xl font-semibold text-slate-900">{tDashboard}</h1>
+          <p className="text-sm text-slate-500 mt-1">{tSubtitle}</p>
         </div>
         <Link
           to="/projects/new"

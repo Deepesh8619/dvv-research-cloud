@@ -348,6 +348,45 @@ class ProfileRuleDB(Base):
     created_at = Column(String)
 
 
+class UIOverrideDB(Base):
+    """A founder-edited piece of UI text, keyed by a stable label id.
+
+    This is Tier A of the founders' console: changing how a feature READS
+    without touching code. Every instrumented string in the frontend is
+    rendered through `useLabel(key, default)`, so an override is a lookup that
+    falls back to the hardcoded default whenever it is missing, inactive, or
+    the fetch failed. That fallback is the whole safety property — the worst a
+    bad override can do is make one label read wrong, and reverting is a
+    single row flip.
+
+    v1 stores STRINGS only. Visibility, ordering and layout each need
+    per-key semantics and their own validation; keeping the blast radius at
+    "a word is wrong" is deliberate for the first version.
+    """
+
+    __tablename__ = "ui_overrides"
+
+    id = Column(String, primary_key=True, index=True)
+    key = Column(String, index=True)  # e.g. "questionnaire.review.title"
+    value = Column(Text)
+    active = Column(Boolean, default=True, index=True)
+    note = Column(Text, nullable=True)  # why it was changed, in their words
+    updated_by = Column(String, nullable=True)
+    created_at = Column(String)
+    updated_at = Column(String, nullable=True)
+
+
+def active_ui_overrides(db) -> dict[str, str]:
+    """All live overrides as {key: value}. Empty dict is always a safe answer."""
+    rows = (
+        db.query(UIOverrideDB)
+        .filter(UIOverrideDB.active.is_(True))
+        .order_by(UIOverrideDB.key)
+        .all()
+    )
+    return {r.key: r.value for r in rows if r.key and r.value is not None}
+
+
 class AuditLogDB(Base):
     """Append-only record of every state change in the correction loop.
 

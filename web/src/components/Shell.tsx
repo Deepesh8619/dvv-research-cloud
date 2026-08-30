@@ -3,12 +3,17 @@ import { Link, NavLink, useNavigate, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { ChatIcon, DocChartIcon, FolderIcon, GridIcon, LogOutIcon, PlusIcon, SearchIcon, ShieldIcon } from './Icons'
 
+// `roles` restricts an entry to those roles; omitted means everyone signed in.
+// Mirrors the SERVER-side gate — hiding a link is presentation, not access
+// control, and the endpoints refuse regardless.
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: GridIcon },
   { to: '/projects', label: 'Projects', icon: FolderIcon },
   { to: '/projects/new', label: 'New Project', icon: PlusIcon },
   { to: '/coding', label: 'Coding', icon: ChatIcon },
   { to: '/admin', label: 'Admin', icon: ShieldIcon },
+  // Founders' wording console — gated below, same roles as the correction loop.
+  { to: '/wording', label: 'Wording', icon: ChatIcon, roles: ['owner', 'founder'] },
 ]
 
 export default function Shell() {
@@ -94,7 +99,9 @@ export default function Shell() {
       {/* Left rail */}
       <aside className="fixed left-0 top-14 bottom-0 w-56 bg-white border-r border-slate-200 z-30">
         <nav className="p-3 space-y-0.5">
-          {NAV.map(({ to, label, icon: Icon }) => (
+          {NAV.filter(
+            ({ roles }) => !roles || (user?.role ? roles.includes(user.role) : false),
+          ).map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}

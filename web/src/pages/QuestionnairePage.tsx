@@ -15,6 +15,7 @@ import { TableSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import { flagInfo } from '../components/questionnaireFlags'
 import CorrectionBox from '../components/CorrectionBox'
+import { useLabel } from '../labels/LabelContext'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
 const WRITE_ROLES = new Set(['owner', 'analyst'])
@@ -510,6 +511,8 @@ function RoutingBlock({
 export default function QuestionnairePage() {
   const { id: studyId } = useParams<{ id: string }>()
   const { user } = useAuth()
+  const tTitle = useLabel('questionnaire.review.title', 'Questionnaire review')
+  const tEmpty = useLabel('questionnaire.review.empty', 'Select a question to review its details.')
   const canWrite = !!user && WRITE_ROLES.has(user.role)
   // The founders' correction lane. Mirrors the server-side gate in
   // routes/corrections.py — the server refuses regardless, this only decides
@@ -645,7 +648,7 @@ export default function QuestionnairePage() {
     return (
       <div>
         <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-slate-900">Questionnaire review</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">{tTitle}</h1>
           <p className="text-sm text-slate-500 mt-1">Loading questionnaire…</p>
         </div>
         <TableSkeleton rows={8} cols={2} />
@@ -662,7 +665,7 @@ export default function QuestionnairePage() {
         <Link to={`/projects/${studyId}`} className="text-sm text-slate-500 hover:text-slate-700">
           ← Back to project
         </Link>
-        <h1 className="text-2xl font-semibold text-slate-900 mt-1">Questionnaire review</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 mt-1">{tTitle}</h1>
         {status && (
           <p className="text-sm text-slate-500 mt-1">
             {status.title ?? status.source_filename} · status: <span className="font-medium">{status.status}</span>
@@ -826,7 +829,7 @@ export default function QuestionnairePage() {
                   onApproved={onQuestionApproved}
                 />
               ) : (
-                <p className="text-sm text-slate-400">Select a question to review its details.</p>
+                <p className="text-sm text-slate-400">{tEmpty}</p>
               )}
             </div>
           </div>

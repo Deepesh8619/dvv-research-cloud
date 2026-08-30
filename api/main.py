@@ -105,6 +105,7 @@ try:
         public,
         questionnaire,
         studies,
+        ui_overrides,
     )
 
     app.include_router(auth.router, prefix="/api")
@@ -130,6 +131,9 @@ try:
 
     app.include_router(corrections.router, prefix="/api")
     logger.info("✅ Correction-loop routes loaded")
+
+    app.include_router(ui_overrides.router, prefix="/api")
+    logger.info("✅ UI-override routes loaded")
 except Exception as e:
     logger.warning(f"Routes not yet available: {e}")
 

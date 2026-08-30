@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import PreviewDiff from './PreviewDiff'
+import { useLabel } from '../labels/LabelContext'
 import {
   correctionsApi,
   type CorrectionResult,
@@ -52,6 +53,11 @@ export default function CorrectionBox({
   profileLabel,
   onApplied,
 }: Props) {
+  const tTrigger = useLabel('correction.trigger', 'Correct this')
+  const tHeading = useLabel('correction.heading', 'What did we read wrong?')
+  const tSubmit = useLabel('correction.submit', 'Send correction')
+  const tScope = useLabel('correction.scopeLabel', 'This applies to')
+  const tSuggest = useLabel('correction.suggestLabel', 'Suggested — click to fill, then edit')
   const [open, setOpen] = useState(false)
   const [instruction, setInstruction] = useState('')
   const [scope, setScope] = useState<string>('profile')
@@ -118,7 +124,7 @@ export default function CorrectionBox({
                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500
                    rounded px-1 py-0.5 transition"
       >
-        Correct this
+        {tTrigger}
       </button>
     )
   }
@@ -127,7 +133,7 @@ export default function CorrectionBox({
     <div className="mt-3 border border-sky-200 bg-sky-50/40 rounded-md p-4 space-y-3">
       <div className="flex items-baseline justify-between gap-3">
         <h4 className="text-sm font-semibold text-slate-800">
-          What did we read wrong?
+          {tHeading}
         </h4>
         <button
           onClick={() => {
@@ -164,7 +170,7 @@ export default function CorrectionBox({
           {suggestions.length > 0 && (
             <div>
               <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-1.5">
-                Suggested — click to fill, then edit
+                {tSuggest}
               </p>
               <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto">
                 {suggestions.map((s, i) => (
@@ -194,7 +200,7 @@ export default function CorrectionBox({
 
           <div className="pt-2 border-t border-sky-200/70">
             <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-1.5">
-              This applies to
+              {tScope}
             </p>
             <div className="flex flex-wrap gap-1.5">
               {SCOPES.map((s) => (
@@ -231,7 +237,7 @@ export default function CorrectionBox({
                        active:scale-[0.98] transition
                        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
           >
-            {busy ? 'Reading…' : 'Send correction'}
+            {busy ? 'Reading…' : tSubmit}
           </button>
         </>
       )}

@@ -770,3 +770,33 @@ export const previewApi = {
       `/studies/${studyId}/corrections/${correctionId}/preview/approve`,
     ),
 }
+
+// --- Founder-editable UI copy (Tier A) ---
+
+export interface UIKey {
+  key: string
+  default: string
+  where: string
+  note: string
+  current: string
+  overridden: boolean
+}
+
+export const uiApi = {
+  /** Live overrides for the whole app. An empty map is a valid, normal answer. */
+  overrides: async () => api.get<{ overrides: Record<string, string> }>('/ui/overrides'),
+
+  /** The editable-string registry, with defaults and current values. */
+  keys: async () => api.get<{ keys: UIKey[]; count: number }>('/ui/keys'),
+
+  set: async (key: string, value: string, note?: string) =>
+    api.post<{ key: string; value: string; default: string; overridden: boolean }>(
+      '/ui/overrides',
+      { key, value, note },
+    ),
+
+  revert: async (key: string) =>
+    api.post<{ key: string; value: string; overridden: boolean }>(
+      `/ui/overrides/${encodeURIComponent(key)}/revert`,
+    ),
+}
