@@ -441,3 +441,25 @@ def test_cooldown_expires(monkeypatch):
     router.note_backend_exhausted("groq", -1)  # already in the past
     assert router.backend_available_in("groq") == 0
     router._backend_cooldown.clear()
+
+
+# --- output budget: reserved tokens are billed, so do not over-reserve -------
+
+
+def test_max_tokens_is_not_over_reserved(monkeypatch):
+    """Providers bill prompt + schema + max_tokens. A 4096 reservation was two
+    thirds of every bill for questions whose largest real output was 493."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    seen = {}
+
+    def capture(request, timeout):
+        seen["body"] = json.loads(request.data)
+        return _openai_body(json.dumps({"answer": "ok"}))
+
+    monkeypatch.setattr(router, "http_json", capture)
+    _openai_generate("gpt-4o", "p", _SCHEMA, timeout=30)
+
+    assert seen["body"]["max_tokens"] == router.MAX_OUTPUT_TOKENS
+    # Comfortably above the largest observed question (493) and far below the
+    # old 4096.
+    assert 600 < router.MAX_OUTPUT_TOKENS < 4096

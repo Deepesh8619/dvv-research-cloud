@@ -36,6 +36,20 @@ load_env()
 # scraper, so every non-local request sends this.
 USER_AGENT = "dvv-research-cloud/1.0"
 
+# Output budget per call. Providers bill (and rate-limit on) prompt + schema +
+# max_tokens, so an over-generous reservation is charged on EVERY request even
+# though it is never used.
+#
+# Measured across the 74 questions of a real client questionnaire: median
+# output 157 tokens, 95th percentile 287, largest 493. A 4096 reservation was
+# 8.3x the worst real case and roughly TWO THIRDS of every bill — the single
+# largest line item, larger than the prompt and schema combined.
+#
+# 1536 keeps ~3x headroom over the largest question actually observed. Raise it
+# with LLM_MAX_OUTPUT_TOKENS if a genuinely huge grid ever truncates; a
+# truncated response fails loudly as a JSON parse error rather than silently.
+MAX_OUTPUT_TOKENS = int(os.environ.get("LLM_MAX_OUTPUT_TOKENS", "1536"))
+
 logger = logging.getLogger(__name__)
 
 
@@ -314,7 +328,7 @@ def _claude_generate(model: str, prompt: str, schema: dict, timeout: int) -> dic
     payload = json.dumps(
         {
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": MAX_OUTPUT_TOKENS,
             "messages": [{"role": "user", "content": prompt}],
             "tools": [
                 {
@@ -359,7 +373,7 @@ def _openai_compatible_generate(
     payload = json.dumps(
         {
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": MAX_OUTPUT_TOKENS,
             "temperature": 0,
             "messages": [{"role": "user", "content": prompt}],
             "tools": [
@@ -495,7 +509,7 @@ def _openai_generate(model: str, prompt: str, schema: dict, timeout: int) -> dic
     payload = json.dumps(
         {
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": MAX_OUTPUT_TOKENS,
             "temperature": 0,
             "messages": [{"role": "user", "content": prompt}],
             "tools": [
