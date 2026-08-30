@@ -91,16 +91,20 @@ _RATE_LIMIT_MAX_WAIT = 30.0
 _backend_cooldown: dict[str, float] = {}
 
 
-def backend_available_in(backend: str) -> float:
-    """Seconds until `backend` is worth trying again. 0 means now."""
-    return max(0.0, _backend_cooldown.get(backend, 0.0) - time.time())
+def backend_available_in(backend: str, model: str = "") -> float:
+    """Seconds until this backend+model is worth trying again. 0 means now.
+
+    Keyed on the MODEL too: providers meter per model, so gpt-oss-120b running
+    out says nothing about gpt-oss-20b's budget.
+    """
+    return max(0.0, _backend_cooldown.get(f"{backend}:{model}", 0.0) - time.time())
 
 
-def note_backend_exhausted(backend: str, seconds: float) -> None:
-    """Skip this backend until its quota window is expected to have reset."""
-    _backend_cooldown[backend] = time.time() + seconds
+def note_backend_exhausted(backend: str, seconds: float, model: str = "") -> None:
+    """Skip this backend+model until its quota window is expected to have reset."""
+    _backend_cooldown[f"{backend}:{model}"] = time.time() + seconds
     logger.warning(
-        f"{backend} quota exhausted — skipping it for {seconds / 60:.0f} min"
+        f"{backend} [{model}] quota exhausted — skipping for {seconds / 60:.0f} min"
     )
 
 
@@ -648,6 +652,26 @@ def open_weights_only() -> bool:
 _OLLAMA_CHAIN_TIMEOUT = 30
 
 
+# Additional Groq models to fall back to when the primary model's DAILY quota
+# is spent. Quotas are metered PER MODEL, so each of these carries its own
+# allowance — three models is three times the free daily capacity.
+#
+# This is a deliberate, NARROW exception to the same-model-everywhere rule that
+# keeps output uniform across providers. The trade is explicit: a different
+# model may extract slightly differently, but a degraded extraction a reviewer
+# can see beats no extraction at all. Which model produced each result is
+# recorded on the ExtractionResult, so the difference is never silent.
+#
+# Empty string disables the behaviour entirely.
+GROQ_FALLBACK_MODELS = [
+    m.strip()
+    for m in os.environ.get(
+        "GROQ_FALLBACK_MODELS", "openai/gpt-oss-20b,qwen/qwen3.6-27b"
+    ).split(",")
+    if m.strip()
+]
+
+
 def _extraction_chain() -> list[dict[str, str]]:
     """Ordered backend fallback for judgment-heavy extraction: local first.
 
@@ -664,7 +688,12 @@ def _extraction_chain() -> list[dict[str, str]]:
         {"backend": "ollama", "model": _EXTRACTION_MODELS["ollama"]}
     ]
     if keys.get("GROQ_API_KEY"):
-        chain.append({"backend": "groq", "model": _EXTRACTION_MODELS["groq"]})
+        primary = _EXTRACTION_MODELS["groq"]
+        chain.append({"backend": "groq", "model": primary})
+        # Same provider, different model = a separate daily allowance.
+        for model in GROQ_FALLBACK_MODELS:
+            if model != primary:
+                chain.append({"backend": "groq", "model": model})
     if keys.get("CEREBRAS_API_KEY"):
         chain.append({"backend": "cerebras", "model": _EXTRACTION_MODELS["cerebras"]})
     if keys.get("HF_TOKEN"):
@@ -752,9 +781,12 @@ def _run_chain(
         # Skip a backend that already told us it is out of quota, rather than
         # re-discovering it (and sleeping through the in-call retries) on every
         # single question of a 75-question document.
-        cooling = backend_available_in(backend)
+        cooling = backend_available_in(backend, candidate["model"])
         if cooling > 0:
-            failures.append(f"{backend}: out of quota for another {cooling / 60:.0f} min")
+            failures.append(
+                f"{backend} [{candidate['model']}]: out of quota for another "
+                f"{cooling / 60:.0f} min"
+            )
             all_config_errors = False
             last_exc = BackendUnavailable(failures[-1])
             continue
@@ -778,7 +810,7 @@ def _run_chain(
             # stops paying for it.
             cause = exc.__cause__
             if isinstance(cause, QuotaExhausted):
-                note_backend_exhausted(backend, cause.retry_after)
+                note_backend_exhausted(backend, cause.retry_after, candidate['model'])
     assert last_exc is not None
     summary = "all backends failed — " + " | ".join(failures)
     if isinstance(last_exc, BackendUnavailable):

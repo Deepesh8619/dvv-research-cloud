@@ -139,7 +139,7 @@ def test_chain_is_ollama_first_then_configured_cloud(monkeypatch):
     monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
-    order = [c["backend"] for c in _extraction_chain()]
+    order = list(dict.fromkeys(c["backend"] for c in _extraction_chain()))
     assert order == ["ollama", "groq", "openai", "claude"]
 
 
@@ -249,7 +249,9 @@ def test_open_weights_only_drops_proprietary_backends(monkeypatch):
         monkeypatch.setenv(k, "x")
     monkeypatch.delenv("LLM_OPEN_WEIGHTS_ONLY", raising=False)  # default is ON
 
-    backends = [step["backend"] for step in _extraction_chain()]
+    # De-duplicated: groq contributes several MODELS (separate daily
+    # quotas), which is not what this test is about.
+    backends = list(dict.fromkeys(s["backend"] for s in _extraction_chain()))
     assert "openai" not in backends
     assert "claude" not in backends
     assert backends == ["ollama", "groq", "cerebras", "huggingface"]
@@ -264,7 +266,7 @@ def test_opting_out_restores_the_proprietary_tail(monkeypatch):
     monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
 
-    backends = [step["backend"] for step in _extraction_chain()]
+    backends = list(dict.fromkeys(s["backend"] for s in _extraction_chain()))
     assert backends == ["ollama", "groq", "openai", "claude"]
 
 
@@ -413,8 +415,10 @@ def test_long_429_becomes_quota_exhausted_not_a_sleep(monkeypatch):
 def test_exhausted_backend_is_skipped_until_its_window_passes(monkeypatch):
     """The point: a 75-question document must not re-probe a dead backend 75x."""
     router._backend_cooldown.clear()
-    router.note_backend_exhausted("groq", 600)
-    assert router.backend_available_in("groq") > 0
+    # Every Groq model must be cooling, or the chain simply uses the next one.
+    for model in [router._EXTRACTION_MODELS["groq"], *router.GROQ_FALLBACK_MODELS]:
+        router.note_backend_exhausted("groq", 600, model)
+    assert router.backend_available_in("groq", router._EXTRACTION_MODELS["groq"]) > 0
 
     monkeypatch.setenv("GROQ_API_KEY", "gk")
     monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
@@ -438,8 +442,8 @@ def test_exhausted_backend_is_skipped_until_its_window_passes(monkeypatch):
 
 def test_cooldown_expires(monkeypatch):
     router._backend_cooldown.clear()
-    router.note_backend_exhausted("groq", -1)  # already in the past
-    assert router.backend_available_in("groq") == 0
+    router.note_backend_exhausted("groq", -1, "m")  # already in the past
+    assert router.backend_available_in("groq", "m") == 0
     router._backend_cooldown.clear()
 
 
@@ -489,3 +493,42 @@ def test_an_unknown_failure_still_says_something_useful():
     msg = router.friendly_backend_error("connection reset by peer")
     assert "could not be reached" in msg
     assert "try uploading it again" in msg.lower()
+
+
+# --- per-model quotas: a second model is real extra free capacity ------------
+
+
+def test_groq_fallback_models_are_added_to_the_chain(monkeypatch):
+    """Quotas are metered per MODEL, so a second model has its own allowance."""
+    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    router._backend_cooldown.clear()
+
+    models = [c["model"] for c in _extraction_chain() if c["backend"] == "groq"]
+    assert models[0] == router._EXTRACTION_MODELS["groq"]   # primary first
+    assert len(models) > 1
+    assert len(models) == len(set(models))                  # no duplicates
+
+
+def test_cooldown_is_per_model_not_per_backend():
+    """gpt-oss-120b running out says nothing about gpt-oss-20b's budget."""
+    router._backend_cooldown.clear()
+    router.note_backend_exhausted("groq", 600, "openai/gpt-oss-120b")
+
+    assert router.backend_available_in("groq", "openai/gpt-oss-120b") > 0
+    assert router.backend_available_in("groq", "openai/gpt-oss-20b") == 0
+    router._backend_cooldown.clear()
+
+
+def test_fallback_models_can_be_disabled(monkeypatch):
+    """Uniformity matters more than capacity for some deployments."""
+    monkeypatch.setenv("GROQ_FALLBACK_MODELS", "")
+    import importlib
+
+    importlib.reload(router)
+    try:
+        assert router.GROQ_FALLBACK_MODELS == []
+    finally:
+        monkeypatch.delenv("GROQ_FALLBACK_MODELS", raising=False)
+        importlib.reload(router)

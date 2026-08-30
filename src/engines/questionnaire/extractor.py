@@ -501,6 +501,14 @@ def extract_question(
         return result
 
     question, routing = _question_from_raw(response.content, chunk)
+    # Which model actually answered. The chain can fall back to a DIFFERENT Groq
+    # model when the primary's daily quota is spent (allowances are per model),
+    # and that must never be silent: a reviewer comparing two questions needs to
+    # know if one of them was read by a different model.
+    # `validation` is None on a question carrying no metadata, so create it.
+    if question.validation is None:
+        question.validation = {}
+    question.validation["extracted_by"] = f"{response.backend}:{response.model}"
     result = ExtractionResult(
         question=question,
         confidence=dict(question.extraction_confidence),
