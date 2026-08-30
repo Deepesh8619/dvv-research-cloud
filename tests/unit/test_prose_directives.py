@@ -120,3 +120,31 @@ def test_unmodelled_directives_are_kept_visible():
 def test_empty_or_unlabelled_text_returns_nothing():
     assert parse_prose_question("", None) is None
     assert parse_prose_question("   \n  ", "S1") is None
+
+
+def test_type_is_read_from_a_scripter_directive_not_just_the_instruction():
+    """The single biggest gap found across all three real client documents.
+
+    An unstated type was why 63/57/56 questions still needed a model — and the
+    declaration was usually right there in the bracketed note, which the parser
+    was not reading.
+    """
+    f = parse_prose_question(
+        "Q9. What did you like about it?\n[PN: OPEN END]", "Q9"
+    )
+    assert f.qtype is QuestionType.OPEN_TEXT
+    assert f.complete is True          # no model needed at all
+
+
+def test_an_inline_bracket_on_the_question_line_gives_the_type():
+    f = parse_prose_question("S1. What is your age? [ENTER NUMBER 1-100]", "S1")
+    assert f.qtype is QuestionType.NUMERIC
+    # And the bracket is not left in the wording a respondent reads.
+    assert "[" not in f.text
+
+
+def test_a_directive_cannot_declare_multi_without_options():
+    """A type that contradicts the question's shape is not trusted."""
+    f = parse_prose_question("Q3. Pick some\n[PN: SELECT ALL THAT APPLY]", "Q3")
+    assert f.qtype is None
+    assert "type" in f.missing
