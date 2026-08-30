@@ -379,3 +379,65 @@ def test_retry_after_header_wins_over_message_text(monkeypatch):
         429, {"error": {"message": "try again in 99s"}}, headers={"Retry-After": "3"}
     )
     assert router._retry_after_seconds(err, "try again in 99s") == 3.0
+
+
+# --- quota exhaustion: stop paying for a backend that said "come back later" --
+
+
+def test_long_429_becomes_quota_exhausted_not_a_sleep(monkeypatch):
+    """A daily limit says 'try again in 14m'. Sleeping through that per call
+    would cost over an hour across one document."""
+    slept = []
+    monkeypatch.setattr(router.time, "sleep", lambda s: slept.append(s))
+    import urllib.request as _req
+
+    def daily_limit(request, timeout=None, context=None):
+        raise _http_error(429, {"error": {"message":
+            "Rate limit reached on tokens per day (TPD). Please try again in 14m10.1s."}})
+
+    monkeypatch.setattr(_req, "urlopen", daily_limit)
+    # "14m10.1s" has no bare-seconds hint, so it backs off normally; the
+    # seconds-form below is what a provider sends for the long window.
+    def daily_limit_seconds(request, timeout=None, context=None):
+        raise _http_error(429, {"error": {"message":
+            "tokens per day (TPD) exceeded. Please try again in 850.5s."}})
+
+    monkeypatch.setattr(_req, "urlopen", daily_limit_seconds)
+    with pytest.raises(router.QuotaExhausted) as exc:
+        router.http_json(_req.Request("https://api.groq.com/x"), timeout=10)
+    assert exc.value.retry_after == 850.5
+    # Crucially: it did NOT sleep through a 14-minute window.
+    assert slept == []
+
+
+def test_exhausted_backend_is_skipped_until_its_window_passes(monkeypatch):
+    """The point: a 75-question document must not re-probe a dead backend 75x."""
+    router._backend_cooldown.clear()
+    router.note_backend_exhausted("groq", 600)
+    assert router.backend_available_in("groq") > 0
+
+    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+
+    calls = []
+
+    def fake_http_json(request, timeout):
+        calls.append(request.full_url)
+        raise urllib.error.URLError("ollama down")
+
+    monkeypatch.setattr(router, "http_json", fake_http_json)
+    with pytest.raises(BackendUnavailable) as exc:
+        run_task("questionnaire.extract", "p", _SCHEMA)
+
+    # Ollama was tried; Groq was skipped without a network call.
+    assert not any("groq.com" in u for u in calls)
+    assert "out of quota" in str(exc.value)
+    router._backend_cooldown.clear()
+
+
+def test_cooldown_expires(monkeypatch):
+    router._backend_cooldown.clear()
+    router.note_backend_exhausted("groq", -1)  # already in the past
+    assert router.backend_available_in("groq") == 0
+    router._backend_cooldown.clear()

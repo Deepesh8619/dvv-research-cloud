@@ -64,6 +64,32 @@ _RATE_LIMIT_RETRIES = 3
 _RATE_LIMIT_MAX_WAIT = 30.0
 
 
+# A provider that says "try again in 14m10s" has exhausted a DAILY budget, not
+# a per-minute one. Without this, every subsequent call re-tries it, burns the
+# bounded in-call retries (~90s of sleeping), and only then falls through — so a
+# 75-question document spends over an hour asleep on a backend that already
+# told us to come back tomorrow.
+#
+# Anything longer than the in-call retry ceiling is treated as "this backend is
+# done for now": it is skipped entirely until the time it named. Process-local
+# and deliberately not persisted — a restart re-probing once is cheap, and a
+# stale cooldown surviving a deploy is worse than one wasted call.
+_backend_cooldown: dict[str, float] = {}
+
+
+def backend_available_in(backend: str) -> float:
+    """Seconds until `backend` is worth trying again. 0 means now."""
+    return max(0.0, _backend_cooldown.get(backend, 0.0) - time.time())
+
+
+def note_backend_exhausted(backend: str, seconds: float) -> None:
+    """Skip this backend until its quota window is expected to have reset."""
+    _backend_cooldown[backend] = time.time() + seconds
+    logger.warning(
+        f"{backend} quota exhausted — skipping it for {seconds / 60:.0f} min"
+    )
+
+
 def _retry_after_seconds(exc: urllib.error.HTTPError, detail: str) -> float | None:
     """How long the provider asked us to wait, if it said."""
     header = exc.headers.get("Retry-After") if exc.headers else None
@@ -102,8 +128,17 @@ def http_json(request: urllib.request.Request, timeout: int) -> dict:
                 detail = json.loads(exc.read()).get("error", {}).get("message", "")
             except Exception:
                 detail = ""
+            if exc.code == 429:
+                hinted = _retry_after_seconds(exc, detail)
+                # A wait longer than the in-call ceiling is a daily/large quota
+                # window. Do not sleep through it — surface it so the caller can
+                # put this backend on cooldown and move on.
+                if hinted is not None and hinted > _RATE_LIMIT_MAX_WAIT:
+                    raise QuotaExhausted(
+                        f"HTTP 429: {detail or exc.reason}", retry_after=hinted
+                    ) from exc
             if exc.code == 429 and attempt < _RATE_LIMIT_RETRIES:
-                wait = _retry_after_seconds(exc, detail)
+                wait = hinted
                 # No hint -> exponential backoff from 2s.
                 wait = min(wait if wait is not None else 2.0 * (2**attempt),
                            _RATE_LIMIT_MAX_WAIT)
@@ -171,6 +206,20 @@ class BackendUnavailable(RuntimeError):
     def __init__(self, *args: object, config_error: bool = False) -> None:
         super().__init__(*args)
         self.config_error = config_error
+
+
+class QuotaExhausted(urllib.error.URLError):
+    """A 429 whose wait hint is too long to sleep through (a daily budget).
+
+    Subclasses URLError so every existing `except urllib.error.URLError` path
+    in the per-backend generators keeps working unchanged; the extra
+    `retry_after` is what lets the chain put the backend on cooldown instead of
+    re-discovering the exhaustion on every subsequent call.
+    """
+
+    def __init__(self, msg: str, retry_after: float) -> None:
+        super().__init__(msg)
+        self.retry_after = retry_after
 
 
 class ModelOutputError(RuntimeError):
@@ -523,7 +572,13 @@ _EXTRACTION_MODELS = {
     # extraction than the llama-3.3-70b it replaces; override per-deployment
     # with GROQ_MODEL after benchmarking against a real client document.
     "groq": os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
-    "huggingface": os.environ.get("HF_MODEL", "Qwen/Qwen3-32B"),
+    # SAME MODEL as Groq and Cerebras, deliberately. gpt-oss-120b is
+    # open-weight, so every provider serves identical weights — which is what
+    # makes the fallback chain safe: exhausting one provider's quota changes
+    # WHO serves the request, never WHAT the model does. Previously this
+    # defaulted to Qwen3-32B, so a Groq outage silently swapped the model
+    # mid-document and extraction behaviour changed with it.
+    "huggingface": os.environ.get("HF_MODEL", "openai/gpt-oss-120b"),
     "cerebras": os.environ.get("CEREBRAS_MODEL", "gpt-oss-120b"),
     "openai": "gpt-4o",
     "claude": "claude-fable-5",
@@ -650,6 +705,16 @@ def _run_chain(
     all_config_errors = True
     failures: list[str] = []
     for candidate in chain:
+        backend = candidate["backend"]
+        # Skip a backend that already told us it is out of quota, rather than
+        # re-discovering it (and sleeping through the in-call retries) on every
+        # single question of a 75-question document.
+        cooling = backend_available_in(backend)
+        if cooling > 0:
+            failures.append(f"{backend}: out of quota for another {cooling / 60:.0f} min")
+            all_config_errors = False
+            last_exc = BackendUnavailable(failures[-1])
+            continue
         # Cap Ollama's attempt so a hung local model can't stall the chain.
         attempt_timeout = (
             min(timeout, _OLLAMA_CHAIN_TIMEOUT)
@@ -662,9 +727,15 @@ def _run_chain(
             )
         except (BackendUnavailable, ModelOutputError) as exc:
             last_exc = exc
-            failures.append(f"{candidate['backend']}: {exc}")
+            failures.append(f"{backend}: {exc}")
             if not getattr(exc, "config_error", False):
                 all_config_errors = False
+            # A quota exhaustion propagates as BackendUnavailable wrapping a
+            # QuotaExhausted; record the cooldown so the rest of the document
+            # stops paying for it.
+            cause = exc.__cause__
+            if isinstance(cause, QuotaExhausted):
+                note_backend_exhausted(backend, cause.retry_after)
     assert last_exc is not None
     summary = "all backends failed — " + " | ".join(failures)
     if isinstance(last_exc, BackendUnavailable):
