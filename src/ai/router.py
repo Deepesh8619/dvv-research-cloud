@@ -120,7 +120,14 @@ def http_json(request: urllib.request.Request, timeout: int) -> dict:
 
 
 DEFAULT_ROUTES: dict[str, dict[str, str]] = {
-    "intake.classify": {"backend": "ollama", "model": "llama3.2:3b"},
+    # Data-file classification on upload. Was hardcoded to Ollama, which does
+    # not exist on Render, so this task could never succeed in production.
+    # Damage was limited by luck: classify_file short-circuits
+    # .sav/.parquet/.xlsx/.xls and wide .csv on extension alone, which covers
+    # most real uploads. Only AMBIGUOUS files (narrow CSVs, .txt) reach the
+    # model, and those came back "unknown" at 0.0 confidence — silently,
+    # because classify_file degrades rather than raising.
+    "intake.classify": {"backend": "auto", "model": ""},
     # Verbatim coding rides the same Ollama → Groq → OpenAI → Claude chain as
     # questionnaire extraction: the previous hardcoded backends meant coding
     # silently failed anywhere the one named backend was missing (Render has
@@ -621,10 +628,17 @@ def _run_chain(
 
     A backend that fails to serve (BackendUnavailable) or returns unusable output
     (ModelOutputError) hands off to the next candidate. If the whole chain fails,
-    the LAST error is raised — but its `config_error` flag is set only when EVERY
-    step was a config fault (all keys missing), so the extractor's flag taxonomy
-    still distinguishes "nothing is configured" (actionable) from "a configured
-    backend was down" (transient).
+    EVERY step's failure is reported, labelled by backend.
+
+    Reporting only the LAST error actively misleads. With a groq -> cerebras
+    chain, a Groq failure followed by an unfunded Cerebras key surfaced as
+    "Cerebras: Payment Required" while the real cause sat one line above it.
+    That sent me down the wrong path twice; the first time this change was made
+    it immediately disproved my own guess about the cause.
+
+    `config_error` is still set only when EVERY step was a config fault, so the
+    extractor's flag taxonomy keeps distinguishing "nothing is configured"
+    (actionable) from "a configured backend was down" (transient).
     """
     if not chain:
         raise BackendUnavailable(
@@ -634,6 +648,7 @@ def _run_chain(
         )
     last_exc: Exception | None = None
     all_config_errors = True
+    failures: list[str] = []
     for candidate in chain:
         # Cap Ollama's attempt so a hung local model can't stall the chain.
         attempt_timeout = (
@@ -647,11 +662,11 @@ def _run_chain(
             )
         except (BackendUnavailable, ModelOutputError) as exc:
             last_exc = exc
+            failures.append(f"{candidate['backend']}: {exc}")
             if not getattr(exc, "config_error", False):
                 all_config_errors = False
     assert last_exc is not None
-    if isinstance(last_exc, BackendUnavailable) and not all_config_errors:
-        # At least one backend was reachable but failed transiently — surface as
-        # a transient (retryable) fault, not an actionable config error.
-        raise BackendUnavailable(str(last_exc), config_error=False)
-    raise last_exc
+    summary = "all backends failed — " + " | ".join(failures)
+    if isinstance(last_exc, BackendUnavailable):
+        raise BackendUnavailable(summary, config_error=all_config_errors)
+    raise ModelOutputError(summary)
