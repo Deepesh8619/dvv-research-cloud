@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { activityApi, uiApi, type UIKey } from '../api/client'
 import { useReloadLabels } from '../labels/LabelContext'
 import { CardListSkeleton } from '../components/Skeleton'
@@ -56,6 +56,12 @@ export default function WordingPage() {
     return [...out.entries()]
   }, [keys, filter])
 
+  // Result count read through a ref, NOT a dependency. Depending on `grouped`
+  // would re-fire this whenever the key list reloads — including right after a
+  // save — logging a search the founder never typed.
+  const foundRef = useRef(0)
+  foundRef.current = grouped.reduce((n, [, rows]) => n + rows.length, 0)
+
   // Record what they SEARCHED FOR, debounced so a keystroke isn't an event.
   // Fire-and-forget: telemetry must never delay or break the screen it watches.
   useEffect(() => {
@@ -66,11 +72,11 @@ export default function WordingPage() {
         action: 'searched',
         surface: 'wording',
         detail: q,
-        found: grouped.reduce((n, [, rows]) => n + rows.length, 0),
+        found: foundRef.current,
       })
     }, 900)
     return () => window.clearTimeout(t)
-  }, [filter, grouped])
+  }, [filter])
 
   const save = async (k: UIKey) => {
     const value = (drafts[k.key] ?? k.current).trim()
