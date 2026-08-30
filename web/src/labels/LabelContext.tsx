@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useLocation } from 'react-router-dom'
 import { uiApi } from '../api/client'
 
 /**
@@ -31,6 +32,16 @@ export function LabelProvider({ children }: { children: ReactNode }) {
   const [overrides, setOverrides] = useState<Record<string, string>>({})
 
   const load = useCallback(() => {
+    // Only fetch when signed in. This provider wraps the WHOLE app, login page
+    // included, and /ui/overrides requires auth — so fetching without a token
+    // returned 401, which the client's response interceptor turns into
+    // `window.location.href = '/login'`. On the login page that is a full
+    // reload, which remounts this provider, which fetches again: an infinite
+    // reload loop that made signing in impossible.
+    if (!localStorage.getItem('authToken')) {
+      setOverrides({})
+      return
+    }
     uiApi
       .overrides()
       .then((r) => setOverrides(r.data.overrides ?? {}))
@@ -40,11 +51,31 @@ export function LabelProvider({ children }: { children: ReactNode }) {
       .catch(() => setOverrides({}))
   }, [])
 
+  // Re-check on every navigation. The provider mounts once, before sign-in,
+  // when there is no token to fetch with — so without this, overrides would
+  // stay empty for the whole session after logging in. `loadedFor` makes the
+  // repeat check free: it only refetches when the token has actually changed
+  // (signed in, signed out, switched account).
+  const location = useLocation()
+  const loadedFor = useRef<string | null>(null)
+
   useEffect(() => {
+    const token = localStorage.getItem('authToken')
+    if (loadedFor.current === token) return
+    loadedFor.current = token
+    load()
+  }, [location.pathname, load])
+
+  // The console calls reload() after saving, when the token has NOT changed —
+  // so it must bypass the loadedFor guard.
+  const reload = useCallback(() => {
+    loadedFor.current = null
+    const token = localStorage.getItem('authToken')
+    loadedFor.current = token
     load()
   }, [load])
 
-  const value = useMemo(() => ({ overrides, reload: load }), [overrides, load])
+  const value = useMemo(() => ({ overrides, reload }), [overrides, reload])
   return <LabelContext.Provider value={value}>{children}</LabelContext.Provider>
 }
 
