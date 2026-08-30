@@ -167,7 +167,9 @@ class SpecTableFields:
         return not self.missing
 
 
-def _parse_terminate(notes: str, options: list[Option]) -> Expression | None:
+def _parse_terminate(
+    notes: str, options: list[Option], qid: str
+) -> Expression | None:
     """Turn 'TERMINATE if 5,6 selected' into a real Expression.
 
     None on anything unreadable: a mis-parsed terminate screens out the wrong
@@ -186,10 +188,16 @@ def _parse_terminate(notes: str, options: list[Option]) -> Expression | None:
     if known and not set(codes).issubset(known):
         return None  # refers to codes this question does not have — do not guess
 
+    # The condition is on THIS question's own answer ("TERMINATE if 5,6
+    # selected" means codes of this question), so it must name this qid. A
+    # placeholder like "__self__" is not a real qid, and the cross-chunk
+    # resolver in extract_survey_definition nulls any expression referencing a
+    # qid that exists nowhere — which silently discarded every terminate this
+    # parser extracted. Caught only by running a full extraction end to end.
     return Expression.from_dict(
         {
             "op": "not_in" if negated else "in",
-            "qid": "__self__",
+            "qid": qid,
             "value": codes,
             "verbatim_text": (notes or "").strip(),
         }
@@ -271,7 +279,7 @@ def parse_spec_table(block: DocumentBlock) -> SpecTableFields | None:
         extras=extras,
     )
     fields.qtype = _infer_type(found.get("type", ""), options, text)
-    fields.terminate_if = _parse_terminate(notes, options)
+    fields.terminate_if = _parse_terminate(notes, options, qid)
     if fields.terminate_if is not None:
         fields.terminate_verbatim = notes.strip()
 

@@ -259,3 +259,17 @@ def test_a_non_table_chunk_is_untouched_by_this_path():
     # The full ten-field schema, i.e. the original path.
     assert run.call_args[0][2] is not None
     assert "qid" in run.call_args[0][2].get("properties", {})
+
+
+def test_a_terminate_references_its_own_question_not_a_placeholder():
+    """A self-referencing terminate must name a REAL qid.
+
+    A placeholder qid exists nowhere in the document, so the cross-chunk
+    resolver in extract_survey_definition nulls the expression and flags
+    UNRESOLVED_ROUTING_QID — which silently discarded every terminate this
+    parser extracted. Only a full end-to-end extraction surfaced it.
+    """
+    f = parse_spec_table(_table(GBK))
+    expr = f.terminate_if.to_dict()
+    assert expr["qid"] == "SS_RESP"
+    assert not expr["qid"].startswith("__")
