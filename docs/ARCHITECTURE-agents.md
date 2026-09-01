@@ -109,11 +109,22 @@ The fix is a branch at step 1: a `questionnaire` classification runs
 extract → review → approve and stores the approved `SurveyDefinition` against
 the study, instead of falling through to the data loader.
 
-### 3.2 The Auditor does not exist
+### 3.2 The Auditor is half built
 
-Nothing compares a data file against the questionnaire it was collected under.
-This is the piece the Excel/SPSS phase is really asking for, and §4 sets out
-exactly what it would check.
+`questionnaire/linker.py` already does two of the hard parts, deterministically
+and with tests: `link_questions_to_datamap` matches each question to the
+variable(s) it produced (including a multi-select exploding into one column per
+option), and `cross_validate_routing` checks `show_if` against real respondent
+rows.
+
+What is missing is narrower than "the Auditor": four more checks over the same
+machinery — declared option codes, `terminate_if`, single-response, and numeric
+ranges — plus a report that combines them. §4 lists them.
+
+Note the dependency: the `terminate_if` check would have reported zero
+violations forever before the September 2026 fix, because the conditions
+evaluated false for every respondent. An audit is only as honest as the
+extraction beneath it.
 
 ### 3.3 The agents (six, and why not more)
 
@@ -214,7 +225,9 @@ Remaining, in order:
 | Pipeline orchestrator + approval gates + playbooks | **built**, integration-tested |
 | Reader agent behaviour (extract → residue → provenance) | **built**, 64% deterministic |
 | Questionnaire branch inside the orchestrator | **not built** — §3.1 |
-| Auditor (data vs questionnaire) | **not built** — §3.2, §4 |
+| Question ↔ datamap variable matching | **built** — `questionnaire/linker.py` |
+| Routing (`show_if`) checked against real data | **built** — `cross_validate_routing` |
+| Screen-out / option-code / range checks vs data | **not built** — §4 |
 | Agents that teach the parsers | **built** — see §5 |
 
 An earlier draft of this document said the orchestrator did not exist. It does

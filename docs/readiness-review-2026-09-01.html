@@ -1,0 +1,396 @@
+<title>DVV Research Cloud Readiness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  :root {
+    --ground:      #F6F8F9;
+    --surface:     #FFFFFF;
+    --surface-alt: #EEF2F3;
+    --line:        #D8E0E2;
+    --line-soft:   #E7ECEE;
+    --ink:         #101820;
+    --ink-mid:     #47555E;
+    --ink-soft:    #6B7A83;
+    --accent:      #0B6E6A;
+    --accent-soft: #E0EFEE;
+    --ok:          #1C6B45;
+    --ok-bg:       #E2F0E9;
+    --warn:        #8A5A00;
+    --warn-bg:     #F7EDD9;
+    --risk:        #983127;
+    --risk-bg:     #F7E4E1;
+    --shadow:      0 1px 2px rgba(16,24,32,.05), 0 8px 24px -12px rgba(16,24,32,.16);
+  }
+  :root:not([data-theme="light"]) { }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0D1318;
+      --surface:     #141C22;
+      --surface-alt: #1B242B;
+      --line:        #2A353D;
+      --line-soft:   #212B32;
+      --ink:         #E6EDF1;
+      --ink-mid:     #A9B7C0;
+      --ink-soft:    #8695A0;
+      --accent:      #45B3AA;
+      --accent-soft: #16302F;
+      --ok:          #5FBF8C;
+      --ok-bg:       #14291F;
+      --warn:        #D9A441;
+      --warn-bg:     #2C2415;
+      --risk:        #E08076;
+      --risk-bg:     #2E1A18;
+      --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #0D1318;
+    --surface:     #141C22;
+    --surface-alt: #1B242B;
+    --line:        #2A353D;
+    --line-soft:   #212B32;
+    --ink:         #E6EDF1;
+    --ink-mid:     #A9B7C0;
+    --ink-soft:    #8695A0;
+    --accent:      #45B3AA;
+    --accent-soft: #16302F;
+    --ok:          #5FBF8C;
+    --ok-bg:       #14291F;
+    --warn:        #D9A441;
+    --warn-bg:     #2C2415;
+    --risk:        #E08076;
+    --risk-bg:     #2E1A18;
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+    font-size: 16.5px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 60rem; margin: 0 auto; padding: 3.5rem 1.5rem 6rem; }
+
+  h1, h2, h3 { font-family: Archivo, ui-sans-serif, system-ui, sans-serif; text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(2rem, 4.4vw, 2.9rem); font-weight: 700; letter-spacing: -.022em; line-height: 1.08; }
+  h2 { font-size: 1.32rem; font-weight: 650; letter-spacing: -.012em; }
+  h3 { font-size: 1.02rem; font-weight: 600; letter-spacing: -.006em; }
+
+  p { margin: 0; max-width: 68ch; }
+  a { color: var(--accent); }
+
+  code, .num, th.num, td.num {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  code {
+    font-size: .855em;
+    background: var(--surface-alt);
+    border: 1px solid var(--line-soft);
+    border-radius: 3px;
+    padding: .08em .34em;
+  }
+
+  .eyebrow {
+    font-family: Archivo, sans-serif;
+    font-size: .69rem;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  header.masthead { display: flex; flex-direction: column; gap: .85rem; padding-bottom: 2rem; border-bottom: 2px solid var(--ink); }
+  .standfirst { font-size: 1.1rem; color: var(--ink-mid); max-width: 62ch; }
+  .meta { display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; font-family: "JetBrains Mono", monospace; font-size: .76rem; color: var(--ink-soft); padding-top: .3rem; }
+
+  section { padding-top: 3rem; display: flex; flex-direction: column; gap: 1.1rem; }
+  .sec-head { display: flex; flex-direction: column; gap: .3rem; }
+
+  /* ---- headline figures ---- */
+  .figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .fig { background: var(--surface); padding: 1.1rem 1.15rem; display: flex; flex-direction: column; gap: .18rem; }
+  .fig .v { font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; font-size: 1.72rem; font-weight: 600; letter-spacing: -.03em; color: var(--ink); line-height: 1.1; }
+  .fig .k { font-size: .78rem; color: var(--ink-soft); }
+
+  /* ---- tables ---- */
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .875rem; }
+  caption { caption-side: top; text-align: left; padding: .8rem 1rem .55rem; font-size: .78rem; color: var(--ink-soft); border-bottom: 1px solid var(--line-soft); }
+  th, td { text-align: left; padding: .6rem 1rem; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  thead th { font-family: Archivo, sans-serif; font-size: .71rem; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-soft); background: var(--surface-alt); white-space: nowrap; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: var(--surface-alt); }
+
+  /* ---- status chips ---- */
+  .chip { display: inline-block; font-family: Archivo, sans-serif; font-size: .68rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; padding: .16rem .46rem; border-radius: 3px; white-space: nowrap; }
+  .chip.ok   { color: var(--ok);   background: var(--ok-bg); }
+  .chip.warn { color: var(--warn); background: var(--warn-bg); }
+  .chip.risk { color: var(--risk); background: var(--risk-bg); }
+
+  /* ---- pipeline (a real sequence, so it is numbered) ---- */
+  .pipe { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .pipe li { background: var(--surface); padding: .85rem 1.1rem; display: grid; grid-template-columns: 2rem 1fr auto; gap: .1rem .9rem; align-items: baseline; }
+  .pipe .n { font-family: "JetBrains Mono", monospace; font-size: .78rem; color: var(--accent); font-weight: 600; }
+  .pipe .what { font-weight: 600; font-size: .95rem; }
+  .pipe .t { font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; font-size: .82rem; color: var(--ink-mid); white-space: nowrap; }
+  .pipe .note { grid-column: 2 / -1; font-size: .84rem; color: var(--ink-soft); max-width: 62ch; }
+
+  /* ---- callout ---- */
+  .callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: .9rem 1.1rem; border-radius: 0 5px 5px 0; display: flex; flex-direction: column; gap: .4rem; }
+  .callout.risk { border-left-color: var(--risk); background: var(--risk-bg); }
+  .callout h3 { font-size: .95rem; }
+  .callout p { font-size: .9rem; color: var(--ink-mid); }
+
+  ul.plain { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .4rem; max-width: 68ch; }
+  ul.plain li { padding-left: .15rem; }
+
+  footer { margin-top: 4rem; padding-top: 1.4rem; border-top: 1px solid var(--line); font-size: .82rem; color: var(--ink-soft); }
+
+  @media (max-width: 34rem) {
+    .pipe li { grid-template-columns: 1.6rem 1fr; }
+    .pipe .t { grid-column: 2; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <span class="eyebrow">Readiness review · 1 September 2026</span>
+  <h1>What the tool does today, how fast, and what it still cannot do</h1>
+  <p class="standfirst">Every number here was measured on this machine against the three real client questionnaires, not estimated. Where something is unbuilt it says so.</p>
+  <div class="meta">
+    <span>699 tests passing</span>
+    <span>691 Python · 8 frontend</span>
+    <span>ruff clean · tsc clean</span>
+    <span>branch main</span>
+  </div>
+</header>
+
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Headline</span>
+    <h2>Where it stands</h2>
+  </div>
+  <div class="figures">
+    <div class="fig"><span class="v">64%</span><span class="k">of questions read with zero AI calls</span></div>
+    <div class="fig"><span class="v">112/s</span><span class="k">questions parsed per second</span></div>
+    <div class="fig"><span class="v">3&ndash;5ms</span><span class="k">API read, warm</span></div>
+    <div class="fig"><span class="v">2,000</span><span class="k">projects tested, no slowdown</span></div>
+  </div>
+  <p>The tool is fast everywhere it is deterministic and slow only where it asks a model. That single fact shapes every recommendation below: the work that makes it faster is the same work that makes it cheaper and more accurate &mdash; teaching the parsers.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Access</span>
+    <h2>Who can see what</h2>
+  </div>
+  <p>Two items were visible to everyone and shouldn&rsquo;t have been. <strong>Admin</strong> is owner-only on the server, but the link showed to every signed-in user, so a viewer who clicked it landed on a page whose first request returns 403 &mdash; which reads as a broken tool rather than a closed door. Both are now gated, labelled in the sidebar, and guarded at the route so typing the URL redirects instead of rendering a dead page.</p>
+  <div class="scroll">
+    <table>
+      <caption>Sidebar entries by role. The server checks independently &mdash; hiding a link is presentation, not access control.</caption>
+      <thead>
+        <tr><th>Entry</th><th>Owner</th><th>Founder</th><th>Analyst</th><th>Viewer</th><th>What it is</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Dashboard</strong></td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>Project overview</td></tr>
+        <tr><td><strong>Projects</strong></td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>All studies</td></tr>
+        <tr><td><strong>Coding</strong></td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>Verbatim coding queue</td></tr>
+        <tr><td><strong>New Project</strong></td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&mdash;</td><td>Create a study, upload a questionnaire</td></tr>
+        <tr><td><strong>Wording</strong></td><td>&#10003;</td><td>&#10003;</td><td>&mdash;</td><td>&mdash;</td><td>Founders&rsquo; console: labels, copy</td></tr>
+        <tr><td><strong>Activity</strong></td><td>&#10003;</td><td>&#10003;</td><td>&mdash;</td><td>&mdash;</td><td>Audit log of corrections and searches</td></tr>
+        <tr><td><strong>Admin</strong></td><td>&#10003;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>User accounts and roles</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Inside a project, the <strong>correction box</strong> and the <strong>Teach this format</strong> panel render only for owners and founders. Everyone else reviews and approves; only founders change how the parser reads a format.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Timing</span>
+    <h2>How long each stage takes</h2>
+  </div>
+  <p>Measured across all three client documents. The stages are a genuine sequence, so they are numbered.</p>
+  <ol class="pipe">
+    <li><span class="n">01</span><span class="what">Identify the file</span><span class="t">195&ndash;544 ms</span>
+      <span class="note">Five scripter conventions decide it by rule. No model call.</span></li>
+    <li><span class="n">02</span><span class="what">Open the .docx</span><span class="t">211&ndash;460 ms</span>
+      <span class="note">Unzipping and walking the document. The single largest deterministic cost.</span></li>
+    <li><span class="n">03</span><span class="what">Split into questions</span><span class="t">~1 ms</span>
+      <span class="note">Label detection over the block list.</span></li>
+    <li><span class="n">04</span><span class="what">Detect the client format</span><span class="t">&lt;1 ms</span>
+      <span class="note">Structural signals only &mdash; no model, despite what the name suggests.</span></li>
+    <li><span class="n">05</span><span class="what">Parse every question</span><span class="t">5&ndash;11 ms</span>
+      <span class="note">All 245 questions across the three documents. This is the part that scales.</span></li>
+    <li><span class="n">06</span><span class="what">Reconciliation pre-pass</span><span class="t">25 s &ndash; 12 min</span>
+      <span class="note">One whole-document model call to catch questions the splitter missed. Highly variable; the dominant cost on a good day and a liability on a bad one.</span></li>
+    <li><span class="n">07</span><span class="what">Ask about what is left</span><span class="t">3&ndash;13 s each</span>
+      <span class="note">~36% of questions. A 263-token prompt asking only for the missing field.</span></li>
+  </ol>
+  <div class="callout">
+    <h3>What that means for one 90-question document</h3>
+    <p>Deterministic work: about <strong>one second</strong>. Model work: roughly 32 questions &times; ~6 s, plus the pre-pass &mdash; so <strong>4 to 15 minutes end to end</strong>, essentially all of it waiting on a model.</p>
+    <p>The same document with its conventions fully taught would finish in <strong>about two seconds</strong>. That is the whole argument for the teaching loop: it is not a nicety, it is the difference between minutes and seconds per document.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Scale</span>
+    <h2>More projects, more users</h2>
+  </div>
+  <p>Seeded a throwaway database with real 73-question definitions and measured the queries the app actually runs.</p>
+  <div class="scroll">
+    <table>
+      <caption>Read performance against project count. Timings measured; sizes are the measured 190&nbsp;KB per definition &times; project count, checked against 376&nbsp;MB at 2,000.</caption>
+      <thead>
+        <tr><th>Projects</th><th class="num">List 50</th><th class="num">Count all</th><th class="num">Open one questionnaire</th><th class="num">Database size</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="num">100</td><td class="num">1.7 ms</td><td class="num">0.3 ms</td><td class="num">1.0 ms</td><td class="num">19 MB</td></tr>
+        <tr><td class="num">500</td><td class="num">1.0 ms</td><td class="num">0.3 ms</td><td class="num">0.9 ms</td><td class="num">94 MB</td></tr>
+        <tr><td class="num">2,000</td><td class="num">3.2 ms</td><td class="num">0.5 ms</td><td class="num">1.0 ms</td><td class="num">376 MB</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><strong>Reads are not the constraint.</strong> Opening a project is a single indexed row read of stored JSON &mdash; extraction never re-runs when a project is selected, which was already the case and is confirmed here at 1.0 ms regardless of how many projects exist.</p>
+  <p><strong>Storage is the constraint.</strong> A 73-question definition is ~190 KB, so 2,000 projects is 376 MB. The free Neon tier is 0.5 GB, which is roughly <strong>2,600 projects</strong> before it has to be paid for or trimmed.</p>
+  <div class="callout risk">
+    <h3>The real scaling risk is concurrent uploads, not project count</h3>
+    <p>Each upload starts its own unbounded background thread. Ten researchers uploading at once means ten threads competing for the same rate-limited model quota, each slowing the others and none of them queued or prioritised. Nothing caps this today.</p>
+    <p>The fix is a small work queue with a concurrency limit &mdash; two or three extractions at a time, the rest waiting visibly. Worth doing before more than a couple of people use it at once.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Accuracy</span>
+    <h2>How well it reads a questionnaire</h2>
+  </div>
+  <div class="scroll">
+    <table>
+      <caption>Questions read with no model call at all, per document.</caption>
+      <thead>
+        <tr><th>Client document</th><th class="num">Questions</th><th class="num">Read deterministically</th><th class="num">Share</th><th>Why the rest escalate</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Bubble &mdash; consumer skincare</td><td class="num">90</td><td class="num">73</td><td class="num">81%</td><td>Grids with no stated scale</td></tr>
+        <tr><td>Vivo &mdash; AU campaign tracking</td><td class="num">80</td><td class="num">60</td><td class="num">75%</td><td>Wrapped wording, borrowed lists</td></tr>
+        <tr><td>Google Ads &mdash; SMB sizing</td><td class="num">75</td><td class="num">24</td><td class="num">32%</td><td><code>Q type: (blank)</code> on 50 questions where single-vs-multi is a genuine judgement call</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The Google Ads document is low on purpose. Its type cell is empty and wordings like <em>&ldquo;Which of the following are you responsible for&rdquo;</em> can honestly be single or multi depending on client intent. Those escalate to a 263-token question rather than being guessed, because a wrong deterministic answer is silent and looks authoritative.</p>
+  <p>Every field the parsers resolve now carries a citation &mdash; the exact fragment that decided it &mdash; shown in the review screen. Approving is checking a quote, not trusting a black box.</p>
+  <div class="callout risk">
+    <h3>Accuracy claims that were wrong until today</h3>
+    <p>Two bugs found this session mean earlier confidence was misplaced, and both are worth knowing before the tool is shown to anyone.</p>
+    <p><strong>Screen-outs fired on nobody.</strong> The codes were written to the wrong field, so 16 of the 17 terminate conditions across the three documents matched no respondent &mdash; in evaluation and in the fielded survey &mdash; while the review screen showed an empty codes box. Fixed and now asserted by running the conditions, not by inspecting their shape.</p>
+    <p><strong>Randomisation was detected and dropped.</strong> 60 questions said randomise and were being fielded in fixed order. Fixed.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Inventory</span>
+    <h2>Built, partly built, not built</h2>
+  </div>
+  <div class="scroll">
+    <table>
+      <caption>Corrected against the code this session. Several pieces were further along than earlier notes claimed.</caption>
+      <thead>
+        <tr><th>Capability</th><th>Status</th><th>Evidence</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>File identification at intake</td><td><span class="chip ok">Built</span></td><td>Rule-first, 7 categories</td></tr>
+        <tr><td>Questionnaire extraction + citations</td><td><span class="chip ok">Built</span></td><td>64% deterministic</td></tr>
+        <tr><td>Correction loop teaching the model</td><td><span class="chip ok">Built</span></td><td>Rules per format profile</td></tr>
+        <tr><td>Correction loop teaching the parsers</td><td><span class="chip ok">Built</span></td><td>1/3 &rarr; 3/3 zero-model on a taught document</td></tr>
+        <tr><td>Pipeline orchestrator + approval gates</td><td><span class="chip ok">Built</span></td><td>3 playbooks, integration-tested</td></tr>
+        <tr><td>SPSS / Excel / datamap readers</td><td><span class="chip ok">Built</span></td><td><code>src/adapters/</code></td></tr>
+        <tr><td>Question &harr; datamap variable matching</td><td><span class="chip ok">Built</span></td><td><code>link_questions_to_datamap</code>, 3 deterministic tiers</td></tr>
+        <tr><td>Routing checked against real data</td><td><span class="chip warn">Partial</span></td><td><code>cross_validate_routing</code> covers <code>show_if</code> only</td></tr>
+        <tr><td>Respondent QC (speeders, straightliners, duplicates, gibberish)</td><td><span class="chip ok">Built</span></td><td><code>src/engines/qc/</code></td></tr>
+        <tr><td>Crosstabs, weighting, significance, wave tracking</td><td><span class="chip ok">Built</span></td><td><code>src/engines/tabs/</code></td></tr>
+        <tr><td>Screen-outs validated against data</td><td><span class="chip risk">Not built</span></td><td>Needed for the discrepancy report</td></tr>
+        <tr><td>Option codes / numeric ranges validated against data</td><td><span class="chip risk">Not built</span></td><td>Needed for the discrepancy report</td></tr>
+        <tr><td>Questionnaire routed through the orchestrator</td><td><span class="chip risk">Not built</span></td><td>A questionnaire upload falls through to the data loader</td></tr>
+        <tr><td>Wave-to-wave questionnaire diff</td><td><span class="chip warn">Partial</span></td><td>Diff engine exists; re-upload does not use it</td></tr>
+        <tr><td>Cost-per-document reporting</td><td><span class="chip risk">Not built</span></td><td>Falling cost is real but only measurable by script</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Next phase</span>
+    <h2>When you upload a data file</h2>
+  </div>
+  <p>More of this exists than expected. The readers, the variable matching and the respondent QC are built and tested; what is missing is narrow and specific.</p>
+  <p>Each extracted field becomes an assertion the data must satisfy. These are comparisons, not judgements &mdash; the audit needs no model at all:</p>
+  <div class="scroll">
+    <table>
+      <caption>Checks a data file would be put through, and whether the machinery exists.</caption>
+      <thead>
+        <tr><th>Questionnaire says</th><th>Data must show</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Question exists</td><td>A matching variable in the datamap</td><td><span class="chip ok">Built</span></td></tr>
+        <tr><td><code>show_if Q3 = 1</code></td><td>Blank wherever Q3 &ne; 1</td><td><span class="chip ok">Built</span></td></tr>
+        <tr><td><code>options 1&ndash;5</code></td><td>No value outside the declared codes</td><td><span class="chip risk">Not built</span></td></tr>
+        <tr><td><code>terminate_if Q1 in [4,5]</code></td><td>No completed respondent satisfies it</td><td><span class="chip risk">Not built</span></td></tr>
+        <tr><td><code>type: single</code></td><td>Exactly one response per respondent</td><td><span class="chip risk">Not built</span></td></tr>
+        <tr><td><code>range 18&ndash;99</code></td><td>No value outside the range</td><td><span class="chip risk">Not built</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Note the dependency: the terminate check would have reported <em>zero violations, always</em>, before today&rsquo;s fix &mdash; the conditions evaluated false for every respondent. An audit is only as honest as the extraction beneath it.</p>
+  <div class="callout">
+    <h3>Send a data file when you have one</h3>
+    <p>The most useful pairing is a questionnaire plus the data it produced plus its datamap, ideally one where you already know a discrepancy exists. The matching and routing checks can be run against it immediately; the four missing checks are a contained build on top.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Waves</span>
+    <h2>Only reading what changed</h2>
+  </div>
+  <p>The pieces exist and are not yet joined up. Questionnaires are already versioned per study, and there is a working diff that compares two extractions question by question &mdash; it is what the correction preview uses to show &ldquo;41 improved, 6 regressed&rdquo; before a rule is approved. Wave-over-wave comparison of the <em>data</em> is fully built in the tabs engine.</p>
+  <p>What is missing is the wiring: re-uploading a revised client document creates a new version and re-reads it from scratch instead of diffing against the approved one. Joining those is a contained piece of work, and it makes the second wave of a tracker cheap in exactly the way the teaching loop makes the second client document cheap.</p>
+  <p>One deliberate caution: the diff labels a field that changed on both sides as <em>changed</em>, never as an improvement. A rule that rewrites forty question texts into different wrong text would look like a triumph under a naive metric; here it reads as forty things to look at.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Recommendation</span>
+    <h2>What to do next, in order</h2>
+  </div>
+  <ul class="plain">
+    <li><strong>Cap concurrent extractions.</strong> A small queue, two or three at a time. This is the one item that bites as soon as more than one person uses the tool.</li>
+    <li><strong>Report rule-vs-model per document.</strong> The cost is genuinely falling as founders teach it, but nobody can see that without running a script. Make it a number on the project page.</li>
+    <li><strong>Build the four data checks.</strong> Codes, screen-outs, single-response, ranges. All deterministic, all on top of machinery that already exists.</li>
+    <li><strong>Wire re-upload to the diff.</strong> Turns a wave revision into a short review instead of a full re-read.</li>
+    <li><strong>Route questionnaires through the orchestrator</strong> so the two halves of the system share one entry point.</li>
+  </ul>
+  <p>One thing that does <em>not</em> need doing: storing extracted questions so they are not re-read on every open. That was already the case, and it is confirmed above at 1.0 ms to open a project at any scale tested.</p>
+</section>
+
+<footer>
+  Measured on this machine, 1 September 2026 &middot; three real client questionnaires &middot; 699 tests passing.
+  Timings for model calls reflect a local 3B model and will differ on hosted backends.
+</footer>
+
+</div>
