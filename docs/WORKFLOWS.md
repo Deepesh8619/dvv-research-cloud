@@ -152,6 +152,15 @@ PYTHONPATH=. .venv/bin/python -m pytest tests -q && .venv/bin/ruff check src/ ap
 
 ## Measuring extraction coverage
 
+The benchmark takes a document. Structural mode needs no labels:
+
 ```bash
-PYTHONPATH=. .venv/bin/python scripts/benchmark_extraction.py
+PYTHONPATH=. .venv/bin/python scripts/benchmark_extraction.py path/to/client.docx
+```
+
+To measure what a founder's correction actually bought, run the same document
+with learned rules off and on:
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/benchmark_extraction.py path/to/client.docx --ab --profile gbk_spec_table
 ```
