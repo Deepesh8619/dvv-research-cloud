@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -44,6 +45,7 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.questionnaire import schema
+from src.engines.questionnaire.learned import LearnedPattern
 from src.engines.questionnaire.profiles import detect_profile
 from src.engines.questionnaire.prose_directives import (
     ProseFields,
@@ -368,14 +370,31 @@ def _extraction_flag_for(exc: Exception) -> str:
 
 
 
-def _spec_table_fields(chunk: QuestionChunk) -> SpecTableFields | None:
+def _spec_table_fields(
+    chunk: QuestionChunk, patterns: list[LearnedPattern] | None = None
+) -> SpecTableFields | None:
     """The structured parse of this chunk's table, if it is one."""
     for block in chunk.source_blocks or []:
         if getattr(block, "block_type", None) == "table":
-            fields = parse_spec_table(block)
+            fields = parse_spec_table(block, patterns)
             if fields is not None:
                 return fields
     return None
+
+
+# A spec-table "Randomize:" cell is free text: "Yes", "Randomize", "Rotate
+# rows", "(blank)", "No". Only an affirmative word turns it on — an unreadable
+# value leaves it off and stays visible in `validation` for a reviewer, because
+# randomising when the document did not ask is a data error, not a nicety.
+_RANDOMIZE_YES = re.compile(r"\byes\b|\brandomi[sz]e\b|\brotate\b|\bscramble\b", re.I)
+_RANDOMIZE_NO = re.compile(r"\bno\b|\bnone\b|\bkeep order\b|\bdo not\b|\(blank\)", re.I)
+
+
+def _randomize_from_cell(stated: str | None) -> bool:
+    text = (stated or "").strip()
+    if not text or _RANDOMIZE_NO.search(text):
+        return False
+    return bool(_RANDOMIZE_YES.search(text))
 
 
 def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Question:
@@ -386,12 +405,15 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
     if fields.extras:
         # An untaught client convention: surfaced for review, never dropped.
         validation["unrecognised_rows"] = fields.extras
+    if fields.randomize:
+        validation["randomize"] = fields.randomize
     return Question(
         qid=fields.qid,
         text=fields.text or "",
         type=fields.qtype or QuestionType.SINGLE,
         options=list(fields.options),
         required=False,
+        randomize_options=_randomize_from_cell(fields.randomize),
         terminate_if=fields.terminate_if,
         source_text=chunk.chunk_text,
         source_location=chunk.provenance,
@@ -495,6 +517,12 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
         type=fields.qtype or QuestionType.SINGLE,
         options=list(fields.options),
         required=False,
+        # The field fielding actually reads. It was being recorded only in
+        # `validation`, which nothing downstream consults — so a question the
+        # parser correctly read as "[PN: RANDOMIZE]" was still fielded in fixed
+        # order. Detecting randomisation and then not applying it is worse than
+        # not detecting it, because the review UI showed it as handled.
+        randomize_options=fields.randomize,
         terminate_if=fields.terminate_if,
         source_text=chunk.chunk_text,
         source_location=chunk.provenance,
@@ -564,6 +592,7 @@ def extract_question(
     chunk: QuestionChunk,
     profile_hint: str | None = None,
     learned_rules: list[str] | None = None,
+    patterns: list[LearnedPattern] | None = None,
 ) -> ExtractionResult:
     """Extract one chunk into a structured Question + confidence + flags.
 
@@ -573,6 +602,10 @@ def extract_question(
 
     `learned_rules` are founder-taught rules for that profile (correction loop).
     None/empty keeps the prompt byte-identical to the pre-loop one.
+
+    `patterns` are the machine-applicable half of the same corrections: the
+    parsers consult them directly, so a taught convention costs nothing on
+    every later document instead of a model call each time.
 
     Never raises on a backend/model failure: a failed chunk comes back flagged
     (CONFIG_ERROR / UNAVAILABLE / MODEL_ERROR by actionability) with a minimal
@@ -589,7 +622,7 @@ def extract_question(
     # remainder is a far smaller call — measured 451,400 -> 14,264 tokens across
     # one real 74-question document. Falls through to full extraction whenever
     # the table is not parseable or the residue call fails.
-    fields = _spec_table_fields(chunk)
+    fields = _spec_table_fields(chunk, patterns)
     if fields is not None:
         structured = _extract_via_spec_table(chunk, fields)
         if structured is not None:
@@ -599,7 +632,7 @@ def extract_question(
     # exact where present: "Select all that apply" is the type, "[TERMINATE]"
     # on an option is a screen-out, "[PN: RANDOMIZE]" is randomisation. Two of
     # the three real client documents are prose, so this is not a niche path.
-    prose = parse_prose_question(chunk.chunk_text, chunk.candidate_qid)
+    prose = parse_prose_question(chunk.chunk_text, chunk.candidate_qid, patterns)
     # `prose.complete` FIRST. The gate used to be options-or-terminate alone,
     # which silently threw away every question the prose parser resolves best:
     # an open end, a numeric entry and a display screen all have no options and
@@ -828,6 +861,7 @@ def extract_survey_definition(
     study_id: str,
     blocks: list[DocumentBlock] | None = None,
     rules_for_profile: Callable[[str], list[str]] | None = None,
+    patterns_for_profile: Callable[[str], list[LearnedPattern]] | None = None,
     on_progress: Callable[[int, int], None] | None = None,
     on_checkpoint: Callable[[int, int, SurveyDefinition], None] | None = None,
     checkpoint_every: int = 5,
@@ -871,6 +905,12 @@ def extract_survey_definition(
     learned_rules: list[str] = []
     if detection is not None and rules_for_profile is not None:
         learned_rules = list(rules_for_profile(detection.profile.slug) or [])
+    # The machine-applicable half of the same corrections. Same provider seam,
+    # same no-op guarantee: no patterns means the parsers behave exactly as
+    # they did before anyone taught them anything.
+    patterns: list[LearnedPattern] = []
+    if detection is not None and patterns_for_profile is not None:
+        patterns = list(patterns_for_profile(detection.profile.slug) or [])
     if blocks is not None:
         # Heartbeat BEFORE and AFTER reconciliation. This is a single
         # whole-document LLM call that runs before any chunk is extracted, and
@@ -888,7 +928,7 @@ def extract_survey_definition(
     results: list[ExtractionResult] = []
     consecutive_backend_failures = 0
     for chunk in chunks:
-        result = extract_question(chunk, profile_hint, learned_rules)
+        result = extract_question(chunk, profile_hint, learned_rules, patterns)
 
         if _is_backend_unavailable_result(result):
             consecutive_backend_failures += 1

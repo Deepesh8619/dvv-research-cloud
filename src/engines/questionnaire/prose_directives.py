@@ -33,6 +33,12 @@ import re
 from dataclasses import dataclass, field
 
 from src.core.survey_definition import Expression, Option, QuestionType
+from src.engines.questionnaire.learned import (
+    LearnedPattern,
+    learned_option_tags,
+    learned_randomize,
+    learned_type,
+)
 
 # A leading question label: "S2.", "Q12a)", "P1:" — the segmenter already found
 # it, but the text still carries it and it is not part of the wording.
@@ -189,6 +195,7 @@ def _infer_type(
     options: list[Option],
     directives: list[str] | None = None,
     borrowed_options: bool = False,
+    patterns: list[LearnedPattern] | None = None,
 ) -> tuple[QuestionType | None, str]:
     """Type from the instruction line OR a scripter directive, plus its evidence.
 
@@ -218,6 +225,13 @@ def _infer_type(
             and not borrowed_options
         )
 
+    # Taught patterns first. A founder binding "[SHOWCARD]" to single is
+    # telling us something the built-in table cannot know — their client's
+    # convention — so it outranks our guesses rather than losing to them.
+    taught = learned_type(patterns, *(directives or []), text)
+    if taught is not None:
+        return taught
+
     for directive in directives or []:
         for pattern, qtype in _TYPE_PATTERNS:
             match = pattern.search(directive)
@@ -238,7 +252,11 @@ def _infer_type(
     return None, ""
 
 
-def parse_prose_question(chunk_text: str, candidate_qid: str | None) -> ProseFields | None:
+def parse_prose_question(
+    chunk_text: str,
+    candidate_qid: str | None,
+    patterns: list[LearnedPattern] | None = None,
+) -> ProseFields | None:
     """Extract what a prose question states. None if it has no usable id."""
     lines = [ln.replace("\t", " ").strip() for ln in (chunk_text or "").splitlines()]
     lines = [ln for ln in lines if ln]
@@ -272,7 +290,11 @@ def parse_prose_question(chunk_text: str, candidate_qid: str | None) -> ProseFie
         if directive:
             body = directive.group("body").strip()
             directives.append(body)
-            if re.search(r"RANDOMI[SZ]E|\bROTATE\b", body, re.I) and not re.search(
+            taught_random = learned_randomize(patterns, body)
+            if taught_random is not None:
+                randomize = True
+                randomize_evidence = f"learned: {taught_random}"
+            elif re.search(r"RANDOMI[SZ]E|\bROTATE\b", body, re.I) and not re.search(
                 r"KEEP ORDER|DO NOT RANDOMI[SZ]E", body, re.I
             ):
                 randomize = True
@@ -311,11 +333,12 @@ def parse_prose_question(chunk_text: str, candidate_qid: str | None) -> ProseFie
         option = Option(code=code, label=label)
         if tags:
             tag_text = tags.group("tags")
-            if _EXCLUSIVE_TAG.search(tag_text):
+            taught_meanings = learned_option_tags(patterns, tag_text)
+            if _EXCLUSIVE_TAG.search(tag_text) or "exclusive" in taught_meanings:
                 option.exclusive = True
-            if _ANCHOR_TAG.search(tag_text):
+            if _ANCHOR_TAG.search(tag_text) or "anchor" in taught_meanings:
                 option.anchored = True
-            if _TERMINATE_TAG.search(tag_text):
+            if _TERMINATE_TAG.search(tag_text) or "terminate" in taught_meanings:
                 terminate_codes.append(code)
                 terminate_lines.append(f"{label} [{tag_text.strip()}]")
         options.append(option)
@@ -351,6 +374,7 @@ def parse_prose_question(chunk_text: str, candidate_qid: str | None) -> ProseFie
             options,
             directives,
             borrowed_options=any(_BORROWED_OPTIONS_RE.search(d) for d in directives),
+            patterns=patterns,
         )
         if type_evidence:
             fields.evidence["type"] = type_evidence

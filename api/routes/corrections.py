@@ -55,6 +55,13 @@ from api.models import (
 from src.ai.router import ModelOutputError, run_task
 from src.engines.questionnaire.diffing import diff_extractions
 from src.engines.questionnaire.extractor import extract_survey_definition
+from src.engines.questionnaire.learned import (
+    FIELD_VALUES,
+    OPTION_TAG_VALUES,
+    PATTERN_KINDS,
+    TYPE_VALUES,
+    validate_pattern,
+)
 from src.intake.questionnaire_loader import (
     load_docx,
     load_pdf,
@@ -485,6 +492,18 @@ async def apply_rule(
     whole point of the loop, so it is an explicit, attributed, reversible act.
     """
     rule_text = (request.rule_text or "").strip()
+    kind = (request.pattern_kind or "").strip()
+    needle = (request.pattern or "").strip()
+    value = (request.pattern_value or "").strip()
+
+    if kind:
+        # Validate before storing. A pattern that cannot be applied is worse
+        # than no pattern: the founder believes the system learned something
+        # and it silently did not.
+        problem = validate_pattern(kind, needle, value)
+        if problem:
+            raise HTTPException(status_code=400, detail=problem)
+        rule_text = rule_text or _rule_text_for_pattern(kind, needle, value)
     if not rule_text:
         raise HTTPException(status_code=400, detail="A rule needs text.")
     scope = request.scope if request.scope in VALID_SCOPES else "profile"
@@ -505,6 +524,9 @@ async def apply_rule(
         id=f"rule_{uuid4().hex[:12]}",
         profile_slug=profile_slug,
         rule_text=rule_text,
+        pattern_kind=kind or None,
+        pattern=needle or None,
+        pattern_value=value or None,
         source_correction_id=request.correction_id,
         scope=scope,
         # Appended last so it wins over existing rules on conflict — matches
@@ -520,7 +542,14 @@ async def apply_rule(
         db, entity="profile_rule", entity_id=rule.id, action="applied",
         actor_id=user.id,
         summary=f"{profile_slug} ({scope}): {rule_text[:120]}",
-        after={"profile_slug": profile_slug, "scope": scope, "rule_text": rule_text},
+        after={
+            "profile_slug": profile_slug,
+            "scope": scope,
+            "rule_text": rule_text,
+            "pattern_kind": kind or None,
+            "pattern": needle or None,
+            "pattern_value": value or None,
+        },
     )
     if request.correction_id:
         correction = (
@@ -534,6 +563,46 @@ async def apply_rule(
     db.refresh(rule)
     logger.info(f"Rule {rule.id} applied to profile {profile_slug} by {user.email}")
     return _rule_response(rule)
+
+
+@router.get("/profiles/pattern-kinds")
+async def pattern_kinds(user: UserDB = Depends(require_correction_access)):
+    """The vocabulary a taught pattern may use.
+
+    Served rather than hardcoded in the UI so the form and the validator can
+    never disagree — a kind added here appears in the form with no frontend
+    change, and a value the server would reject is never offered.
+    """
+    return {
+        "kinds": [
+            {
+                "kind": "type_signal",
+                "label": "Marks the answer type",
+                "help": "A directive that tells you what kind of answer this is, "
+                        "e.g. [SHOWCARD].",
+                "values": sorted(TYPE_VALUES),
+            },
+            {
+                "kind": "field_alias",
+                "label": "Names a spec-table row",
+                "help": "A row label this client uses, e.g. 'Asked of:' for the base.",
+                "values": sorted(FIELD_VALUES),
+            },
+            {
+                "kind": "option_tag",
+                "label": "Tags one answer option",
+                "help": "A tag on a single option, e.g. [SO] meaning screen-out.",
+                "values": sorted(OPTION_TAG_VALUES),
+            },
+            {
+                "kind": "randomize_signal",
+                "label": "Means randomise",
+                "help": "A directive that shuffles the options, e.g. [SCRAMBLE].",
+                "values": [],
+            },
+        ],
+        "all_kinds": sorted(PATTERN_KINDS),
+    }
 
 
 @router.get("/profiles/{profile_slug}/rules")
@@ -590,11 +659,30 @@ async def toggle_rule(
     return _rule_response(rule)
 
 
+# How a taught pattern reads back to a human. The registry has to stay
+# reviewable by whoever asks "why does it do that" six months from now, so a
+# pattern gets a plain-English sentence as well as its structured form.
+_PATTERN_PROSE = {
+    "type_signal": "Treat any question whose text or directives contain {p} as {v}.",
+    "field_alias": "Treat a spec-table row labelled {p} as the {v} field.",
+    "option_tag": "Treat the option tag {p} as {v}.",
+    "randomize_signal": "Treat {p} as an instruction to randomise the options.",
+}
+
+
+def _rule_text_for_pattern(kind: str, needle: str, value: str) -> str:
+    template = _PATTERN_PROSE.get(kind, "Treat {p} as {v}.")
+    return template.format(p=f'"{needle}"', v=value)
+
+
 def _rule_response(rule: ProfileRuleDB) -> ProfileRuleResponse:
     return ProfileRuleResponse(
         id=rule.id,
         profile_slug=rule.profile_slug,
         rule_text=rule.rule_text,
+        pattern_kind=rule.pattern_kind,
+        pattern=rule.pattern,
+        pattern_value=rule.pattern_value,
         scope=rule.scope,
         ordinal=rule.ordinal,
         active=bool(rule.active),
@@ -634,7 +722,11 @@ def _run_preview(preview_id: str, study_id: str, questionnaire_id: str,
     definition is never touched here, so a bad rule cannot damage anything
     before a human has looked at the diff.
     """
-    from api.db import SessionLocal, active_rules_for_profile
+    from api.db import (
+        SessionLocal,
+        active_patterns_for_profile,
+        active_rules_for_profile,
+    )
 
     job_db = SessionLocal()
     try:
@@ -647,12 +739,17 @@ def _run_preview(preview_id: str, study_id: str, questionnaire_id: str,
         # appended last so it wins on conflict — the same ordering the prompt
         # promises the model.
         candidate_rules = [*active_rules_for_profile(job_db, profile_slug), rule_text]
+        # Same for the machine-applicable half, so the diff a founder approves
+        # is the diff they will actually get. Previewing the prose while the
+        # pattern silently sat out would show the wrong answer.
+        candidate_patterns = active_patterns_for_profile(job_db, profile_slug)
 
         survey = extract_survey_definition(
             chunks,
             study_id=study_id,
             blocks=blocks,
             rules_for_profile=lambda _slug: candidate_rules,
+            patterns_for_profile=lambda _slug: candidate_patterns,
         )
         after = json.loads(survey.to_json()).get("questions", [])
 

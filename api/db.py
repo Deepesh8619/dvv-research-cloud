@@ -339,6 +339,16 @@ class ProfileRuleDB(Base):
     id = Column(String, primary_key=True, index=True)
     profile_slug = Column(String, index=True)
     rule_text = Column(Text)
+    # The machine-applicable half of a rule. When `pattern_kind` is set, the
+    # deterministic parsers apply this directly and the convention costs
+    # nothing on every later document; `rule_text` still goes into the prompt
+    # for the chunks that escalate anyway. A rule with no pattern_kind is prose
+    # for the model only, exactly as before — which is why this is three
+    # nullable columns on the existing table rather than a second table with
+    # its own queue, approval flow and UI.
+    pattern_kind = Column(String, nullable=True)
+    pattern = Column(String, nullable=True)
+    pattern_value = Column(String, nullable=True)
     source_correction_id = Column(String, nullable=True)
     scope = Column(String, default="profile")
     ordinal = Column(Integer, default=0)
@@ -536,6 +546,39 @@ def active_rules_for_profile(db, profile_slug: str) -> list[str]:
     return [r.rule_text for r in rows if r.rule_text]
 
 
+def active_patterns_for_profile(db, profile_slug: str):
+    """Ordered active LearnedPatterns for one profile — parser-ready.
+
+    Mirrors `active_rules_for_profile`, and carries the same guarantee: `[]`
+    for a profile nobody has taught means the parsers behave byte-identically
+    to before the correction loop existed.
+
+    Rows whose stored pattern no longer validates are skipped rather than
+    raising — one bad row must not take down extraction for a whole document.
+    """
+    from src.engines.questionnaire.learned import LearnedPattern, validate_pattern
+
+    rows = (
+        db.query(ProfileRuleDB)
+        .filter(ProfileRuleDB.profile_slug == profile_slug)
+        .filter(ProfileRuleDB.active.is_(True))
+        .filter(ProfileRuleDB.pattern_kind.isnot(None))
+        .order_by(ProfileRuleDB.ordinal)
+        .all()
+    )
+    patterns = []
+    for row in rows:
+        kind, needle, value = row.pattern_kind, row.pattern or "", row.pattern_value or ""
+        if validate_pattern(kind, needle, value) is not None:
+            logger.warning(
+                f"skipping unusable learned pattern {row.id} "
+                f"({kind}: {needle!r} -> {value!r})"
+            )
+            continue
+        patterns.append(LearnedPattern(kind=kind, pattern=needle, value=value))
+    return patterns
+
+
 def init_db():
     """Initialize database tables."""
     Base.metadata.create_all(bind=engine)
@@ -592,6 +635,13 @@ def _ensure_new_columns():
             "coding_json": "TEXT",
             "source_filename": "VARCHAR",
             "source_file_b64": "TEXT",
+        },
+        "profile_rules": {
+            # The machine-applicable half of a learned rule, added after
+            # `profile_rules` first shipped.
+            "pattern_kind": "VARCHAR",
+            "pattern": "VARCHAR",
+            "pattern_value": "VARCHAR",
         },
         "corrections": {
             # Added after `corrections` first shipped (same-day follow-up):

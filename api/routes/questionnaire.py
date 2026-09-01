@@ -276,6 +276,7 @@ def _run_extraction(
     """
     from api.db import (
         SessionLocal,
+        active_patterns_for_profile,
         active_rules_for_profile,
         set_questionnaire_definition,
         touch_questionnaire,
@@ -339,6 +340,11 @@ def _run_extraction(
             study_id=study_id,
             blocks=blocks,
             rules_for_profile=lambda slug: active_rules_for_profile(job_db, slug),
+            # The machine-applicable half of the same corrections. This is the
+            # line that makes a correction CHEAPER as well as more accurate:
+            # a convention taught on an earlier document is now read by the
+            # deterministic parsers here, with no model call at all.
+            patterns_for_profile=lambda slug: active_patterns_for_profile(job_db, slug),
             on_progress=_heartbeat,
             on_checkpoint=_checkpoint,
         )

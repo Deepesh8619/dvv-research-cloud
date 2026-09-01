@@ -16,6 +16,7 @@ import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../c
 import { flagInfo } from '../components/questionnaireFlags'
 import CorrectionBox from '../components/CorrectionBox'
 import ExtractionProvenance from '../components/ExtractionProvenance'
+import TeachFormat from '../components/TeachFormat'
 import { useLabel } from '../labels/LabelContext'
 import { typeHint, typeLabel } from '../labels/questionTypes'
 import { canCorrect as hasCorrectRole, canWrite as hasWriteRole } from '../auth/roles'
@@ -329,6 +330,18 @@ function QuestionDetail({
             questionId={q.qid}
             profileSlug={profile?.slug}
             profileLabel={profile?.label}
+          />
+        )}
+      </div>
+
+      {/* Teaching is only meaningful once we know WHICH format we would be
+          teaching — an unrecognised document has no profile to attach it to. */}
+      <div>
+        {canCorrect && profile?.slug && (
+          <TeachFormat
+            profileSlug={profile.slug}
+            profileLabel={profile.label}
+            question={q}
           />
         )}
       </div>

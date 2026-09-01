@@ -174,34 +174,33 @@ number reached by guessing.
 
 ---
 
-## 5. The gap that matters most: agents that learn
+## 5. Agents that learn — built
 
-The correction loop stores founder corrections as `learned_rules` and injects
-them into the **LLM prompt** (`schema.build_learned_rules_block`). That teaches
-the model. It does not teach the parsers.
-
-So today, when a founder corrects the same convention on a second client
-document, the deterministic path still misses it and still pays for a model
-call. The system gets more accurate; it does not get cheaper.
-
-The fix is to let a correction write a **pattern**, not just prose:
+A correction now writes a **pattern** the deterministic parsers read, not only
+prose for the model:
 
 ```
-LearnedPattern(profile, kind="type_signal", pattern="[SHOWCARD]", value="single")
+LearnedPattern(kind="type_signal", pattern="[SHOWCARD]", value="single")
 ```
 
-The parsers already take `learned_rules` through a `rules_for_profile` callable,
-so the seam exists — the engines never import `api.db`. Widening that callable
-to also carry patterns is a contained change, and it is what turns "the founders
-train it" from a slogan into a measurable falling cost per document.
+`src/engines/questionnaire/learned.py` holds the four kinds and their
+validation; both parsers consult taught patterns before their built-in tables,
+because a founder describing their client's convention knows something the
+built-ins cannot. Patterns travel the same `*_for_profile` provider seam as
+`learned_rules`, so the engines still never import `api.db`.
 
-**This is the highest-value next build.** Recommended order:
+Measured on a document using a convention nothing built-in knows: **1 of 3
+questions parsed with zero model calls before teaching, 3 of 3 after**, verified
+through the real upload path. Details and the safety properties are in
+`CHANGELOG-correction-loop.md`.
 
-1. `LearnedPattern` storage + the correction UI that offers "always treat X as Y"
-2. Parsers consult learned patterns before their built-in table
-3. Report rule-vs-model ratio per document, so the learning is visible
-4. Orchestrator + `PLAN` table (§3.1), with Librarian and Auditor first
-5. Cartographer, Coder, Tabulator as the data phase lands
+Remaining, in order:
+
+1. Report the rule-vs-model ratio per document, so falling cost is visible
+   rather than asserted
+2. The questionnaire branch inside the orchestrator (§3.1)
+3. The Auditor (§3.2, §4) — the piece the Excel/SPSS phase needs
+4. Cartographer, Coder, Tabulator as the data phase lands
 
 ---
 
@@ -216,7 +215,7 @@ train it" from a slogan into a measurable falling cost per document.
 | Reader agent behaviour (extract → residue → provenance) | **built**, 64% deterministic |
 | Questionnaire branch inside the orchestrator | **not built** — §3.1 |
 | Auditor (data vs questionnaire) | **not built** — §3.2, §4 |
-| Agents that teach the parsers | **not built** — §5, highest value |
+| Agents that teach the parsers | **built** — see §5 |
 
 An earlier draft of this document said the orchestrator did not exist. It does
 — `src/orchestration/{orchestrator,playbooks,approvals,manifest}.py` — and the

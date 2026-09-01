@@ -685,10 +685,21 @@ export interface CorrectionResult {
   created_at: string | null
 }
 
+export interface PatternKind {
+  kind: string
+  label: string
+  help: string
+  values: string[]
+}
+
 export interface ProfileRule {
   id: string
   profile_slug: string
   rule_text: string
+  /** Set when this rule is machine-applicable — the parsers read it directly. */
+  pattern_kind?: string | null
+  pattern?: string | null
+  pattern_value?: string | null
   scope: string
   ordinal: number
   active: boolean
@@ -718,8 +729,21 @@ export const correctionsApi = {
 
   applyRule: async (
     profileSlug: string,
-    body: { rule_text: string; scope?: string; correction_id?: string },
+    body: {
+      rule_text?: string
+      scope?: string
+      correction_id?: string
+      // The machine-applicable half. Supplying these lets the deterministic
+      // parsers apply the convention, so it costs nothing on later documents;
+      // the server writes the prose half from them.
+      pattern_kind?: string
+      pattern?: string
+      pattern_value?: string
+    },
   ) => api.post<ProfileRule>(`/profiles/${profileSlug}/rules`, body),
+
+  patternKinds: async () =>
+    api.get<{ kinds: PatternKind[]; all_kinds: string[] }>('/profiles/pattern-kinds'),
 
   toggleRule: async (profileSlug: string, ruleId: string) =>
     api.post<ProfileRule>(`/profiles/${profileSlug}/rules/${ruleId}/toggle`),

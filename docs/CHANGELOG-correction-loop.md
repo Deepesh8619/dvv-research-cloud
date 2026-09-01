@@ -410,3 +410,69 @@ Together these are why the full 75-question extraction had never completed end
 to end. The worker also logs its stages now (thread started, blocks → chunks,
 extracting N) — it was previously silent from upload until the first extracted
 question, which is what made this undiagnosable from the logs alone.
+
+## Corrections that teach the parsers, not only the model
+
+Until now a correction produced prose that was appended to the extraction
+prompt. That made the system more accurate and never cheaper: the same
+convention on the next client document still cost a model call, every time,
+forever. This closes that.
+
+A correction can now carry a **pattern** the deterministic parsers read
+directly. Four kinds, one per decision the parsers actually make:
+
+| kind | example | means |
+|---|---|---|
+| `type_signal` | `[SHOWCARD]` | the answer type |
+| `field_alias` | `Screener population:` | which spec-table field a row fills |
+| `option_tag` | `[SO]` | terminate / exclusive / anchor on one option |
+| `randomize_signal` | `[SCRAMBLE]` | randomise the options |
+
+Measured on a document using a client convention nothing in the built-in
+tables knows: **1 of 3 questions parsed with zero model calls before teaching,
+3 of 3 after** — verified end to end through the real upload path, not just in
+a unit test.
+
+**Patterns are literal fragments, never regexes.** A founder types what they
+see. Accepting a regex would hand a text box the ability to hang extraction on
+a catastrophic backtrack, and would fail confusingly on the brackets that
+appear in nearly every real directive. Square brackets are stripped when
+matching, because the parsers hand the matcher the text *inside* the brackets
+for an option tag while a founder writes `[SO]` — "write what you see" has to
+work for every kind, not most of them.
+
+Validation runs at the boundary, before storing: an empty needle is a substring
+of every string, so it would silently retype every question in the document.
+A pattern that cannot be applied is worse than no pattern, because the founder
+believes the system learned something and it silently did not.
+
+Storage is three nullable columns on the existing `profile_rules` table rather
+than a second table — one queue, one approval flow, one registry. A rule with
+no `pattern_kind` is prose for the model exactly as before, and the server
+writes the prose half from the pattern so a founder never says the same thing
+twice. `active_patterns_for_profile` skips a row that no longer validates
+rather than raising: one bad row must not take down a whole extraction.
+
+The no-op guarantee holds at every layer — no patterns means the parsers behave
+byte-identically to before the loop existed, asserted in the test suite.
+
+**Teaching is reachable from the review screen.** The picker offers the
+fragments *this question* contains that the parsers did not understand,
+excluding anything already cited in `extraction_evidence`; picking from that
+list instead of retyping is the difference between teaching the real string and
+teaching a typo that silently never matches.
+
+### A randomisation bug this uncovered
+
+Wiring the taught `randomize_signal` through showed that randomisation was
+being detected and then dropped: both parsers recorded it in
+`Question.validation` but never set `Question.randomize_options`, the field
+fielding actually reads. **60 questions across the three client documents said
+randomise and were being fielded in fixed order** — order bias in collected
+data, while the review UI showed the directive as handled. Detecting something
+and then not applying it is worse than not detecting it.
+
+Spec-table `Randomize:` cells are free text, so they are read conservatively:
+only an affirmative word turns it on, and an unreadable value stays off and
+stays visible in `validation`. Randomising when the document did not ask is a
+data error, not a nicety.

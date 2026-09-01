@@ -29,6 +29,11 @@ import re
 from dataclasses import dataclass, field
 
 from src.core.survey_definition import Expression, Option, QuestionType
+from src.engines.questionnaire.learned import (
+    LearnedPattern,
+    learned_field,
+    learned_type,
+)
 from src.engines.questionnaire.prose_directives import is_single_select_wording
 from src.intake.questionnaire_loader import DocumentBlock
 
@@ -77,8 +82,17 @@ def _norm_label(value: str) -> str:
     return " ".join(low.split())
 
 
-def _field_for(label: str) -> str | None:
-    """Which field a row label populates, or None if we do not know it."""
+def _field_for(label: str, patterns: list[LearnedPattern] | None = None) -> str | None:
+    """Which field a row label populates, or None if we do not know it.
+
+    Taught aliases are checked first. A client writing "Asked of:" instead of
+    "Among who:" is the single commonest reason a spec table lands a real value
+    in `extras` and then asks a model for something the document stated plainly
+    — and it is exactly the correction a founder can make in one line.
+    """
+    taught = learned_field(patterns, label)
+    if taught is not None:
+        return taught
     norm = _norm_label(label)
     if not norm:
         return None
@@ -218,13 +232,19 @@ _OPEN_ENTRY_RE = re.compile(
 
 
 def _infer_type(
-    stated: str, options: list[Option], text: str | None
+    stated: str,
+    options: list[Option],
+    text: str | None,
+    patterns: list[LearnedPattern] | None = None,
 ) -> tuple[QuestionType | None, str]:
     """Resolve the question type and the fragment that decided it.
 
     Scripters frequently leave the cell blank, so the answer often comes from
     the wording instead — the reviewer needs to be told which.
     """
+    taught = learned_type(patterns, stated or "", text or "")
+    if taught is not None:
+        return taught
     low = (stated or "").strip().lower()
     for word, qtype in _TYPE_WORDS:
         if word in low:
@@ -257,7 +277,9 @@ def _infer_type(
     return None, ""
 
 
-def parse_spec_table(block: DocumentBlock) -> SpecTableFields | None:
+def parse_spec_table(
+    block: DocumentBlock, patterns: list[LearnedPattern] | None = None
+) -> SpecTableFields | None:
     """Extract everything a labelled spec table states. None if it is not one."""
     rows = block.rows or []
     if not rows:
@@ -280,7 +302,7 @@ def parse_spec_table(block: DocumentBlock) -> SpecTableFields | None:
                 options.append(Option(code=int(cells[0]), label=value))
             continue
 
-        name = _field_for(cells[0])
+        name = _field_for(cells[0], patterns)
         if name:
             value = _value_of(row)
             found.setdefault(name, value)
@@ -316,7 +338,9 @@ def parse_spec_table(block: DocumentBlock) -> SpecTableFields | None:
         notes=notes or None,
         extras=extras,
     )
-    fields.qtype, type_evidence = _infer_type(found.get("type", ""), options, text)
+    fields.qtype, type_evidence = _infer_type(
+        found.get("type", ""), options, text, patterns
+    )
     if type_evidence:
         fields.evidence["type"] = type_evidence
     fields.terminate_if = _parse_terminate(notes, options, qid)

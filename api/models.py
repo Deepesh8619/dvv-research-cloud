@@ -467,9 +467,17 @@ class SuggestionResponse(BaseModel):
 class ApplyRuleRequest(BaseModel):
     """Approve a drafted rule onto a format profile. `scope` 'global' needs owner."""
 
-    rule_text: str
+    rule_text: str | None = None
     scope: str | None = None
     correction_id: str | None = None
+    # The machine-applicable half. When these are supplied the deterministic
+    # parsers apply the convention directly, so it costs nothing on every later
+    # document. `rule_text` becomes optional because the server can write the
+    # prose half from the pattern — a founder should not have to say the same
+    # thing twice.
+    pattern_kind: str | None = None
+    pattern: str | None = None
+    pattern_value: str | None = None
 
 
 class ProfileRuleResponse(BaseModel):
@@ -479,6 +487,9 @@ class ProfileRuleResponse(BaseModel):
     profile_slug: str
     rule_text: str
     scope: str
+    pattern_kind: str | None = None
+    pattern: str | None = None
+    pattern_value: str | None = None
     ordinal: int
     active: bool
     approved_by: str | None = None
