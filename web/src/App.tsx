@@ -7,6 +7,8 @@ import Shell from './components/Shell'
 import WordingPage from './pages/WordingPage'
 import ActivityPage from './pages/ActivityPage'
 import RequireAuth from './components/RequireAuth'
+import RequireRole from './components/RequireRole'
+import { FOUNDER_ROLES, WRITE_ROLES } from './auth/roles'
 import AdminPage from './pages/AdminPage'
 import CodingPage from './pages/CodingPage'
 import DashboardPage from './pages/DashboardPage'
@@ -43,15 +45,43 @@ export default function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/projects" element={<ProjectsPage />} />
-            <Route path="/projects/new" element={<NewProjectPage />} />
+            <Route
+              path="/projects/new"
+              element={
+                <RequireRole roles={WRITE_ROLES}>
+                  <NewProjectPage />
+                </RequireRole>
+              }
+            />
             <Route path="/projects/:id" element={<ProjectPage />} />
             <Route path="/projects/:id/questionnaire" element={<QuestionnairePage />} />
             <Route path="/projects/:id/builder" element={<SurveyBuilderPage />} />
             <Route path="/projects/:id/fielding" element={<FieldingPage />} />
             <Route path="/coding" element={<CodingPage />} />
-            <Route path="/admin" element={<AdminPage />} />
-            <Route path="/wording" element={<WordingPage />} />
-            <Route path="/activity" element={<ActivityPage />} />
+            <Route
+              path="/admin"
+              element={
+                <RequireRole roles={['owner']}>
+                  <AdminPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/wording"
+              element={
+                <RequireRole roles={FOUNDER_ROLES}>
+                  <WordingPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/activity"
+              element={
+                <RequireRole roles={FOUNDER_ROLES}>
+                  <ActivityPage />
+                </RequireRole>
+              }
+            />
             {/* Legacy routes */}
             <Route path="/upload" element={<Navigate to="/projects/new" replace />} />
             <Route path="/studies" element={<Navigate to="/projects" replace />} />

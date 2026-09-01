@@ -1,20 +1,56 @@
 import { useState } from 'react'
 import { Link, NavLink, useNavigate, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { FOUNDER_ROLES, WRITE_ROLES } from '../auth/roles'
 import { ChatIcon, DocChartIcon, FolderIcon, GridIcon, LogOutIcon, PlusIcon, SearchIcon, ShieldIcon } from './Icons'
 
 // `roles` restricts an entry to those roles; omitted means everyone signed in.
 // Mirrors the SERVER-side gate — hiding a link is presentation, not access
 // control, and the endpoints refuse regardless.
+// `roles` restricts an entry; omitted means everyone signed in.
+//
+// `restrictedTo` is the caption shown beside a restricted entry, so someone who
+// CAN see it knows the rest of the team cannot — the question "who else sees
+// this?" was previously unanswerable from the UI.
+//
+// Admin and New Project were missing their `roles` entirely: every signed-in
+// user saw them and every viewer who clicked landed on a page whose first API
+// call returns 403. Hiding a link is presentation, not access control — the
+// endpoints refuse regardless — but advertising a door that is locked is its
+// own bug.
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: GridIcon },
   { to: '/projects', label: 'Projects', icon: FolderIcon },
-  { to: '/projects/new', label: 'New Project', icon: PlusIcon },
+  {
+    to: '/projects/new',
+    label: 'New Project',
+    icon: PlusIcon,
+    roles: WRITE_ROLES,
+    restrictedTo: 'Owner, analyst, founder',
+  },
   { to: '/coding', label: 'Coding', icon: ChatIcon },
-  { to: '/admin', label: 'Admin', icon: ShieldIcon },
-  // Founders' wording console — gated below, same roles as the correction loop.
-  { to: '/wording', label: 'Wording', icon: ChatIcon, roles: ['owner', 'founder'] },
-  { to: '/activity', label: 'Activity', icon: DocChartIcon, roles: ['owner', 'founder'] },
+  {
+    to: '/admin',
+    label: 'Admin',
+    icon: ShieldIcon,
+    roles: ['owner'],
+    restrictedTo: 'Owner only',
+  },
+  // Founders' wording console — same roles as the correction loop.
+  {
+    to: '/wording',
+    label: 'Wording',
+    icon: ChatIcon,
+    roles: FOUNDER_ROLES,
+    restrictedTo: 'Owner, founder',
+  },
+  {
+    to: '/activity',
+    label: 'Activity',
+    icon: DocChartIcon,
+    roles: FOUNDER_ROLES,
+    restrictedTo: 'Owner, founder',
+  },
 ]
 
 export default function Shell() {
@@ -101,8 +137,9 @@ export default function Shell() {
       <aside className="fixed left-0 top-14 bottom-0 w-56 bg-white border-r border-slate-200 z-30">
         <nav className="p-3 space-y-0.5">
           {NAV.filter(
-            ({ roles }) => !roles || (user?.role ? roles.includes(user.role) : false),
-          ).map(({ to, label, icon: Icon }) => (
+            ({ roles }) =>
+              !roles || (user?.role ? (roles as readonly string[]).includes(user.role) : false),
+          ).map(({ to, label, icon: Icon, restrictedTo }) => (
             <NavLink
               key={to}
               to={to}
@@ -115,8 +152,15 @@ export default function Shell() {
                 }`
               }
             >
-              <Icon className="w-[18px] h-[18px]" />
-              {label}
+              <Icon className="w-[18px] h-[18px] shrink-0" />
+              <span className="flex-1 min-w-0">
+                {label}
+                {restrictedTo && (
+                  <span className="block text-[10px] font-normal text-slate-400 leading-tight">
+                    {restrictedTo}
+                  </span>
+                )}
+              </span>
             </NavLink>
           ))}
         </nav>

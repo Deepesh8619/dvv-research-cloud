@@ -13,17 +13,20 @@
  */
 
 /** Roles that may create and edit studies, questionnaires, and fielding. */
-const WRITE_ROLES = new Set(['owner', 'analyst', 'founder'])
+export const WRITE_ROLES = ['owner', 'analyst', 'founder'] as const
 
 /** Founders' surfaces: the correction loop, wording, activity. */
-const FOUNDER_ROLES = new Set(['owner', 'founder'])
+export const FOUNDER_ROLES = ['owner', 'founder'] as const
+
+const WRITE_ROLE_SET = new Set<string>(WRITE_ROLES)
+const FOUNDER_ROLE_SET = new Set<string>(FOUNDER_ROLES)
 
 export function canWrite(role: string | undefined | null): boolean {
-  return !!role && WRITE_ROLES.has(role)
+  return !!role && WRITE_ROLE_SET.has(role)
 }
 
 export function canCorrect(role: string | undefined | null): boolean {
-  return !!role && FOUNDER_ROLES.has(role)
+  return !!role && FOUNDER_ROLE_SET.has(role)
 }
 
 export function isOwner(role: string | undefined | null): boolean {
