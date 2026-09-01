@@ -203,7 +203,7 @@ def check_against_questionnaire(
         report.skipped.append("data file has no rows")
         return report
 
-    counts = {"codes": 0, "single": 0, "range": 0, "terminate": 0}
+    counts = {"codes": 0, "single": 0, "range": 0, "terminate": 0, "mask": 0}
 
     for qid, variables in sorted(link_map.items()):
         question = by_qid.get(qid)
@@ -340,6 +340,53 @@ def check_against_questionnaire(
                         kind="out_of_range",
                         severity="error",
                         detail=f"{qid} allows {bounds} but some answers fall outside it.",
+                        n_rows=len(hits),
+                        variables=variables,
+                        example_rows=hits[:MAX_EXAMPLES],
+                    )
+                )
+
+    # --- Masking -----------------------------------------------------------
+    # A question whose options are masked from an earlier answer may only hold
+    # codes that respondent actually chose there. A mis-scripted mask shows the
+    # wrong list to real people and is invisible in the output — no other check
+    # in the pipeline can catch it.
+    for qid, variables in sorted(link_map.items()):
+        question = by_qid.get(qid)
+        if question is None:
+            continue
+        masks = ((question.validation or {}).get("techniques") or {}).get("masks") or []
+        for mask in masks:
+            if mask.get("mode") != "selected":
+                continue  # full_list / not_selected need the source's option list, not answers
+            source = mask.get("source_qid")
+            source_vars = link_map.get(source)
+            source_question = by_qid.get(source)
+            if not source_vars or source_question is None:
+                report.skipped.append(
+                    f"{qid}: masked from {source}, which is not linked to a variable"
+                )
+                continue
+            counts["mask"] += 1
+            hits = []
+            for index, row in enumerate(rows, start=1):
+                chosen = set(_selected_codes(row, source_vars, source_question))
+                if not chosen:
+                    continue  # never answered the source; nothing to mask against
+                shown = set(_selected_codes(row, variables, question))
+                if shown - chosen - set(system_codes):
+                    hits.append(index)
+            if hits:
+                report.findings.append(
+                    Discrepancy(
+                        qid=qid,
+                        kind="mask_violated",
+                        severity="error",
+                        detail=(
+                            f"{qid} should only offer options the respondent selected at "
+                            f"{source}, but some answered it with codes they did not choose "
+                            "there."
+                        ),
                         n_rows=len(hits),
                         variables=variables,
                         example_rows=hits[:MAX_EXAMPLES],

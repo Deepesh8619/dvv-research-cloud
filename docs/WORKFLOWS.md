@@ -214,3 +214,40 @@ into the response list, and flagging them would bury the real findings.
 **Known limit.** `show_if` routing is checked by `linker.cross_validate_routing`
 and is not yet folded into this report. Grid questions are linked but their rows
 are not individually range-checked.
+
+### MR techniques the parser understands
+
+Read structurally from the directives, not as prose, so the review screen can
+show them and the data cross-check can verify them. Every pattern is taken
+verbatim from the three real client questionnaires.
+
+| Technique | Written as | Recorded as |
+|---|---|---|
+| Masking — only selected | `[PN: ONLY DISPLAY OPTIONS SELECTED AT S6]` | `mask selected ← S6` |
+| Masking — rows | `[PN: SHOW ONLY ITEMS SELECTED AT Q18 IN ROWS]` | `mask selected ← Q18` |
+| Masking — whole list | `[SHOW Q26 LIST]` | `mask full_list ← Q26` |
+| Masking — list minus a pick | `[SHOW Q26 LIST EXCEPT FOR Q27 SELECTION]` | `mask list_except ← Q26, minus Q27` |
+| Masking — option level | `Unaware (Not selected at Q2a)` | `mask not_selected ← Q2a` |
+| Masking — from a list | `[PN: INSERT BRANDS USED … FROM Q13]` | `mask selected ← Q13` |
+| Piping — from a question | `[INSERT RESPONSE FROM Q8]` | `pipe ← Q8` |
+| Piping — scripter variable | `[INSERT PHARMACY]` | `pipe PHARMACY` (recorded, never guessed) |
+| Least fill | `ASSIGN BASED ON LEAST FILL` | `least_fill: true` |
+
+Two distinctions the parser makes deliberately:
+
+**A pipe is not a mask.** `INSERT RESPONSE FROM Q8` puts one answer into the
+wording; `INSERT BRANDS … FROM Q13` builds an option list. Treating the first
+as a mask would claim a question's options come from somewhere they don't.
+
+**The most specific mask wins.** `SHOW Q26 LIST EXCEPT FOR Q27 SELECTION` also
+matches the plain `SHOW Q26 LIST`; reading it as the plain form would show a
+respondent the option they just picked.
+
+**`mask_violated`** is then checkable against data: a respondent's answer to a
+masked question may only contain codes they chose at the source. A mis-scripted
+mask shows the wrong list to real people and leaves no other trace in the
+output.
+
+Not yet modelled: MaxDiff design balance (the `_LF` version columns and
+best/worst pairs are recognised as MaxDiff machinery by the variable-role
+classifier, but the design itself is not validated), and quota cell fill.

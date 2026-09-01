@@ -24,6 +24,7 @@ const KIND_LABELS: Record<string, string> = {
   type_mismatch: 'Read as a coded question, but the data says otherwise',
   option_not_scripted: 'Option in the questionnaire with no punch in the data',
   punch_not_in_questionnaire: 'Punch in the data the questionnaire never offers',
+  mask_violated: 'Answer outside the masked option list',
 }
 
 const CHECK_LABELS: Record<string, string> = {
@@ -31,6 +32,7 @@ const CHECK_LABELS: Record<string, string> = {
   single: 'single-answer questions',
   range: 'numeric ranges',
   terminate: 'screen-outs',
+  mask: 'masked option lists',
 }
 
 export default function CrosscheckPanel({ studyId }: { studyId: string }) {

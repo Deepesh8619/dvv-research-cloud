@@ -316,3 +316,86 @@ def test_data_is_judged_against_the_scripted_punches_not_the_extraction(tmp_path
     assert len(undeclared) == 1
     assert undeclared[0].n_rows == 1        # only the 7
     assert "7" in undeclared[0].detail
+
+
+# --- Masking ----------------------------------------------------------------
+# A masked question offers only what the respondent chose earlier. A
+# mis-scripted mask shows the wrong list to real people and leaves no trace in
+# the output — nothing else in the pipeline can catch it.
+
+
+def _masked_pair():
+    source = Question(
+        qid="Q18",
+        text="Which have you used?",
+        type=QuestionType.MULTI,
+        options=[Option(code=1, label="A"), Option(code=2, label="B"), Option(code=3, label="C")],
+    )
+    masked = Question(
+        qid="Q18a",
+        text="How often for each?",
+        type=QuestionType.MULTI,
+        options=[Option(code=1, label="A"), Option(code=2, label="B"), Option(code=3, label="C")],
+        validation={
+            "techniques": {
+                "masks": [{"source_qid": "Q18", "mode": "selected", "exclude_qid": None}],
+                "pipes": [],
+                "least_fill": False,
+            }
+        },
+    )
+    return source, masked
+
+
+def _links():
+    return [
+        QuestionVariableLink(qid="Q18", variable_names=["Q18r1", "Q18r2", "Q18r3"]),
+        QuestionVariableLink(qid="Q18a", variable_names=["Q18ar1", "Q18ar2", "Q18ar3"]),
+    ]
+
+
+def test_a_mask_that_held_produces_no_finding(tmp_path):
+    """Respondent chose 1 and 3 at Q18, and answered Q18a within that set."""
+    path = _parquet(tmp_path, {
+        "Q18r1": [1, 1], "Q18r2": [0, 0], "Q18r3": [1, 1],
+        "Q18ar1": [1, 0], "Q18ar2": [0, 0], "Q18ar3": [1, 1],
+    })
+    report = check_against_questionnaire(_survey(list(_masked_pair())), _links(), path)
+    assert [f for f in report.findings if f.kind == "mask_violated"] == []
+    assert report.checked.get("mask") == 1  # it did look
+
+
+def test_an_answer_outside_the_masked_list_is_found(tmp_path):
+    """Respondent never chose option 2 at Q18, yet answered it at Q18a."""
+    path = _parquet(tmp_path, {
+        "Q18r1": [1, 1], "Q18r2": [0, 0], "Q18r3": [1, 0],
+        "Q18ar1": [1, 1], "Q18ar2": [0, 1], "Q18ar3": [0, 0],
+    })
+    report = check_against_questionnaire(_survey(list(_masked_pair())), _links(), path)
+    finding = next(f for f in report.findings if f.kind == "mask_violated")
+    assert finding.qid == "Q18a"
+    assert finding.example_rows == [2]
+
+
+def test_a_respondent_who_never_answered_the_source_is_not_judged(tmp_path):
+    """No answer at Q18 means the mask had nothing to work from — that is skip
+    logic, not a violation."""
+    path = _parquet(tmp_path, {
+        "Q18r1": [None], "Q18r2": [None], "Q18r3": [None],
+        "Q18ar1": [1], "Q18ar2": [0], "Q18ar3": [0],
+    })
+    report = check_against_questionnaire(_survey(list(_masked_pair())), _links(), path)
+    assert [f for f in report.findings if f.kind == "mask_violated"] == []
+
+
+def test_a_mask_whose_source_is_unlinked_is_skipped_not_passed(tmp_path):
+    """Nothing to compare against must never read as a clean result."""
+    _, masked = _masked_pair()
+    path = _parquet(tmp_path, {"Q18ar1": [1], "Q18ar2": [0], "Q18ar3": [0]})
+    report = check_against_questionnaire(
+        _survey([masked]),
+        [QuestionVariableLink(qid="Q18a", variable_names=["Q18ar1", "Q18ar2", "Q18ar3"])],
+        path,
+    )
+    assert any("masked from Q18" in s for s in report.skipped)
+    assert "mask" not in report.checked

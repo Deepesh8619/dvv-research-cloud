@@ -46,6 +46,7 @@ from src.core.survey_definition import (
 )
 from src.engines.questionnaire import schema
 from src.engines.questionnaire.learned import LearnedPattern
+from src.engines.questionnaire.mr_techniques import detect_techniques
 from src.engines.questionnaire.profiles import detect_profile
 from src.engines.questionnaire.prose_directives import (
     ProseFields,
@@ -407,6 +408,9 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
         validation["unrecognised_rows"] = fields.extras
     if fields.randomize:
         validation["randomize"] = fields.randomize
+    techniques = detect_techniques(fields.text or "", fields.notes or "", fields.show or "")
+    if techniques:
+        validation["techniques"] = techniques.to_dict()
     return Question(
         qid=fields.qid,
         text=fields.text or "",
@@ -511,6 +515,12 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
         validation["scripter_directives"] = fields.directives
     if fields.randomize:
         validation["randomize"] = True
+    # MR techniques the question declares about itself. Recorded structurally
+    # so the review UI can show them and the data cross-check can verify a mask
+    # actually held — a mis-scripted mask is invisible in the output otherwise.
+    techniques = detect_techniques(fields.text or "", *fields.directives)
+    if techniques:
+        validation["techniques"] = techniques.to_dict()
     return Question(
         qid=fields.qid,
         text=fields.text or "",
