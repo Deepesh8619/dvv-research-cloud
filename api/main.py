@@ -74,12 +74,23 @@ async def health():
     never the values/lengths/prefixes) so a missing key — the root cause of the
     production incident where all 80 questions failed extraction — is caught at
     deploy via the health check, not at the first client upload (T16 preflight).
+
+    Also reports the commit the running instance was built from. "Is my fix
+    live yet?" was previously unanswerable without opening the Render dashboard
+    — and on a free plan that redeploys on every push, it is the first thing
+    worth checking when behaviour does not match the code in front of you.
+    Render injects RENDER_GIT_COMMIT automatically; locally it is absent and
+    the field reads "unknown".
     """
+    import os
+
     from src.ai.router import llm_key_presence
 
+    commit = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or ""
     return {
         "status": "ok",
         "service": "dvv-research-api",
+        "commit": commit[:12] or "unknown",
         "llm_keys": llm_key_presence(),
     }
 

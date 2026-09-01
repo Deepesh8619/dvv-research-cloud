@@ -683,6 +683,29 @@ export default function QuestionnairePage() {
     }
   }, [status?.status, loadStatus, loadQuestions])
 
+  // How long since the saved question count last moved. This is what makes
+  // "still working" distinguishable from "died quietly" without asking anyone
+  // to read a server log.
+  const seenCount = useRef<number | null>(null)
+  const lastChangeAt = useRef<number>(Date.now())
+  const [progressAge, setProgressAge] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (status?.status !== 'processing') {
+      setProgressAge(null)
+      return
+    }
+    if (seenCount.current !== status.n_questions) {
+      seenCount.current = status.n_questions
+      lastChangeAt.current = Date.now()
+    }
+    const t = setInterval(
+      () => setProgressAge(Math.floor((Date.now() - lastChangeAt.current) / 1000)),
+      1000,
+    )
+    return () => clearInterval(t)
+  }, [status?.status, status?.n_questions])
+
   const selected = useMemo(
     () => questions.find((q) => q.qid === selectedQid) ?? null,
     [questions, selectedQid],
@@ -856,11 +879,47 @@ export default function QuestionnairePage() {
         </div>
       )}
 
-      {/* Processing */}
+      {/* Processing.
+
+          A bare spinner could not answer the only question a researcher has
+          while they wait — "is this working, or has it died?" Extraction
+          checkpoints its progress, so the count below is real saved work; if
+          it is still climbing the run is healthy, and if it has been still for
+          minutes something is wrong. Showing nothing threw away the very thing
+          checkpointing exists to provide. */}
       {status?.status === 'processing' && (
         <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
           <LoadingSpinner />
-          <p className="text-sm text-slate-500 mt-3">Extracting questions from the document…</p>
+          {status.n_questions === 0 ? (
+            <>
+              <p className="text-sm text-slate-700 mt-3 font-medium">Preparing the document</p>
+              {/* Before the first checkpoint there is genuinely nothing saved
+                  yet: a whole-document pass runs first to catch questions the
+                  splitter missed. A stall here is expected, so this must NOT
+                  warn — the warning below is only honest once questions have
+                  started landing. */}
+              <p className="text-xs text-slate-500 mt-1">
+                Checking for questions the splitter may have missed. This first
+                step runs once and can take a few minutes.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-slate-700 mt-3 font-medium">
+                Reading the document — {status.n_questions} questions saved so far
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                {progressAge !== null && progressAge >= 120
+                  ? `No new questions for ${Math.floor(progressAge / 60)}m — the model ` +
+                    'backend may be rate-limited. Everything already read is saved.'
+                  : 'Questions are saved as they are read, so nothing is lost if this is interrupted.'}
+              </p>
+            </>
+          )}
+          <p className="text-xs text-slate-400 mt-2">
+            Questions the parser cannot resolve need an AI reading at a few
+            seconds each, so a long questionnaire can take several minutes.
+          </p>
         </div>
       )}
 
