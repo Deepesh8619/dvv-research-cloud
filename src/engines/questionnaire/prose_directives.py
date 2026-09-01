@@ -156,6 +156,9 @@ class ProseFields:
     # silently dropped, so an unhandled convention is discoverable.
     directives: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+    # field -> the exact fragment that decided it. Shown to the reviewer so
+    # approving is checking a citation, not trusting a black box.
+    evidence: dict[str, str] = field(default_factory=dict)
 
     @property
     def complete(self) -> bool:
@@ -186,8 +189,8 @@ def _infer_type(
     options: list[Option],
     directives: list[str] | None = None,
     borrowed_options: bool = False,
-) -> QuestionType | None:
-    """Type from the instruction line OR a scripter directive.
+) -> tuple[QuestionType | None, str]:
+    """Type from the instruction line OR a scripter directive, plus its evidence.
 
     Measured across all three real client documents, an unstated type was the
     single biggest reason a question still needed a model: missing on 63, 57
@@ -199,35 +202,40 @@ def _infer_type(
         [PN: OPEN END. ALLOW UP TO 10 RESPONSES]
 
     Reading both halves is what turns those into free answers.
+
+    Returns the fragment that decided it as well as the type, so the review UI
+    can cite the source instead of asking a reviewer to take the answer on
+    faith. An empty string means nothing decided it.
     """
+
+    def _blocked(qtype: QuestionType) -> bool:
+        # "Select all that apply" with no options is a contradiction; trust an
+        # instruction only when the shape agrees with it, or when the options
+        # are explicitly borrowed from another question.
+        return (
+            qtype in (QuestionType.MULTI, QuestionType.SINGLE)
+            and not options
+            and not borrowed_options
+        )
+
     for directive in directives or []:
         for pattern, qtype in _TYPE_PATTERNS:
-            if pattern.search(directive):
-                # A directive is an explicit scripter instruction, so it is
-                # trusted even without options — "[PN: OPEN END]" IS the type.
-                if (
-                    qtype in (QuestionType.MULTI, QuestionType.SINGLE)
-                    and not options
-                    and not borrowed_options
-                ):
-                    continue
-                return qtype
+            match = pattern.search(directive)
+            if match and not _blocked(qtype):
+                return qtype, f"[{directive}]"
+
     for pattern, qtype in _TYPE_PATTERNS:
-        if pattern.search(text):
-            # "Select all that apply" with no options is a contradiction; trust
-            # the instruction only when the shape agrees with it.
-            if (
-                qtype in (QuestionType.MULTI, QuestionType.SINGLE)
-                and not options
-                and not borrowed_options
-            ):
-                continue
-            return qtype
-    if _is_binary_choice(options) or (options and is_single_select_wording(text)):
-        return QuestionType.SINGLE
+        match = pattern.search(text)
+        if match and not _blocked(qtype):
+            return qtype, match.group(0)
+
+    if _is_binary_choice(options):
+        return QuestionType.SINGLE, "a Yes/No option pair"
+    if options and is_single_select_wording(text):
+        return QuestionType.SINGLE, "wording that admits only one answer"
     # Options but no instruction: single vs multi changes the data structure,
     # so this is a real question for a model, not a guess.
-    return None
+    return None, ""
 
 
 def parse_prose_question(chunk_text: str, candidate_qid: str | None) -> ProseFields | None:
@@ -256,6 +264,7 @@ def parse_prose_question(chunk_text: str, candidate_qid: str | None) -> ProseFie
     terminate_codes: list[int] = []
     terminate_lines: list[str] = []
     randomize = False
+    randomize_evidence = ""
     scale_row: str | None = None
 
     for line in lines[1:]:
@@ -267,6 +276,7 @@ def parse_prose_question(chunk_text: str, candidate_qid: str | None) -> ProseFie
                 r"KEEP ORDER|DO NOT RANDOMI[SZ]E", body, re.I
             ):
                 randomize = True
+                randomize_evidence = f"[{body}]"
             if _TERMINATE_TAG.search(body):
                 # A document-level terminate rule ("CONTINUE IF AGES 18-60,
                 # TERMINATE ALL OTHERS") is prose about a range, not per-option
@@ -317,22 +327,33 @@ def parse_prose_question(chunk_text: str, candidate_qid: str | None) -> ProseFie
         randomize=randomize,
         directives=directives,
     )
+    if randomize_evidence:
+        fields.evidence["randomize"] = randomize_evidence
     if question_text and is_derived_wording(question_text):
         # Scripter-computed, not asked. Labelled the same way the extractor
         # labels a HID_ variable, so the review UI says "needs manual setup".
         fields.derived = True
         fields.qtype = QuestionType.INFO
-    elif scale_row or (
-        options and any(_GRID_DIRECTIVE_RE.search(d) for d in directives)
+        fields.evidence["type"] = "an all-caps CODE instruction to the scripter"
+    elif scale_row:
+        fields.qtype = QuestionType.GRID_SINGLE
+        fields.evidence["type"] = scale_row
+    elif options and (
+        grid_directive := next(
+            (d for d in directives if _GRID_DIRECTIVE_RE.search(d)), None
+        )
     ):
         fields.qtype = QuestionType.GRID_SINGLE
+        fields.evidence["type"] = f"[{grid_directive}]"
     else:
-        fields.qtype = _infer_type(
+        fields.qtype, type_evidence = _infer_type(
             instruction_text,
             options,
             directives,
             borrowed_options=any(_BORROWED_OPTIONS_RE.search(d) for d in directives),
         )
+        if type_evidence:
+            fields.evidence["type"] = type_evidence
 
     if terminate_codes:
         fields.terminate_if = Expression.from_dict(
@@ -344,6 +365,7 @@ def parse_prose_question(chunk_text: str, candidate_qid: str | None) -> ProseFie
             }
         )
         fields.terminate_verbatim = "; ".join(terminate_lines)
+        fields.evidence["terminate"] = "; ".join(terminate_lines)
     elif terminate_lines:
         # Stated in prose but not tied to option codes — preserve it and let a
         # model resolve it, never drop a screen-out.

@@ -251,6 +251,7 @@ def _question_from_raw(content: dict, chunk: QuestionChunk) -> tuple[Question, d
         source_text=chunk.chunk_text,
         source_location=chunk.provenance,
         extraction_confidence=dict(content.get("confidence") or {}),
+        extraction_method="llm",
     )
     return question, routing
 
@@ -395,6 +396,8 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
         source_text=chunk.chunk_text,
         source_location=chunk.provenance,
         validation=validation,
+        extraction_method="spec_table",
+        extraction_evidence=dict(fields.evidence),
     )
 
 
@@ -496,6 +499,8 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
         source_text=chunk.chunk_text,
         source_location=chunk.provenance,
         validation=validation,
+        extraction_method="prose_directives",
+        extraction_evidence=dict(fields.evidence),
     )
 
 

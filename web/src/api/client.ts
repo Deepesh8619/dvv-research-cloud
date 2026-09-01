@@ -289,6 +289,11 @@ export interface Question {
   source_text: string | null
   source_location: string | null
   extraction_confidence: Record<string, number>
+  /** How this question was read: "spec_table" | "prose_directives" | "llm".
+      Optional: questions stored before provenance existed carry neither. */
+  extraction_method?: string | null
+  /** field -> the exact fragment that decided it. */
+  extraction_evidence?: Record<string, string>
   flags: string[]
   approved: boolean
 }

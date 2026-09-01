@@ -213,6 +213,13 @@ class Question:
     source_location: str | None = None  # page / paragraph reference
     extraction_confidence: dict[str, float] = field(default_factory=dict)  # per-field
     flags: list[str] = field(default_factory=list)  # e.g. "AMBIGUOUS_ROUTING"
+    # HOW this question was read. A reviewer approving 80 questions cannot check
+    # each one against the source unless the system says what it acted on, so
+    # `extraction_method` names the path taken and `extraction_evidence` maps a
+    # field to the exact fragment that decided it ({"type": "[PN: TEXTBOX]"}).
+    # Without this, approval is a rubber stamp.
+    extraction_method: str | None = None
+    extraction_evidence: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -234,6 +241,8 @@ class Question:
             "source_location": self.source_location,
             "extraction_confidence": self.extraction_confidence,
             "flags": self.flags,
+            "extraction_method": self.extraction_method,
+            "extraction_evidence": self.extraction_evidence,
         }
 
     @classmethod
@@ -261,6 +270,8 @@ class Question:
             source_location=raw.get("source_location"),
             extraction_confidence=raw.get("extraction_confidence", {}),
             flags=raw.get("flags", []),
+            extraction_method=raw.get("extraction_method"),
+            extraction_evidence=raw.get("extraction_evidence", {}),
         )
 
 

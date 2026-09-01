@@ -15,6 +15,7 @@ import { TableSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import { flagInfo } from '../components/questionnaireFlags'
 import CorrectionBox from '../components/CorrectionBox'
+import ExtractionProvenance from '../components/ExtractionProvenance'
 import { useLabel } from '../labels/LabelContext'
 import { typeHint, typeLabel } from '../labels/questionTypes'
 import { canCorrect as hasCorrectRole, canWrite as hasWriteRole } from '../auth/roles'
@@ -118,17 +119,50 @@ function QuestionRow({
   q,
   selected,
   onClick,
+  draggable,
+  dragging,
+  dropBefore,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  onMoveKey,
 }: {
   q: Question
   selected: boolean
   onClick: () => void
+  draggable: boolean
+  dragging: boolean
+  dropBefore: boolean
+  onDragStart: () => void
+  onDragOver: (e: React.DragEvent) => void
+  onDrop: () => void
+  onDragEnd: () => void
+  onMoveKey: (delta: number) => void
 }) {
   return (
     <button
       onClick={onClick}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      // Dragging is not usable by keyboard or screen reader, so the same
+      // reorder is reachable with Alt+Arrow on the focused row.
+      onKeyDown={(e) => {
+        if (!draggable || !e.altKey) return
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          e.preventDefault()
+          onMoveKey(e.key === 'ArrowUp' ? -1 : 1)
+        }
+      }}
+      title={draggable ? 'Drag to reorder, or Alt+↑ / Alt+↓' : undefined}
       className={`w-full text-left px-3 py-2.5 border-b border-slate-100 hover:bg-slate-50 transition-colors ${
         selected ? 'bg-sky-50' : ''
-      }`}
+      } ${dragging ? 'opacity-40' : ''} ${
+        dropBefore ? 'border-t-2 border-t-sky-500' : ''
+      } ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
     >
       <div className="flex items-center gap-2">
         <ConfidenceDot conf={q.extraction_confidence} />
@@ -318,6 +352,8 @@ function QuestionDetail({
           })}
         </div>
       )}
+
+      <ExtractionProvenance method={q.extraction_method} evidence={q.extraction_evidence} />
 
       {/* A derived variable is computed by the scripter from other answers, so
           there is no wording, type or routing to review. Saying so plainly beats
@@ -545,6 +581,12 @@ export default function QuestionnairePage() {
 
   const [status, setStatus] = useState<QuestionnaireStatus | null>(null)
   const [questions, setQuestions] = useState<Question[]>([])
+  // Reorder. The server rejects an order that moves a question ahead of one its
+  // routing depends on (a forward reference), so the optimistic list is rolled
+  // back and the server's reason shown rather than left silently wrong.
+  const [dragQid, setDragQid] = useState<string | null>(null)
+  const [dropBeforeQid, setDropBeforeQid] = useState<string | null>(null)
+  const [reorderError, setReorderError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [selectedQid, setSelectedQid] = useState<string | null>(null)
@@ -667,6 +709,42 @@ export default function QuestionnairePage() {
       setApprovingClean(false)
     }
   }
+
+  const commitOrder = useCallback(
+    async (next: Question[], previous: Question[]) => {
+      if (!studyId) return
+      setQuestions(next)
+      setReorderError(null)
+      try {
+        await questionnaireApi.reorderQuestions(
+          studyId,
+          next.map((q) => q.qid),
+        )
+      } catch (err) {
+        setQuestions(previous)
+        const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null
+        setReorderError(
+          typeof detail === 'string'
+            ? detail
+            : (detail?.error ?? 'Could not save the new order.'),
+        )
+      }
+    },
+    [studyId],
+  )
+
+  const moveQid = useCallback(
+    (qid: string, toIndex: number) => {
+      const from = questions.findIndex((q) => q.qid === qid)
+      const to = Math.max(0, Math.min(questions.length - 1, toIndex))
+      if (from < 0 || from === to) return
+      const next = questions.slice()
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      void commitOrder(next, questions)
+    },
+    [questions, commitOrder],
+  )
 
   if (loading) {
     return (
@@ -823,6 +901,11 @@ export default function QuestionnairePage() {
                   </div>
                 )}
               </div>
+              {reorderError && (
+                <p className="text-xs text-red-700 bg-red-50 border-b border-red-100 px-3 py-2">
+                  {reorderError}
+                </p>
+              )}
               <div className="max-h-[70vh] overflow-y-auto">
                 {questions.map((q) => (
                   <QuestionRow
@@ -830,6 +913,29 @@ export default function QuestionnairePage() {
                     q={q}
                     selected={q.qid === selectedQid}
                     onClick={() => setSelectedQid(q.qid)}
+                    draggable={canWrite}
+                    dragging={dragQid === q.qid}
+                    dropBefore={dropBeforeQid === q.qid && dragQid !== q.qid}
+                    onDragStart={() => setDragQid(q.qid)}
+                    onDragOver={(e) => {
+                      if (!dragQid) return
+                      e.preventDefault()
+                      setDropBeforeQid(q.qid)
+                    }}
+                    onDrop={() => {
+                      if (dragQid && dragQid !== q.qid) {
+                        moveQid(dragQid, questions.findIndex((x) => x.qid === q.qid))
+                      }
+                      setDragQid(null)
+                      setDropBeforeQid(null)
+                    }}
+                    onDragEnd={() => {
+                      setDragQid(null)
+                      setDropBeforeQid(null)
+                    }}
+                    onMoveKey={(delta) =>
+                      moveQid(q.qid, questions.findIndex((x) => x.qid === q.qid) + delta)
+                    }
                   />
                 ))}
                 {questions.length === 0 && (

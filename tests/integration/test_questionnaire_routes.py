@@ -146,14 +146,23 @@ def _upload(test_client, study_id="study_q1", filename="survey.docx"):
     return resp
 
 
+# Extraction runs in a background thread, so these helpers wait on wall clock.
+# The budget was 50 x 0.02s = 1 second, which is ample on an idle machine and
+# not ample under a loaded full-suite run — the tests passed alone and failed
+# intermittently in CI-style runs. 10 seconds costs nothing when the job
+# finishes (the loop exits on the first poll) and removes the flake.
+_WAIT_ATTEMPTS = 200
+_WAIT_INTERVAL = 0.05
+
+
 def _wait_draft(test_client, study_id="study_q1"):
-    for _ in range(50):
+    import time
+
+    for _ in range(_WAIT_ATTEMPTS):
         body = test_client.get(f"/api/studies/{study_id}/questionnaire").json()
         if body["status"] != "processing":
             return body
-        import time
-
-        time.sleep(0.02)
+        time.sleep(_WAIT_INTERVAL)
     raise AssertionError("questionnaire never left 'processing'")
 
 
@@ -629,11 +638,11 @@ def _wait_error(test_client, study_id="study_q1"):
     """Poll status until it leaves 'processing'; return the status body."""
     import time
 
-    for _ in range(50):
+    for _ in range(_WAIT_ATTEMPTS):
         body = test_client.get(f"/api/studies/{study_id}/questionnaire").json()
         if body["status"] != "processing":
             return body
-        time.sleep(0.02)
+        time.sleep(_WAIT_INTERVAL)
     raise AssertionError("questionnaire never left 'processing'")
 
 

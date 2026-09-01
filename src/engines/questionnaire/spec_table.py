@@ -161,6 +161,9 @@ class SpecTableFields:
     # visible (and teachable via the correction loop) rather than silently lost.
     extras: dict[str, str] = field(default_factory=dict)
     missing: list[str] = field(default_factory=list)
+    # field -> the exact row or fragment that decided it, so the review UI can
+    # cite the source rather than asking a reviewer to trust the parse.
+    evidence: dict[str, str] = field(default_factory=dict)
 
     @property
     def complete(self) -> bool:
@@ -205,25 +208,53 @@ def _parse_terminate(
     )
 
 
-def _infer_type(stated: str, options: list[Option], text: str | None) -> QuestionType | None:
-    """Resolve the question type. Scripters frequently leave the cell blank."""
+# An explicit request for typed input, used to tell an open end apart from a
+# display screen when neither has a response list.
+_OPEN_ENTRY_RE = re.compile(
+    r"\bopen[- ]?end|\btextbox\b|\bOE\b|specify|please describe|"
+    r"in your own words|enter|type|_\s*_\s*_",
+    re.I,
+)
+
+
+def _infer_type(
+    stated: str, options: list[Option], text: str | None
+) -> tuple[QuestionType | None, str]:
+    """Resolve the question type and the fragment that decided it.
+
+    Scripters frequently leave the cell blank, so the answer often comes from
+    the wording instead — the reviewer needs to be told which.
+    """
     low = (stated or "").strip().lower()
     for word, qtype in _TYPE_WORDS:
         if word in low:
-            return qtype
+            return qtype, f"Q type: {stated.strip()}"
     if low:
-        return None  # said something unrecognised — ask rather than assume
+        # Said something unrecognised — ask rather than assume.
+        return None, ""
     if not options:
-        return QuestionType.OPEN_TEXT if text else None
+        if not text:
+            return None, ""
+        # No response list is NOT automatically an open end. Intro and
+        # instruction screens have no options either, and typing them open_text
+        # puts a text box in front of a respondent who was only being greeted
+        # ("Thank you for taking the time to participate!"). A question that
+        # genuinely wants typing either asks something or says so in a
+        # directive; display text does neither.
+        asks_something = "?" in text
+        wants_typing = _OPEN_ENTRY_RE.search(text) is not None
+        if asks_something or wants_typing:
+            return QuestionType.OPEN_TEXT, "a question with no response list"
+        return QuestionType.INFO, "display text — no question asked, no options"
     if is_single_select_wording(text or ""):
         # The type cell is blank but the wording settles it: a superlative or a
         # single-fact question cannot be multi-select. This is the commonest
         # remaining gap in spec-table documents, where "Q type: (blank)" is
         # routine and the wording is the only statement of intent.
-        return QuestionType.SINGLE
+        return QuestionType.SINGLE, "wording that admits only one answer"
     # Has options but no stated type: single vs multi changes the data
     # structure, so this is a real question, not a guess.
-    return None
+    return None, ""
 
 
 def parse_spec_table(block: DocumentBlock) -> SpecTableFields | None:
@@ -285,10 +316,15 @@ def parse_spec_table(block: DocumentBlock) -> SpecTableFields | None:
         notes=notes or None,
         extras=extras,
     )
-    fields.qtype = _infer_type(found.get("type", ""), options, text)
+    fields.qtype, type_evidence = _infer_type(found.get("type", ""), options, text)
+    if type_evidence:
+        fields.evidence["type"] = type_evidence
     fields.terminate_if = _parse_terminate(notes, options, qid)
     if fields.terminate_if is not None:
         fields.terminate_verbatim = notes.strip()
+        fields.evidence["terminate"] = notes.strip()
+    if fields.base:
+        fields.evidence["base"] = f"Among who: {fields.base}"
 
     if not fields.text:
         fields.missing.append("text")
