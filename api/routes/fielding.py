@@ -515,7 +515,18 @@ async def submit_answers(
     survey = SurveyDefinition.from_json(link.survey_json)
     answers = get_session_answers_map(db, session_id)
     for question in survey.questions:
-        if question.terminate_if is not None and evaluate(question.terminate_if, answers):
+        if question.terminate_if is None:
+            continue
+        # Only judge a screen-out once every question it references has been
+        # ANSWERED. Without this a negated terminate ("TERMINATE if 1 not
+        # selected", stored as not(in ...)) fires on a respondent who has
+        # answered nothing at all: the inner `in` is false against an empty
+        # answer set, and `not false` is true. Every respondent was screened
+        # out on their first submit. The quota check below already uses this
+        # rule (`decidable_only`); the terminate check must too.
+        if not question.terminate_if.referenced_qids().issubset(answers.keys()):
+            continue
+        if evaluate(question.terminate_if, answers):
             set_respondent_session_status(db, session_id, STATUS_TERMINATE)
             session = get_respondent_session(db, session_id)
             logger.info(

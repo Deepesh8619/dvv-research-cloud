@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from src.core.models import DataMap
 from src.core.survey_definition import (
     Question,
     QuestionType,
@@ -147,11 +148,37 @@ def _selected_codes(row: dict, variables: list[str], question: Question) -> list
     return [codes[i - 1] for i in value if 1 <= i <= len(codes)]
 
 
+def _datamap_codes(datamap: DataMap | None, variables: list[str]) -> set[int] | None:
+    """The codes the DATAMAP says a question's columns can hold.
+
+    None means the datamap does not describe this as a coded question — an open
+    numeric or text column carries no code list. That distinction is the
+    difference between a useful check and an unusable one: on a real client
+    file, comparing raw ages against a questionnaire's option list produced 14
+    separate "undeclared code" findings for ages 32 to 45, all of them correct
+    data. The datamap is the authority on what a column actually holds.
+    """
+    if datamap is None:
+        return None
+    by_name = {v.name: v for v in datamap.variables}
+    codes: set[int] = set()
+    described = False
+    for name in variables:
+        variable = by_name.get(name)
+        if variable is None:
+            continue
+        if variable.values:
+            described = True
+            codes |= set(variable.values.keys())
+    return codes if described else None
+
+
 def check_against_questionnaire(
     survey: SurveyDefinition,
     links: list[QuestionVariableLink],
     parquet_path: Path,
     system_codes: frozenset[int] = DEFAULT_SYSTEM_CODES,
+    datamap: DataMap | None = None,
 ) -> DiscrepancyReport:
     """Compare a data file against the questionnaire that produced it.
 
@@ -184,26 +211,91 @@ def check_against_questionnaire(
             continue
 
         declared = _declared_codes(question)
-        if declared:
+        # Without a datamap the questionnaire is the only authority we have, so
+        # judge against it. With one, the datamap wins: it describes what the
+        # column actually holds, and `None` from it means "open response", not
+        # "unknown".
+        scripted = _datamap_codes(datamap, variables) if datamap is not None else declared
+        datamap_says_open = datamap is not None and scripted is None
+
+        # The questionnaire says this question has options, but the datamap
+        # says the column holds an open number. That is a reading disagreement
+        # worth ONE finding — not one per distinct value in the file.
+        if declared and datamap_says_open:
+            report.findings.append(
+                Discrepancy(
+                    qid=qid,
+                    kind="type_mismatch",
+                    severity="warning",
+                    detail=(
+                        f"{qid} was read as a coded question with options "
+                        f"{sorted(declared)[:8]}, but the data map describes "
+                        "its column as an open response. The extracted option "
+                        "list is probably wrong."
+                    ),
+                    variables=variables,
+                )
+            )
+        elif declared and datamap is not None and scripted is not None:
+            # Punches vs questionnaire: what was scripted against what was asked.
+            missing_in_data = sorted(declared - scripted - system_codes)
+            extra_in_data = sorted(scripted - declared - system_codes)
+            if missing_in_data:
+                report.findings.append(
+                    Discrepancy(
+                        qid=qid,
+                        kind="option_not_scripted",
+                        severity="warning",
+                        detail=(
+                            f"{qid} offers {missing_in_data} in the questionnaire but "
+                            "the data map has no punch for them."
+                        ),
+                        variables=variables,
+                    )
+                )
+            if extra_in_data:
+                report.findings.append(
+                    Discrepancy(
+                        qid=qid,
+                        kind="punch_not_in_questionnaire",
+                        severity="warning",
+                        detail=(
+                            f"{qid} has punches {extra_in_data} in the data map that "
+                            "the questionnaire never offers."
+                        ),
+                        variables=variables,
+                    )
+                )
+
+        if scripted:
             counts["codes"] += 1
+            # Judge the data against what was SCRIPTED. A value outside the
+            # scripted punch list is a genuine data defect; a value outside the
+            # extracted option list may only mean the extraction was wrong,
+            # which the type/punch findings above already say once.
             offenders: dict[int, list[int]] = {}
             for index, row in enumerate(rows, start=1):
                 for code in _selected_codes(row, variables, question):
-                    if code not in declared and code not in system_codes:
+                    if code not in scripted and code not in system_codes:
                         offenders.setdefault(code, []).append(index)
-            for code, hits in sorted(offenders.items()):
+            if offenders:
+                # ONE finding per question, listing the offending values. A
+                # separate finding per value turned a single broken column into
+                # fourteen entries and buried everything else.
+                total = sorted({r for hits in offenders.values() for r in hits})
+                values = ", ".join(str(c) for c in sorted(offenders)[:10])
                 report.findings.append(
                     Discrepancy(
                         qid=qid,
                         kind="undeclared_code",
                         severity="error",
                         detail=(
-                            f"Value {code} appears in the data but {qid} declares "
-                            f"only {sorted(declared)}."
+                            f"Value(s) {values} appear in the data but are not in "
+                            f"the scripted punch list for {qid}."
                         ),
-                        n_rows=len(hits),
+                        n_rows=len(total),
                         variables=variables,
-                        example_rows=hits[:MAX_EXAMPLES],
+                        example_rows=total[:MAX_EXAMPLES],
                     )
                 )
 

@@ -180,8 +180,12 @@ def test_nothing_linked_is_skipped_not_passed(tmp_path):
     assert report.skipped and "link" in report.skipped[0]
 
 
-def test_worst_findings_come_first(tmp_path):
-    """A researcher reads the top of the list and stops."""
+def test_all_bad_values_for_one_question_are_a_single_finding(tmp_path):
+    """One broken column must not become one finding per distinct value.
+
+    On a real client file this produced fourteen separate entries for a single
+    mis-read age question and buried everything else in the report.
+    """
     q = Question(
         qid="Q1", text="Pick", type=QuestionType.SINGLE,
         options=[Option(code=1, label="A")],
@@ -190,6 +194,28 @@ def test_worst_findings_come_first(tmp_path):
     report = check_against_questionnaire(
         _survey([q]), [QuestionVariableLink(qid="Q1", variable_names=["Q1"])], path
     )
+    assert len(report.findings) == 1
+    finding = report.findings[0]
+    assert finding.n_rows == 4          # every offending respondent, counted once
+    assert "5" in finding.detail and "6" in finding.detail
+
+
+def test_worst_findings_come_first(tmp_path):
+    """A researcher reads the top of the list and stops."""
+    qs = [
+        Question(qid="Q1", text="Pick", type=QuestionType.SINGLE,
+                 options=[Option(code=1, label="A")]),
+        Question(qid="Q2", text="Pick", type=QuestionType.SINGLE,
+                 options=[Option(code=1, label="A")]),
+    ]
+    path = _parquet(tmp_path, {"Q1": [5, 5, 5, 1], "Q2": [1, 1, 1, 6]})
+    report = check_against_questionnaire(
+        _survey(qs),
+        [QuestionVariableLink(qid="Q1", variable_names=["Q1"]),
+         QuestionVariableLink(qid="Q2", variable_names=["Q2"])],
+        path,
+    )
+    assert [f.qid for f in report.findings] == ["Q1", "Q2"]
     assert [f.n_rows for f in report.findings] == [3, 1]
 
 
@@ -201,3 +227,92 @@ def test_missing_answers_are_not_discrepancies(tmp_path, bad):
         _survey([SINGLE_Q]), [QuestionVariableLink(qid="Q1", variable_names=["Q1"])], path
     )
     assert report.findings == []
+
+
+# --- The data map is the authority on what a column holds -------------------
+# Measured on a real 750-respondent client file: without this, comparing raw
+# ages against a mis-extracted option list produced 14 "undeclared code"
+# findings for ages 32 to 45 — all of them perfectly good data. A check that
+# cries wolf 715 times on a clean file is worse than no check at all.
+
+
+def _datamap(entries):
+    from src.core.models import DataMap, Variable, VarType
+
+    dm = DataMap()
+    for name, values in entries:
+        dm.add(Variable(name=name, label=name, type=VarType.SINGLE, values=values))
+    return dm
+
+
+def test_an_open_numeric_column_is_not_code_checked(tmp_path):
+    """The datamap gives RESP_AGE no code list, so it is an open number."""
+    age = Question(
+        qid="RESP_AGE",
+        text="What is your age?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=c, label=f"band {c}") for c in range(1, 11)],
+    )
+    path = _parquet(tmp_path, {"RESP_AGE": [32, 38, 44, 45]})
+    report = check_against_questionnaire(
+        _survey([age]),
+        [QuestionVariableLink(qid="RESP_AGE", variable_names=["RESP_AGE"])],
+        path,
+        datamap=_datamap([("RESP_AGE", {})]),
+    )
+    assert [f.kind for f in report.findings] == ["type_mismatch"]
+    assert report.findings[0].severity == "warning"
+    assert report.findings[0].n_rows == 0  # a reading disagreement, not bad data
+
+
+def test_an_option_the_scripter_never_punched_is_reported(tmp_path):
+    """Questionnaire offers code 3; the data map has no punch for it."""
+    q = Question(
+        qid="Q1", text="Pick", type=QuestionType.SINGLE,
+        options=[Option(code=1, label="A"), Option(code=2, label="B"), Option(code=3, label="C")],
+    )
+    path = _parquet(tmp_path, {"Q1": [1, 2, 1]})
+    report = check_against_questionnaire(
+        _survey([q]),
+        [QuestionVariableLink(qid="Q1", variable_names=["Q1"])],
+        path,
+        datamap=_datamap([("Q1", {1: "A", 2: "B"})]),
+    )
+    assert any(f.kind == "option_not_scripted" and "3" in f.detail for f in report.findings)
+
+
+def test_a_punch_the_questionnaire_never_offers_is_reported(tmp_path):
+    """The data map has code 4; the questionnaire never asks it."""
+    q = Question(
+        qid="Q1", text="Pick", type=QuestionType.SINGLE,
+        options=[Option(code=1, label="A"), Option(code=2, label="B")],
+    )
+    path = _parquet(tmp_path, {"Q1": [1, 2, 4]})
+    report = check_against_questionnaire(
+        _survey([q]),
+        [QuestionVariableLink(qid="Q1", variable_names=["Q1"])],
+        path,
+        datamap=_datamap([("Q1", {1: "A", 2: "B", 4: "D"})]),
+    )
+    assert any(f.kind == "punch_not_in_questionnaire" and "4" in f.detail for f in report.findings)
+
+
+def test_data_is_judged_against_the_scripted_punches_not_the_extraction(tmp_path):
+    """A value outside the SCRIPTED list is a real data defect. A value the
+    extraction merely failed to list is reported once as a punch mismatch, not
+    once per respondent."""
+    q = Question(
+        qid="Q1", text="Pick", type=QuestionType.SINGLE,
+        options=[Option(code=1, label="A")],
+    )
+    path = _parquet(tmp_path, {"Q1": [1, 2, 7]})
+    report = check_against_questionnaire(
+        _survey([q]),
+        [QuestionVariableLink(qid="Q1", variable_names=["Q1"])],
+        path,
+        datamap=_datamap([("Q1", {1: "A", 2: "B"})]),
+    )
+    undeclared = [f for f in report.findings if f.kind == "undeclared_code"]
+    assert len(undeclared) == 1
+    assert undeclared[0].n_rows == 1        # only the 7
+    assert "7" in undeclared[0].detail

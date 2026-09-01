@@ -92,3 +92,82 @@ def test_read_tabular_merges_real_labels_instead_of_guessing(two_sheet_workbook)
 
     assert len(df) == 3
     assert "status" in df.columns
+
+
+# --- Multi-punch blocks -----------------------------------------------------
+# On a real 440-column client export these were 189 columns — 48% of the file
+# and nearly every multi-select question in the study — silently absent from
+# the parsed datamap. The cause was a one-character difference in the
+# convention: a punch column is written "[NAMEr1] | label" in the SECOND
+# column, under an UNBRACKETED parent header, not "[NAME]: label" in the first.
+
+
+def _multi_sheet(tmp_path):
+    """A datamap laid out exactly as the real client export lays one out."""
+    import pandas as pd
+
+    rows = [
+        ["[RESP_AGE]: What is your age?", None, None],
+        ["Open numeric response", None, None],
+        ["", None, None],
+        ["DA_GOALS: Which objectives do you seek?", None, None],
+        ["Values: 0-1", None, None],
+        ["", 0, "Unchecked"],
+        ["", 1, "Checked"],
+        ["", "[DA_GOALSr1]", "Generate new customer leads"],
+        ["", "[DA_GOALSr2]", "Increase visits to website"],
+        ["", "[DA_GOALSr98]", "Other, specify:"],
+        ["", None, None],
+        ["[DA_TOP_GOAL]: What is the top objective?", None, None],
+        ["Values: 1-2", None, None],
+        ["", 1, "Leads"],
+        ["", 2, "Visits"],
+    ]
+    path = tmp_path / "dm.xlsx"
+    pd.DataFrame(rows).to_excel(path, sheet_name="Datamap", header=False, index=False)
+    return path
+
+
+def test_multi_punch_columns_become_real_variables(tmp_path):
+    dm = parse_datamap_sheet(_multi_sheet(tmp_path), "Datamap")
+    names = {v.name for v in dm.variables}
+    assert {"DA_GOALSr1", "DA_GOALSr2", "DA_GOALSr98"} <= names
+
+
+def test_each_punch_keeps_its_own_row_label(tmp_path):
+    """The row label is the only thing that identifies which option a punch is."""
+    dm = parse_datamap_sheet(_multi_sheet(tmp_path), "Datamap")
+    by = {v.name: v for v in dm.variables}
+    assert by["DA_GOALSr1"].label == "Generate new customer leads"
+    assert by["DA_GOALSr98"].label == "Other, specify:"
+
+
+def test_a_punch_points_back_at_its_parent_question(tmp_path):
+    """Without question_ref the columns cannot be grouped back into a question."""
+    dm = parse_datamap_sheet(_multi_sheet(tmp_path), "Datamap")
+    by = {v.name: v for v in dm.variables}
+    assert by["DA_GOALSr1"].question_ref == "DA_GOALS"
+
+
+def test_the_parent_itself_is_not_emitted_as_a_column(tmp_path):
+    """DA_GOALS is a question, not a column in the data — emitting it would
+    invent a variable that no data file contains."""
+    dm = parse_datamap_sheet(_multi_sheet(tmp_path), "Datamap")
+    assert "DA_GOALS" not in {v.name for v in dm.variables}
+
+
+def test_punches_inherit_the_blocks_shared_value_labels(tmp_path):
+    dm = parse_datamap_sheet(_multi_sheet(tmp_path), "Datamap")
+    by = {v.name: v for v in dm.variables}
+    assert by["DA_GOALSr1"].values == {0: "Unchecked", 1: "Checked"}
+
+
+def test_a_multi_block_does_not_swallow_the_variable_after_it(tmp_path):
+    """The block must stop at the next header, or one bad block eats the rest
+    of the sheet."""
+    dm = parse_datamap_sheet(_multi_sheet(tmp_path), "Datamap")
+    by = {v.name: v for v in dm.variables}
+    assert "DA_TOP_GOAL" in by
+    assert by["DA_TOP_GOAL"].values == {1: "Leads", 2: "Visits"}
+    assert by["DA_TOP_GOAL"].question_ref is None
+    assert "RESP_AGE" in by  # the plain block before it survived too

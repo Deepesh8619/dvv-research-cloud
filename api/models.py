@@ -205,7 +205,10 @@ class QuestionnaireStatusResponse(BaseModel):
     created_at: str
     updated_at: str
     title: str | None = None
-    n_questions: int = 0
+    n_questions: int
+    # Items a reviewer can actually act on — display text and scripter-computed
+    # variables are excluded, so progress is against a reachable total.
+    n_reviewable: int = 0
     n_approved: int = 0
     # "extracted" or "authored" — lets the builder vs. review UIs decide which one
     # owns a given questionnaire (the builder redirects extracted docs to review).

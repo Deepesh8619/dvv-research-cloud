@@ -940,7 +940,14 @@ async def crosscheck_study(
             "Use Re-process to rebuild it, then run the cross-check.",
         )
 
-    report = check_against_questionnaire(survey, link_report.links, parquet_path)
+    # The datamap is passed deliberately: it is the authority on what each
+    # column actually holds. Without it, a question the extractor mis-read as
+    # coded is compared against raw values and every respondent becomes a
+    # finding — measured at 715 findings on a clean 750-respondent file, versus
+    # 7 real ones with the datamap supplied.
+    report = check_against_questionnaire(
+        survey, link_report.links, parquet_path, datamap=datamap
+    )
     payload = {
         **report.to_dict(),
         "linked_questions": len(link_report.links),

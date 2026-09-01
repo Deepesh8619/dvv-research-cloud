@@ -71,6 +71,18 @@ router = APIRouter()
 # Flags that must be clear on every question before a questionnaire can be
 # approved as a whole — these mark routing/extraction the pipeline could not
 # resolve on its own and that a human must have looked at.
+def _is_reviewable(question) -> bool:
+    """True when a reviewer has something to decide about this item.
+
+    Display text ("Thank you for taking part") and scripter-computed variables
+    carry no wording, type or routing to check, so counting them as
+    unapproved questions turns the review queue into noise.
+    """
+    from src.core.survey_definition import QuestionType
+
+    return question.type is not QuestionType.INFO
+
+
 _BLOCKING_FLAGS = frozenset(
     {
         "AMBIGUOUS_ROUTING",
@@ -227,6 +239,12 @@ def _status_response(questionnaire, survey: SurveyDefinition | None) -> Question
         updated_at=questionnaire.updated_at,
         title=survey.title if survey else None,
         n_questions=len(survey.questions) if survey else 0,
+        # Only items a reviewer can act on. Counting display text and
+        # scripter-computed variables made the denominator unreachable and the
+        # progress meaningless.
+        n_reviewable=(
+            sum(1 for q in survey.questions if _is_reviewable(q)) if survey else 0
+        ),
         n_approved=len(questionnaire.approved_qids or []),
         source=survey.source if survey else None,
         validation_errors=metadata.get("validation_errors", []),
@@ -1036,7 +1054,14 @@ async def approve_all(
     unresolved: list[dict] = []
     for q in survey.questions:
         reasons = []
-        if q.qid not in approved:
+        # Display text and scripter-computed variables are not questions a
+        # reviewer approves — there is no wording, type or routing to check.
+        # Requiring an approval for each one buried the real review work and
+        # made "0/35 approved" count things nobody can act on. A blocking flag
+        # on one is still reported below.
+        if q.qid not in approved and not _is_reviewable(q):
+            pass
+        elif q.qid not in approved:
             reasons.append("not approved")
         blocking = sorted(set(q.flags) & _BLOCKING_FLAGS)
         if blocking:

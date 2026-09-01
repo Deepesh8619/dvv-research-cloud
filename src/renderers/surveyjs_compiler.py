@@ -162,11 +162,23 @@ def _compile_question(question: Question) -> dict[str, Any]:
     return element
 
 
+# Content that exists for the scripter, not the respondent. A derived variable
+# is computed from other answers and its "wording" is an instruction — showing
+# "CODE AGE - BASED ON RESPONSES AT S1" to a member of the public is a defect,
+# not display text. `info` alone is not enough to exclude: a genuine intro or
+# transition screen is also `info` and SHOULD be shown.
+_SCRIPTER_ONLY_FLAGS = frozenset({"DERIVED_VARIABLE"})
+
+
+def _is_respondent_facing(question: Question) -> bool:
+    return not (_SCRIPTER_ONLY_FLAGS & set(question.flags or ()))
+
+
 def _compile_block(block: Block, survey: SurveyDefinition) -> dict[str, Any]:
     """Compile one `Block` into a SurveyJS page dict."""
     elements: list[dict[str, Any]] = []
     for qid in block.question_ids:
-        if qid in survey:
+        if qid in survey and _is_respondent_facing(survey[qid]):
             elements.append(_compile_question(survey[qid]))
 
     page: dict[str, Any] = {"name": block.block_id, "elements": elements}
