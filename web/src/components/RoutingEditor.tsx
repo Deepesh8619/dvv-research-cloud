@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import { Expression, ExprOp } from '../api/client'
 
 // --- Routing editor -----------------------------------------------------------
@@ -110,12 +112,32 @@ export default function RoutingEditor({ label, flat, onChange, qidOptions, disab
     )
   }
 
+  // What the user is currently TYPING in a codes box, keyed by row.
+  //
+  // The input cannot be driven straight from `cond.values`: that array is the
+  // parsed result, so `join(', ')` erases the separator the moment it is typed
+  // — "1," parses to [1] and renders back as "1", making a comma impossible to
+  // enter and the field effectively single-value. Holding the raw text while
+  // the box has focus lets commas, spaces and half-typed codes survive; the
+  // parsed array is still updated on every keystroke, so nothing is deferred.
+  const [codeDrafts, setCodeDrafts] = useState<Record<number, string>>({})
+
+  const clearDraft = (i: number) =>
+    setCodeDrafts((drafts) => {
+      const next = { ...drafts }
+      delete next[i]
+      return next
+    })
+
   const setCondition = (i: number, patch: Partial<Expression>) => {
     const conditions = flat.conditions.map((c, idx) => (idx === i ? { ...c, ...patch } : c))
     onChange({ ...flat, conditions })
   }
 
   const removeCondition = (i: number) => {
+    // Drafts are keyed by row index, so a removal would leave the draft of the
+    // deleted row sitting on whichever row slid into its place.
+    setCodeDrafts({})
     onChange({ ...flat, conditions: flat.conditions.filter((_, idx) => idx !== i) })
   }
 
@@ -186,16 +208,22 @@ export default function RoutingEditor({ label, flat, onChange, qidOptions, disab
                 </select>
                 {usesValues ? (
                   <input
-                    value={(cond.values ?? []).join(', ')}
+                    value={codeDrafts[i] ?? (cond.values ?? []).join(', ')}
                     disabled={disabled}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      setCodeDrafts((drafts) => ({ ...drafts, [i]: raw }))
                       setCondition(i, {
-                        values: e.target.value
+                        values: raw
                           .split(',')
                           .map((s) => coerce(s.trim()))
                           .filter((v) => v !== ''),
                       })
-                    }
+                    }}
+                    // On blur the box goes back to showing the parsed codes, so
+                    // stray separators ("1,,2 ,") are tidied to "1, 2" and what
+                    // is displayed is exactly what will be saved.
+                    onBlur={() => clearDraft(i)}
                     placeholder="codes e.g. 1, 2, 3"
                     className="h-8 px-2 rounded-md border border-slate-300 text-sm flex-1 min-w-[120px] disabled:bg-slate-50"
                     aria-label="condition values"

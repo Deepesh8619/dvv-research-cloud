@@ -232,6 +232,8 @@ function QuestionDetail({
   onApproved: (qid: string) => void
 }) {
   const [state, setState] = useState<DetailState>(() => buildDetailState(q))
+  // Raw text of an option-code box while it has focus — see the input below.
+  const [codeDrafts, setCodeDrafts] = useState<Record<number, string>>({})
   // Display-only fallback: the extractor stashes the routing sentence in
   // question.validation.routing_verbatim (one shared string) so it survives even
   // when the structured show_if/terminate_if is nulled out as unresolvable — the
@@ -435,9 +437,26 @@ function QuestionDetail({
               <div key={i} className="flex items-center gap-2">
                 <input
                   type="number"
-                  value={o.code}
+                  value={codeDrafts[i] ?? String(o.code)}
                   disabled={!canWrite}
-                  onChange={(e) => setOption(i, { code: Number(e.target.value) })}
+                  // Clearing the box gives "", and Number("") is 0 — so
+                  // backspacing to retype a code silently wrote code 0 into the
+                  // questionnaire. Hold the raw text while editing, commit only
+                  // a real number, and restore the stored code on blur.
+                  onChange={(e) => {
+                    const raw = e.target.value
+                    setCodeDrafts((d) => ({ ...d, [i]: raw }))
+                    if (raw.trim() !== '' && Number.isFinite(Number(raw))) {
+                      setOption(i, { code: Number(raw) })
+                    }
+                  }}
+                  onBlur={() =>
+                    setCodeDrafts((d) => {
+                      const next = { ...d }
+                      delete next[i]
+                      return next
+                    })
+                  }
                   className="h-8 w-20 px-2 rounded-md border border-slate-300 text-sm disabled:bg-slate-50"
                   aria-label="option code"
                 />

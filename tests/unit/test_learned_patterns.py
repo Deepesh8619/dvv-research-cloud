@@ -65,12 +65,18 @@ def test_taught_type_outranks_the_built_in_guess():
 
 
 def test_taught_option_tag_creates_a_real_screen_out():
+    """Asserted through evaluate(): a screen-out that does not fire is not a
+    screen-out, however correct the expression looks."""
+    from src.core.survey_definition import evaluate
+
     text = "S1. Do you work in research?\nYes [SO]\nNo"
     taught = parse_prose_question(
         text, "S1", [LearnedPattern("option_tag", "[SO]", "terminate")]
     )
     assert taught.terminate_if is not None
-    assert taught.terminate_if.value == [1]
+    assert taught.terminate_if.values == [1]
+    assert evaluate(taught.terminate_if, {"S1": [1]}) is True
+    assert evaluate(taught.terminate_if, {"S1": [2]}) is False
 
 
 def test_taught_option_tag_survives_the_bracket_a_founder_types():
@@ -227,3 +233,93 @@ def test_spec_table_randomise_cell_is_read_conservatively():
     assert _randomize_from_cell("") is False
     assert _randomize_from_cell(None) is False
     assert _randomize_from_cell("ask the scripter") is False
+
+
+# --- Screen-outs must actually screen people out ----------------------------
+# These assert on evaluate(), not on the shape of the expression. The bug they
+# pin produced a perfectly reasonable-LOOKING expression that matched nobody:
+# codes went into `value` while `in` is defined as membership in `values`, so
+# evaluate() read `expression.values or []` and every terminate was inert — in
+# the evaluator, in the compiled SurveyJS, and as an empty codes box in the UI.
+
+
+def test_a_prose_terminate_actually_fires():
+    from src.core.survey_definition import evaluate
+
+    fields = parse_prose_question(
+        "S2. Do you work in any of these?\n"
+        "Select all that apply.\n"
+        "Advertising [TERMINATE]\n"
+        "Healthcare",
+        "S2",
+    )
+    expression = fields.terminate_if
+    assert expression.values == [1], "codes must live in `values` for an `in` op"
+    assert evaluate(expression, {"S2": [1]}) is True
+    assert evaluate(expression, {"S2": [2]}) is False
+
+
+def test_a_spec_table_terminate_actually_fires():
+    from src.core.survey_definition import evaluate
+
+    block = _spec([
+        ["Q Name", "Q1"],
+        ["Question text", "Which apply?"],
+        ["Q type", "multi"],
+        ["1", "Agency"],
+        ["3", "Consultant"],
+        ["98", "None of the above"],
+        ["Other details", "TERMINATE if 1,3,98 selected"],
+    ])
+    expression = parse_spec_table(block).terminate_if
+    assert expression.values == [1, 3, 98]
+    assert evaluate(expression, {"Q1": [3]}) is True
+    assert evaluate(expression, {"Q1": [2]}) is False
+
+
+def test_a_negated_terminate_uses_a_declared_op_and_inverts():
+    """"TERMINATE if 1 not selected" produced op `not_in`, which is not in
+    ExprOp — the evaluator, the SurveyJS compiler and the review UI all failed
+    to understand it. `not` over `in` says the same thing in the real language."""
+    from typing import get_args
+
+    from src.core.survey_definition import ExprOp, evaluate
+
+    block = _spec([
+        ["Q Name", "Q1"],
+        ["Question text", "Which apply?"],
+        ["Q type", "multi"],
+        ["1", "Agency"],
+        ["2", "Other"],
+        ["Other details", "TERMINATE if 1 not selected"],
+    ])
+    expression = parse_spec_table(block).terminate_if
+    assert expression.op in get_args(ExprOp)
+    assert evaluate(expression, {"Q1": [1]}) is False  # picked it: continue
+    assert evaluate(expression, {"Q1": [2]}) is True  # did not: screen out
+
+
+def test_every_terminate_op_the_parsers_emit_is_declared():
+    """A guard against reintroducing an op nothing downstream implements."""
+    from typing import get_args
+
+    from src.core.survey_definition import ExprOp
+
+    declared = set(get_args(ExprOp))
+    samples = [
+        "TERMINATE if 1,2 selected",
+        "TERMINATE if 1 not selected",
+        "Terminate if codes 1,2",
+    ]
+    for note in samples:
+        block = _spec([
+            ["Q Name", "Q1"],
+            ["Question text", "W?"],
+            ["Q type", "multi"],
+            ["1", "A"],
+            ["2", "B"],
+            ["Other details", note],
+        ])
+        expression = parse_spec_table(block).terminate_if
+        assert expression is not None, note
+        assert expression.op in declared, f"{note} produced undeclared op {expression.op}"

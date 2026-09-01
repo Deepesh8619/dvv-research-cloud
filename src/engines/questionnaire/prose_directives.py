@@ -384,7 +384,14 @@ def parse_prose_question(
             {
                 "op": "in",
                 "qid": qid,
-                "value": sorted(terminate_codes),
+                # `values`, NOT `value`. Expression defines `in` as membership
+                # in `values`; evaluate() reads `expression.values or []` and
+                # the SurveyJS compiler emits `anyof [...]` from it. Putting the
+                # codes in `value` left both reading an empty list, so every
+                # screen-out this parser produced fired on NOBODY — while the
+                # review UI showed an empty codes box beside a verbatim that
+                # plainly said "TERMINATE if 1,3,98 selected".
+                "values": sorted(terminate_codes),
                 "verbatim_text": "; ".join(terminate_lines),
             }
         )

@@ -476,3 +476,47 @@ Spec-table `Randomize:` cells are free text, so they are read conservatively:
 only an affirmative word turns it on, and an unreadable value stays off and
 stays visible in `validation`. Randomising when the document did not ask is a
 data error, not a nicety.
+
+## Screen-outs that fired on nobody
+
+Found while checking why the review UI showed an empty codes box next to a
+verbatim reading `TERMINATE if 1,3,98 selected`.
+
+`Expression` defines `in` as membership in **`values`**. Both deterministic
+parsers were putting the codes in **`value`**. Nothing raised — the shapes are
+both valid — but everything downstream read the wrong field:
+
+- `evaluate()` does `any(v in chosen for v in (expression.values or []))`,
+  which is `any([])` — **False for every respondent**
+- the SurveyJS compiler emits `anyof []`, so the fielded survey screened out
+  nobody either
+- the review UI reads `cond.values` for an `in` op, hence the empty codes box
+
+**16 of the 17 terminate expressions the parsers produce across the three
+client documents were inert.** The 17th used `op: "not_in"`, which is not in
+`ExprOp` at all — unhandled by `evaluate()`, and the SurveyJS compiler raises
+`ValueError` on it. Negation is now `not` over `in`, which is the declared
+language and already supported by both.
+
+Two existing tests asserted `expr["value"] == [1, 2]` and `op == "not_in"`.
+They were green the whole time. **A test that pins the shape of a value without
+exercising the behaviour can hold a bug in place** — both now assert through
+`evaluate()`, and a new test checks that every op the parsers emit is one
+`ExprOp` declares.
+
+## Two controlled-input round-trips in the review form
+
+Both are the same defect: the input's `value` was derived from the *parsed*
+model, so parsing erased what was being typed before the next keystroke.
+
+**Codes box (`is one of`).** `value={(cond.values ?? []).join(', ')}` meant
+typing `1,` parsed to `[1]` and rendered back as `1` — the comma vanished as it
+was typed, making a multi-code screen-out impossible to enter by hand. The raw
+text is now held while the box has focus; the parsed array still updates on
+every keystroke, and blur re-renders the normalised codes so what is shown is
+what will be saved.
+
+**Option code.** `onChange={{ code: Number(e.target.value) }}` — clearing the
+box gives `""`, and `Number("")` is `0`, so backspacing to retype a code
+silently wrote **code 0** into the questionnaire. It now holds the raw text,
+commits only a real number, and restores the stored code on blur.

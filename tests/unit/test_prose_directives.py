@@ -36,12 +36,23 @@ def test_a_real_prose_question_parses_completely():
 
 
 def test_per_option_terminate_tags_become_one_condition():
-    """The field the UI was showing as missing."""
+    """The field the UI was showing as missing.
+
+    Asserts through evaluate() as well as shape. An earlier version of this
+    test checked `expr["value"] == [1, 2]` and passed while the screen-out
+    matched nobody: `in` is defined as membership in `values`, so evaluate()
+    and the SurveyJS compiler both read an empty list. A test that pins the
+    shape without exercising the behaviour can hold a bug in place.
+    """
+    from src.core.survey_definition import evaluate
+
     f = parse_prose_question(REAL, "S2")
     expr = f.terminate_if.to_dict()
     assert expr["op"] == "in"
-    assert expr["value"] == [1, 2]                # exactly the tagged options
+    assert expr["values"] == [1, 2]               # exactly the tagged options
     assert expr["qid"] == "S2"                    # a real qid, not a placeholder
+    assert evaluate(f.terminate_if, {"S2": [2]}) is True
+    assert evaluate(f.terminate_if, {"S2": [3]}) is False
 
 
 def test_anchor_and_exclusive_tags_land_on_the_option():

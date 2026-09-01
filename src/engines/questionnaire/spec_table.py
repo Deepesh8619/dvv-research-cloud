@@ -212,13 +212,24 @@ def _parse_terminate(
     # resolver in extract_survey_definition nulls any expression referencing a
     # qid that exists nowhere — which silently discarded every terminate this
     # parser extracted. Caught only by running a full extraction end to end.
+    # `values`, not `value`: `in` is defined as membership in `values`, and
+    # both evaluate() and the SurveyJS compiler read that field. Codes in
+    # `value` meant the screen-out matched nobody.
+    verbatim = (notes or "").strip()
+    membership = {
+        "op": "in",
+        "qid": qid,
+        "values": codes,
+        "verbatim_text": verbatim,
+    }
+    if not negated:
+        return Expression.from_dict(membership)
+    # "TERMINATE if 1 not selected" is the inverse. There is no `not_in` op —
+    # emitting one produced an expression the evaluator, the compiler and the
+    # review UI all failed to understand. `not` over `in` is the declared way to
+    # say this and is already handled everywhere.
     return Expression.from_dict(
-        {
-            "op": "not_in" if negated else "in",
-            "qid": qid,
-            "value": codes,
-            "verbatim_text": (notes or "").strip(),
-        }
+        {"op": "not", "children": [membership], "verbatim_text": verbatim}
     )
 
 

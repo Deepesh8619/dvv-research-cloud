@@ -126,11 +126,23 @@ def test_prose_base_escalates_but_a_coded_one_does_not():
 
 
 def test_not_selected_inverts_the_terminate():
+    """Inversion, expressed in an op the rest of the system implements.
+
+    This asserted `op == "not_in"` — an op absent from ExprOp, unhandled by
+    evaluate(), and one the SurveyJS compiler raises on. The test passed; the
+    feature could not work. `not` over `in` is the declared way to say it.
+    """
+    from typing import get_args
+
+    from src.core.survey_definition import ExprOp, evaluate
+
     f = parse_spec_table(_table([
         ["Q Name", "Q1"], ["Pick"], ["1", "A"], ["2", "B"], ["Q type", "Multi"],
         ["Other details", "TERMINATE if 1 not selected"],
     ]))
-    assert f.terminate_if.to_dict()["op"] == "not_in"
+    assert f.terminate_if.op in get_args(ExprOp)
+    assert evaluate(f.terminate_if, {"Q1": [1]}) is False   # picked 1: continue
+    assert evaluate(f.terminate_if, {"Q1": [2]}) is True    # did not: screen out
 
 
 def test_a_table_without_an_id_is_not_a_question():
