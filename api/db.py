@@ -741,6 +741,28 @@ def update_study_status(db: Session, study_id: str, status: str, metadata: dict 
     return study
 
 
+def touch_study_stage(db: Session, study_id: str, stage: str) -> None:
+    """Record which phase a running study is in, and that it is still alive.
+
+    The data pipeline persisted nothing until it finished, so a worker killed
+    part-way (a deploy, a free-tier spin-down, a crash) left the study on
+    "processing" for ever with no way to tell it apart from one still working.
+    This is the same heartbeat the questionnaire extractor already writes, and
+    it is what `_is_stale_study` measures against.
+
+    Never raises: bookkeeping must not be able to kill the pipeline it measures.
+    """
+    try:
+        study = get_study(db, study_id)
+        if study:
+            study.study_metadata = {**(study.study_metadata or {}), "stage": stage}
+            study.updated_at = datetime.now().isoformat()
+            db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[{study_id}] stage heartbeat failed: {exc}")
+        db.rollback()
+
+
 def approve_gate(db: Session, study_id: str, gate: str, approved_by: str):
     """Mark a gate as approved."""
     study = get_study(db, study_id)

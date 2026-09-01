@@ -11,6 +11,9 @@ class StudyMetadata(BaseModel):
     qc_issues: list[str] = []
     qc_warnings: list[str] = []
     error: str | None = None
+    # Which phase a running pipeline is in. Written as a heartbeat, so it also
+    # tells the staleness guard that the worker is still alive.
+    stage: str | None = None
 
 
 class ApprovalRecord(BaseModel):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -191,6 +192,7 @@ class StudyOrchestrator:
         auto_approve_classify: bool = False,
         auto_approve_qc: bool = False,
         require_delivery_approval: bool = True,
+        on_stage: Callable[[str], None] | None = None,
     ) -> StudyRun:
         """
         End-to-end: intake → QC → code → tabs → render.
@@ -203,6 +205,11 @@ class StudyOrchestrator:
             auto_approve_classify: Skip classify gate if confidence > 95%
             auto_approve_qc: Skip QC gate if all checks pass
             require_delivery_approval: Always require delivery approval
+            on_stage: Called with a short stage name as each phase begins.
+                A long pipeline is indistinguishable from a dead worker
+                without it: the caller uses it to record progress so a run
+                that is merely slow is not reported as failed, and so a run
+                that really did die can be told apart from one still going.
 
         Returns:
             StudyRun with all paths populated
@@ -212,6 +219,8 @@ class StudyOrchestrator:
         study_dir.mkdir(parents=True, exist_ok=True)
 
         # 1. CLASSIFY
+        if on_stage:
+            on_stage("classifying")
         logger.info(f"[{run_id}] Classifying {source_file.name}...")
         classification = classify_file(str(source_file))
         logger.info(
@@ -255,6 +264,8 @@ class StudyOrchestrator:
             study.approve("classify", "manual_pending")
 
         # 2. LOAD DATA (once — QC and every engine reuse this frame)
+        if on_stage:
+            on_stage("loading data")
         logger.info(f"[{run_id}] Loading {source_file.suffix} data...")
         try:
             df, datamap = load_study_data(source_file)
@@ -266,6 +277,8 @@ class StudyOrchestrator:
         logger.info(f"[{run_id}] → {len(df)} respondents, {len(datamap.variables)} variables")
 
         # 3. QC (validate the loaded data)
+        if on_stage:
+            on_stage("quality check")
         logger.info(f"[{run_id}] Running QC checks...")
         qc = self._run_qc(df, datamap)
         study.qc_report = qc
@@ -291,6 +304,8 @@ class StudyOrchestrator:
         df.write_parquet(str(data_parquet_path))
 
         # 4. VERBATIM CODING (if any open-ends)
+        if on_stage:
+            on_stage("coding verbatims")
         from src.core.models import VarType
         open_ends = [v for v in datamap.variables if v.type == VarType.TEXT]
         if open_ends:
@@ -340,6 +355,8 @@ class StudyOrchestrator:
             study.stage = StudyStage.CODING_DONE
 
         # 5. CROSSTABS & RENDERING
+        if on_stage:
+            on_stage("tables and decks")
         if tab_plan_file and tab_plan_file.exists():
             tab_plan = load_tab_plan(str(tab_plan_file), datamap)
         else:

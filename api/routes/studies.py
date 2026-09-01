@@ -2,6 +2,7 @@
 
 import logging
 import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -91,6 +92,35 @@ def _restore_source_file(study, upload_dir: Path) -> Path | None:
     return path
 
 
+# Stages the pipeline passes through while a worker should be alive. A study
+# sitting in one of these with no heartbeat has lost its thread.
+_RUNNING_STAGES = frozenset({"classifying", "processing", "intake", "classified"})
+_STUDY_STALE_AFTER = timedelta(minutes=20)
+
+
+def _is_stale_study(study) -> bool:
+    """True when a study claims to be processing but nothing has moved.
+
+    The pipeline writes a stage heartbeat as it goes, so "slow" and "dead" are
+    distinguishable. Twenty minutes is deliberately generous: coding and deck
+    rendering on a large file legitimately take a while, and calling a healthy
+    run dead is worse than showing a spinner slightly too long.
+
+    A malformed or missing timestamp counts as NOT stale — a parse error must
+    never mask a run that is still going.
+    """
+    if study.status not in _RUNNING_STAGES:
+        return False
+    stamp = study.updated_at or study.created_at
+    if not stamp:
+        return False
+    try:
+        started = datetime.fromisoformat(stamp)
+    except (ValueError, TypeError):
+        return False
+    return datetime.now() - started > _STUDY_STALE_AFTER
+
+
 def _run_orchestration_job(study_id: str, client_name: str, file_path: Path) -> None:
     """The full pipeline for one study, on a fresh DB session (daemon thread).
 
@@ -98,14 +128,20 @@ def _run_orchestration_job(study_id: str, client_name: str, file_path: Path) -> 
     durable artifact copies (datamap/crosstabs/coding JSON) so the study
     remains fully servable after the ephemeral disk is wiped.
     """
-    from api.db import SessionLocal, set_study_artifacts
+    from api.db import SessionLocal, set_study_artifacts, touch_study_stage
 
     job_db = SessionLocal()
     try:
         orchestrator = StudyOrchestrator(work_dir=STUDIES_DIR)
+
+        def _stage(name: str) -> None:
+            logger.info(f"[{study_id}] stage: {name}")
+            touch_study_stage(job_db, study_id, name)
+
         result = orchestrator.run_study(
             client_name=client_name,
             source_file=file_path,
+            on_stage=_stage,
             auto_approve_classify=AUTO_APPROVE_CLASSIFY,
             auto_approve_qc=AUTO_APPROVE_QC,
             require_delivery_approval=REQUIRE_DELIVERY_APPROVAL,
@@ -344,6 +380,23 @@ async def get_study_detail(
     study = get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
+
+    # A study whose worker died would otherwise poll for ever behind a spinner,
+    # showing "QC pending…" with nothing behind it. Flip it to a state the UI
+    # can act on, and say what to do about it.
+    if _is_stale_study(study):
+        stage = (study.study_metadata or {}).get("stage")
+        study = update_study_status(
+            db,
+            study_id,
+            "error",
+            {
+                "error": (
+                    f"Processing stopped{f' during {stage}' if stage else ''} and did not "
+                    "resume — the server most likely restarted. Use Re-process to run it again."
+                )
+            },
+        )
 
     approval_records = [
         {"gate": gate, "approved_by": data["approved_by"], "approved_at": data["approved_at"]}

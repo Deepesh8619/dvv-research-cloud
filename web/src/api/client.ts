@@ -43,6 +43,8 @@ export interface Study {
     qc_issues?: string[]
     qc_warnings?: string[]
     error?: string | null
+    /** Which phase a running pipeline is in — also its liveness heartbeat. */
+    stage?: string | null
   }
   approval_chain: Array<{
     gate: string

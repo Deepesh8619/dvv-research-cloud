@@ -392,7 +392,15 @@ function OverviewTab({ study, progress }: { study: Study; progress: number }) {
         <div className="bg-white rounded-lg border border-slate-200 p-6">
           <h2 className="font-semibold text-slate-900 mb-4">Quality control</h2>
           {study.metadata.qc_passed == null ? (
-            <p className="text-sm text-slate-500">QC pending…</p>
+            /* "QC pending…" was shown whether the pipeline was two seconds in,
+               twenty minutes in, or dead — the one thing it never said was
+               which. The stage is a heartbeat, so naming it distinguishes
+               working from stopped without anyone reading a server log. */
+            <p className="text-sm text-slate-500">
+              {study.metadata.stage
+                ? `Running: ${study.metadata.stage}…`
+                : 'Quality checks run once the data file has been read.'}
+            </p>
           ) : (
             <>
               <div className="flex items-center gap-2 mb-3">
