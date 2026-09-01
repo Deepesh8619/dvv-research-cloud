@@ -1002,3 +1002,59 @@ def test_failed_chunks_do_not_all_collide_on_UNKNOWN():
 
     qids = [q.qid for q in survey.questions]
     assert len(qids) == len(set(qids)), f"duplicates remain: {qids}"
+
+
+def test_heartbeat_uses_the_same_clock_as_the_staleness_guard():
+    """A heartbeat must never look stale the instant it is written.
+
+    touch_questionnaire wrote UTC while _is_stale_processing compares against
+    datetime.now(). On any machine not set to UTC the offset alone exceeded the
+    15-minute window, so the first heartbeat of a healthy extraction marked it
+    dead — reporting "the background worker was likely killed by a restart"
+    while the worker was still running. Asserting the two clocks agree is what
+    keeps them from drifting apart again.
+    """
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    from api.routes.questionnaire import _is_stale_processing
+
+    # Exactly what touch_questionnaire writes.
+    just_beaten = SimpleNamespace(
+        status="processing",
+        updated_at=datetime.now().isoformat(),
+        created_at=None,
+    )
+    assert _is_stale_processing(just_beaten) is False
+
+
+def test_progress_fires_before_the_reconciliation_prepass():
+    """Reconciliation must not run silently ahead of the first chunk.
+
+    It is one whole-document LLM call that happens before any question is
+    extracted — measured at 12 minutes on a real upload, against a 15-minute
+    staleness watchdog. With no heartbeat the caller could not tell "slow but
+    working" from "thread died", and healthy runs were reported as failures.
+    """
+    from src.engines.questionnaire.extractor import extract_survey_definition
+    from src.intake.questionnaire_loader import DocumentBlock
+
+    beats: list[tuple[int, int]] = []
+    chunks = [_chunk("Q1")]
+    blocks = [DocumentBlock("paragraph", "Q1. Age?", 0)]
+
+    def fake_run(task, prompt, schema_arg, *args, **kwargs):
+        if task == "questionnaire.verify":
+            return _response({"faithful": True, "discrepancies": []})
+        return _response(_extraction_content(qid="Q1"))
+
+    with patch(_EXTRACT, side_effect=fake_run):
+        extract_survey_definition(
+            chunks,
+            study_id="s1",
+            blocks=blocks,
+            on_progress=lambda done, total: beats.append((done, total)),
+        )
+
+    # At least one beat before any chunk was finished.
+    assert beats and beats[0][0] == 0, beats

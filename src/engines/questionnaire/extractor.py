@@ -600,7 +600,13 @@ def extract_question(
     # on an option is a screen-out, "[PN: RANDOMIZE]" is randomisation. Two of
     # the three real client documents are prose, so this is not a niche path.
     prose = parse_prose_question(chunk.chunk_text, chunk.candidate_qid)
-    if prose is not None and (prose.options or prose.terminate_if):
+    # `prose.complete` FIRST. The gate used to be options-or-terminate alone,
+    # which silently threw away every question the prose parser resolves best:
+    # an open end, a numeric entry and a display screen all have no options and
+    # no screen-out, so a fully-read "[PN: TEXTBOX]" question fell through to a
+    # full LLM extraction anyway. Measured on a 3-question document: 951s and
+    # three model calls, for questions the parser answers in milliseconds.
+    if prose is not None and (prose.complete or prose.options or prose.terminate_if):
         via_prose = _extract_via_prose(chunk, prose)
         if via_prose is not None:
             return via_prose
@@ -866,7 +872,18 @@ def extract_survey_definition(
     if detection is not None and rules_for_profile is not None:
         learned_rules = list(rules_for_profile(detection.profile.slug) or [])
     if blocks is not None:
+        # Heartbeat BEFORE and AFTER reconciliation. This is a single
+        # whole-document LLM call that runs before any chunk is extracted, and
+        # it was completely silent: measured at 12 minutes on one upload,
+        # against a 15-minute staleness watchdog. The run was declared dead
+        # ("the background worker was likely killed by a restart") while it was
+        # working perfectly — and on a larger document it never survived at all.
+        # Two callbacks cost nothing and make the pre-pass visible as progress.
+        if on_progress is not None:
+            on_progress(0, len(chunks))
         chunks = reconcile_segmentation(blocks, chunks, reconcile_meta)
+        if on_progress is not None:
+            on_progress(0, len(chunks))
 
     results: list[ExtractionResult] = []
     consecutive_backend_failures = 0

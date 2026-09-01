@@ -1394,5 +1394,12 @@ def touch_questionnaire(db: Session, questionnaire_id: str) -> None:
         QuestionnaireDB.id == questionnaire_id
     ).first()
     if questionnaire:
-        questionnaire.updated_at = datetime.utcnow().isoformat()
+        # datetime.now(), NOT utcnow(): the staleness guard compares this
+        # against datetime.now(), and every other writer in this module uses
+        # local time. Writing UTC here made the heartbeat land one timezone
+        # offset in the past, so on any machine not set to UTC the very first
+        # heartbeat looked older than the 15-minute window and killed a healthy
+        # extraction. It reported "the background worker was likely killed by a
+        # restart" while the worker was still running.
+        questionnaire.updated_at = datetime.now().isoformat()
         db.commit()

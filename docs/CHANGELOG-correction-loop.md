@@ -375,3 +375,38 @@ questions the parsers escalate.
 One test double had to be tightened: it dispatched on the substring `"Q2"`, and
 the new guidance cites `[SHOW Q26 LIST]` as an example, which silently swapped
 two questions. It now matches on the question wording.
+
+## Three production bugs found by running the real upload path
+
+The provenance work forced an end-to-end upload, which had not been done since
+the parsers landed. Each of these made extraction fail or waste money, and none
+was visible from the test suite.
+
+**1. Every question paid for a full LLM extraction it did not need.**
+`extract_question` gated the prose parser on `prose.options or
+prose.terminate_if`. An open end, a numeric entry and a display screen have
+neither — so exactly the questions the prose parser resolves best fell through
+to a full model call anyway. Measured on a 3-question document: 951 seconds and
+three model calls, for questions the parser answers in milliseconds. Across the
+three real client documents, 33 more questions now avoid a full extraction
+(199 → 232 of 245 chunks).
+
+**2. The extraction heartbeat wrote a different clock from the watchdog.**
+`touch_questionnaire` used `datetime.utcnow()`; `_is_stale_processing` compares
+against `datetime.now()`. On any machine not set to UTC the timezone offset
+alone exceeded the 15-minute staleness window, so the *first* heartbeat of a
+healthy run marked it dead — reporting "the background worker was likely killed
+by a restart" while the worker was still running. Local development on a
+non-UTC machine could never complete an extraction.
+
+**3. The reconciliation pre-pass ran silently for 12 minutes.**
+`reconcile_segmentation` is one whole-document LLM call that runs *before* any
+chunk is extracted. It emitted no progress, so the watchdog saw a row that had
+not moved. Measured at 12 minutes on one upload against a 15-minute window —
+which is why a large document "never finished". It now heartbeats before and
+after.
+
+Together these are why the full 75-question extraction had never completed end
+to end. The worker also logs its stages now (thread started, blocks → chunks,
+extracting N) — it was previously silent from upload until the first extracted
+question, which is what made this undiagnosable from the logs alone.

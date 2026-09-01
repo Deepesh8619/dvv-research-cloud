@@ -283,6 +283,12 @@ def _run_extraction(
 
     job_db = SessionLocal()
     try:
+        # Stage logs, not debug scaffolding: until these existed the worker was
+        # silent from "uploaded" until its first extracted question, so a stall
+        # anywhere in load/segment/detect was indistinguishable from a thread
+        # that never started — and the only symptom was the 15-minute watchdog
+        # reporting "the worker was likely killed by a restart".
+        logger.info(f"[{study_id}] extraction thread started for {questionnaire_id}")
         suffix = file_path.suffix.lower()
         if suffix == ".docx":
             blocks = load_docx(file_path)
@@ -290,6 +296,9 @@ def _run_extraction(
             blocks = load_pdf(file_path)
 
         chunks = segment_into_questions(blocks)
+        logger.info(
+            f"[{study_id}] loaded {len(blocks)} blocks -> {len(chunks)} question chunks"
+        )
         # Founder-taught rules for whichever profile this document turns out to
         # be (correction loop). Passed as a provider because only detection —
         # inside the extractor — knows the slug. This is the line that makes a
@@ -324,6 +333,7 @@ def _run_extraction(
             set_questionnaire_definition(job_db, questionnaire_id, partial.to_json())
             logger.info(f"[{study_id}] checkpoint saved {done}/{total}")
 
+        logger.info(f"[{study_id}] extracting {len(chunks)} chunks")
         survey = extract_survey_definition(
             chunks,
             study_id=study_id,
