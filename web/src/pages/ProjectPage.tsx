@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+
+import CrosscheckPanel from '../components/CrosscheckPanel'
 import axios from 'axios'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ProfileVariable, Study, studiesApi, shareApi, ShareLink, StudyProfile, questionnaireApi } from '../api/client'
@@ -270,7 +272,7 @@ export default function ProjectPage() {
         </nav>
       </div>
 
-      {tab === 'Overview' && (noData ? <NoDataState /> : <OverviewTab study={study} progress={progress} />)}
+      {tab === 'Overview' && (noData ? <NoDataState /> : <OverviewTab study={study} progress={progress} canWrite={hasWriteRole(user?.role)} />)}
       {tab === 'Reports' && (noData ? <NoDataState /> : <ReportsTab study={study} />)}
       {tab === 'Activity' && <ActivityTab study={study} />}
 
@@ -356,7 +358,15 @@ function NoDataState() {
   )
 }
 
-function OverviewTab({ study, progress }: { study: Study; progress: number }) {
+function OverviewTab({
+  study,
+  progress,
+  canWrite,
+}: {
+  study: Study
+  progress: number
+  canWrite: boolean
+}) {
   return (
     <div className="grid grid-cols-3 gap-6">
       <div className="col-span-2 space-y-6">
@@ -387,6 +397,9 @@ function OverviewTab({ study, progress }: { study: Study; progress: number }) {
             ))}
           </div>
         </div>
+
+        {/* Data vs questionnaire — the advanced check, run on request. */}
+        {canWrite && <CrosscheckPanel studyId={study.id} />}
 
         {/* QC */}
         <div className="bg-white rounded-lg border border-slate-200 p-6">

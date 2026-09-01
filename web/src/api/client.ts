@@ -245,6 +245,11 @@ export const studiesApi = {
     )
   },
 
+  /** Check the collected data against the questionnaire it was collected under. */
+  crosscheck: async (id: string) => {
+    return api.post<CrosscheckReport>(`/studies/${id}/crosscheck`, {})
+  },
+
   archive: async (id: string) => {
     return api.delete(`/studies/${id}`)
   },
@@ -708,6 +713,29 @@ export interface ProfileRule {
   approved_by: string | null
   approved_at: string | null
   created_at: string | null
+}
+
+export interface Discrepancy {
+  qid: string
+  kind: string
+  severity: string
+  detail: string
+  n_rows: number
+  variables: string[]
+  example_rows: number[]
+}
+
+export interface CrosscheckReport {
+  passed: boolean
+  n_rows: number
+  checked: Record<string, number>
+  skipped: string[]
+  findings: Discrepancy[]
+  linked_questions: number
+  unmatched_questions: string[]
+  unmatched_variables: string[]
+  run_by?: string
+  run_at?: string
 }
 
 export const correctionsApi = {

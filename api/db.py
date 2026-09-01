@@ -90,6 +90,9 @@ class StudyDB(Base):
     coding_json = Column(String, nullable=True)
     source_filename = Column(String, nullable=True)
     source_file_b64 = Column(String, nullable=True)  # gzip + base64 of the upload
+    # Last data-vs-questionnaire cross-check. Durable so the finding survives
+    # the ephemeral run directory it was computed from.
+    crosscheck_json = Column(String, nullable=True)
 
 
 class ChatMessageDB(Base):
@@ -635,6 +638,7 @@ def _ensure_new_columns():
             "coding_json": "TEXT",
             "source_filename": "VARCHAR",
             "source_file_b64": "TEXT",
+            "crosscheck_json": "TEXT",
         },
         "profile_rules": {
             # The machine-applicable half of a learned rule, added after
@@ -809,6 +813,7 @@ def set_study_artifacts(
     coding_json: str = None,
     source_filename: str = None,
     source_file_b64: str = None,
+    crosscheck_json: str = None,
 ):
     """Persist durable copies of a study's artifacts (free-tier survival kit).
 
@@ -822,6 +827,8 @@ def set_study_artifacts(
             study.coding_json = coding_json
         if source_filename is not None:
             study.source_filename = source_filename
+        if crosscheck_json is not None:
+            study.crosscheck_json = crosscheck_json
         if source_file_b64 is not None:
             study.source_file_b64 = source_file_b64
         study.updated_at = datetime.now().isoformat()

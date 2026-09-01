@@ -1,5 +1,6 @@
 """Study endpoints."""
 
+import json
 import logging
 import threading
 from datetime import datetime, timedelta
@@ -876,3 +877,92 @@ async def revoke_study_share_link(
     logger.info(f"[{study_id}] Share link revoked by {user.name}")
 
     return {"status": "revoked", "token": revoked_link.token}
+
+
+@router.post("/studies/{study_id}/crosscheck")
+async def crosscheck_study(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Check the collected data against the questionnaire it was collected under.
+
+    This is the step that joins the two halves of the tool. The standard
+    pipeline validates a data file *on its own terms* — speeders, duplicates,
+    straightliners — which says nothing about whether the data matches the
+    instrument the client signed off. That comparison needs both, so it is an
+    explicit action rather than something that silently happens on upload:
+    a study may have data long before its questionnaire is approved, and
+    running this against an unreviewed extraction would report the parser's
+    mistakes as the client's.
+
+    Deterministic throughout — no model is called. Every finding names the
+    question, the count and example row numbers so a researcher can open the
+    file and see it for themselves.
+    """
+    from api.db import list_questionnaires_for_study, record_audit, set_study_artifacts
+    from src.core.models import DataMap
+    from src.core.survey_definition import SurveyDefinition
+    from src.engines.qc.discrepancy import check_against_questionnaire
+    from src.engines.questionnaire.linker import link_questions_to_datamap
+
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    questionnaires = list_questionnaires_for_study(db, study_id)
+    questionnaire = questionnaires[0] if questionnaires else None
+    definition_json = getattr(questionnaire, "definition_json", None) if questionnaire else None
+    if not definition_json:
+        raise HTTPException(
+            status_code=409,
+            detail="This project has no extracted questionnaire yet. Upload and "
+            "review one first — the cross-check compares the data against it.",
+        )
+    if not study.datamap_json:
+        raise HTTPException(
+            status_code=409,
+            detail="This project has no data file yet. Upload the data and let "
+            "processing finish, then run the cross-check.",
+        )
+
+    survey = SurveyDefinition.from_json(definition_json)
+    datamap = DataMap.from_json(study.datamap_json)
+    link_report = link_questions_to_datamap(survey, datamap)
+
+    parquet_path = STUDIES_DIR / study_id / "data.parquet"
+    if not parquet_path.exists():
+        # The run directory is ephemeral on the free tier; the durable copies
+        # are enough to link, but the row-level checks need the actual rows.
+        raise HTTPException(
+            status_code=409,
+            detail="The data file is no longer on disk (the server restarted). "
+            "Use Re-process to rebuild it, then run the cross-check.",
+        )
+
+    report = check_against_questionnaire(survey, link_report.links, parquet_path)
+    payload = {
+        **report.to_dict(),
+        "linked_questions": len(link_report.links),
+        "unmatched_questions": link_report.unmatched_questions,
+        "unmatched_variables": link_report.unmatched_variables,
+        "run_by": user.name,
+        "run_at": datetime.now().isoformat(),
+    }
+    set_study_artifacts(db, study_id, crosscheck_json=json.dumps(payload))
+    record_audit(
+        db,
+        entity="study",
+        entity_id=study_id,
+        action="crosschecked",
+        actor_id=user.id,
+        summary=(
+            f"{len(report.findings)} discrepancies over {report.n_rows} rows; "
+            f"{len(link_report.links)} questions linked"
+        ),
+    )
+    logger.info(
+        f"[{study_id}] cross-check: {len(report.findings)} findings, "
+        f"{len(link_report.links)} linked, {len(link_report.unmatched_questions)} unmatched"
+    )
+    return payload

@@ -166,3 +166,51 @@ with learned rules off and on:
 ```bash
 PYTHONPATH=. .venv/bin/python scripts/benchmark_extraction.py path/to/client.docx --ab --profile gbk_spec_table
 ```
+
+---
+
+## Workflow 4 — Data vs questionnaire (the cross-check)
+
+The standard data pipeline validates a file *on its own terms*: speeders,
+straightliners, duplicates, gibberish open-ends. None of that says whether the
+data matches the instrument the client signed off. That comparison needs both
+halves, and it is the check a DP shop is actually paid for.
+
+**It is an explicit action, not something that happens on upload.** A project
+often has data before its questionnaire has been reviewed, and running this
+against an unreviewed extraction would report the parser's mistakes as the
+client's. `Run cross-check` on the project overview (owner / analyst / founder).
+
+```
+questionnaire (approved)  ─┐
+datamap                    ├─ link_questions_to_datamap()  → which variable holds which question
+data.parquet              ─┘
+                              ↓
+                     check_against_questionnaire()
+                              ↓
+        undeclared_code · single_multi · out_of_range · terminate_violated
+```
+
+| Check | What it means | Severity |
+|---|---|---|
+| `undeclared_code` | A value in the data that the question never declared | error |
+| `single_multi` | More than one response to a single-answer question | error |
+| `out_of_range` | A number outside the stated minimum/maximum | error |
+| `terminate_violated` | A completed respondent the screen-out should have removed | error |
+
+No model is called anywhere in this. Every finding names the question, the
+number of respondents and example row numbers, so a researcher can open the
+file and see it. A finding nobody can reproduce by hand is worse than none.
+
+**What was *not* checked is reported too.** `checked` counts what ran and
+`skipped` says what could not — a screen-out referencing a question that could
+not be linked to a variable is listed as skipped, never silently passed.
+"Nothing found" and "nothing looked at" must never read the same.
+
+Common system codes (99, 98, 0, −1 …) are excluded from the undeclared-code
+check by default: they appear in nearly every real file without being written
+into the response list, and flagging them would bury the real findings.
+
+**Known limit.** `show_if` routing is checked by `linker.cross_validate_routing`
+and is not yet folded into this report. Grid questions are linked but their rows
+are not individually range-checked.
