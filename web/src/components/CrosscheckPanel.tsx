@@ -17,10 +17,13 @@ import { CrosscheckReport, studiesApi } from '../api/client'
  * mistakes as the client's.
  */
 const KIND_LABELS: Record<string, string> = {
-  undeclared_code: 'Answer code not in the questionnaire',
+  undeclared_code: 'Answer not in the scripted punch list',
   single_multi: 'More than one answer to a single-answer question',
   out_of_range: 'Number outside the allowed range',
   terminate_violated: 'Respondent who should have been screened out',
+  type_mismatch: 'Read as a coded question, but the data says otherwise',
+  option_not_scripted: 'Option in the questionnaire with no punch in the data',
+  punch_not_in_questionnaire: 'Punch in the data the questionnaire never offers',
 }
 
 const CHECK_LABELS: Record<string, string> = {
@@ -128,6 +131,36 @@ export default function CrosscheckPanel({ studyId }: { studyId: string }) {
                 </div>
               ))}
             </div>
+          )}
+
+          {/* What every column in the file is for. Hidden variables carry the
+              segment and quota logic a client analyses by, so they are named
+              rather than buried in an "unmatched" count. */}
+          {report.variable_roles && report.variable_roles.length > 0 && (
+            <details className="text-xs text-slate-600">
+              <summary className="cursor-pointer text-slate-500 hover:text-slate-700">
+                What the {report.variable_roles.reduce((a, r) => a + r.n, 0)} data columns are
+              </summary>
+              <ul className="mt-2 space-y-0.5">
+                {report.variable_roles.map((r) => (
+                  <li key={r.role} className="flex gap-2">
+                    <span className="font-mono tabular-nums w-10 text-right">{r.n}</span>
+                    <span>{r.label}</span>
+                  </li>
+                ))}
+              </ul>
+              {report.hidden_variables && report.hidden_variables.length > 0 && (
+                <p className="mt-2 text-slate-500">
+                  Hidden variables are computed by the script and are meant to be
+                  absent from the questionnaire — they are not gaps:{' '}
+                  <span className="font-mono">
+                    {report.hidden_variables.slice(0, 6).join(', ')}
+                    {report.hidden_variables.length > 6 &&
+                      ` and ${report.hidden_variables.length - 6} more`}
+                  </span>
+                </p>
+              )}
+            </details>
           )}
 
           {(report.skipped.length > 0 || report.unmatched_questions.length > 0) && (

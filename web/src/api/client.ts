@@ -733,7 +733,11 @@ export interface CrosscheckReport {
   findings: Discrepancy[]
   linked_questions: number
   unmatched_questions: string[]
+  /** Columns that SHOULD map to a question and do not — hidden variables,
+      MaxDiff design and system columns are excluded, being correctly absent. */
   unmatched_variables: string[]
+  variable_roles?: Array<{ role: string; label: string; n: number }>
+  hidden_variables?: string[]
   run_by?: string
   run_at?: string
 }

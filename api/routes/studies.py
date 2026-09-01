@@ -904,6 +904,7 @@ async def crosscheck_study(
     from src.core.models import DataMap
     from src.core.survey_definition import SurveyDefinition
     from src.engines.qc.discrepancy import check_against_questionnaire
+    from src.engines.qc.variable_roles import ROLE_LABELS, summarize, unexplained
     from src.engines.questionnaire.linker import link_questions_to_datamap
 
     study = get_study(db, study_id)
@@ -948,11 +949,22 @@ async def crosscheck_study(
     report = check_against_questionnaire(
         survey, link_report.links, parquet_path, datamap=datamap
     )
+    # "412 variables no question claimed" is not a finding — most of those are
+    # hidden variables, MaxDiff design columns and system fields that are
+    # SUPPOSED to be absent from a questionnaire. Report what each column is
+    # for, and list only the ones genuinely worth chasing.
+    matched = {name for link in link_report.links for name in link.variable_names}
+    roles = summarize(datamap)
     payload = {
         **report.to_dict(),
         "linked_questions": len(link_report.links),
         "unmatched_questions": link_report.unmatched_questions,
-        "unmatched_variables": link_report.unmatched_variables,
+        "unmatched_variables": unexplained(datamap, matched),
+        "variable_roles": [
+            {"role": role, "label": ROLE_LABELS[role], "n": n}
+            for role, n in sorted(roles.counts().items(), key=lambda kv: -kv[1])
+        ],
+        "hidden_variables": roles.of("hidden"),
         "run_by": user.name,
         "run_at": datetime.now().isoformat(),
     }
