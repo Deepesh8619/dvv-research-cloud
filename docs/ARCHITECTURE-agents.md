@@ -75,29 +75,47 @@ reuse), `tabs` (crosstab, weighting, significance, tracking), `analysis`
 
 ---
 
-## 3. What is missing: the orchestrator
+### 2.4 Orchestrator — `src/orchestration/`
 
-Today, `classify_file` returns a category and a human picks what happens next.
-Nothing maps *category → operations → engine → escalation*. That mapping is the
-whole of the missing piece, and it is what the Excel/SPSS phase needs.
-
-Proposed as one module, `src/orchestrator/`, with three parts:
-
-### 3.1 The plan
+An end-to-end pipeline runner **already exists** for the data path, with human
+approval gates and three playbooks (`fast_intake`, `standard_intake`,
+`strict_intake` — differing only in which gates auto-approve):
 
 ```
-FileArrived(path, study_id)
-  → classify_file()                     # exists
-  → PLAN[category]                      # new: a table, not a model
-  → [Operation, Operation, ...]         # ordered, each with a precondition
+classify_file()  ->  load data  ->  QC  ->  [gate]  ->  verbatim coding
+   ->  crosstabs  ->  Excel/PPT decks  ->  [delivery gate]
 ```
 
-`PLAN` is a literal dict from category to an ordered list of operations. It is
-deliberately a **table, not a model call**: choosing what to do with a file
-whose type is already known is a lookup, and paying a model to perform a lookup
-is the exact waste this system is designed to avoid.
+It maps a classification to a `FileType`, records a `FileManifest`, and carries
+a `StudyRun` through `StudyStage` with an `approval_chain`. This is the
+"identify which agent to trigger and which operation to perform" machinery,
+built and integration-tested.
 
-### 3.2 The agents (six, and why not more)
+---
+
+## 3. What is actually missing
+
+Not the orchestrator — two specific things inside it.
+
+### 3.1 The questionnaire is not wired into the pipeline
+
+`orchestrator.py` maps `questionnaire -> FileType.WORD_DOC`, and then step 2 is
+`LOAD DATA`. There is no branch that routes a questionnaire to the extraction
+pipeline that `api/routes/questionnaire.py` drives. So the two halves of the
+system — questionnaire understanding and data processing — run from different
+entry points and never meet.
+
+The fix is a branch at step 1: a `questionnaire` classification runs
+extract → review → approve and stores the approved `SurveyDefinition` against
+the study, instead of falling through to the data loader.
+
+### 3.2 The Auditor does not exist
+
+Nothing compares a data file against the questionnaire it was collected under.
+This is the piece the Excel/SPSS phase is really asking for, and §4 sets out
+exactly what it would check.
+
+### 3.3 The agents (six, and why not more)
 
 Each agent owns one engine, states its preconditions, and declares what it does
 when it gets stuck. Six is the count because it is the number of distinct
@@ -194,9 +212,15 @@ train it" from a slogan into a measurable falling cost per document.
 | Intake classification | **built**, rule-first, tested |
 | Chat specialist routing | **built** |
 | Engines for every phase | **built**, tested |
+| Pipeline orchestrator + approval gates + playbooks | **built**, integration-tested |
 | Reader agent behaviour (extract → residue → provenance) | **built**, 64% deterministic |
-| Orchestrator / `PLAN` table | **not built** — §3.1 |
-| Auditor (data vs questionnaire) | **not built** — §4 |
+| Questionnaire branch inside the orchestrator | **not built** — §3.1 |
+| Auditor (data vs questionnaire) | **not built** — §3.2, §4 |
 | Agents that teach the parsers | **not built** — §5, highest value |
+
+An earlier draft of this document said the orchestrator did not exist. It does
+— `src/orchestration/{orchestrator,playbooks,approvals,manifest}.py` — and the
+real gap is narrower and more useful to know: the questionnaire never enters
+it.
 
 Nothing above is described as finished unless it is tested and measured.

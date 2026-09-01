@@ -24,6 +24,9 @@ from src.engines.questionnaire.extractor import (
 from src.intake.questionnaire_loader import QuestionChunk
 
 _EXTRACT = "src.engines.questionnaire.extractor.run_task"
+# reconciler.py has its own module-level import of run_task; a test that
+# passes `blocks` must patch this too or it hits the network.
+_RECONCILE = "src.engines.questionnaire.reconciler.run_task"
 
 
 def _chunk(qid: str = "Q1", text: str = "Q1. Are you aware of Brand X?") -> QuestionChunk:
@@ -1048,7 +1051,14 @@ def test_progress_fires_before_the_reconciliation_prepass():
             return _response({"faithful": True, "discrepancies": []})
         return _response(_extraction_content(qid="Q1"))
 
-    with patch(_EXTRACT, side_effect=fake_run):
+    # Both call sites. reconciler.py imports run_task at module level, so
+    # patching only the extractor's copy leaves the reconciliation pre-pass
+    # making a LIVE network call — which is exactly how this test first hung
+    # the suite for twelve minutes.
+    with (
+        patch(_EXTRACT, side_effect=fake_run),
+        patch(_RECONCILE, side_effect=fake_run),
+    ):
         extract_survey_definition(
             chunks,
             study_id="s1",
