@@ -90,9 +90,12 @@ interface Props {
   onChange: (flat: FlatRouting) => void
   qidOptions: string[] // prior qids available to reference
   disabled?: boolean
+  /** Shown when there are no conditions. "Always shown" is wrong under a
+      terminate rule, so each caller says what empty means for it. */
+  emptyText?: string
 }
 
-export default function RoutingEditor({ label, flat, onChange, qidOptions, disabled }: Props) {
+export default function RoutingEditor({ label, flat, onChange, qidOptions, disabled, emptyText }: Props) {
   if (!flat.editable) {
     return (
       <div>
@@ -139,7 +142,7 @@ export default function RoutingEditor({ label, flat, onChange, qidOptions, disab
       </div>
 
       {flat.conditions.length === 0 ? (
-        <p className="text-sm text-slate-400 mb-2">No condition — always shown.</p>
+        <p className="text-sm text-slate-400 mb-2">{emptyText ?? 'No condition — always shown.'}</p>
       ) : (
         <div className="space-y-2">
           {flat.conditions.map((cond, i) => {

@@ -335,3 +335,43 @@ visible and cheap.
 Two rules are shared by both parsers (`is_derived_wording`,
 `is_single_select_wording`) so a spec-table document and a prose document
 cannot disagree about the same sentence.
+
+## Plain-language question types, and the vocabulary taught to the model
+
+**UI.** The review screen rendered engine identifiers directly: `grid_single`,
+`open_text`, `info`. That asks a researcher to learn our vocabulary before they
+can review anything. One shared map (`web/src/labels/questionTypes.ts`) now
+gives every screen the same plain names and a one-line description of what the
+respondent actually does, so a wrong type is visible without decoding it:
+
+| stored | shown | hint |
+|---|---|---|
+| `single` | One answer | Respondent picks exactly one option. |
+| `multi` | Multiple answers | Can tick as many options as apply. |
+| `grid_single` | Rating grid | Each row rated on the same scale. |
+| `rank` | Ranking | Puts the options in order of preference. |
+| `numeric` | Number | Types a number, e.g. an age or a count. |
+| `open_text` | Written answer | Types their answer in their own words. |
+| `dropdown` | Dropdown list | One answer from a long list. |
+| `info` | Not a question | Display text, or computed by the scripter. |
+
+The stored values are unchanged — this is presentation only.
+
+Two related fixes on the same screen. A derived variable now shows a plain
+callout ("Not asked to respondents … the fields below are expected to be
+empty") instead of an empty question form with an Approve button and no
+explanation. And the two routing panels no longer share one empty message: "No
+condition — always shown" under TERMINATE read as though someone were being
+screened out. Each panel now says what empty means for it.
+
+**Model.** The residue schema could not return `rank` at all — the enum omitted
+it, so a ranking question the parser did not catch had no correct answer
+available. Added, and both prompts now carry the directive vocabulary from the
+inventory: TEXTBOX/OE/NUMERIC OE, scale rows, IN ROWS, RANK, ROTATE vs KEEP
+ORDER, ANCHOR/EXCLUSIVE, borrowed option lists, and all-caps CODE variables.
+The residue prompt stays at ~263 tokens and is only sent for the ~36% of
+questions the parsers escalate.
+
+One test double had to be tightened: it dispatched on the substring `"Q2"`, and
+the new guidance cites `[SHOW Q26 LIST]` as an example, which silently swapped
+two questions. It now matches on the question wording.

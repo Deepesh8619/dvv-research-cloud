@@ -209,7 +209,38 @@ _TYPE_GUIDANCE = (
     "  - free text / open-end -> open_text\n"
     "  - a long list intended as a dropdown -> dropdown\n"
     "  - ranking task -> rank\n"
-    "  - display/instructional text that is not a question -> info"
+    "  - display/instructional text that is not a question -> info\n"
+    # The house vocabulary, taken from an inventory of every bracketed
+    # directive across the three real client questionnaires. These are the
+    # exact strings scripters write; recognising them is not inference.
+    "Scripter shorthand seen in these documents:\n"
+    "  - 'TEXTBOX', 'OPEN END', 'OE: n-CHARACTER MINIMUM', a written blank "
+    "'_ _ _ _' -> open_text\n"
+    "  - 'NUMERIC OE', 'RECORD NUMBER n TO n', 'ENTER NUMBER n-n' -> numeric "
+    "(note 'NUMERIC OE' is a number, not an open end)\n"
+    "  - a scale row written '0=Not Important | 1 | ... | 10=Very Important', "
+    "or 'IN ROWS' / 'RANDOMIZE STATEMENTS' -> grid_single; the listed items "
+    "are the ROWS, not the answer options\n"
+    "  - 'RANK n,n,n' or 'rank your top three' -> rank\n"
+    "  - a superlative ('best describes', 'which one') or a Yes/No pair -> "
+    "single, whatever the type cell says\n"
+    "  - an all-caps 'CODE ... BASED ON ...' wording -> info: this is computed "
+    "by the scripter from other answers and is never asked"
+)
+
+# Directives that carry meaning beyond the type. Each appears verbatim in the
+# client documents; the deterministic parsers handle them, and the model needs
+# the same reading for the chunks that still reach it.
+_DIRECTIVE_GUIDANCE = (
+    "DIRECTIVE SHORTHAND:\n"
+    "  - 'RANDOMIZE' and 'ROTATE' both mean randomize=true; 'KEEP ORDER' and "
+    "'DO NOT RANDOMIZE' mean false.\n"
+    "  - '[ANCHOR]' pins an option to the end of the list; '[EXCLUSIVE]' means "
+    "selecting it clears the others; '[TERMINATE]' on an option screens the "
+    "respondent out when that option is chosen.\n"
+    "  - '[SHOW Q26 LIST]' or 'INSERT RESPONSES FROM Q4' means the options come "
+    "from another question. Do NOT invent them — leave options empty and record "
+    "the reference in instructions."
 )
 
 _RULES = (
@@ -360,6 +391,7 @@ def build_extraction_prompt(
         "You extract ONE market-research survey question from the text chunk below into "
         "structured JSON. The chunk was segmented from a real questionnaire document.\n\n"
         f"{_TYPE_GUIDANCE}\n\n"
+        f"{_DIRECTIVE_GUIDANCE}\n\n"
         f"{_RULES}\n"
         f"{spec}"
         f"{hint}"
@@ -488,12 +520,36 @@ _RESIDUE_FIELDS: dict[str, tuple[dict, str]] = {
     "type": (
         {
             "type": "string",
-            "enum": ["single", "multi", "open_text", "numeric", "grid_single", "info"],
+            "enum": [
+                "single",
+                "multi",
+                "open_text",
+                "numeric",
+                "grid_single",
+                "rank",
+                "info",
+            ],
             "description": "The answer format this question collects",
         },
-        "type: single if exactly one option can be chosen, multi if several can. "
-        "Use the wording and the option list to decide — 'select all that apply' "
-        "and a 'None of these' code both indicate multi.",
+        # Conventions inventoried from every bracketed directive across the
+        # three real client questionnaires. The parser resolves these on its
+        # own; they are repeated here because the questions that still reach a
+        # model are the ones where the signal is prose rather than a directive,
+        # and the model was previously guessing against no house style at all.
+        "type: the answer format.\n"
+        "  single — exactly one option; superlatives ('best describes', "
+        "'which one') and yes/no pairs are always single.\n"
+        "  multi — several options; 'select all that apply' or an exclusive "
+        "'None of these' code indicate multi.\n"
+        "  grid_single — the options are ROWS rated on a shared scale; look for "
+        "'each of the following', 'IN ROWS', 'RANDOMIZE STATEMENTS', or a "
+        "scale written as '0=Low | 1 | ... | 10=High'.\n"
+        "  rank — 'rank your top three', 'RANK 1,2,3'.\n"
+        "  numeric — 'ENTER NUMBER', 'RECORD NUMBER n TO n', 'NUMERIC OE'.\n"
+        "  open_text — 'OPEN END', 'TEXTBOX', 'OE: n-CHARACTER MINIMUM', or a "
+        "written blank '_ _ _ _'.\n"
+        "  info — not asked: display text, or a scripter-computed variable "
+        "(an all-caps 'CODE ... BASED ON ...' wording).",
     ),
     "text": (
         {"type": "string", "description": "The question as asked to a respondent"},

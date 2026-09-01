@@ -16,6 +16,7 @@ import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../c
 import { flagInfo } from '../components/questionnaireFlags'
 import CorrectionBox from '../components/CorrectionBox'
 import { useLabel } from '../labels/LabelContext'
+import { typeHint, typeLabel } from '../labels/questionTypes'
 import { canCorrect as hasCorrectRole, canWrite as hasWriteRole } from '../auth/roles'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
@@ -132,7 +133,7 @@ function QuestionRow({
       <div className="flex items-center gap-2">
         <ConfidenceDot conf={q.extraction_confidence} />
         <span className="font-mono text-xs text-slate-700 shrink-0">{q.qid}</span>
-        <span className="text-xs text-slate-400 shrink-0">{q.type}</span>
+        <span className="text-xs text-slate-400 shrink-0">{typeLabel(q.type)}</span>
         {q.approved && (
           <span className="text-[11px] text-emerald-600 shrink-0" title="Approved">
             ✓ approved
@@ -318,6 +319,19 @@ function QuestionDetail({
         </div>
       )}
 
+      {/* A derived variable is computed by the scripter from other answers, so
+          there is no wording, type or routing to review. Saying so plainly beats
+          leaving a reviewer to work out why every field below is blank. */}
+      {q.flags.includes('DERIVED_VARIABLE') && (
+        <div className="text-sm rounded-md px-3 py-2 bg-slate-100 text-slate-700 border border-slate-200">
+          <span className="font-medium">Not asked to respondents.</span>
+          <span className="block mt-0.5">
+            This is a value the scripter calculates from other answers. Nothing here is shown in
+            the survey, so the fields below are expected to be empty — approve it to move on.
+          </span>
+        </div>
+      )}
+
       {/* Source excerpt — reviewers check extraction against origin */}
       {q.source_text && (
         <div>
@@ -354,10 +368,13 @@ function QuestionDetail({
         >
           {QUESTION_TYPES.map((t) => (
             <option key={t} value={t}>
-              {t}
+              {typeLabel(t)}
             </option>
           ))}
         </select>
+        {/* The name alone is not enough to review against — say what the
+            respondent actually does, so a wrong type is obvious on sight. */}
+        <p className="mt-1 text-xs text-slate-500">{typeHint(state.type)}</p>
       </div>
 
       {/* Options */}
@@ -417,6 +434,7 @@ function QuestionDetail({
           canonical screener pattern and validate() explicitly allows it. */}
       <RoutingBlock
         label="Show this question if"
+        emptyText="No condition — everyone sees this question."
         flat={state.showIf}
         verbatim={state.showIfVerbatim ?? routingVerbatim}
         priorQids={priorQids.filter((qid) => qid !== q.qid)}
@@ -425,6 +443,7 @@ function QuestionDetail({
       />
       <RoutingBlock
         label="Terminate / screen out if"
+        emptyText="No screen-out — nobody is disqualified here."
         flat={state.terminateIf}
         verbatim={state.terminateIfVerbatim ?? routingVerbatim}
         priorQids={priorQids}
@@ -471,6 +490,7 @@ function QuestionDetail({
 
 function RoutingBlock({
   label,
+  emptyText,
   flat,
   verbatim,
   priorQids,
@@ -478,6 +498,7 @@ function RoutingBlock({
   onChangeFlat,
 }: {
   label: string
+  emptyText: string
   flat: FlatRouting
   verbatim: string | null
   priorQids: string[]
@@ -489,7 +510,14 @@ function RoutingBlock({
   if (!canWrite && flat.conditions.length === 0 && !flat.raw && !verbatim) return null
   return (
     <div className="grid grid-cols-2 gap-4 border border-slate-200 rounded-md p-3">
-      <RoutingEditor label={label} flat={flat} onChange={onChangeFlat} qidOptions={priorQids} disabled={!canWrite} />
+      <RoutingEditor
+        label={label}
+        emptyText={emptyText}
+        flat={flat}
+        onChange={onChangeFlat}
+        qidOptions={priorQids}
+        disabled={!canWrite}
+      />
       <div>
         <span className="text-xs font-medium uppercase tracking-wide text-slate-500 block mb-1">
           Verbatim source

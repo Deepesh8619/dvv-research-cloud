@@ -8,6 +8,7 @@ import {
   QuestionOption,
   questionnaireApi,
 } from '../api/client'
+import { typeLabel } from '../labels/questionTypes'
 import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
@@ -299,7 +300,7 @@ function QuestionDetail({
           >
             {QUESTION_TYPES.map((t) => (
               <option key={t} value={t}>
-                {t}
+                {typeLabel(t)}
               </option>
             ))}
           </select>
@@ -438,7 +439,7 @@ function AddQuestionForm({
         >
           {QUESTION_TYPES.map((t) => (
             <option key={t} value={t}>
-              {t}
+              {typeLabel(t)}
             </option>
           ))}
         </select>

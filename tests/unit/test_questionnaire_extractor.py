@@ -234,8 +234,11 @@ def test_survey_definition_from_clean_chunks_validates():
     def fake_run(task, prompt, schema_arg, *args, **kwargs):
         if task == "questionnaire.verify":
             return _response({"faithful": True, "discrepancies": []})
-        # Extraction: pick content by which qid the prompt is about.
-        qid = "Q2" if "Q2" in prompt else "Q1"
+        # Extraction: pick content by which chunk the prompt is about. Match on
+        # the wording, not on the bare qid — the prompt's guidance block cites
+        # example qids ("[SHOW Q26 LIST]"), so a substring test for "Q2" matched
+        # the Q1 prompt and silently swapped the two questions.
+        qid = "Q2" if "Overall satisfaction?" in prompt else "Q1"
         return _response(extraction_by_qid[qid])
 
     with patch(_EXTRACT, side_effect=fake_run):
