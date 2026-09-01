@@ -300,7 +300,11 @@ class QuestionOrderRequest(BaseModel):
 
 class FieldingLinkResponse(BaseModel):
     """A created/listed fielding link. `respondent_path` is the public URL path
-    a respondent visits (no auth); `counts` is present in list responses."""
+    a respondent visits (no auth); `counts` is present in list responses.
+
+    `unenforced_routing` names questions whose routing survived extraction only
+    as prose: it is preserved for a human but cannot be evaluated, so those
+    questions are shown to EVERY respondent."""
 
     id: str
     study_id: str
@@ -312,6 +316,7 @@ class FieldingLinkResponse(BaseModel):
     created_at: str
     closed_at: str | None = None
     respondent_path: str
+    unenforced_routing: list[str] = []
     counts: dict = {}
     # Vendor redirect templates (T10); None when unset.
     redirect_complete: str | None = None

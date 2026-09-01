@@ -105,3 +105,56 @@ def test_genuine_display_text_is_still_shown():
     assert len(elements) == 2
     assert elements[0]["type"] == "html"
     assert "Thank you" in elements[0]["html"]
+
+
+# --- 3. Routing that exists only as prose is not applied in the field -------
+
+
+def test_a_question_whose_routing_is_only_prose_is_named_before_launch():
+    """The silent failure this prevents.
+
+    When extraction cannot resolve "ASK IF AWARE OF BRAND AT Q4" into a
+    question and codes, it keeps the sentence so a human can act on it. A
+    sentence cannot be evaluated, so the question is shown to EVERY
+    respondent — the questionnaire looks routed, the data comes back wrong,
+    and nothing in between says so.
+    """
+    from api.routes.fielding import _unenforced_routing
+
+    routed = Question(
+        qid="Q5",
+        text="Which brand do you prefer?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=1, label="A")],
+        validation={"routing_verbatim": "ASK IF AWARE OF BRAND AT Q4"},
+    )
+    plain = Question(qid="Q1", text="How old are you?", type=QuestionType.NUMERIC)
+    assert _unenforced_routing(_survey([routed, plain])) == ["Q5"]
+
+
+def test_a_question_with_real_structured_routing_is_not_flagged():
+    """Resolved routing IS compiled and enforced — it must not be warned about."""
+    from api.routes.fielding import _unenforced_routing
+
+    resolved = Question(
+        qid="Q5",
+        text="Which brand?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=1, label="A")],
+        show_if=Expression.from_dict({"op": "in", "qid": "Q4", "values": [1]}),
+        validation={"routing_verbatim": "ASK IF AWARE OF BRAND AT Q4"},
+    )
+    assert _unenforced_routing(_survey([resolved])) == []
+
+
+def test_prose_routing_really_does_not_reach_the_respondent():
+    """Proves the premise rather than assuming it: no visibleIf is emitted."""
+    routed = Question(
+        qid="Q5",
+        text="Which brand do you prefer?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=1, label="A")],
+        validation={"routing_verbatim": "ASK IF AWARE OF BRAND AT Q4"},
+    )
+    element = compile_to_surveyjs(_survey([routed]))["pages"][0]["elements"][0]
+    assert "visibleIf" not in element

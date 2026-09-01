@@ -91,6 +91,10 @@ STATUS_TERMINATE = 20
 STATUS_SECURITY = 30  # duplicate-pid screen-out (T10)
 STATUS_OVERQUOTA = 40  # quota engine (T10)
 
+# Where the extractor stashes a routing sentence it could not resolve into a
+# structured condition (mirrors questionnaire.py's key).
+_ROUTING_VERBATIM_KEY = "routing_verbatim"
+
 # status_code -> the redirect-template column on FieldingLinkDB.
 _REDIRECT_COL = {
     STATUS_COMPLETE: "redirect_complete",
@@ -148,6 +152,23 @@ def _matching_cells(cells, answers: dict, decidable_only: bool = False):
             continue
         if evaluate(expr, answers):
             out.append(cell)
+    return out
+
+
+def _unenforced_routing(survey) -> list[str]:
+    """Questions whose routing will NOT be applied to respondents.
+
+    When extraction cannot resolve a routing sentence to a question and codes,
+    it keeps the sentence verbatim so a human can act on it — but a sentence is
+    not something the field engine can evaluate. Such a question is shown to
+    EVERYONE, which is silent: the questionnaire looks routed, the data comes
+    back wrong, and nothing in between says so.
+    """
+    out = []
+    for question in survey.questions:
+        verbatim = (question.validation or {}).get(_ROUTING_VERBATIM_KEY)
+        if verbatim and question.show_if is None:
+            out.append(question.qid)
     return out
 
 
@@ -243,11 +264,23 @@ async def create_link(
         created_by=user.email,
         redirects=redirects,
     )
+    unenforced = _unenforced_routing(survey)
+    if unenforced:
+        # Not a refusal: a link is often opened deliberately for a soft launch.
+        # But routing that exists only as prose is NOT applied in the field —
+        # the question is shown to every respondent — and that is invisible
+        # unless it is said out loud at the moment the link is created.
+        logger.warning(
+            f"[{study_id}] Fielding link {link.id} opened with {len(unenforced)} "
+            f"question(s) whose routing is not enforced: {', '.join(unenforced[:10])}"
+        )
     logger.info(
         f"[{study_id}] Fielding link {link.id} opened by {user.name} "
         f"(questionnaire {questionnaire.id} v{survey.version})"
     )
-    return _link_response(link, fielding_link_counts(db, link.id))
+    response = _link_response(link, fielding_link_counts(db, link.id))
+    response.unenforced_routing = unenforced
+    return response
 
 
 @router.get(

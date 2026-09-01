@@ -251,3 +251,19 @@ output.
 Not yet modelled: MaxDiff design balance (the `_LF` version columns and
 best/worst pairs are recognised as MaxDiff machinery by the variable-role
 classifier, but the design itself is not validated), and quota cell fill.
+
+### Routing that is preserved but not enforced
+
+When extraction cannot resolve a routing sentence into a question and codes —
+"ASK IF AWARE OF BRAND AT Q4", with no qid or code named — it keeps the
+sentence verbatim so a reviewer can act on it, and leaves `show_if` null. The
+review screen shows the sentence beside the empty condition.
+
+**A sentence cannot be evaluated.** The field engine applies structured
+`show_if` only, so such a question is shown to **every respondent**. Creating a
+fielding link now returns `unenforced_routing` naming those questions, and logs
+a warning. Without it the failure is silent: the questionnaire looks routed,
+the data comes back wrong, and nothing in between says so.
+
+Resolve them in review (set the condition) before a real launch, or accept it
+knowingly for a soft launch.
