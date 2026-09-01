@@ -131,9 +131,11 @@ find, which is the whole argument for citations over guesses.
 - Deployed on Neon Postgres + Render + Vercel
 
 **Test and quality gates**
-- 669 tests
+- 691 Python tests, 8 frontend tests (vitest + Testing Library)
 - `ruff` clean, `tsc` clean
 - Every parser rule has a test naming the real client convention it came from
+- Routing tests assert through `evaluate()`, not the shape of the expression:
+  a screen-out that does not fire is not a screen-out, however correct it looks
 
 ---
 

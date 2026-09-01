@@ -211,7 +211,10 @@ function buildDetailState(q: Question): DetailState {
   }
 }
 
-function QuestionDetail({
+// Exported for tests. The option-code and routing inputs hold non-obvious
+// draft state across keystrokes, and that behaviour is only observable by
+// driving a real input — not from the page's props.
+export function QuestionDetail({
   studyId,
   q,
   priorQids,

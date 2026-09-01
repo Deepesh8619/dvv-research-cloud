@@ -1,0 +1,110 @@
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it } from 'vitest'
+
+import { Question } from '../api/client'
+import { QuestionDetail } from './QuestionnairePage'
+
+/**
+ * Guards the option-code box.
+ *
+ * `Number("")` is 0, so an input that coerced on every keystroke turned
+ * "clear the box to retype the code" into "write code 0 into the
+ * questionnaire" — silently, and only while the box was mid-edit. Nothing in
+ * the component's props shows that; it is only visible by clearing a real
+ * input and looking at what it holds before you finish typing.
+ */
+
+function question(overrides: Partial<Question> = {}): Question {
+  return {
+    qid: 'Q1',
+    text: 'Which of these apply?',
+    type: 'multi',
+    options: [
+      { code: 1, label: 'Alpha' },
+      { code: 98, label: 'None of the above' },
+    ],
+    rows: null,
+    cols: null,
+    required: true,
+    randomize_options: false,
+    show_if: null,
+    terminate_if: null,
+    piping_refs: [],
+    validation: null,
+    source_text: null,
+    source_location: null,
+    extraction_confidence: {},
+    flags: [],
+    approved: false,
+    ...overrides,
+  } as Question
+}
+
+function renderDetail(q: Question = question()) {
+  return render(
+    <QuestionDetail
+      studyId="study_1"
+      q={q}
+      priorQids={['Q1']}
+      canWrite
+      // Keeps the founder-only surfaces (correction box, teach panel) out of
+      // the tree, so this test needs no providers and no network.
+      canCorrect={false}
+      profile={null}
+      onSaved={() => {}}
+      onApproved={() => {}}
+    />,
+  )
+}
+
+describe('option code box', () => {
+  it('stays empty while being cleared instead of snapping to 0', async () => {
+    const user = userEvent.setup()
+    renderDetail()
+
+    const code = screen.getAllByLabelText('option code')[0] as HTMLInputElement
+    expect(code.value).toBe('1')
+
+    await user.clear(code)
+
+    // The regression: this read "0", and tabbing away would have saved code 0.
+    expect(code.value).toBe('')
+  })
+
+  it('restores the stored code when you leave without typing a new one', async () => {
+    const user = userEvent.setup()
+    renderDetail()
+
+    const code = screen.getAllByLabelText('option code')[0] as HTMLInputElement
+    await user.clear(code)
+    await user.click(screen.getAllByLabelText('option label')[0])
+
+    expect(code.value).toBe('1')
+  })
+
+  it('accepts a code typed after clearing', async () => {
+    const user = userEvent.setup()
+    renderDetail()
+
+    const code = screen.getAllByLabelText('option code')[0] as HTMLInputElement
+    await user.clear(code)
+    await user.type(code, '97')
+    await user.click(screen.getAllByLabelText('option label')[0])
+
+    expect(code.value).toBe('97')
+  })
+
+  it('edits one option code without disturbing the others', async () => {
+    const user = userEvent.setup()
+    renderDetail()
+
+    const codes = () => screen.getAllByLabelText('option code') as HTMLInputElement[]
+    await user.clear(codes()[0])
+    await user.type(codes()[0], '5')
+    await user.click(screen.getAllByLabelText('option label')[0])
+
+    expect(codes()[0].value).toBe('5')
+    expect(codes()[1].value).toBe('98')
+  })
+})

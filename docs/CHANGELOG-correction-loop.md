@@ -520,3 +520,36 @@ what will be saved.
 box gives `""`, and `Number("")` is `0`, so backspacing to retype a code
 silently wrote **code 0** into the questionnaire. It now holds the raw text,
 commits only a real number, and restores the stored code on blur.
+
+
+## Frontend tests for the two input regressions
+
+`vitest` + Testing Library (`jsdom`), run with `npm test` in `web/`.
+
+Both tests **type one character at a time**. That is the whole point: these
+were per-keystroke bugs, and setting a whole value at once (`fireEvent.change`)
+reproduces neither — it never asks the component to survive a half-typed state,
+which is exactly where both failed.
+
+Each test was checked against the pre-fix code before being kept:
+
+| test | on the fixed code | on the old code |
+|---|---|---|
+| comma survives while typing `1,3,98` | passes | **fails** |
+| trailing separator `1,` is held | passes | **fails** |
+| blur normalises `1,,3 ,98` to `1, 3, 98` | passes | **fails** |
+| backspacing a code keeps the others | passes | **fails** |
+| cleared option code stays empty, not `0` | passes | **fails** |
+| blur restores the stored code | passes | **fails** |
+| a code typed after clearing is accepted | passes | passes |
+| editing one code leaves the others alone | passes | passes |
+
+The last two are behavioural coverage rather than regression guards — they hold
+on the buggy version too, and are labelled as such rather than counted as
+protection they do not provide. A test that passes on the broken code guards
+nothing, which is the same trap the routing tests fell into: they asserted
+`value == [1, 2]` and stayed green while every screen-out matched nobody.
+
+`QuestionDetail` is exported from `QuestionnairePage.tsx` for this. Rendering
+it with `canCorrect={false}` keeps the founder-only surfaces out of the tree,
+so the test needs no providers and touches no network.
