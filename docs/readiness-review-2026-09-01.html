@@ -165,12 +165,12 @@
 <div class="wrap">
 
 <header class="masthead">
-  <span class="eyebrow">Readiness review · 1 September 2026</span>
+  <span class="eyebrow">Readiness review · 2 September 2026</span>
   <h1>What the tool does today, how fast, and what it still cannot do</h1>
   <p class="standfirst">Every number here was measured on this machine against the three real client questionnaires, not estimated. Where something is unbuilt it says so.</p>
   <div class="meta">
-    <span>699 tests passing</span>
-    <span>691 Python · 8 frontend</span>
+    <span>771 tests passing</span>
+    <span>763 Python · 8 frontend</span>
     <span>ruff clean · tsc clean</span>
     <span>branch main</span>
   </div>
@@ -321,10 +321,15 @@
         <tr><td>SPSS / Excel / datamap readers</td><td><span class="chip ok">Built</span></td><td><code>src/adapters/</code></td></tr>
         <tr><td>Question &harr; datamap variable matching</td><td><span class="chip ok">Built</span></td><td><code>link_questions_to_datamap</code>, 3 deterministic tiers</td></tr>
         <tr><td>Routing checked against real data</td><td><span class="chip warn">Partial</span></td><td><code>cross_validate_routing</code> covers <code>show_if</code> only</td></tr>
+        <tr><td>Data map parsed completely (incl. multi punches)</td><td><span class="chip ok">Built</span></td><td>440 of 440 columns on the client file</td></tr>
+        <tr><td>Masking / piping / least fill understood</td><td><span class="chip ok">Built</span></td><td>13 questions across the three documents</td></tr>
+        <tr><td>Masked option lists checked against data</td><td><span class="chip ok">Built</span></td><td><code>mask_violated</code></td></tr>
         <tr><td>Respondent QC (speeders, straightliners, duplicates, gibberish)</td><td><span class="chip ok">Built</span></td><td><code>src/engines/qc/</code></td></tr>
         <tr><td>Crosstabs, weighting, significance, wave tracking</td><td><span class="chip ok">Built</span></td><td><code>src/engines/tabs/</code></td></tr>
-        <tr><td>Screen-outs validated against data</td><td><span class="chip risk">Not built</span></td><td>Needed for the discrepancy report</td></tr>
-        <tr><td>Option codes / numeric ranges validated against data</td><td><span class="chip risk">Not built</span></td><td>Needed for the discrepancy report</td></tr>
+        <tr><td>Screen-outs validated against data</td><td><span class="chip ok">Built</span></td><td><code>terminate_violated</code></td></tr>
+        <tr><td>Option codes / numeric ranges validated against data</td><td><span class="chip ok">Built</span></td><td>Judged against the scripted punches</td></tr>
+        <tr><td>MaxDiff design balance / quota fill validated</td><td><span class="chip risk">Not built</span></td><td>MaxDiff columns are recognised, the design is not checked</td></tr>
+        <tr><td>Chatbot answering from the cross-check</td><td><span class="chip risk">Not built</span></td><td>Findings are structured and ready to feed it</td></tr>
         <tr><td>Questionnaire routed through the orchestrator</td><td><span class="chip risk">Not built</span></td><td>A questionnaire upload falls through to the data loader</td></tr>
         <tr><td>Wave-to-wave questionnaire diff</td><td><span class="chip warn">Partial</span></td><td>Diff engine exists; re-upload does not use it</td></tr>
         <tr><td>Cost-per-document reporting</td><td><span class="chip risk">Not built</span></td><td>Falling cost is real but only measurable by script</td></tr>
@@ -335,31 +340,84 @@
 
 <section>
   <div class="sec-head">
-    <span class="eyebrow">Next phase</span>
-    <h2>When you upload a data file</h2>
+    <span class="eyebrow">Data phase</span>
+    <h2>Run against a real client file</h2>
   </div>
-  <p>More of this exists than expected. The readers, the variable matching and the respondent QC are built and tested; what is missing is narrow and specific.</p>
-  <p>Each extracted field becomes an assertion the data must satisfy. These are comparisons, not judgements &mdash; the audit needs no model at all:</p>
+  <p>The Google Ads questionnaire was checked against its own export: 750 respondents, 440 columns, a companion data map. It took <strong>1.6 seconds</strong>. Two defects surfaced that no test had caught.</p>
+
+  <div class="callout risk">
+    <h3>The data map was missing 48% of the file</h3>
+    <p>A multi-select question is written in the data map as an <em>unbracketed</em> parent whose columns are listed underneath, in the second column: <code>[DA_GOALSr1] | Generate new customer leads</code>. Only the <code>[NAME]: label</code> form was recognised, so every punch column was skipped — <strong>189 of 440 columns</strong>, and nearly every multi-select question in the study. A one-character difference in the convention was the entire cause. Coverage is now 440 of 440, with no column left undescribed.</p>
+  </div>
+
+  <div class="callout risk">
+    <h3>The cross-check reported 715 findings on good data</h3>
+    <p>It judged answers against the extracted option list and emitted one finding per distinct bad value — 14 of them for ages 32 to 45, against a question the extractor had mis-read as coded. All perfectly good data.</p>
+    <p>The data map is now the authority on what a column holds: an open numeric is never code-checked, and all bad values for a question are one finding. Same file, <strong>715 → 7 findings</strong>, every one true — including three open-end questions the extractor had wrongly read as coded.</p>
+  </div>
+
   <div class="scroll">
     <table>
-      <caption>Checks a data file would be put through, and whether the machinery exists.</caption>
-      <thead>
-        <tr><th>Questionnaire says</th><th>Data must show</th><th>Status</th></tr>
-      </thead>
+      <caption>What the 440 columns in that export actually are.</caption>
+      <thead><tr><th>Role</th><th class="num">Columns</th><th>Belongs in the questionnaire?</th></tr></thead>
       <tbody>
-        <tr><td>Question exists</td><td>A matching variable in the datamap</td><td><span class="chip ok">Built</span></td></tr>
-        <tr><td><code>show_if Q3 = 1</code></td><td>Blank wherever Q3 &ne; 1</td><td><span class="chip ok">Built</span></td></tr>
-        <tr><td><code>options 1&ndash;5</code></td><td>No value outside the declared codes</td><td><span class="chip risk">Not built</span></td></tr>
-        <tr><td><code>terminate_if Q1 in [4,5]</code></td><td>No completed respondent satisfies it</td><td><span class="chip risk">Not built</span></td></tr>
-        <tr><td><code>type: single</code></td><td>Exactly one response per respondent</td><td><span class="chip risk">Not built</span></td></tr>
-        <tr><td><code>range 18&ndash;99</code></td><td>No value outside the range</td><td><span class="chip risk">Not built</span></td></tr>
+        <tr><td>Answer option of a multi-select</td><td class="num">181</td><td>Yes</td></tr>
+        <tr><td>Question</td><td class="num">92</td><td>Yes</td></tr>
+        <tr><td>Hidden variable computed by the script</td><td class="num">89</td><td>No — computed, not asked</td></tr>
+        <tr><td>MaxDiff design or response</td><td class="num">51</td><td>No</td></tr>
+        <tr><td>“Other, specify” text</td><td class="num">17</td><td>No</td></tr>
+        <tr><td>Survey system column</td><td class="num">5</td><td>No</td></tr>
+        <tr><td>Refused / no-answer flag</td><td class="num">3</td><td>No</td></tr>
+        <tr><td>Quality-check flag</td><td class="num">2</td><td>No</td></tr>
       </tbody>
     </table>
   </div>
-  <p>Note the dependency: the terminate check would have reported <em>zero violations, always</em>, before today&rsquo;s fix &mdash; the conditions evaluated false for every respondent. An audit is only as honest as the extraction beneath it.</p>
+  <p>Reporting all 412 unclaimed columns as “unmatched” sent someone looking for questions that were never meant to exist. The chase list is now 252, and the hidden variables are <em>named</em> rather than buried — they carry the segment and quota logic a client analyses by.</p>
+  <p>Those 252 are honest: only 24 of that document&rsquo;s 75 questions are currently read deterministically, so most real columns have no extracted question to match. <strong>Cross-check coverage is capped by extraction coverage.</strong></p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Techniques</span>
+    <h2>What the tool now understands about MR</h2>
+  </div>
+  <p>Read structurally from the directives, every pattern taken verbatim from the three client questionnaires.</p>
+  <div class="scroll">
+    <table>
+      <caption>Masking, piping and least fill — 13 questions across the three documents declare one.</caption>
+      <thead><tr><th>Technique</th><th>Written as</th><th>Understood as</th></tr></thead>
+      <tbody>
+        <tr><td>Masking — only selected</td><td><code>[PN: ONLY DISPLAY OPTIONS SELECTED AT S6]</code></td><td>options ← S6, selected only</td></tr>
+        <tr><td>Masking — rows</td><td><code>[PN: SHOW ONLY ITEMS SELECTED AT Q18 IN ROWS]</code></td><td>rows ← Q18</td></tr>
+        <tr><td>Masking — whole list</td><td><code>[SHOW Q26 LIST]</code></td><td>options ← Q26</td></tr>
+        <tr><td>Masking — minus a pick</td><td><code>[SHOW Q26 LIST EXCEPT FOR Q27 SELECTION]</code></td><td>Q26 minus the Q27 answer</td></tr>
+        <tr><td>Masking — option level</td><td><code>Unaware (Not selected at Q2a)</code></td><td>this option only if not chosen at Q2a</td></tr>
+        <tr><td>Piping — from a question</td><td><code>[INSERT RESPONSE FROM Q8]</code></td><td>Q8&rsquo;s answer into the wording</td></tr>
+        <tr><td>Piping — scripter variable</td><td><code>[INSERT PHARMACY]</code></td><td>recorded by name, never guessed</td></tr>
+        <tr><td>Least fill</td><td><code>ASSIGN BASED ON LEAST FILL</code></td><td>version balanced by fill</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Two distinctions made on purpose. <strong>A pipe is not a mask</strong> — <code>INSERT RESPONSE FROM Q8</code> puts one answer into wording; <code>INSERT BRANDS … FROM Q13</code> builds an option list, and confusing them claims a question&rsquo;s options come from somewhere they don&rsquo;t. <strong>The most specific mask wins</strong> — <code>SHOW Q26 LIST EXCEPT FOR Q27 SELECTION</code> also matches the plain form, and reading it plainly would show a respondent the option they just picked.</p>
+  <p>The payoff is a check nothing else can do: a masked question may only hold codes the respondent chose at the source. A mis-scripted mask shows the wrong list to real people and leaves no other trace in the output.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Fielding</span>
+    <h2>Two defects that made a link unusable</h2>
+  </div>
+  <div class="callout risk">
+    <h3>Every respondent was screened out on their first answer</h3>
+    <p>A negated screen-out — “TERMINATE if 1 not selected”, stored as <code>not(in …)</code> — is <em>true</em> against an empty answer set: the inner test is false, and <code>not false</code> is true. Every question&rsquo;s terminate was judged on every submit, including questions nobody had reached. A screen-out is now only judged once the questions it references have actually been answered — the rule the quota check already used three lines below.</p>
+  </div>
+  <div class="callout risk">
+    <h3>Scripter instructions were being shown to respondents</h3>
+    <p><code>CODE AGE — BASED ON RESPONSES AT S1</code> is an instruction to the programmer. Derived variables now never render, while genuine intro and transition text still does. They also no longer count toward “N of M approved”, which was making the review queue unreachable by including items nobody can act on.</p>
+  </div>
   <div class="callout">
-    <h3>Send a data file when you have one</h3>
-    <p>The most useful pairing is a questionnaire plus the data it produced plus its datamap, ideally one where you already know a discrepancy exists. The matching and routing checks can be run against it immediately; the four missing checks are a contained build on top.</p>
+    <h3>Routing kept as prose is not applied in the field</h3>
+    <p>When extraction cannot resolve “ASK IF AWARE OF BRAND AT Q4” into a question and codes, it keeps the sentence for a reviewer. A sentence cannot be evaluated, so that question is shown to <em>every</em> respondent. Creating a link now names those questions instead of letting it pass silently — the questionnaire looks routed, the data comes back wrong, and nothing in between used to say so.</p>
   </div>
 </section>
 
@@ -381,7 +439,7 @@
   <ul class="plain">
     <li><strong>Cap concurrent extractions.</strong> A small queue, two or three at a time. This is the one item that bites as soon as more than one person uses the tool.</li>
     <li><strong>Report rule-vs-model per document.</strong> The cost is genuinely falling as founders teach it, but nobody can see that without running a script. Make it a number on the project page.</li>
-    <li><strong>Build the four data checks.</strong> Codes, screen-outs, single-response, ranges. All deterministic, all on top of machinery that already exists.</li>
+    <li><strong>Lift extraction coverage on spec-table documents.</strong> 24 of 75 questions on the Google Ads file is what caps everything downstream — the cross-check can only judge what was extracted.</li>
     <li><strong>Wire re-upload to the diff.</strong> Turns a wave revision into a short review instead of a full re-read.</li>
     <li><strong>Route questionnaires through the orchestrator</strong> so the two halves of the system share one entry point.</li>
   </ul>
