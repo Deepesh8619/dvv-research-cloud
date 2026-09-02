@@ -982,6 +982,8 @@ async def crosscheck_study(
     # SUPPOSED to be absent from a questionnaire. Report what each column is
     # for, and list only the ones genuinely worth chasing.
     matched = {name for link in link_report.links for name in link.variable_names}
+    by_qid = {q.qid: q for q in survey.questions}
+    variable_labels = {v.name: (v.label or "") for v in datamap.variables}
     roles = summarize(datamap)
     payload = {
         **report.to_dict(),
@@ -989,6 +991,28 @@ async def crosscheck_study(
         "unmatched_questions": link_report.unmatched_questions,
         "unmatched_variables": unexplained(datamap, matched),
         "conditions": condition_audit.to_dict(),
+        # A variable name in the data need not equal the qid in the document.
+        # The linker falls back to matching on question TEXT, which is right
+        # far more often than not — but it is a judgement, and a wrong one
+        # silently checks the wrong column. Every such link is surfaced for a
+        # human to confirm rather than quietly accepted.
+        "needs_confirmation": [
+            {
+                "qid": link.qid,
+                "variables": link.variable_names,
+                "confidence": round(link.confidence, 2),
+                "question_text": (by_qid.get(link.qid).text or "")[:160]
+                if by_qid.get(link.qid)
+                else "",
+                "variable_label": (
+                    variable_labels.get(link.variable_names[0], "")[:160]
+                    if link.variable_names
+                    else ""
+                ),
+            }
+            for link in link_report.links
+            if link.match_method == "fuzzy"
+        ],
         "reconciliation": {
             **agreement.summary(),
             "recovered_from_datamap": [q.qid for q in recovered],

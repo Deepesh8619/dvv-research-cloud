@@ -41,8 +41,15 @@ _PUNCH_RE = re.compile(r"^(?P<parent>\w+?)r\d+$")
 # companion hid a real question from the reconciliation.
 _OTHER_SPECIFY_RE = re.compile(r"r\d+oe$", re.I)
 _NO_ANSWER_RE = re.compile(r"^noanswer", re.I)
-# HID_/Hid_/h_ prefixes plus the word "hidden" in the label — both appear.
+# HID_/Hid_/h_ name prefixes cover most derived variables, but not all: the
+# real export also contains `hC_GEO_ZIP_Flagged`, whose name is just `h` plus
+# the question. Its LABEL is unambiguous — "Dummy variable to flag if
+# respondent invalid US zip code" — so the declaration in the label is the more
+# reliable signal, and the two together miss nothing in the studies seen.
 _HIDDEN_NAME_RE = re.compile(r"^(hid[_a-z]*|h_)", re.I)
+_HIDDEN_LABEL_RE = re.compile(
+    r"\b(hidden|dummy)\s+(variable|question)\b|^\s*hidden\s*:", re.I
+)
 _MAXDIFF_NAME_RE = re.compile(r"maxdiff|^md_|(best|worst)$", re.I)
 _SYSTEM_NAMES = frozenset(
     {"record", "uuid", "date", "status", "country", "markers", "vos", "start_date"}
@@ -95,7 +102,7 @@ def classify_variable(name: str, label: str = "", question_ref: str | None = Non
         return "other_specify"
     # Hidden before punch: HID_ names never carry a parent, but a label saying
     # "hidden" on a punch-shaped name should still read as hidden.
-    if _HIDDEN_NAME_RE.match(name) or lowered_label.startswith("hidden"):
+    if _HIDDEN_NAME_RE.match(name) or _HIDDEN_LABEL_RE.search(lowered_label):
         return "hidden"
     if question_ref or _PUNCH_RE.match(name):
         return "punch"
@@ -136,3 +143,79 @@ def unexplained(datamap, matched_variables: set[str]) -> list[str]:
         if role in EXPECTED_IN_QUESTIONNAIRE:
             out.append(variable.name)
     return sorted(out)
+
+
+# --- Companions -------------------------------------------------------------
+# An open-ended question rarely stands alone. The script derives companions from
+# it — a band, a threshold flag, a validity check, a refusal marker — and the
+# questionnaire's conditions are written against THOSE, not the raw value:
+#
+#     SS_AD_SPEND   "how much do you spend?"        open number
+#     HID_SS_AD_SPEND  "Flag if greater than $1,000,000"   1 = Flag, 2 = Not
+#     noanswerSS_AD_SPEND_r99  "Prefer not to answer"      0/1
+#
+# So "SS_AD_SPEND has no codes" and "the questionnaire lists bands for it" are
+# both true and not a contradiction: the bands live in the companion.
+#
+# Detection is structural, never a list of known names. A companion is a
+# non-answerable variable whose name contains an answerable variable's name;
+# the LONGEST containing name wins, so `HID_SS_AD_SPEND` attaches to
+# `SS_AD_SPEND` rather than to a shorter `SS_AD`.
+
+#: Roles that can act as a companion to a question.
+COMPANION_ROLES = frozenset({"hidden", "no_answer", "other_specify"})
+
+
+@dataclass
+class Companion:
+    """A derived variable and the question it was computed from."""
+
+    name: str
+    role: str
+    label: str
+    question: str
+
+
+def find_companions(datamap) -> dict[str, list[Companion]]:
+    """Map each question to the variables the script derived from it.
+
+    Returns `{question_name: [Companion, ...]}`. A derived variable that names
+    no question is simply absent — a study-level hidden variable like
+    `Hid_Segment` belongs to the study, not to one question, and inventing a
+    parent for it would be a fabrication.
+    """
+    roles = {
+        v.name: classify_variable(
+            v.name, getattr(v, "label", "") or "", getattr(v, "question_ref", None)
+        )
+        for v in datamap.variables
+    }
+    # Answerable names, longest first so the most specific parent wins.
+    answerable = sorted(
+        (name for name, role in roles.items() if role in EXPECTED_IN_QUESTIONNAIRE),
+        key=len,
+        reverse=True,
+    )
+    parents = {
+        v.name: (getattr(v, "question_ref", None) or v.name) for v in datamap.variables
+    }
+    by_name = {v.name: v for v in datamap.variables}
+
+    out: dict[str, list[Companion]] = {}
+    for name, role in roles.items():
+        if role not in COMPANION_ROLES:
+            continue
+        for candidate in answerable:
+            if candidate == name or candidate not in name:
+                continue
+            owner = parents.get(candidate, candidate)
+            out.setdefault(owner, []).append(
+                Companion(
+                    name=name,
+                    role=role,
+                    label=getattr(by_name[name], "label", "") or "",
+                    question=owner,
+                )
+            )
+            break
+    return out

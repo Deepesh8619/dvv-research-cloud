@@ -25,6 +25,7 @@ const KIND_LABELS: Record<string, string> = {
   option_not_scripted: 'Option in the questionnaire with no punch in the data',
   punch_not_in_questionnaire: 'Punch in the data the questionnaire never offers',
   mask_violated: 'Answer outside the masked option list',
+  coded_in_companion: 'Open response — its codes live in a derived variable',
 }
 
 const CHECK_LABELS: Record<string, string> = {
@@ -148,6 +149,35 @@ export default function CrosscheckPanel({ studyId }: { studyId: string }) {
               from the script as fielded, so they are checked here — but review them against
               the questionnaire before relying on the text.
             </p>
+          )}
+
+          {/* Matched on question text because the names differed. Surfaced,
+              never quietly accepted: a wrong match silently checks the wrong
+              column, and only a human can settle it. */}
+          {report.needs_confirmation && report.needs_confirmation.length > 0 && (
+            <div className="border border-sky-200 bg-sky-50/60 rounded-md px-3 py-2.5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-sky-900">
+                Please confirm {report.needs_confirmation.length} match
+                {report.needs_confirmation.length === 1 ? '' : 'es'}
+              </p>
+              <p className="text-xs text-slate-600 mt-0.5">
+                The variable name differs from the question id, so these were matched on
+                wording. Check each one is the same question.
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {report.needs_confirmation.map((m) => (
+                  <li key={m.qid} className="text-xs text-slate-700">
+                    <span className="font-mono">{m.qid}</span>
+                    <span className="text-slate-400"> ↔ </span>
+                    <span className="font-mono">{m.variables.join(', ')}</span>
+                    <span className="text-slate-400"> ({Math.round(m.confidence * 100)}%)</span>
+                    <span className="block text-slate-500 mt-0.5">
+                      “{m.question_text}” vs “{m.variable_label}”
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
           {/* Conditions that cannot fire. Reported BEFORE the data findings:

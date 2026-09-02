@@ -40,6 +40,7 @@ from src.core.survey_definition import (
     SurveyDefinition,
     evaluate,
 )
+from src.engines.qc.variable_roles import find_companions
 from src.engines.questionnaire.linker import _read_rows, _row_value
 
 # How many offending row numbers to keep per finding. Enough to start looking,
@@ -213,6 +214,7 @@ def check_against_questionnaire(
         return report
 
     counts = {"codes": 0, "single": 0, "range": 0, "terminate": 0, "mask": 0}
+    companions = find_companions(datamap) if datamap is not None else {}
 
     for qid, variables in sorted(link_map.items()):
         question = by_qid.get(qid)
@@ -233,20 +235,45 @@ def check_against_questionnaire(
         # says the column holds an open number. That is a reading disagreement
         # worth ONE finding — not one per distinct value in the file.
         if declared and datamap_says_open:
-            report.findings.append(
-                Discrepancy(
-                    qid=qid,
-                    kind="type_mismatch",
-                    severity="warning",
-                    detail=(
-                        f"{qid} was read as a coded question with options "
-                        f"{sorted(declared)[:8]}, but the data map describes "
-                        "its column as an open response. The extracted option "
-                        "list is probably wrong."
-                    ),
-                    variables=variables,
+            # An open-ended question usually has a derived companion holding
+            # the bands or flags the conditions are actually written against
+            # ("SS_AD_SPEND" is a number; "HID_SS_AD_SPEND" flags spend over
+            # $1,000,000). When one exists, "the column has no codes" and "the
+            # questionnaire lists bands" are both true and not a contradiction
+            # — so say where the codes live instead of calling it a mistake.
+            coded_companions = [
+                c for c in companions.get(qid, []) if c.role in ("hidden", "no_answer")
+            ]
+            if coded_companions:
+                report.findings.append(
+                    Discrepancy(
+                        qid=qid,
+                        kind="coded_in_companion",
+                        severity="info",
+                        detail=(
+                            f"{qid} is collected as an open response; the codes the "
+                            "questionnaire lists are held by "
+                            + ", ".join(c.name for c in coded_companions)
+                            + ". Conditions should be written against those."
+                        ),
+                        variables=[c.name for c in coded_companions],
+                    )
                 )
-            )
+            else:
+                report.findings.append(
+                    Discrepancy(
+                        qid=qid,
+                        kind="type_mismatch",
+                        severity="warning",
+                        detail=(
+                            f"{qid} was read as a coded question with options "
+                            f"{sorted(declared)[:8]}, but the data map describes "
+                            "its column as an open response, and no derived "
+                            "variable holds those codes."
+                        ),
+                        variables=variables,
+                    )
+                )
         elif declared and datamap is not None and scripted is not None:
             # Punches vs questionnaire: what was scripted against what was asked.
             missing_in_data = sorted(declared - scripted - system_codes)

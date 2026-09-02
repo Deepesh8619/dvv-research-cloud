@@ -93,3 +93,66 @@ def test_summarize_counts_every_variable_exactly_once():
     assert sum(summary.counts().values()) == 4
     assert summary.of("hidden") == ["HID_COMP_SIZE"]
     assert summary.counts()["question"] == 1
+
+
+# --- Companions -------------------------------------------------------------
+# An open question rarely stands alone: the script derives bands, thresholds and
+# refusal flags from it, and the questionnaire's conditions are written against
+# THOSE. Names taken verbatim from the real export.
+
+
+def _companion_map():
+    dm = DataMap()
+    dm.add(Variable(name="SS_AD_SPEND", label="How much do you spend?", type=VarType.NUMERIC))
+    dm.add(Variable(name="HID_SS_AD_SPEND",
+                    label="Hidden variable: Flag if greater than $1,000,000", type=VarType.SINGLE))
+    dm.add(Variable(name="noanswerSS_AD_SPEND_r99",
+                    label="How much do you spend?: Prefer not to answer", type=VarType.SINGLE))
+    dm.add(Variable(name="C_GEO_ZIP", label="What ZIP code?", type=VarType.TEXT))
+    dm.add(Variable(name="hC_GEO_ZIP_Flagged",
+                    label="Dummy variable to flag if respondent invalid US zip code",
+                    type=VarType.SINGLE))
+    dm.add(Variable(name="Hid_Segment", label="Hidden: To punch the Segment", type=VarType.SINGLE))
+    return dm
+
+
+def test_a_derived_variable_is_recognised_from_its_label_not_its_name():
+    """`hC_GEO_ZIP_Flagged` is just "h" plus the question — the name prefix
+    rules miss it, but its label says "Dummy variable to flag"."""
+    assert classify_variable(
+        "hC_GEO_ZIP_Flagged", "Dummy variable to flag if respondent invalid US zip code"
+    ) == "hidden"
+
+
+def test_companions_attach_to_the_question_they_derive_from():
+    from src.engines.qc.variable_roles import find_companions
+
+    companions = find_companions(_companion_map())
+    assert {c.name for c in companions["SS_AD_SPEND"]} == {
+        "HID_SS_AD_SPEND", "noanswerSS_AD_SPEND_r99"
+    }
+    assert {c.name for c in companions["C_GEO_ZIP"]} == {"hC_GEO_ZIP_Flagged"}
+
+
+def test_a_study_level_hidden_variable_is_not_given_an_invented_parent():
+    """`Hid_Segment` belongs to the study, not to any one question."""
+    from src.engines.qc.variable_roles import find_companions
+
+    companions = find_companions(_companion_map())
+    assert not any(
+        c.name == "Hid_Segment" for group in companions.values() for c in group
+    )
+
+
+def test_the_longest_matching_question_wins():
+    """`HID_SS_AD_SPEND` must attach to `SS_AD_SPEND`, not to a shorter name
+    that happens to be a substring of it."""
+    from src.engines.qc.variable_roles import find_companions
+
+    dm = _companion_map()
+    dm.add(Variable(name="SS_AD", label="Do you advertise?", type=VarType.SINGLE))
+    companions = find_companions(dm)
+    assert {c.name for c in companions["SS_AD_SPEND"]} == {
+        "HID_SS_AD_SPEND", "noanswerSS_AD_SPEND_r99"
+    }
+    assert "SS_AD" not in companions

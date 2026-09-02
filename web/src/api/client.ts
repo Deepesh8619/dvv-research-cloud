@@ -744,6 +744,15 @@ export interface CrosscheckReport {
     n_checked: number
     issues: Array<{ qid: string; where: string; kind: string; detail: string; severity: string }>
   }
+  /** Links made by matching question TEXT because the names differed — a
+      judgement a human should confirm. */
+  needs_confirmation?: Array<{
+    qid: string
+    variables: string[]
+    confidence: number
+    question_text: string
+    variable_label: string
+  }>
   /** Two-way agreement between the questionnaire and the data map. */
   reconciliation?: {
     in_both: number

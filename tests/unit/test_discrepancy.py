@@ -399,3 +399,35 @@ def test_a_mask_whose_source_is_unlinked_is_skipped_not_passed(tmp_path):
     )
     assert any("masked from Q18" in s for s in report.skipped)
     assert "mask" not in report.checked
+
+
+def test_an_open_question_whose_codes_live_in_a_companion_is_explained_not_blamed(tmp_path):
+    """"The column has no codes" and "the questionnaire lists bands" are both
+    true and not a contradiction: the bands live in the derived variable, and
+    the conditions are written against that."""
+    from src.core.models import DataMap, Variable, VarType
+
+    spend = Question(
+        qid="SS_AD_SPEND",
+        text="How much do you spend?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=1, label="Under $1m"), Option(code=2, label="Over $1m")],
+    )
+    dm = DataMap()
+    dm.add(Variable(name="SS_AD_SPEND", label="How much do you spend?",
+                    type=VarType.NUMERIC, values={}))
+    dm.add(Variable(name="HID_SS_AD_SPEND",
+                    label="Hidden variable: Flag if greater than $1,000,000",
+                    type=VarType.SINGLE, values={1: "Flag", 2: "Not Flag"}))
+
+    path = _parquet(tmp_path, {"SS_AD_SPEND": [50000, 2000000]})
+    report = check_against_questionnaire(
+        _survey([spend]),
+        [QuestionVariableLink(qid="SS_AD_SPEND", variable_names=["SS_AD_SPEND"])],
+        path,
+        datamap=dm,
+    )
+    finding = next(f for f in report.findings if f.kind == "coded_in_companion")
+    assert finding.severity == "info"
+    assert "HID_SS_AD_SPEND" in finding.detail
+    assert not any(f.kind == "type_mismatch" for f in report.findings)

@@ -323,3 +323,42 @@ One subtlety that caused a wave of false positives: for a multi-select, **the
 code is in the column name** — `DA_GOALSr98` is punch 98, and its value labels
 are only `{0: Unchecked, 1: Checked}`. Reading just the value labels made every
 punch beyond 1 look unscripted, producing 40 spurious findings on the real file.
+
+### Derived companions: where an open question's codes actually live
+
+An open-ended question rarely stands alone. The script derives companions from
+it, and the questionnaire's conditions are written against **those**, not the
+raw value:
+
+```
+SS_AD_SPEND              "how much do you spend?"              open number
+  HID_SS_AD_SPEND        "Flag if greater than $1,000,000"     1 = Flag, 2 = Not
+  noanswerSS_AD_SPEND_r99 "Prefer not to answer"               0 / 1
+
+C_GEO_ZIP                "what ZIP code?"                      open text
+  hC_GEO_ZIP_Flagged     "flag if respondent invalid US zip"   1 = Flagged
+```
+
+So "the column has no codes" and "the questionnaire lists bands for it" are
+both true and not a contradiction. Where a companion exists the report says
+`coded_in_companion` (info) and names it, instead of `type_mismatch` (warning).
+On the real file that reclassified two of five findings correctly.
+
+Detection is structural, never a list of known names: a derived variable whose
+name contains an answerable variable's name, longest match winning, so
+`HID_SS_AD_SPEND` attaches to `SS_AD_SPEND` and not to a shorter `SS_AD`. A
+study-level variable like `Hid_Segment` names no question and is left
+unattached rather than given an invented parent.
+
+A derived variable is also recognised from its **label**, not only its name
+prefix: `hC_GEO_ZIP_Flagged` is just "h" plus the question, but its label says
+"Dummy variable to flag…". The declaration in the label is the more reliable
+signal.
+
+### When the variable name and the question id differ
+
+They often do. The linker falls back to matching on question **text**, which is
+right far more often than not — but it is a judgement, and a wrong one silently
+checks the wrong column. Every text-matched link is returned as
+`needs_confirmation` with both wordings and the score, for a human to settle.
+It is never quietly accepted.
