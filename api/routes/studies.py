@@ -903,8 +903,10 @@ async def crosscheck_study(
     from api.db import list_questionnaires_for_study, record_audit, set_study_artifacts
     from src.core.models import DataMap
     from src.core.survey_definition import SurveyDefinition
+    from src.engines.qc.condition_audit import audit_conditions
     from src.engines.qc.discrepancy import check_against_questionnaire
     from src.engines.qc.variable_roles import ROLE_LABELS, summarize, unexplained
+    from src.engines.questionnaire.datamap_recovery import reconcile, recover_missing
     from src.engines.questionnaire.linker import link_questions_to_datamap
 
     study = get_study(db, study_id)
@@ -929,7 +931,33 @@ async def crosscheck_study(
 
     survey = SurveyDefinition.from_json(definition_json)
     datamap = DataMap.from_json(study.datamap_json)
+
+    # Two-way reconciliation, BEFORE linking. The data map is the script's own
+    # record of what was fielded — every variable, its question text, and every
+    # option label with its punch. Extraction only guesses. So a question the
+    # data map describes and extraction missed is rebuilt from the data map
+    # rather than guessed at a second time, and then takes part in every check
+    # below. Recovered questions are flagged, never silently merged: their
+    # wording comes from the script, not the client's document, and the two can
+    # legitimately differ.
+    agreement = reconcile(survey, datamap)
+    recovered, recovered_links = recover_missing(survey, datamap)
+    for question in recovered:
+        survey.questions.append(question)
+        if survey.blocks:
+            survey.blocks[0].question_ids.append(question.qid)
+
+    # Link the EXTRACTED questions by matching, then add the recovered ones
+    # whose links are already known exactly.
     link_report = link_questions_to_datamap(survey, datamap)
+    already = {link.qid for link in link_report.links}
+    link_report.links.extend(link for link in recovered_links if link.qid not in already)
+
+    # Audit the conditions against what was actually scripted before reading a
+    # single respondent row. A screen-out testing codes that were never punched
+    # fires for nobody, and the data check would report zero violations — which
+    # reads exactly like a clean result.
+    condition_audit = audit_conditions(survey, link_report.links, datamap)
 
     parquet_path = STUDIES_DIR / study_id / "data.parquet"
     if not parquet_path.exists():
@@ -960,6 +988,11 @@ async def crosscheck_study(
         "linked_questions": len(link_report.links),
         "unmatched_questions": link_report.unmatched_questions,
         "unmatched_variables": unexplained(datamap, matched),
+        "conditions": condition_audit.to_dict(),
+        "reconciliation": {
+            **agreement.summary(),
+            "recovered_from_datamap": [q.qid for q in recovered],
+        },
         "variable_roles": [
             {"role": role, "label": ROLE_LABELS[role], "n": n}
             for role, n in sorted(roles.counts().items(), key=lambda kv: -kv[1])
@@ -977,7 +1010,9 @@ async def crosscheck_study(
         actor_id=user.id,
         summary=(
             f"{len(report.findings)} discrepancies over {report.n_rows} rows; "
-            f"{len(link_report.links)} questions linked"
+            f"{len(link_report.links)} questions linked; "
+            f"{len(recovered)} recovered from the data map; "
+            f"{len(condition_audit.issues)} condition issues"
         ),
     )
     logger.info(

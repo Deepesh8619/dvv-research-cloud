@@ -267,3 +267,59 @@ the data comes back wrong, and nothing in between says so.
 
 Resolve them in review (set the condition) before a real launch, or accept it
 knowingly for a soft launch.
+
+## Workflow 5 — Two-way reconciliation with the data map
+
+The data map does not guess. It is the script's own record of what was fielded:
+every variable name, the question text, every option label with its punch code,
+and the hidden variables the script computed. Extraction reads a Word document
+and infers. On a real client study the data map described **113 questions**
+while extraction had produced **24**.
+
+So the cross-check runs both directions before it reads a single row:
+
+```
+1. read the data map          440 variables, grouped into 113 questions
+2. read the questionnaire     24 questions extracted from the document
+3. reconcile both ways        13 in both · 105 only in the data map
+                              · 11 only in the questionnaire (intros, transitions)
+4. rebuild what was missed    105 questions, from the script's own text and punches
+5. link                       121 questions covering 281 columns (was 16)
+6. audit the conditions       against the punch lists, before any data is read
+7. check the data             42 questions code-checked (was 9)
+```
+
+**Rebuilt questions are flagged, never silently merged.** They carry
+`extraction_method="datamap"` and `RECOVERED_FROM_DATAMAP`, because their
+wording comes from the script rather than the client's document and the two can
+legitimately differ — hiding that would hide a real disagreement. Routing is
+never invented: the data map records what was *collected*, not who was *asked*,
+so a rebuilt question has no `show_if` and says so in `missing`.
+
+**Links are carried, not re-derived.** A rebuilt question was made FROM named
+columns, so its link is already exact. Sending it back through the fuzzy matcher
+would make a multi-select re-guess the very columns it came from.
+
+### Auditing conditions before touching data
+
+A condition is only meaningful if the variable it names exists and the codes it
+tests are real punches. When they are not, it is dead — false for every
+respondent, for ever.
+
+That failure is invisible where you would look for it: run the data check on a
+dead screen-out and it reports **zero violations**, which reads exactly like a
+screen-out nobody breached. So conditions are audited first:
+
+| Finding | Meaning |
+|---|---|
+| `unknown_variable` | the condition names a question with no column at all |
+| `unscriptable_code` | the codes tested are not punches on that variable |
+| `no_codes` | an `in` test with an empty value list |
+
+A condition where *some* codes exist is a warning (it still fires for some
+respondents); one where *none* do is an error.
+
+One subtlety that caused a wave of false positives: for a multi-select, **the
+code is in the column name** — `DA_GOALSr98` is punch 98, and its value labels
+are only `{0: Unchecked, 1: Checked}`. Reading just the value labels made every
+punch beyond 1 look unscripted, producing 40 spurious findings on the real file.

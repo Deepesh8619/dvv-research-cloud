@@ -34,7 +34,12 @@ from dataclasses import dataclass, field
 
 # Decipher writes one column per option as `<parent>r<n>`; a grid adds `c<n>`.
 _PUNCH_RE = re.compile(r"^(?P<parent>\w+?)r\d+$")
-_OTHER_SPECIFY_RE = re.compile(r"r?\d*oe$", re.I)
+# The companion text behind an "Other, specify" punch is named
+# `<parent>r<code>oe` — the punch code is part of the name. A bare `_OE`
+# suffix is a STANDALONE open-end question ("GA_USER_BARRIER_OE": "Please
+# describe your specific job responsibilities"), and treating it as a
+# companion hid a real question from the reconciliation.
+_OTHER_SPECIFY_RE = re.compile(r"r\d+oe$", re.I)
 _NO_ANSWER_RE = re.compile(r"^noanswer", re.I)
 # HID_/Hid_/h_ prefixes plus the word "hidden" in the label — both appear.
 _HIDDEN_NAME_RE = re.compile(r"^(hid[_a-z]*|h_)", re.I)

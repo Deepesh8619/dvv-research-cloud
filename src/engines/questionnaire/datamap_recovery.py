@@ -1,0 +1,215 @@
+"""Reconcile a questionnaire against its data map, in both directions.
+
+Extraction reads a Word document and guesses what is a question. The data map
+does not guess: it is the script's own record of what was actually fielded —
+every variable name, the question text, every option label with its punch code,
+and the hidden variables the script computed. On a real client study the data
+map described 113 questions while extraction had produced 24.
+
+So the two halves inform each other:
+
+    data map -> questionnaire   which questions SHOULD exist, and what they are
+    questionnaire -> data map   which conditions, masks and routing were asked
+
+A question the data map describes and extraction missed does not need to be
+guessed at a second time. Its text and its options are already known, exactly
+as they were fielded, and can be rebuilt.
+
+**Recovered questions are marked, never silently merged.** A rebuilt question
+carries `extraction_method="datamap"` and the RECOVERED_FROM_DATAMAP flag so a
+reviewer can see that its wording came from the script rather than the client's
+document — the two can legitimately differ, and pretending otherwise would hide
+a real disagreement. Routing is never invented: the data map records what was
+collected, not who was asked, so a recovered question has no `show_if` and says
+so in `missing`.
+
+Deterministic; no model is called.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from src.core.models import DataMap, Variable
+from src.core.survey_definition import (
+    Option,
+    Question,
+    QuestionType,
+    QuestionVariableLink,
+    SurveyDefinition,
+)
+from src.engines.qc.variable_roles import classify_variable
+
+#: Set on any question rebuilt from the data map rather than read from the document.
+FLAG_RECOVERED = "RECOVERED_FROM_DATAMAP"
+
+#: Roles that represent something a respondent was actually asked.
+_ANSWERABLE = frozenset({"question", "punch"})
+
+
+@dataclass
+class DatamapQuestion:
+    """One question as the data map describes it."""
+
+    qid: str
+    text: str
+    variables: list[Variable] = field(default_factory=list)
+
+    @property
+    def is_multi(self) -> bool:
+        return len(self.variables) > 1
+
+
+@dataclass
+class Reconciliation:
+    """What each side knows that the other does not."""
+
+    #: Questions the data map describes that extraction did not produce.
+    missing_from_questionnaire: list[DatamapQuestion] = field(default_factory=list)
+    #: Extracted qids with no matching variable — a wrong read, or a display item.
+    missing_from_datamap: list[str] = field(default_factory=list)
+    #: Questions both sides agree exist.
+    matched: list[str] = field(default_factory=list)
+
+    def summary(self) -> dict:
+        return {
+            "in_both": len(self.matched),
+            "only_in_datamap": len(self.missing_from_questionnaire),
+            "only_in_questionnaire": len(self.missing_from_datamap),
+        }
+
+
+def questions_from_datamap(datamap: DataMap) -> list[DatamapQuestion]:
+    """Group answerable columns into the questions they belong to.
+
+    A multi-select is one question over many punch columns; everything else is
+    one question per column. Hidden variables, MaxDiff machinery, system fields
+    and open-end companions are excluded — they were never asked.
+    """
+    grouped: dict[str, list[Variable]] = {}
+    for variable in datamap.variables:
+        role = classify_variable(
+            variable.name,
+            variable.label or "",
+            getattr(variable, "question_ref", None),
+        )
+        if role not in _ANSWERABLE:
+            continue
+        key = getattr(variable, "question_ref", None) or variable.name
+        grouped.setdefault(key, []).append(variable)
+
+    out: list[DatamapQuestion] = []
+    for qid, variables in grouped.items():
+        # For a multi the parent header holds the question; for a single the
+        # variable's own label is the question.
+        text = ""
+        for variable in variables:
+            text = getattr(variable, "question_text", None) or ""
+            if text:
+                break
+        if not text:
+            text = variables[0].label or ""
+        out.append(DatamapQuestion(qid=qid, text=text, variables=list(variables)))
+    return sorted(out, key=lambda q: q.qid)
+
+
+def _normalize(qid: str) -> str:
+    return qid.strip().lower().replace("_", "").replace("-", "")
+
+
+def reconcile(survey: SurveyDefinition, datamap: DataMap) -> Reconciliation:
+    """Compare both sides by question id, tolerantly."""
+    extracted = {_normalize(q.qid): q.qid for q in survey.questions}
+    result = Reconciliation()
+
+    for candidate in questions_from_datamap(datamap):
+        if _normalize(candidate.qid) in extracted:
+            result.matched.append(candidate.qid)
+        else:
+            result.missing_from_questionnaire.append(candidate)
+
+    described = {_normalize(q.qid) for q in questions_from_datamap(datamap)}
+    for question in survey.questions:
+        if _normalize(question.qid) not in described:
+            result.missing_from_datamap.append(question.qid)
+    return result
+
+
+def rebuild_question(candidate: DatamapQuestion) -> Question:
+    """Rebuild one question from what the data map records about it.
+
+    Options come from the punch labels for a multi, and from the value labels
+    for a single — in both cases these are the codes as actually fielded, so a
+    later data check compares against the truth rather than a re-read.
+
+    `missing` names what the data map cannot supply: it records what was
+    COLLECTED, never who was asked, so routing is absent by construction and
+    must not be inferred.
+    """
+    options: list[Option] = []
+    if candidate.is_multi:
+        for index, variable in enumerate(candidate.variables, start=1):
+            code = index
+            # Decipher names a punch `<parent>r<code>`; the suffix IS the code.
+            suffix = variable.name[len(candidate.qid) :].lstrip("rR")
+            if suffix.isdigit():
+                code = int(suffix)
+            options.append(Option(code=code, label=variable.label or f"Option {code}"))
+        qtype = QuestionType.MULTI
+    else:
+        variable = candidate.variables[0]
+        for code, label in sorted((variable.values or {}).items()):
+            options.append(Option(code=code, label=label))
+        qtype = QuestionType.SINGLE if options else QuestionType.OPEN_TEXT
+
+    question = Question(
+        qid=candidate.qid,
+        text=candidate.text,
+        type=qtype,
+        options=options,
+        required=False,
+        source_text=(
+            "Rebuilt from the data map: "
+            + ", ".join(v.name for v in candidate.variables[:12])
+        ),
+        source_location="data map",
+        extraction_method="datamap",
+        extraction_evidence={
+            "text": "the data map's question text",
+            "options": f"{len(options)} punch labels from the data map",
+        },
+        validation={
+            "recovered_from_datamap": True,
+            # Said plainly so nobody mistakes silence for "no routing".
+            "missing": ["routing"],
+        },
+    )
+    question.flags.append(FLAG_RECOVERED)
+    return question
+
+
+def recover_missing(
+    survey: SurveyDefinition, datamap: DataMap
+) -> tuple[list[Question], list[QuestionVariableLink]]:
+    """Every question the data map describes and the questionnaire lacks.
+
+    Returns the rebuilt questions AND their variable links. The link is not
+    re-derived by name matching: a recovered question was built FROM named
+    columns, so its link is already known exactly. Sending it back through the
+    fuzzy matcher would be both wasteful and lossy — a multi-select rebuilt
+    from `DA_GOALSr1..r9` would have to re-guess the very columns it came from.
+    """
+    questions: list[Question] = []
+    links: list[QuestionVariableLink] = []
+    for candidate in reconcile(survey, datamap).missing_from_questionnaire:
+        questions.append(rebuild_question(candidate))
+        links.append(
+            QuestionVariableLink(
+                qid=candidate.qid,
+                variable_names=[v.name for v in candidate.variables],
+                match_method="exact",
+                confidence=1.0,
+                notes="rebuilt from the data map",
+            )
+        )
+    return questions, links

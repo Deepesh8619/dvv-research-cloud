@@ -738,6 +738,19 @@ export interface CrosscheckReport {
   unmatched_variables: string[]
   variable_roles?: Array<{ role: string; label: string; n: number }>
   hidden_variables?: string[]
+  /** Conditions audited against the data map before any row was read. */
+  conditions?: {
+    passed: boolean
+    n_checked: number
+    issues: Array<{ qid: string; where: string; kind: string; detail: string; severity: string }>
+  }
+  /** Two-way agreement between the questionnaire and the data map. */
+  reconciliation?: {
+    in_both: number
+    only_in_datamap: number
+    only_in_questionnaire: number
+    recovered_from_datamap: string[]
+  }
   run_by?: string
   run_at?: string
 }

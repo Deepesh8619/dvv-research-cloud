@@ -135,6 +135,40 @@ export default function CrosscheckPanel({ studyId }: { studyId: string }) {
             </div>
           )}
 
+          {/* Questions rebuilt from the data map. Named explicitly: their
+              wording comes from the script rather than the client's document,
+              and the two can legitimately differ. */}
+          {report.reconciliation && report.reconciliation.recovered_from_datamap.length > 0 && (
+            <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-2.5 py-2">
+              <span className="font-medium">
+                {report.reconciliation.recovered_from_datamap.length} questions were rebuilt
+                from the data map
+              </span>{' '}
+              because the document reader did not find them. Their wording and options come
+              from the script as fielded, so they are checked here — but review them against
+              the questionnaire before relying on the text.
+            </p>
+          )}
+
+          {/* Conditions that cannot fire. Reported BEFORE the data findings:
+              a dead screen-out shows zero violations, which reads exactly like
+              a screen-out nobody breached. */}
+          {report.conditions && report.conditions.issues.length > 0 && (
+            <div className="border border-amber-200 bg-amber-50/60 rounded-md px-3 py-2.5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-900">
+                Conditions that cannot do what they say
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {report.conditions.issues.map((i, n) => (
+                  <li key={`${i.qid}-${i.kind}-${n}`} className="text-sm text-slate-700">
+                    <span className="font-mono text-xs text-slate-600">{i.qid}</span>{' '}
+                    <span className="text-slate-500">· {i.where}</span> — {i.detail}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* What every column in the file is for. Hidden variables carry the
               segment and quota logic a client analyses by, so they are named
               rather than buried in an "unmatched" count. */}

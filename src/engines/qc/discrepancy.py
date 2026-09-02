@@ -148,7 +148,9 @@ def _selected_codes(row: dict, variables: list[str], question: Question) -> list
     return [codes[i - 1] for i in value if 1 <= i <= len(codes)]
 
 
-def _datamap_codes(datamap: DataMap | None, variables: list[str]) -> set[int] | None:
+def _datamap_codes(
+    datamap: DataMap | None, variables: list[str], qid: str = ""
+) -> set[int] | None:
     """The codes the DATAMAP says a question's columns can hold.
 
     None means the datamap does not describe this as a coded question — an open
@@ -167,7 +169,14 @@ def _datamap_codes(datamap: DataMap | None, variables: list[str]) -> set[int] | 
         variable = by_name.get(name)
         if variable is None:
             continue
-        if variable.values:
+        # A multi-select punch column IS the option: `<parent>r98` is code 98,
+        # and its value labels are only {0: Unchecked, 1: Checked}. Reading
+        # just the value labels made every punch beyond 1 look unscripted.
+        suffix = name[len(qid):].lstrip("rR") if qid and name.startswith(qid) else ""
+        if suffix.isdigit():
+            described = True
+            codes.add(int(suffix))
+        elif variable.values:
             described = True
             codes |= set(variable.values.keys())
     return codes if described else None
@@ -215,7 +224,9 @@ def check_against_questionnaire(
         # judge against it. With one, the datamap wins: it describes what the
         # column actually holds, and `None` from it means "open response", not
         # "unknown".
-        scripted = _datamap_codes(datamap, variables) if datamap is not None else declared
+        scripted = (
+            _datamap_codes(datamap, variables, qid) if datamap is not None else declared
+        )
         datamap_says_open = datamap is not None and scripted is None
 
         # The questionnaire says this question has options, but the datamap

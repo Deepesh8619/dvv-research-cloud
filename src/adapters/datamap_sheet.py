@@ -107,6 +107,10 @@ def _consume_multi_block(
                     type=VarType.SINGLE,
                     values=dict(shared_values),
                     question_ref=parent_name,
+                    # The punch label says WHICH option; the parent header says
+                    # what was asked. Both are needed to rebuild the question,
+                    # and only the punch label survives in `label`.
+                    question_text=parent_label,
                     provenance="datamap_sheet",
                 )
             )
