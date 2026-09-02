@@ -389,3 +389,21 @@ not who was *asked* — so a base or terminate keeps escalating.
 
 **No data map means no change.** The extractor behaves exactly as it did
 before, which is asserted by a test.
+
+### Straightlining is only measured on grids someone was asked
+
+A survey export is full of columns that repeat by construction. Blocks of
+script-computed flags are identical across items for most respondents because
+that is what a computed flag does, and a MaxDiff exercise gets the same
+position chosen task after task as ordinary behaviour — which is why scripters
+write their own MaxDiff straightliner flag rather than relying on a generic
+one.
+
+Counting those as grids reported **89.3% straightlining** on a real
+750-respondent study. Nobody acts on a number like that; it just teaches people
+to ignore the panel. The single biggest contributor was `HID_AWARE`, flat
+across items for 78% of respondents.
+
+Grids are now built only from columns classified `question` or `punch`. Same
+file: **89.3% → 16.4%**, across 20 genuine rating grids instead of 32 mixed
+ones.

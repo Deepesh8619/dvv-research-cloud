@@ -34,6 +34,10 @@ from dataclasses import dataclass, field
 import polars as pl
 
 from src.core.models import DataMap, VarType
+from src.engines.qc.variable_roles import (
+    EXPECTED_IN_QUESTIONNAIRE,
+    classify_variable,
+)
 
 # A grid must have at least this many item variables before a uniform answer
 # row is suspicious — answering "agree" to 3 items is opinion, to 8 is a flag.
@@ -126,16 +130,29 @@ def detect_speeders(df: pl.DataFrame, datamap: DataMap) -> tuple[list[int], str 
 
 
 def _grid_groups(datamap: DataMap) -> list[list[str]]:
-    """Group single-coded variables into grids.
+    """Group single-coded variables into grids a respondent actually filled in.
 
     question_ref (adapter-provided grid parent) wins; variables without one are
     grouped by the Q5r1/Q5_1 naming convention. Only groups of MIN_GRID_ITEMS+
     sharing one scale (same code set) count — mixed-scale groups are almost
     certainly not a visual grid and would false-positive.
+
+    Columns nobody was asked are excluded, and that exclusion is the difference
+    between a usable number and an ignored one. On a real 750-respondent study
+    this check reported 89.3% straightlining, which nobody would act on. The
+    biggest contributor was `HID_AWARE`, a block of script-computed flags that
+    is identical across items for 78% of respondents — as computed values often
+    are. That is arithmetic, not inattention. MaxDiff blocks are excluded for a
+    related reason: choosing the same POSITION each task is ordinary MaxDiff
+    behaviour, which is why scripters write a purpose-built MaxDiff
+    straightliner flag instead of using this one.
     """
     groups: dict[str, list] = {}
     for v in datamap.variables:
         if v.type != VarType.SINGLE or not v.values:
+            continue
+        role = classify_variable(v.name, getattr(v, "label", "") or "", v.question_ref)
+        if role not in EXPECTED_IN_QUESTIONNAIRE:
             continue
         key = v.question_ref
         if not key:

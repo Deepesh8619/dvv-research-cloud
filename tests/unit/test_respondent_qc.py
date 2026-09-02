@@ -210,3 +210,89 @@ def test_report_small_n_skips_speeder_check():
     assert report["flagged"]["speeders"] == []
     assert "speeders" in report["checks_skipped"]
     assert "stable median" in report["checks_skipped"]["speeders"]
+
+
+# --- Only grids a respondent actually filled in -----------------------------
+# On a real 750-respondent study this check reported 89.3% straightlining — a
+# number nobody would act on. The biggest contributor was HID_AWARE, a block of
+# script-computed flags identical across items for 78% of respondents, as
+# computed values often are. Excluding what nobody was asked took it to 16.4%.
+
+
+def _grid(prefix, n=5, values=None, label="", parent=None):
+    from src.core.models import Variable, VarType
+
+    return [
+        Variable(
+            name=f"{prefix}r{i}",
+            label=label or f"item {i}",
+            type=VarType.SINGLE,
+            values=values or {1: "Low", 2: "Mid", 3: "High"},
+            question_ref=parent,
+        )
+        for i in range(1, n + 1)
+    ]
+
+
+def _map(variables):
+    from src.core.models import DataMap
+
+    dm = DataMap()
+    for v in variables:
+        dm.add(v)
+    return dm
+
+
+def test_a_real_rating_grid_is_still_checked():
+    from src.engines.qc.respondents import _grid_groups
+
+    grids = _grid_groups(_map(_grid("Q7")))
+    assert len(grids) == 1
+    assert grids[0][0] == "Q7r1"
+
+
+def test_a_block_of_computed_flags_is_not_a_grid():
+    """HID_AWARE is set by the script. Identical values across it are
+    arithmetic, not a respondent rushing."""
+    from src.engines.qc.respondents import _grid_groups
+
+    assert _grid_groups(_map(_grid("HID_AWARE"))) == []
+
+
+def test_a_hidden_block_named_only_in_its_label_is_also_excluded():
+    from src.engines.qc.respondents import _grid_groups
+
+    hidden = _grid("Hid_DA_ATTITUDES_1", label="Hidden variable to punch attitudes")
+    assert _grid_groups(_map(hidden)) == []
+
+
+def test_a_maxdiff_block_is_not_treated_as_a_rating_grid():
+    """Choosing the same POSITION each task is ordinary MaxDiff behaviour —
+    which is why scripters write their own MaxDiff straightliner flag rather
+    than relying on this check."""
+    from src.engines.qc.respondents import _grid_groups
+
+    maxdiff = [
+        v for v in _grid("MAXDIFF_ANCHOR", n=12)
+    ]
+    for v in maxdiff:
+        v.name = v.name.replace("r", "_")  # MAXDIFF_ANCHOR_1 .. _12
+    assert _grid_groups(_map(maxdiff)) == []
+
+
+def test_excluding_computed_columns_changes_the_verdict_not_just_the_count():
+    """Both blocks are perfectly flat. Only the asked one may be reported."""
+    import polars as pl
+
+    from src.engines.qc.respondents import detect_straightliners
+
+    dm = _map(_grid("Q7") + _grid("HID_AWARE"))
+    # Respondents 1 and 2 give the same answer to every item; respondent 3
+    # varies. The computed block is flat for everyone, as computed blocks are.
+    columns = {f"Q7r{i}": [2, 3, i] for i in range(1, 6)}
+    columns.update({f"HID_AWAREr{i}": [1, 1, 1] for i in range(1, 6)})
+    df = pl.DataFrame(columns)
+
+    rows, n_grids = detect_straightliners(df, dm)
+    assert n_grids == 1, "the computed block must not be counted as a grid"
+    assert sorted(rows) == [0, 1], "respondent 3 varied and must not be flagged"
