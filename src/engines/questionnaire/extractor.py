@@ -556,6 +556,10 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
         # not detecting it, because the review UI showed it as handled.
         randomize_options=fields.randomize,
         terminate_if=fields.terminate_if,
+        # The base the directive states. Without it `show_if` was empty on
+        # every prose document, so routing cross-validation and the condition
+        # audit had nothing to check even though the base was written down.
+        show_if=fields.show_if,
         source_text=chunk.chunk_text,
         source_location=chunk.provenance,
         validation=validation,

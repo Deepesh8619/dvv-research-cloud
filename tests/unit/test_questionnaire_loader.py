@@ -396,3 +396,76 @@ def test_docx_qname_table_serialized_clean_end_to_end(tmp_path: Path) -> None:
     assert "If not All, specify:" not in table.text
     # Rows are still preserved for any downstream grid detection.
     assert table.rows is not None
+
+
+# --- PDF: one block can hold several questions ------------------------------
+
+
+@pytest.fixture
+def tight_pdf(tmp_path: Path) -> Path:
+    """A PDF whose lines sit close enough that PyMuPDF groups them into ONE block.
+
+    This is the ordinary case in a real questionnaire, not a corner: consecutive
+    lines of the same paragraph group become a single PDF "block", so the next
+    question's label lands mid-block behind the previous question's options.
+    """
+    import fitz
+
+    doc = fitz.open()
+    page = doc.new_page()
+    for i, line in enumerate(
+        [
+            "Q1. What is your age?",
+            "1. Under 30",
+            "2. 30 or older",
+            "Q2A. What is your gender?",
+        ]
+    ):
+        page.insert_text((72, 100 + 13 * i), line, fontsize=11)
+    out = tmp_path / "tight.pdf"
+    doc.save(str(out))
+    doc.close()
+    return out
+
+
+def test_pdf_block_holding_several_lines_is_split_per_line(tight_pdf: Path) -> None:
+    import fitz
+
+    with fitz.open(tight_pdf) as doc:
+        text_blocks = [b for b in doc[0].get_text("dict")["blocks"] if b.get("type", 0) == 0]
+    # Guard the premise: PyMuPDF really did merge all four lines into one block.
+    assert len(text_blocks) == 1
+
+    blocks = load_pdf(tight_pdf)
+    assert [b.text for b in blocks] == [
+        "Q1. What is your age?",
+        "1. Under 30",
+        "2. 30 or older",
+        "Q2A. What is your gender?",
+    ]
+
+
+def test_pdf_question_label_after_options_starts_a_new_chunk(tight_pdf: Path) -> None:
+    """The second question must not be swallowed by the first.
+
+    Joining a block's lines into one string hid every label that was not at
+    character 0; on the Federal Reserve SHED 2014 questionnaire that collapsed
+    a ~100-question survey into 4 chunks.
+    """
+    chunks = segment_into_questions(load_pdf(tight_pdf))
+    assert [c.candidate_qid for c in chunks] == ["Q1", "Q2A"]
+    assert "Under 30" in chunks[0].chunk_text
+    assert "Under 30" not in chunks[1].chunk_text
+
+
+def test_uppercase_sub_question_suffix_is_a_boundary() -> None:
+    """D4A/D8A (federal instruments) label as surely as A1a (Decipher docs)."""
+    blocks = [
+        DocumentBlock("paragraph", "D4. Are you employed?", 0),
+        DocumentBlock("paragraph", "1. Yes", 1),
+        DocumentBlock("paragraph", "D4A. Do you work full-time?", 2),
+        DocumentBlock("paragraph", "A1a. And how many hours?", 3),
+    ]
+    chunks = segment_into_questions(blocks)
+    # Suffix case is preserved as written — it is the data map's variable name.
+    assert [c.candidate_qid for c in chunks] == ["D4", "D4A", "A1a"]

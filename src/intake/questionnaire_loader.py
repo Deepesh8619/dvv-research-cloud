@@ -62,7 +62,12 @@ class QuestionChunk:
 # match. The prefix is ANY 1-3 letters, not a whitelist: a real client screener
 # used P1-P3 (parent path) and T1-T5 (teen path), which a Q|S|A|C|D whitelist
 # silently glued onto the preceding question (pilot finding, 2026-07).
-_QID_RE = re.compile(r"^\s*([A-Za-z]{1,3})(\d+)([a-z]?)[.):]")
+# The sub-question suffix is EITHER case: Decipher client docs write "A1a.",
+# but federal instruments write "D4A.", "D8A.", "BK49A." A lowercase-only
+# suffix class silently glued every uppercase sub-question onto the preceding
+# question (SHED 2014: D4A/D4B/D4C/D8A all lost). The suffix is kept as
+# written — it is the variable name the data map will carry.
+_QID_RE = re.compile(r"^\s*([A-Za-z]{1,3})(\d+)([A-Za-z]?)[.):]")
 # SECTION B, SECTION 2 — a labelled section boundary with no question number.
 _SECTION_RE = re.compile(r"^\s*SECTION\s+[A-Z0-9]", re.IGNORECASE)
 # Strong instruction/boundary markers even without a question-number prefix.
@@ -91,6 +96,25 @@ _BOILERPLATE_CELLS = frozenset(
 # Programmer notes authored ABOVE their question that belong WITH the following
 # question table, not the preceding one.
 _NOTE_RE = re.compile(r"^\s*SCRIPTER\s*NOTE\b", re.IGNORECASE)
+
+# A line made up ONLY of bracketed scripter directives, e.g. "[SP] [IF D2 = 1]"
+# or "[NUMBER BOX range 1900-2014]". No respondent-facing prose.
+_DIRECTIVE_ONLY_RE = re.compile(r"^\s*(?:\[[^\]]*\]\s*)+$")
+# Routing directives name WHO gets asked. They are authored immediately above
+# the question they govern, so a run of them trailing a chunk belongs to the
+# NEXT question, not the one whose options just ended:
+#
+#     8. Retired
+#     [SP] [IF D2 = 1]      <- D4A's routing and type, sitting in D2's chunk
+#     D4A. Do you work full-time...
+#
+# Without this, D4A loses its base definition and D2 is handed a type marker
+# that was never about D2 (Federal Reserve SHED 2014: 30+ questions affected).
+# The trailing run only moves when it actually contains routing — a lone "[SP]"
+# after a question's options is left where the author put it.
+_ROUTING_DIRECTIVE_RE = re.compile(
+    r"\[\s*(?:IF|ONLY\s+ASK|ASK\s+IF|ASK\s+ONLY)\b", re.IGNORECASE
+)
 
 
 def _table_qid(block: DocumentBlock) -> str | None:
@@ -303,20 +327,35 @@ def load_pdf(path: str | Path) -> list[DocumentBlock]:
             page_blocks = _extract_page_blocks(page)
             body_size = _body_font_size(page_blocks)
             for pb in page_blocks:
-                is_heading = pb["is_bold"] or (
-                    body_size is not None and pb["size"] > body_size * 1.15
-                )
-                blocks.append(
-                    DocumentBlock(
-                        block_type="heading" if is_heading else "paragraph",
-                        text=pb["text"],
-                        paragraph_index=para_index,
-                        page_number=page_number,
-                        is_bold=pb["is_bold"],
-                        is_heading=is_heading,
+                # One DocumentBlock per LINE, not per PDF block. A PDF "block"
+                # is a visual paragraph group, so a single one routinely spans
+                # several logical lines — the previous question's answer list
+                # followed by the next question's label:
+                #
+                #   "1. Yes  0. No  [SP] S2. Which best describes your housing…"
+                #
+                # `_detect_label` only matches at position 0, so every label
+                # buried mid-block was invisible and the whole document
+                # collapsed into a handful of chunks (measured on the Federal
+                # Reserve SHED 2014 questionnaire: 268 blocks -> 4 chunks for a
+                # ~100-question survey). Lines exist in the PDF; joining them
+                # away was throwing the boundaries out. Ordering still happens
+                # at block level, so column detection is unchanged.
+                for line in pb["lines"]:
+                    is_heading = line["is_bold"] or (
+                        body_size is not None and line["size"] > body_size * 1.15
                     )
-                )
-                para_index += 1
+                    blocks.append(
+                        DocumentBlock(
+                            block_type="heading" if is_heading else "paragraph",
+                            text=line["text"],
+                            paragraph_index=para_index,
+                            page_number=page_number,
+                            is_bold=line["is_bold"],
+                            is_heading=is_heading,
+                        )
+                    )
+                    para_index += 1
     return blocks
 
 
@@ -331,27 +370,41 @@ def _extract_page_blocks(page) -> list[dict]:
     for block in raw.get("blocks", []):
         if block.get("type", 0) != 0:  # skip image blocks
             continue
-        lines = block.get("lines", [])
-        text_parts: list[str] = []
+        line_items: list[dict] = []
         sizes: list[float] = []
         bold_flags: list[bool] = []
-        for line in lines:
+        for line in block.get("lines", []):
+            line_parts: list[str] = []
+            line_sizes: list[float] = []
+            line_bold: list[bool] = []
             for span in line.get("spans", []):
                 span_text = span.get("text", "")
                 if not span_text.strip():
                     continue
-                text_parts.append(span_text)
-                sizes.append(float(span.get("size", 0.0)))
+                line_parts.append(span_text)
+                line_sizes.append(float(span.get("size", 0.0)))
                 flags = int(span.get("flags", 0))
                 # PyMuPDF font flag bit 4 (value 16) marks bold.
-                bold_flags.append(bool(flags & 16))
-        text = " ".join(text_parts).strip()
-        if not text:
+                line_bold.append(bool(flags & 16))
+            line_text = " ".join(line_parts).strip()
+            if not line_text:
+                continue
+            line_items.append(
+                {
+                    "text": line_text,
+                    "size": max(line_sizes) if line_sizes else 0.0,
+                    "is_bold": any(line_bold),
+                }
+            )
+            sizes.extend(line_sizes)
+            bold_flags.extend(line_bold)
+        if not line_items:
             continue
         x0, y0 = block["bbox"][0], block["bbox"][1]
         parsed.append(
             {
-                "text": text,
+                "text": " ".join(li["text"] for li in line_items),
+                "lines": line_items,
                 "x0": x0,
                 "y0": y0,
                 "size": max(sizes) if sizes else 0.0,
@@ -410,6 +463,28 @@ def _body_font_size(page_blocks: list[dict]) -> float | None:
 # --- Segmentation -----------------------------------------------------------
 
 
+def _trailing_routing_directives(current: list[DocumentBlock]) -> list[DocumentBlock]:
+    """Pop a trailing run of directive-only blocks that carries routing.
+
+    Mutates `current`, returning the popped blocks in original order so the
+    caller can prepend them to the next chunk. Returns [] (and leaves `current`
+    untouched) when the trailing run has no routing directive in it, or when the
+    directives are all the chunk has — a chunk that is nothing but directives is
+    a standalone programmer note and stays where it is.
+    """
+    tail: list[DocumentBlock] = []
+    i = len(current)
+    while i > 0 and _DIRECTIVE_ONLY_RE.match(current[i - 1].text):
+        i -= 1
+    if i == 0 or i == len(current):
+        return []
+    tail = current[i:]
+    if not any(_ROUTING_DIRECTIVE_RE.search(b.text) for b in tail):
+        return []
+    del current[i:]
+    return tail
+
+
 def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
     """Split ordered blocks into candidate questions on detected label lines.
 
@@ -457,8 +532,9 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
 
         is_boundary, qid = _detect_label(block.text)
         if is_boundary:
+            carried = _trailing_routing_directives(current)
             flush()
-            current = [block]
+            current = carried + [block]
             current_qid = qid
             seen_label = True
         else:

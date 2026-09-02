@@ -39,13 +39,74 @@ from src.engines.questionnaire.learned import (
     learned_randomize,
     learned_type,
 )
+from src.engines.questionnaire.routing_prose import parse_routing
 
 # A leading question label: "S2.", "Q12a)", "P1:" — the segmenter already found
 # it, but the text still carries it and it is not part of the wording.
 _LABEL_RE = re.compile(r"^\s*([A-Za-z]{0,3}\d+[a-z]?)\s*[.):]\s*")
 
-# A whole line that is only a scripter directive, e.g. "[PN: RANDOMIZE]".
-_DIRECTIVE_LINE_RE = re.compile(r"^\s*\[(?P<body>[^\]]*)\]\s*$")
+# A whole line that is only scripter directives. Real questionnaires put
+# SEVERAL on one line — "[SP] [IF D2 = 1]", "[IF S2=1] [MP] [RANDOMIZE a-f]" —
+# and a single-bracket pattern matched none of them: the line fell through to
+# the option parser, so "[SP]" became the question wording and the actual
+# question text became option 1.
+_DIRECTIVE_LINE_RE = re.compile(r"^\s*(?:\[[^\]]*\]\s*)+$")
+_DIRECTIVE_BODY_RE = re.compile(r"\[([^\]]*)\]")
+
+# A directive too long for one line wraps mid-bracket:
+#
+#     [ALLOW RESPONDENT TO EITHER TYPE ANSWER IN NUMBER BOX OR CHECK
+#     DON'T KNOW, PROMPT WITH THE FOLLOWING...]
+#
+# Each wrapped line has no closing bracket of its own, so it read as an answer
+# option and the question grew three options nobody could ever pick. Joined
+# back together before parsing, bounded so an unmatched stray "[" in respondent
+# wording cannot swallow the rest of the question.
+_MAX_WRAPPED_DIRECTIVE_LINES = 6
+
+
+def _join_wrapped_directives(lines: list[str]) -> list[str]:
+    """Join lines that continue an unclosed bracketed directive."""
+    joined: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        span = 1
+        while (
+            line.count("[") > line.count("]")
+            and i + span < len(lines)
+            and span < _MAX_WRAPPED_DIRECTIVE_LINES
+        ):
+            line = f"{line} {lines[i + span]}"
+            span += 1
+        if line.count("[") > line.count("]"):
+            # Never closed — not a directive after all; keep the lines as they
+            # were written rather than merging unrelated content.
+            joined.append(lines[i])
+            i += 1
+            continue
+        joined.append(line)
+        i += span
+    return joined
+
+
+# A question stem that wraps onto the next line is still the stem, not option 1.
+# PDFs deliver one line per block, so every wrapped question was silently
+# donating its tail to the answer list (and shifting every option code by one).
+# The stem is continuing while it has not yet reached its terminal punctuation
+# and no option has been seen.
+_STEM_CONTINUES_RE = re.compile(r"[?:.!\]]\s*$")
+
+# The code an option line writes for itself: "5. Much better off", "98) None".
+# Positional numbering is only right when the author left the codes implicit —
+# scales are routinely written in descending order (5,4,3,2,1) and skip codes
+# entirely (1,2,3,98,99), so counting down the list invents codes that the data
+# file does not use and every one of them becomes a false discrepancy.
+_OPTION_CODE_RE = re.compile(r"^\s*(\d{1,3})\s*[.):]\s+(?=\S)")
+# Multi-punch items are as often lettered as numbered ("a. It's cheaper").
+# The letter is an item marker, not a code — strip it from the label, keep the
+# position as the code, so the label matches the data map's option label.
+_OPTION_LETTER_RE = re.compile(r"^\s*([A-Za-z])\s*[.):]\s+(?=\S)")
 
 # A trailing tag on an option: "Healthcare [TERMINATE]", "None [ANCHOR, EXCLUSIVE]".
 _OPTION_TAG_RE = re.compile(r"\s*\[(?P<tags>[^\]]*)\]\s*$")
@@ -63,7 +124,7 @@ _TYPE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
     # NUMERIC first: "NUMERIC OE: 3-DIGIT MINIMUM" is a number, not a verbatim.
     (re.compile(r"numeric\s*oe|record number|enter (a )?number|\bnumeric\b|"
                 r"\byears\b|\bage\b.*\bnumber\b|number\s+\d+\s*-\s*\d+|"
-                r"\d+\s*-\s*digit", re.I),
+                r"\d+\s*-\s*digit|num(?:ber)?\s*box", re.I),
      QuestionType.NUMERIC),
     (re.compile(r"\brank\b.{0,20}\b(top|first|three|order)\b|\brank \d[, \d]*and\b|"
                 r"^\s*rank\b", re.I), QuestionType.RANK),
@@ -72,6 +133,20 @@ _TYPE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
     (re.compile(r"_\s*_\s*_|open[- ]?end|\btextbox\b|\boe\b|please describe|"
                 r"in your own words|type your|enter response|verbatim", re.I),
      QuestionType.OPEN_TEXT),
+]
+
+# SP / MP are the two most universal punch abbreviations in survey scripting —
+# every panel and platform writes them, and no client document has to teach us
+# what they mean. They are checked ONLY inside a bracketed directive: "SP" and
+# "MP" are two-letter tokens that appear innocently in ordinary prose and in
+# brand names, so searching them against the whole question text would invent
+# types. Tried after `_TYPE_PATTERNS` so "[NUMBER BOX WITH SP]" stays numeric.
+_PUNCH_DIRECTIVE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
+    (re.compile(r"\bMP\b|\bmulti(?:ple)?\s*(?:punch|select)\b|\bcheck\s*all\b", re.I),
+     QuestionType.MULTI),
+    (re.compile(r"\bSP\b|\bsingle\s*(?:punch|select)\b|\bradio\b", re.I),
+     QuestionType.SINGLE),
+    (re.compile(r"\bTXT\b", re.I), QuestionType.OPEN_TEXT),
 ]
 
 # The option list is not written out here — it is taken from another question
@@ -155,6 +230,7 @@ class ProseFields:
     options: list[Option] = field(default_factory=list)
     terminate_if: Expression | None = None
     terminate_verbatim: str | None = None
+    show_if: Expression | None = None
     randomize: bool = False
     # A scripter-computed variable ("CODE AGE - BASED ON S1..."), not a question.
     derived: bool = False
@@ -233,7 +309,7 @@ def _infer_type(
         return taught
 
     for directive in directives or []:
-        for pattern, qtype in _TYPE_PATTERNS:
+        for pattern, qtype in (*_TYPE_PATTERNS, *_PUNCH_DIRECTIVE_PATTERNS):
             match = pattern.search(directive)
             if match and not _blocked(qtype):
                 return qtype, f"[{directive}]"
@@ -259,11 +335,21 @@ def parse_prose_question(
 ) -> ProseFields | None:
     """Extract what a prose question states. None if it has no usable id."""
     lines = [ln.replace("\t", " ").strip() for ln in (chunk_text or "").splitlines()]
-    lines = [ln for ln in lines if ln]
+    lines = _join_wrapped_directives([ln for ln in lines if ln])
     if not lines:
         return None
 
-    first = lines[0]
+    # Directives authored ABOVE the label ("[SP] [IF D2 = 1]") govern THIS
+    # question — segmentation carries them into this chunk, so they lead the
+    # text. The wording is the first line that is not one of them; the rest,
+    # before and after, go through the same directive/option pass below.
+    head = next(
+        (i for i, ln in enumerate(lines) if not _DIRECTIVE_LINE_RE.match(ln)), None
+    )
+    if head is None:
+        return None
+    first = lines[head]
+    body_lines = lines[:head] + lines[head + 1 :]
     match = _LABEL_RE.match(first)
     qid = (match.group(1) if match else (candidate_qid or "")).strip()
     if not qid:
@@ -281,29 +367,40 @@ def parse_prose_question(
     options: list[Option] = []
     terminate_codes: list[int] = []
     terminate_lines: list[str] = []
+    show_if: Expression | None = None
+    show_if_verbatim = ""
+    written_codes: list[int | None] = []
+    stem_wraps_used = False
     randomize = False
     randomize_evidence = ""
     scale_row: str | None = None
 
-    for line in lines[1:]:
-        directive = _DIRECTIVE_LINE_RE.match(line)
-        if directive:
-            body = directive.group("body").strip()
-            directives.append(body)
-            taught_random = learned_randomize(patterns, body)
-            if taught_random is not None:
-                randomize = True
-                randomize_evidence = f"learned: {taught_random}"
-            elif re.search(r"RANDOMI[SZ]E|\bROTATE\b", body, re.I) and not re.search(
-                r"KEEP ORDER|DO NOT RANDOMI[SZ]E", body, re.I
-            ):
-                randomize = True
-                randomize_evidence = f"[{body}]"
-            if _TERMINATE_TAG.search(body):
-                # A document-level terminate rule ("CONTINUE IF AGES 18-60,
-                # TERMINATE ALL OTHERS") is prose about a range, not per-option
-                # codes — record it, do not invent an expression.
-                terminate_lines.append(body)
+    for line in body_lines:
+        if _DIRECTIVE_LINE_RE.match(line):
+            for raw in _DIRECTIVE_BODY_RE.findall(line):
+                body = raw.strip()
+                directives.append(body)
+                taught_random = learned_randomize(patterns, body)
+                if taught_random is not None:
+                    randomize = True
+                    randomize_evidence = f"learned: {taught_random}"
+                elif re.search(
+                    r"RANDOMI[SZ]E|\bROTATE\b", body, re.I
+                ) and not re.search(r"KEEP ORDER|DO NOT RANDOMI[SZ]E", body, re.I):
+                    randomize = True
+                    randomize_evidence = f"[{body}]"
+                if _TERMINATE_TAG.search(body):
+                    # A document-level terminate rule ("CONTINUE IF AGES 18-60,
+                    # TERMINATE ALL OTHERS") is prose about a range, not
+                    # per-option codes — record it, do not invent an expression.
+                    terminate_lines.append(body)
+                elif show_if is None:
+                    # "[IF S2 = 2 or S2=3]" states this question's base. First
+                    # readable one wins; an unreadable one stays a directive.
+                    routing = parse_routing(body)
+                    if routing is not None:
+                        show_if = routing
+                        show_if_verbatim = body
             continue
 
         if _SECTION_ROUTING_RE.search(line):
@@ -323,12 +420,40 @@ def parse_prose_question(
             instruction_text = f"{instruction_text} {line}"
             continue
 
+        if (
+            not options
+            and not stem_wraps_used
+            and not _OPTION_CODE_RE.match(line)
+            and not _OPTION_LETTER_RE.match(line)
+            and not _STEM_CONTINUES_RE.search(question_text)
+            and any(c.islower() for c in question_text)
+        ):
+            # The stem wrapped. Finish reading it before the option list starts.
+            # ONE line only, and only for a stem that is addressed to the
+            # RESPONDENT. An all-caps header is addressed to the scripter — a
+            # recode table ("BUBBLE AUDIENCE CODE", "CODE STATE & REGION") also
+            # has no terminal punctuation and no option markers, and absorbing
+            # its first definition line costs it `derived` on the same
+            # no-lowercase rule `is_derived_wording` uses.
+            stem_wraps_used = True
+            question_text = f"{question_text} {line}".strip()
+            instruction_text = f"{instruction_text} {line}".strip()
+            continue
+
         # Otherwise: an answer option. Codes are positional (1-based), which is
         # how prose lists are scripted.
         tags = _OPTION_TAG_RE.search(line)
         label = _OPTION_TAG_RE.sub("", line).strip() if tags else line
+        written = _OPTION_CODE_RE.match(label)
+        if written:
+            label = label[written.end() :].strip()
+        else:
+            lettered = _OPTION_LETTER_RE.match(label)
+            if lettered:
+                label = label[lettered.end() :].strip()
         if not label:
             continue
+        written_codes.append(int(written.group(1)) if written else None)
         code = len(options) + 1
         option = Option(code=code, label=label)
         if tags:
@@ -343,6 +468,20 @@ def parse_prose_question(
                 terminate_lines.append(f"{label} [{tag_text.strip()}]")
         options.append(option)
 
+    # Adopt the written codes only when EVERY option states one and they are
+    # distinct. A partial list (wrapped option text, an unnumbered "Other")
+    # keeps positional numbering rather than mixing two schemes.
+    if (
+        options
+        and len(written_codes) == len(options)
+        and all(c is not None for c in written_codes)
+        and len(set(written_codes)) == len(written_codes)
+    ):
+        remap = {opt.code: wc for opt, wc in zip(options, written_codes, strict=True)}
+        for opt, wc in zip(options, written_codes, strict=True):
+            opt.code = wc
+        terminate_codes = [remap.get(c, c) for c in terminate_codes]
+
     fields = ProseFields(
         qid=qid,
         text=question_text or None,
@@ -350,6 +489,9 @@ def parse_prose_question(
         randomize=randomize,
         directives=directives,
     )
+    if show_if is not None:
+        fields.show_if = show_if
+        fields.evidence["base"] = f"[{show_if_verbatim}]"
     if randomize_evidence:
         fields.evidence["randomize"] = randomize_evidence
     if question_text and is_derived_wording(question_text):

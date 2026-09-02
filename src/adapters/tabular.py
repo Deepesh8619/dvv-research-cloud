@@ -47,6 +47,25 @@ def _is_integral(series: pd.Series) -> bool:
     return bool(((values % 1) == 0).all())
 
 
+# Survey exports are not reliably UTF-8. SPSS, Excel-on-Windows and most
+# government data portals emit cp1252, so a single curly apostrophe in an
+# option label (byte 0x92) raised UnicodeDecodeError and the whole upload died
+# — with the raw traceback, which is not an error a client should ever see.
+# cp1252 decodes every byte 0x00-0xFF, so the fallback cannot fail in turn.
+_CSV_ENCODINGS = ("utf-8", "cp1252")
+
+
+def _read_csv_any_encoding(path: Path) -> pd.DataFrame:
+    """Read a CSV, trying UTF-8 first and falling back to cp1252."""
+    last: UnicodeDecodeError | None = None
+    for encoding in _CSV_ENCODINGS:
+        try:
+            return pd.read_csv(path, low_memory=False, encoding=encoding)
+        except UnicodeDecodeError as exc:  # pragma: no cover - cp1252 never raises
+            last = exc
+    raise last  # type: ignore[misc]
+
+
 def read_tabular(path: str | Path) -> tuple[pd.DataFrame, DataMap]:
     """Read a CSV/XLSX export into a DataFrame plus a DataMap.
 
@@ -60,7 +79,7 @@ def read_tabular(path: str | Path) -> tuple[pd.DataFrame, DataMap]:
     suffix = path.suffix.lower()
     parsed_vars: dict[str, Variable] = {}
     if suffix == ".csv":
-        df = pd.read_csv(path, low_memory=False)
+        df = _read_csv_any_encoding(path)
         provenance = "csv_import"
     elif suffix in (".xlsx", ".xls"):
         sheet_names = pd.ExcelFile(path).sheet_names

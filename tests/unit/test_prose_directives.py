@@ -242,3 +242,59 @@ def test_rank_instruction_is_its_own_type():
         "Q7",
     )
     assert fields.qtype is QuestionType.RANK
+
+
+# --- SP / MP punch abbreviations --------------------------------------------
+
+
+def test_sp_directive_types_a_question_single() -> None:
+    fields = parse_prose_question(
+        "[SP] [IF D2 = 1]\nD4A. Do you work full-time?\n1. Yes\n0. No", "D4A"
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.SINGLE
+
+
+def test_mp_directive_types_a_question_multi() -> None:
+    fields = parse_prose_question(
+        "[IF S2 = 2] [MP]\nR1. Why do you rent?\na. Cheaper\nb. Convenient", "R1"
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.MULTI
+
+
+def test_number_box_with_sp_is_numeric_not_single() -> None:
+    """'SP' inside a NUMBER BOX directive describes the widget, not the type."""
+    fields = parse_prose_question(
+        "[NUMBER BOX WITH SP]\nR3. What is your monthly rent?\n$ ______", "R3"
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.NUMERIC
+
+
+def test_bare_sp_in_prose_does_not_type_a_question() -> None:
+    """SP/MP are two-letter tokens; only a bracketed directive may claim them.
+
+    'SP' here is a brand abbreviation in the respondent's wording. Typing the
+    question off it would silently declare a multi-select single.
+    """
+    fields = parse_prose_question(
+        "Q9. Which SP brand did you buy?\n1. Brand A\n2. Brand B", "Q9"
+    )
+    assert fields is not None
+    assert fields.qtype is None
+    assert "type" in fields.missing
+
+
+def test_several_directives_on_one_line_are_all_read() -> None:
+    """"[IF S2=1] [MP] [RANDOMIZE a-f]" is one line and three instructions."""
+    fields = parse_prose_question(
+        "[IF S2 = 2] [MP] [RANDOMIZE a-f]\nR1. Why do you rent?\na. Cheaper\nb. Prefer it",
+        "R1",
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.MULTI
+    assert fields.randomize is True
+    # The wording is the question, not the directive line above it.
+    assert fields.text is not None and fields.text.startswith("Why do you rent")
+    assert [o.label for o in fields.options] == ["Cheaper", "Prefer it"]
