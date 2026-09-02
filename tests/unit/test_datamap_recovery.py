@@ -139,3 +139,97 @@ def test_matching_ignores_case_and_underscores():
     survey = _survey([Question(qid="ss_emp", text="Work status?", type=QuestionType.SINGLE)])
     questions, _ = recover_missing(survey, _datamap())
     assert [q.qid for q in questions] == ["DA_GOALS"]
+
+
+# --- Inside the extractor ---------------------------------------------------
+# Recovery used to run at cross-check time, which explained a gap after paying
+# for it. Consulting the data map DURING extraction means the gap is never paid
+# for: on the real study this halved the model calls, 56 -> 28.
+
+
+def test_a_gap_the_datamap_can_answer_is_filled_without_a_model():
+    """A residue call for something already written down is paid for twice."""
+    from src.engines.questionnaire.datamap_recovery import fill_from_datamap
+    from src.engines.questionnaire.prose_directives import parse_prose_question
+
+    fields = parse_prose_question("DA_GOALS. Which objectives?\nAlpha\nBeta", "DA_GOALS")
+    assert "type" in fields.missing  # would have escalated
+
+    candidate = next(q for q in questions_from_datamap(_datamap()) if q.qid == "DA_GOALS")
+    filled = fill_from_datamap(fields, candidate)
+
+    assert "type" in filled
+    assert fields.complete, "no model call is needed any more"
+    assert fields.qtype is QuestionType.MULTI
+
+
+def test_routing_is_never_filled_from_the_datamap():
+    """A data map records what was COLLECTED, never who was ASKED. A base or
+    terminate must keep escalating rather than being invented."""
+    from src.engines.questionnaire.datamap_recovery import fill_from_datamap
+
+    class Fields:
+        text = None
+        qtype = None
+        options: list = []
+        missing = ["text", "type", "base", "terminate"]
+
+    fields = Fields()
+    candidate = next(q for q in questions_from_datamap(_datamap()) if q.qid == "SS_EMP")
+    fill_from_datamap(fields, candidate)
+
+    assert "base" in fields.missing
+    assert "terminate" in fields.missing
+
+
+def test_a_hidden_variable_is_recognised_without_a_model_call():
+    """A questionnaire often describes its hidden variables inline, and the
+    reader treats each as a question — paying a call to invent an answer type
+    for something nobody was asked."""
+    from src.engines.questionnaire.datamap_recovery import non_answerable_qids, normalize_qid
+
+    not_asked = non_answerable_qids(_datamap())
+    assert not_asked.get(normalize_qid("HID_SEGMENT")) == "hidden"
+    assert not_asked.get(normalize_qid("record")) == "system"
+    # A real question must never land here.
+    assert normalize_qid("SS_EMP") not in not_asked
+    assert normalize_qid("DA_GOALS") not in not_asked
+
+
+def test_extraction_appends_questions_the_reader_never_found():
+    """End to end, with no model available: the survey still gains the
+    questions the data map describes."""
+    from src.engines.questionnaire.extractor import extract_survey_definition
+    from src.intake.questionnaire_loader import QuestionChunk
+
+    chunk = QuestionChunk(
+        chunk_text="SS_EMP. What is your work status?\nEmployed\nNot employed",
+        candidate_qid="SS_EMP",
+        provenance="p1",
+        source_blocks=[],
+    )
+    survey = extract_survey_definition([chunk], study_id="s1", datamap=_datamap())
+
+    qids = {q.qid for q in survey.questions}
+    assert "SS_EMP" in qids           # read from the document
+    assert "DA_GOALS" in qids         # recovered from the data map
+    assert survey.metadata["recovered_from_datamap"] == ["DA_GOALS"]
+    recovered = next(q for q in survey.questions if q.qid == "DA_GOALS")
+    assert FLAG_RECOVERED in recovered.flags
+
+
+def test_extraction_without_a_datamap_is_unchanged():
+    """The no-op guarantee: no data map means the reader behaves exactly as
+    it did before any of this existed."""
+    from src.engines.questionnaire.extractor import extract_survey_definition
+    from src.intake.questionnaire_loader import QuestionChunk
+
+    chunk = QuestionChunk(
+        chunk_text="SS_EMP. What is your work status?\nEmployed\nNot employed",
+        candidate_qid="SS_EMP",
+        provenance="p1",
+        source_blocks=[],
+    )
+    survey = extract_survey_definition([chunk], study_id="s1")
+    assert [q.qid for q in survey.questions] == ["SS_EMP"]
+    assert "recovered_from_datamap" not in survey.metadata

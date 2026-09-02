@@ -113,24 +113,24 @@ def questions_from_datamap(datamap: DataMap) -> list[DatamapQuestion]:
     return sorted(out, key=lambda q: q.qid)
 
 
-def _normalize(qid: str) -> str:
+def normalize_qid(qid: str) -> str:
     return qid.strip().lower().replace("_", "").replace("-", "")
 
 
 def reconcile(survey: SurveyDefinition, datamap: DataMap) -> Reconciliation:
     """Compare both sides by question id, tolerantly."""
-    extracted = {_normalize(q.qid): q.qid for q in survey.questions}
+    extracted = {normalize_qid(q.qid): q.qid for q in survey.questions}
     result = Reconciliation()
 
     for candidate in questions_from_datamap(datamap):
-        if _normalize(candidate.qid) in extracted:
+        if normalize_qid(candidate.qid) in extracted:
             result.matched.append(candidate.qid)
         else:
             result.missing_from_questionnaire.append(candidate)
 
-    described = {_normalize(q.qid) for q in questions_from_datamap(datamap)}
+    described = {normalize_qid(q.qid) for q in questions_from_datamap(datamap)}
     for question in survey.questions:
-        if _normalize(question.qid) not in described:
+        if normalize_qid(question.qid) not in described:
             result.missing_from_datamap.append(question.qid)
     return result
 
@@ -186,6 +186,75 @@ def rebuild_question(candidate: DatamapQuestion) -> Question:
     )
     question.flags.append(FLAG_RECOVERED)
     return question
+
+
+def fill_from_datamap(fields, candidate: DatamapQuestion) -> list[str]:
+    """Answer a parser's open questions from the script's own record.
+
+    `fields` is a SpecTableFields or ProseFields whose `missing` list says what
+    the document did not state plainly. The data map states all three of text,
+    type and options exactly as fielded, so anything still missing that it can
+    answer is filled here — BEFORE a model is asked, which is the whole point:
+    on a real study this removed 50 residue calls that would each have been
+    asked for something already written down.
+
+    Routing is never filled. A data map records what was COLLECTED, never who
+    was ASKED, so `base`/`terminate` stay missing and still escalate.
+
+    Returns the field names it filled, for provenance. Mutates `fields`.
+    """
+    filled: list[str] = []
+
+    if "text" in fields.missing and candidate.text:
+        fields.text = candidate.text
+        filled.append("text")
+
+    if "options" in fields.missing or (not fields.options and candidate.variables):
+        rebuilt = rebuild_question(candidate).options
+        if rebuilt:
+            fields.options = rebuilt
+            if "options" in fields.missing:
+                filled.append("options")
+
+    if "type" in fields.missing:
+        fields.qtype = QuestionType.MULTI if candidate.is_multi else (
+            QuestionType.SINGLE if fields.options else QuestionType.OPEN_TEXT
+        )
+        filled.append("type")
+
+    for name in filled:
+        if name in fields.missing:
+            fields.missing.remove(name)
+    return filled
+
+
+def non_answerable_qids(datamap: DataMap) -> dict[str, str]:
+    """Normalized qid -> role, for every column that was never asked.
+
+    A questionnaire document often describes its hidden variables inline
+    ("HID_COMP_SIZE: Hidden variable for company size classification"), and the
+    reader dutifully treats each as a question — then pays a model call trying
+    to work out its answer type. The data map already knows they are computed,
+    not asked. Consulting it removes the call AND gives the right answer, which
+    is the better argument of the two.
+    """
+    roles: dict[str, str] = {}
+    for variable in datamap.variables:
+        role = classify_variable(
+            variable.name,
+            getattr(variable, "label", "") or "",
+            getattr(variable, "question_ref", None),
+        )
+        if role in _ANSWERABLE:
+            continue
+        key = normalize_qid(getattr(variable, "question_ref", None) or variable.name)
+        roles.setdefault(key, role)
+    return roles
+
+
+def index_by_qid(datamap: DataMap) -> dict[str, DatamapQuestion]:
+    """Data-map questions keyed by normalized qid, for fast lookup per chunk."""
+    return {normalize_qid(q.qid): q for q in questions_from_datamap(datamap)}
 
 
 def recover_missing(

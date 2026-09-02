@@ -277,6 +277,25 @@ def _question_payload(question, approved_qids: set[str]) -> dict:
 # --- Background extraction --------------------------------------------------
 
 
+def _study_datamap(db, study_id: str):
+    """The study's data map, if a data file has already been processed.
+
+    Never raises: a questionnaire must still extract when no data exists yet,
+    or when a stored data map cannot be parsed. Losing the acceleration is a
+    cost; failing the upload is a defect.
+    """
+    from src.core.models import DataMap
+
+    try:
+        study = get_study(db, study_id)
+        if study is None or not study.datamap_json:
+            return None
+        return DataMap.from_json(study.datamap_json)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[{study_id}] data map unavailable for extraction: {exc}")
+        return None
+
+
 def _run_extraction(
     questionnaire_id: str,
     study_id: str,
@@ -363,6 +382,14 @@ def _run_extraction(
             # a convention taught on an earlier document is now read by the
             # deterministic parsers here, with no model call at all.
             patterns_for_profile=lambda slug: active_patterns_for_profile(job_db, slug),
+            # The script's own record of what was fielded, when the data was
+            # uploaded before the questionnaire. It answers a parser's open
+            # questions without a model call, tells the reader which chunks are
+            # computed variables nobody was asked, and supplies the questions
+            # the reader never found at all. Measured on a real study: model
+            # calls 56 -> 28. None when no data has been uploaded yet, and the
+            # reader then behaves exactly as it did before.
+            datamap=_study_datamap(job_db, study_id),
             on_progress=_heartbeat,
             on_checkpoint=_checkpoint,
         )
@@ -380,6 +407,20 @@ def _run_extraction(
                 f"[{study_id}] Could not write ephemeral definition file "
                 f"{definition_path}: {write_exc}"
             )
+        # Exception-based review: pre-approve the clean questions (computed in the
+        # extractor, where per-result `verified` is in scope) so the reviewer is
+        # left with only the flagged/low-confidence exceptions. Status stays
+        # 'draft'; approve-all still gates on the remainder.
+        #
+        # Written BEFORE the status flips to 'draft'. The review page polls for
+        # the status leaving 'processing', so writing approvals afterwards left
+        # a window where it saw "draft, 0 approved" and only later corrected
+        # itself — a reviewer opening the page the instant extraction finished
+        # got the wrong count. Order is the whole fix: once the status says
+        # draft, everything that status implies is already true.
+        auto_approved = survey.metadata.get("auto_approved_qids", [])
+        if auto_approved:
+            set_questionnaire_approved_qids(job_db, questionnaire_id, auto_approved)
         update_questionnaire_status(
             job_db,
             questionnaire_id,
@@ -387,13 +428,6 @@ def _run_extraction(
             definition_json=payload,
             definition_path=str(definition_path),
         )
-        # Exception-based review: pre-approve the clean questions (computed in the
-        # extractor, where per-result `verified` is in scope) so the reviewer is
-        # left with only the flagged/low-confidence exceptions. Status stays
-        # 'draft'; approve-all still gates on the remainder.
-        auto_approved = survey.metadata.get("auto_approved_qids", [])
-        if auto_approved:
-            set_questionnaire_approved_qids(job_db, questionnaire_id, auto_approved)
         logger.info(
             f"[{study_id}] Questionnaire {questionnaire_id} extracted: "
             f"{len(survey.questions)} questions, {len(auto_approved)} auto-approved"

@@ -362,3 +362,30 @@ right far more often than not — but it is a judgement, and a wrong one silentl
 checks the wrong column. Every text-matched link is returned as
 `needs_confirmation` with both wordings and the score, for a human to settle.
 It is never quietly accepted.
+
+### The data map inside the extractor
+
+Recovery used to run at cross-check time, which explained a gap *after* paying
+for it. The extractor now consults the data map directly, when one exists —
+i.e. when the data was uploaded before the questionnaire.
+
+Three uses, in order of how much they save:
+
+1. **Answer the parser's open questions.** A residue call for a question text,
+   type or option list that the data map already records is a call paid for
+   twice. Filled fields are cited as "the data map" in the provenance.
+2. **Skip what was never asked.** A questionnaire commonly describes its hidden
+   variables inline (`HID_COMP_SIZE: Hidden variable for company size`), and the
+   reader treats each as a question, then pays a call to invent an answer type
+   for something nobody was asked. The data map already knows they are computed.
+3. **Add what the reader never found.** Questions the data map names and no
+   chunk produced are rebuilt from the script's own text and punches.
+
+Measured on the Google Ads study: **model calls 56 → 28**, nine fabricated
+answers avoided, and 105 questions recovered that the reader never found.
+
+Routing is never filled from the data map — it records what was *collected*,
+not who was *asked* — so a base or terminate keeps escalating.
+
+**No data map means no change.** The extractor behaves exactly as it did
+before, which is asserted by a test.

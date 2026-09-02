@@ -36,6 +36,7 @@ from src.ai.router import (
     ModelOutputError,
     run_task,
 )
+from src.core.models import DataMap
 from src.core.survey_definition import (
     Block,
     Expression,
@@ -45,6 +46,14 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.questionnaire import schema
+from src.engines.questionnaire.datamap_recovery import (
+    DatamapQuestion,
+    fill_from_datamap,
+    index_by_qid,
+    non_answerable_qids,
+    normalize_qid,
+    recover_missing,
+)
 from src.engines.questionnaire.learned import LearnedPattern
 from src.engines.questionnaire.mr_techniques import detect_techniques
 from src.engines.questionnaire.profiles import detect_profile
@@ -428,16 +437,29 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
 
 
 def _extract_via_spec_table(
-    chunk: QuestionChunk, fields: SpecTableFields
+    chunk: QuestionChunk,
+    fields: SpecTableFields,
+    datamap_question: DatamapQuestion | None = None,
 ) -> ExtractionResult | None:
     """Deterministic parse, plus ONE small call for whatever it could not state.
 
     Returns None if the residue call fails, so the caller falls back to normal
     full extraction rather than shipping a half-read question.
     """
+    # Anything the document left unstated that the data map already records —
+    # the question text, its type, its option list — is filled from the script's
+    # own output before a model is asked. A residue call for something written
+    # down in the data map is a call paid for twice.
+    filled_from_datamap = (
+        fill_from_datamap(fields, datamap_question) if datamap_question else []
+    )
     question = _question_from_fields(fields, chunk)
     # Fields read straight from the table are not model guesses.
     confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
+    if filled_from_datamap:
+        question.extraction_evidence.update(
+            {name: "the data map" for name in filled_from_datamap}
+        )
 
     if fields.complete:
         result = ExtractionResult(question=question, confidence=confidence)
@@ -543,15 +565,24 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
 
 
 def _extract_via_prose(
-    chunk: QuestionChunk, fields: ProseFields
+    chunk: QuestionChunk,
+    fields: ProseFields,
+    datamap_question: DatamapQuestion | None = None,
 ) -> ExtractionResult | None:
     """Prose directives, plus one small call for what they do not state.
 
     Mirrors the spec-table path. Returns None so the caller falls back to full
     extraction rather than shipping a half-read question.
     """
+    filled_from_datamap = (
+        fill_from_datamap(fields, datamap_question) if datamap_question else []
+    )
     question = _question_from_prose(fields, chunk)
     confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
+    if filled_from_datamap:
+        question.extraction_evidence.update(
+            {name: "the data map" for name in filled_from_datamap}
+        )
 
     if fields.complete:
         result = ExtractionResult(question=question, confidence=confidence)
@@ -603,6 +634,7 @@ def extract_question(
     profile_hint: str | None = None,
     learned_rules: list[str] | None = None,
     patterns: list[LearnedPattern] | None = None,
+    datamap_question: DatamapQuestion | None = None,
 ) -> ExtractionResult:
     """Extract one chunk into a structured Question + confidence + flags.
 
@@ -634,7 +666,7 @@ def extract_question(
     # the table is not parseable or the residue call fails.
     fields = _spec_table_fields(chunk, patterns)
     if fields is not None:
-        structured = _extract_via_spec_table(chunk, fields)
+        structured = _extract_via_spec_table(chunk, fields, datamap_question)
         if structured is not None:
             return structured
 
@@ -650,7 +682,7 @@ def extract_question(
     # full LLM extraction anyway. Measured on a 3-question document: 951s and
     # three model calls, for questions the parser answers in milliseconds.
     if prose is not None and (prose.complete or prose.options or prose.terminate_if):
-        via_prose = _extract_via_prose(chunk, prose)
+        via_prose = _extract_via_prose(chunk, prose, datamap_question)
         if via_prose is not None:
             return via_prose
 
@@ -866,12 +898,37 @@ def _maybe_checkpoint(
         sys.stderr.write(f"[{study_id}] checkpoint failed at {done}/{total}: {exc}\n")
 
 
+def _derived_result(chunk: QuestionChunk, role: str) -> ExtractionResult:
+    """A chunk the data map says was computed, not asked — no model call.
+
+    Typed `info` and flagged so the review UI says "needs manual setup" rather
+    than surfacing an unanswerable question, and so it never reaches a
+    respondent.
+    """
+    question = Question(
+        qid=chunk.candidate_qid or "UNKNOWN",
+        text=(chunk.chunk_text or "").strip().splitlines()[0][:300]
+        if chunk.chunk_text
+        else "",
+        type=QuestionType.INFO,
+        required=False,
+        source_text=chunk.chunk_text,
+        source_location=chunk.provenance,
+        extraction_method="datamap",
+        extraction_evidence={"type": f"the data map records this as a {role} variable"},
+    )
+    result = ExtractionResult(question=question, confidence={"type": 1.0})
+    result.add_flag(schema.FLAG_DERIVED_VARIABLE)
+    return result
+
+
 def extract_survey_definition(
     chunks: list[QuestionChunk],
     study_id: str,
     blocks: list[DocumentBlock] | None = None,
     rules_for_profile: Callable[[str], list[str]] | None = None,
     patterns_for_profile: Callable[[str], list[LearnedPattern]] | None = None,
+    datamap: DataMap | None = None,
     on_progress: Callable[[int, int], None] | None = None,
     on_checkpoint: Callable[[int, int, SurveyDefinition], None] | None = None,
     checkpoint_every: int = 5,
@@ -935,10 +992,32 @@ def extract_survey_definition(
         if on_progress is not None:
             on_progress(0, len(chunks))
 
+    # The script's own record of what was fielded, when the data arrived first.
+    # Used two ways: to answer a parser's open questions without a model call,
+    # and afterwards to add questions the document reader never found at all.
+    datamap_index = index_by_qid(datamap) if datamap is not None else {}
+    # Columns the script computes rather than asks. The document describes them
+    # inline like questions, so without this the reader pays a model call per
+    # hidden variable and gets a fabricated answer type for something nobody
+    # was ever asked.
+    datamap_not_asked = non_answerable_qids(datamap) if datamap is not None else {}
+
     results: list[ExtractionResult] = []
     consecutive_backend_failures = 0
     for chunk in chunks:
-        result = extract_question(chunk, profile_hint, learned_rules, patterns)
+        key = normalize_qid(chunk.candidate_qid or "")
+        not_asked = datamap_not_asked.get(key)
+        if not_asked and key not in datamap_index:
+            results.append(_derived_result(chunk, not_asked))
+            if on_progress:
+                on_progress(len(results), len(chunks))
+            _maybe_checkpoint(
+                results, chunks, study_id, detection, reconcile_meta,
+                on_checkpoint, checkpoint_every,
+            )
+            continue
+        known = datamap_index.get(key)
+        result = extract_question(chunk, profile_hint, learned_rules, patterns, known)
 
         if _is_backend_unavailable_result(result):
             consecutive_backend_failures += 1
@@ -989,7 +1068,24 @@ def extract_survey_definition(
             on_checkpoint, checkpoint_every,
         )
 
-    return _assemble_survey(results, study_id, detection, reconcile_meta)
+    survey = _assemble_survey(results, study_id, detection, reconcile_meta)
+
+    # Whatever the document reader never found at all. The data map lists every
+    # question that was actually fielded, so a question it names and no chunk
+    # produced can be rebuilt from the script's own text and punches instead of
+    # being lost. Measured on a real study: 24 questions read from the document,
+    # 105 more recovered here — and each one would otherwise have been a model
+    # call, or simply absent.
+    if datamap is not None:
+        recovered, _links = recover_missing(survey, datamap)
+        for question in recovered:
+            survey.questions.append(question)
+            if survey.blocks:
+                survey.blocks[-1].question_ids.append(question.qid)
+        if recovered:
+            survey.metadata["recovered_from_datamap"] = [q.qid for q in recovered]
+
+    return survey
 
 
 
