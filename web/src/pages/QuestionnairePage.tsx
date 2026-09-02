@@ -916,9 +916,14 @@ export default function QuestionnairePage() {
               </p>
             </>
           )}
+          {/* Whether the script's own record is helping. Half the model calls
+              ride on this, and a reviewer watching a slow run otherwise cannot
+              tell an accelerated run from one paying full price. */}
           <p className="text-xs text-slate-400 mt-2">
-            Questions the parser cannot resolve need an AI reading at a few
-            seconds each, so a long questionnaire can take several minutes.
+            {status.used_datamap
+              ? 'Using this project’s data map, so questions it already describes cost no AI reading.'
+              : 'No data map on this project yet — every unresolved question needs an AI reading. ' +
+                'Uploading the data file first makes this roughly twice as fast.'}
           </p>
         </div>
       )}

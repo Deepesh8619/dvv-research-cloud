@@ -83,3 +83,25 @@ def test_the_configured_engine_matches_its_backend():
         assert engine.pool._pre_ping is False
     else:
         assert engine.pool._pre_ping is True
+
+
+# --- The data map must outlive the run that produced it ---------------------
+
+
+def test_the_datamap_is_saved_independently_of_the_decks():
+    """It is produced at intake, minutes before any deck exists.
+
+    Gating its storage on `excel_deck_path` meant a run that paused at the QC
+    approval gate — or errored during coding, or was killed — threw away a data
+    map that had parsed perfectly. That silently removed the acceleration from
+    every questionnaire later uploaded to the same project: the extractor found
+    no data map and paid full price for questions the script had described.
+    """
+    import inspect
+
+    from api.routes import studies
+
+    source = inspect.getsource(studies._run_orchestration_job)
+    datamap_at = source.index("datamap_json = _read(result.datamap_path)")
+    decks_at = source.index("if result.excel_deck_path:")
+    assert datamap_at < decks_at, "the data map must be stored before the deck gate"

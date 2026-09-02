@@ -188,16 +188,28 @@ def _run_orchestration_job(study_id: str, client_name: str, file_path: Path) -> 
             metadata["qc_warnings"] = result.qc_report.warnings
         update_study_status(job_db, study_id, result.stage.value, metadata)
 
-        if result.excel_deck_path:
-            def _read(path) -> str | None:
-                return Path(path).read_text() if path and Path(path).exists() else None
+        def _read(path) -> str | None:
+            return Path(path).read_text() if path and Path(path).exists() else None
 
+        # The data map is persisted on its OWN, not alongside the decks. It is
+        # produced at intake, minutes before any deck exists, and a run that
+        # pauses at the QC gate — or errors during coding, or is killed — never
+        # reaches deck rendering. Gating it on excel_deck_path threw away a data
+        # map that had parsed perfectly, which then silently removed the
+        # acceleration from every questionnaire uploaded to the same project:
+        # the extractor found no data map and paid full price for questions the
+        # script had already described.
+        datamap_json = _read(result.datamap_path)
+        if datamap_json:
+            update_study_paths(job_db, study_id, datamap_json=datamap_json)
+            logger.info(f"[{study_id}] Data map stored ({len(datamap_json)} bytes)")
+
+        if result.excel_deck_path:
             update_study_paths(
                 job_db,
                 study_id,
                 excel_path=str(result.excel_deck_path),
                 pptx_path=str(result.pptx_deck_path) if result.pptx_deck_path else None,
-                datamap_json=_read(result.datamap_path),
             )
             set_study_artifacts(
                 job_db,

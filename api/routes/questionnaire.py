@@ -226,7 +226,11 @@ def _save_definition(db: Session, questionnaire, survey: SurveyDefinition) -> No
 # --- Serialization helpers --------------------------------------------------
 
 
-def _status_response(questionnaire, survey: SurveyDefinition | None) -> QuestionnaireStatusResponse:
+def _status_response(
+    questionnaire,
+    survey: SurveyDefinition | None,
+    used_datamap: bool = False,
+) -> QuestionnaireStatusResponse:
     """Build the status/summary payload; survey is None while still processing."""
     metadata = survey.metadata if survey else {}
     return QuestionnaireStatusResponse(
@@ -242,6 +246,12 @@ def _status_response(questionnaire, survey: SurveyDefinition | None) -> Question
         # Only items a reviewer can act on. Counting display text and
         # scripter-computed variables made the denominator unreachable and the
         # progress meaningless.
+        # Whether the script's own record was available to this extraction.
+        # Without it, a reviewer watching a slow run cannot tell one that is
+        # being helped from one paying full price for every question — and the
+        # difference is roughly half the model calls.
+        used_datamap=used_datamap,
+        n_recovered_from_datamap=len(metadata.get("recovered_from_datamap") or []),
         n_reviewable=(
             sum(1 for q in survey.questions if _is_reviewable(q)) if survey else 0
         ),
@@ -275,6 +285,15 @@ def _question_payload(question, approved_qids: set[str]) -> dict:
 
 
 # --- Background extraction --------------------------------------------------
+
+
+def _study_has_datamap(db, study_id: str) -> bool:
+    """Does this study already hold the data map? Cheap enough for a status poll."""
+    try:
+        study = get_study(db, study_id)
+        return bool(study is not None and study.datamap_json)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _study_datamap(db, study_id: str):
@@ -582,7 +601,7 @@ async def get_questionnaire_status(
     payload = _read_definition_json(db, questionnaire)
     if payload is not None:
         survey = SurveyDefinition.from_json(payload)
-    response = _status_response(questionnaire, survey)
+    response = _status_response(questionnaire, survey, _study_has_datamap(db, study_id))
     if _is_stale_processing(questionnaire):
         response.status = "error"
         response.error_detail = (

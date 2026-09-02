@@ -315,6 +315,9 @@ export interface QuestionnaireStatus {
   updated_at: string
   title: string | null
   n_questions: number
+  /** True when the study's data map was available to accelerate extraction. */
+  used_datamap?: boolean
+  n_recovered_from_datamap?: number
   n_approved: number
   source?: string | null // 'extracted' | 'authored'
   validation_errors: string[]
