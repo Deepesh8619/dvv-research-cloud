@@ -122,6 +122,36 @@ def _is_stale_study(study) -> bool:
     return datetime.now() - started > _STUDY_STALE_AFTER
 
 
+# Database errors that mean "the connection died", not "your file is wrong".
+_CONNECTION_ERROR_MARKERS = (
+    "ssl connection has been closed",
+    "server closed the connection",
+    "connection already closed",
+    "terminating connection",
+    "could not connect to server",
+    "operationalerror",
+)
+
+
+def _upload_error_message(exc: Exception) -> str:
+    """What to tell the person who just uploaded a file.
+
+    The raw exception was being handed straight to the browser. On a dropped
+    database connection that meant a wall of SQLAlchemy internals — the full
+    SELECT, the table columns, and the user's own email address — presented as
+    though their spreadsheet were at fault. It is neither their fault nor their
+    business: the detail belongs in the server log, which already has it with a
+    traceback.
+    """
+    text = str(exc).lower()
+    if any(marker in text for marker in _CONNECTION_ERROR_MARKERS):
+        return (
+            "The database connection dropped while saving your upload. "
+            "Nothing was lost — please try again."
+        )
+    return "The upload could not be processed. The error has been logged."
+
+
 def _run_orchestration_job(study_id: str, client_name: str, file_path: Path) -> None:
     """The full pipeline for one study, on a fresh DB session (daemon thread).
 
@@ -244,7 +274,7 @@ async def upload_study(
         raise
     except Exception as e:
         logger.error(f"Upload failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail=_upload_error_message(e)) from e
 
 
 @router.post("/studies", response_model=StudyResponse)

@@ -19,7 +19,24 @@ logger = logging.getLogger(__name__)
 # only when DATABASE_URL is actually SQLite, letting the same code run against
 # either backend (SQLite locally, Postgres once deployed).
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=_connect_args)
+_is_sqlite = DATABASE_URL.startswith("sqlite")
+
+# pool_pre_ping is not optional on serverless Postgres. Neon suspends its
+# compute after a few minutes of inactivity and drops the TCP connection;
+# SQLAlchemy's pool has no idea and hands the dead socket to the next request,
+# which fails with "SSL connection has been closed unexpectedly" on whatever
+# query happened to be first — in production that was the login lookup on an
+# upload, so a perfectly good file looked like a broken feature.
+#
+# pre_ping issues a cheap liveness check before lending a connection out and
+# transparently replaces a dead one. pool_recycle retires connections before
+# the provider does, so the pre_ping rarely has to fire at all. Neither applies
+# to SQLite, which has no server to disconnect from.
+_pool_kwargs: dict = {} if _is_sqlite else {
+    "pool_pre_ping": True,
+    "pool_recycle": 280,  # under Neon's ~5-minute idle suspend
+}
+engine = create_engine(DATABASE_URL, connect_args=_connect_args, **_pool_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
