@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import axios from 'axios'
 
 import { CrosscheckReport, studiesApi } from '../api/client'
@@ -40,6 +40,28 @@ export default function CrosscheckPanel({ studyId }: { studyId: string }) {
   const [report, setReport] = useState<CrosscheckReport | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  // The last result is stored on the study, and was never read back — so
+  // leaving the project and returning showed an empty panel as though the
+  // check had never run. The work was done, paid for, then hidden.
+  useEffect(() => {
+    let cancelled = false
+    studiesApi
+      .storedCrosscheck(studyId)
+      .then((res) => {
+        if (!cancelled && res.data.report) setReport(res.data.report)
+      })
+      .catch(() => {
+        /* never run, or unreadable — the button is still there */
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [studyId])
 
   const run = async () => {
     setRunning(true)
@@ -81,8 +103,18 @@ export default function CrosscheckPanel({ studyId }: { studyId: string }) {
         </p>
       )}
 
+      {loading && !report && (
+        <p className="text-sm text-slate-400 mt-4">Loading the last result…</p>
+      )}
+
       {report && (
         <div className="mt-5 space-y-4">
+          {report.run_at && (
+            <p className="text-xs text-slate-500">
+              Last run {new Date(report.run_at).toLocaleString()}
+              {report.run_by ? ` by ${report.run_by}` : ''}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
             <span
               className={`font-medium ${report.passed ? 'text-emerald-700' : 'text-red-700'}`}

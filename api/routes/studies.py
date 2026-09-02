@@ -921,6 +921,33 @@ async def revoke_study_share_link(
     return {"status": "revoked", "token": revoked_link.token}
 
 
+@router.get("/studies/{study_id}/crosscheck")
+async def get_crosscheck(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The last cross-check result for this study, or null if never run.
+
+    The result was already being stored and never read back, so leaving the
+    project and returning showed an empty panel as though the check had never
+    happened — the work was done, paid for, and then hidden. It is a durable
+    column, so a result stays readable a week later without re-running
+    anything.
+    """
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    if not study.crosscheck_json:
+        return {"report": None}
+    try:
+        return {"report": json.loads(study.crosscheck_json)}
+    except (TypeError, ValueError) as exc:
+        # A corrupt stored result must not break the page; re-running fixes it.
+        logger.warning(f"[{study_id}] stored cross-check unreadable: {exc}")
+        return {"report": None}
+
+
 @router.post("/studies/{study_id}/crosscheck")
 async def crosscheck_study(
     study_id: str,

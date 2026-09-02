@@ -250,6 +250,11 @@ export const studiesApi = {
     return api.post<CrosscheckReport>(`/studies/${id}/crosscheck`, {})
   },
 
+  /** The last stored cross-check, so leaving and returning does not lose it. */
+  storedCrosscheck: async (id: string) => {
+    return api.get<{ report: CrosscheckReport | null }>(`/studies/${id}/crosscheck`)
+  },
+
   archive: async (id: string) => {
     return api.delete(`/studies/${id}`)
   },

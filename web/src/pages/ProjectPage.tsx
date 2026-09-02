@@ -35,7 +35,13 @@ const STAGE_PROGRESS: Record<string, number> = {
 // Profile card is the default view instead. Crosstabs stay fully available
 // on demand via the chat navigator's show_table tool (rendered inline in
 // ChatBot), and CrosstabTable/studiesApi.crosstabs remain wired for that.
-const TABS = ['Overview', 'Reports', 'Activity'] as const
+// "Questionnaire checks" is its own tab, not a card on Overview. The QC panel
+// below it validates a data file on its OWN terms — speeders, empty columns,
+// straightliners — which says nothing about whether the data matches the
+// instrument the client signed off. That second comparison is the one a DP shop
+// is paid for, and burying it under generic data QC misrepresented which of the
+// two matters.
+const TABS = ['Overview', 'Questionnaire checks', 'Reports', 'Activity'] as const
 type Tab = (typeof TABS)[number]
 
 export default function ProjectPage() {
@@ -272,7 +278,10 @@ export default function ProjectPage() {
         </nav>
       </div>
 
-      {tab === 'Overview' && (noData ? <NoDataState /> : <OverviewTab study={study} progress={progress} canWrite={hasWriteRole(user?.role)} />)}
+      {tab === 'Overview' && (noData ? <NoDataState /> : <OverviewTab study={study} progress={progress} />)}
+      {tab === 'Questionnaire checks' && (
+        <QuestionnaireChecksTab study={study} canWrite={hasWriteRole(user?.role)} />
+      )}
       {tab === 'Reports' && (noData ? <NoDataState /> : <ReportsTab study={study} />)}
       {tab === 'Activity' && <ActivityTab study={study} />}
 
@@ -358,15 +367,31 @@ function NoDataState() {
   )
 }
 
-function OverviewTab({
+function QuestionnaireChecksTab({
   study,
-  progress,
   canWrite,
 }: {
   study: Study
-  progress: number
   canWrite: boolean
 }) {
+  if (!canWrite) {
+    return (
+      <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
+        <p className="text-sm text-slate-500">
+          Running the cross-check needs an owner, analyst or founder account.
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-4">
+      <CrosscheckPanel studyId={study.id} />
+    </div>
+  )
+}
+
+
+function OverviewTab({ study, progress }: { study: Study; progress: number }) {
   return (
     <div className="grid grid-cols-3 gap-6">
       <div className="col-span-2 space-y-6">
@@ -397,9 +422,6 @@ function OverviewTab({
             ))}
           </div>
         </div>
-
-        {/* Data vs questionnaire — the advanced check, run on request. */}
-        {canWrite && <CrosscheckPanel studyId={study.id} />}
 
         {/* QC */}
         <div className="bg-white rounded-lg border border-slate-200 p-6">
