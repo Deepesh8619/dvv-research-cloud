@@ -534,3 +534,62 @@ def test_close_unknown_link_404(client):
     _make_study(sf)
     resp = test_client.post("/api/studies/study_f1/fielding/links/nope/close")
     assert resp.status_code == 404
+
+
+# --- dry run: what the script does to people, before it does it to people ----
+
+
+def _impossible_survey(study_id: str) -> SurveyDefinition:
+    """Q3's base tests a code Q2 never offers, so nobody can ever be shown it."""
+    survey = _sample_survey(study_id)
+    survey[survey.questions[2].qid].show_if = Expression(op="eq", qid="Q2", value=9)
+    return survey
+
+
+def test_dry_run_reports_what_the_script_does(client) -> None:
+    test_client, SessionLocal = client[0], client[1]
+    _make_study(SessionLocal)
+    _make_questionnaire(SessionLocal)
+
+    resp = test_client.post(
+        "/api/studies/study_f1/fielding/dry-run", json={"n": 200, "seed": 5}
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["n_respondents"] == 200
+    assert sum(body["dispositions"].values()) == 200
+    # The screen-out removed some but not all — an incidence figure, before a
+    # single real respondent has been paid for.
+    screen_out = next(
+        c for c in body["conditions"] if c["kind"] == "screen_out" and c["qid"] == "Q1"
+    )
+    assert 0 < screen_out["fired"] < 200
+    # Everything the link-creation response warns about is here too: the point
+    # of a dry run is to see it all BEFORE publishing, not after.
+    assert "display_issues" in body and "unenforced_routing" in body
+
+
+def test_a_link_is_refused_when_a_condition_can_never_be_true(client) -> None:
+    """A screener that cannot screen looks perfect until the data comes back."""
+    test_client, SessionLocal = client[0], client[1]
+    _make_study(SessionLocal)
+    _make_questionnaire(SessionLocal, survey=_impossible_survey("study_f1"))
+
+    resp = test_client.post("/api/studies/study_f1/fielding/links", json={})
+
+    assert resp.status_code == 409
+    assert "never be true" in resp.json()["detail"]
+
+
+def test_the_refusal_can_be_overridden_deliberately(client) -> None:
+    """Blocking with no way through is its own failure. The decision is logged."""
+    test_client, SessionLocal = client[0], client[1]
+    _make_study(SessionLocal)
+    _make_questionnaire(SessionLocal, survey=_impossible_survey("study_f1"))
+
+    resp = test_client.post(
+        "/api/studies/study_f1/fielding/links", json={"force": True}
+    )
+
+    assert resp.status_code == 200

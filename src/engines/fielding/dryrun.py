@@ -1,0 +1,274 @@
+"""Field a survey against synthetic respondents, before real ones arrive.
+
+The point is not to produce data — it is to find out what the script DOES to
+people. A screen-out that fires for nobody, a base that hides a question from
+everyone, a mask that never narrows anything, a quota that fills at respondent
+40 of 500: each of those is invisible in the questionnaire and obvious in the
+run, and each costs real money once a panel is pointed at the link.
+
+Every decision here comes from `decisions.py`, which is the same module the
+live respondent route uses. A dry run that reimplemented the rules would be
+free to disagree with the engine, and a clean report would mean nothing.
+
+Deterministic: the same survey and seed give the same run, so a result can be
+argued with.
+"""
+
+from __future__ import annotations
+
+import random
+from collections import Counter
+from dataclasses import dataclass, field
+from typing import Any
+
+from src.core.survey_definition import Option, Question, QuestionType, SurveyDefinition
+from src.engines.fielding.decisions import (
+    STATUS_COMPLETE,
+    STATUS_OVERQUOTA,
+    STATUS_TERMINATE,
+    QuotaCell,
+    is_decidable,
+    is_visible,
+    matching_cells,
+    terminating_question,
+    unsatisfiable_conditions,
+)
+
+DEFAULT_RESPONDENTS = 500
+MAX_RESPONDENTS = 5000
+
+
+@dataclass
+class ConditionResult:
+    """What one condition did across the whole run."""
+
+    qid: str
+    kind: str  # screen_out | base | mask | quota
+    fired: int = 0
+    eligible: int = 0
+    #: Quotas only: the respondent number at which the cell reached its limit.
+    #: The single most useful number in a field report — it says how long the
+    #: sample will last before the cell starts turning people away.
+    filled_at: int | None = None
+    detail: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "qid": self.qid,
+            "kind": self.kind,
+            "fired": self.fired,
+            "eligible": self.eligible,
+            "filled_at": self.filled_at,
+            "detail": self.detail,
+        }
+
+
+@dataclass
+class DryRunReport:
+    n_respondents: int = 0
+    seed: int = 0
+    dispositions: dict[str, int] = field(default_factory=dict)
+    conditions: list[ConditionResult] = field(default_factory=list)
+    never_fired: list[str] = field(default_factory=list)
+    impossible: list[dict[str, str]] = field(default_factory=list)
+    questions_never_shown: list[str] = field(default_factory=list)
+
+    @property
+    def passed(self) -> bool:
+        """Nothing structurally impossible, and every condition did something."""
+        return not self.impossible and not self.never_fired
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "n_respondents": self.n_respondents,
+            "seed": self.seed,
+            "passed": self.passed,
+            "dispositions": self.dispositions,
+            "conditions": [c.to_dict() for c in self.conditions],
+            "never_fired": self.never_fired,
+            "impossible": self.impossible,
+            "questions_never_shown": self.questions_never_shown,
+        }
+
+
+def _mask_allowed_codes(
+    question: Question, answers: dict, by_qid: dict[str, Question]
+) -> set[int] | None:
+    """Codes a masked question may offer this respondent, or None if unmasked.
+
+    The simulator has to respect the mask for the same reason the link does: a
+    synthetic respondent picking an option the mask hides would produce exactly
+    the violation the cross-check is built to catch, and the run would report
+    our own generator as a defect.
+    """
+    techniques = (question.validation or {}).get("techniques") or {}
+    for mask in techniques.get("masks") or []:
+        mode = mask.get("mode")
+        if mode == "full_list":
+            continue
+        against = mask.get("exclude_qid") if mode == "list_except" else mask.get("source_qid")
+        source = by_qid.get(against or "")
+        if source is None:
+            continue
+        chosen = answers.get(against)
+        if chosen is None:
+            continue
+        picked = set(chosen) if isinstance(chosen, list) else {chosen}
+        offered = {o.code for o in question.options}
+        return picked & offered if mode == "selected" else offered - picked
+    return None
+
+
+def _answer(
+    question: Question, rng: random.Random, allowed: set[int] | None
+) -> Any:
+    """A plausible answer, sampled from what the question itself offers."""
+    codes = [o.code for o in question.options]
+    if allowed is not None:
+        codes = [c for c in codes if c in allowed]
+
+    if question.type in (QuestionType.SINGLE, QuestionType.DROPDOWN):
+        return rng.choice(codes) if codes else None
+    if question.type == QuestionType.MULTI:
+        if not codes:
+            return None
+        return rng.sample(codes, rng.randint(1, len(codes)))
+    if question.type == QuestionType.RANK:
+        return rng.sample(codes, len(codes)) if codes else None
+    if question.type == QuestionType.GRID_SINGLE:
+        rows: list[Option] = question.rows or []
+        cols: list[Option] = question.cols or []
+        if not rows or not cols:
+            return None
+        return {str(r.code): rng.choice([c.code for c in cols]) for r in rows}
+    if question.type == QuestionType.NUMERIC:
+        validation = question.validation or {}
+        low = int(validation.get("min", 1) or 1)
+        high = int(validation.get("max", 100) or 100)
+        return rng.randint(low, high) if low <= high else low
+    if question.type == QuestionType.OPEN_TEXT:
+        return rng.choice(
+            ["it was fine", "nothing to add", "too expensive", "good value", "not sure"]
+        )
+    return None
+
+
+def simulate(
+    survey: SurveyDefinition,
+    quota_cells: list[QuotaCell] | None = None,
+    n: int = DEFAULT_RESPONDENTS,
+    seed: int = 20260903,
+) -> DryRunReport:
+    """Run `n` synthetic respondents through the survey's own conditions."""
+    n = max(1, min(int(n), MAX_RESPONDENTS))
+    rng = random.Random(seed)
+    by_qid = {q.qid: q for q in survey.questions}
+    cells = list(quota_cells or [])
+    counts = {cell.id: cell.count for cell in cells}
+
+    report = DryRunReport(n_respondents=n, seed=seed)
+    report.impossible = unsatisfiable_conditions(survey)
+
+    screen_outs = {q.qid: ConditionResult(q.qid, "screen_out") for q in survey.questions
+                   if q.terminate_if is not None}
+    bases = {q.qid: ConditionResult(q.qid, "base") for q in survey.questions
+             if q.show_if is not None}
+    masks = {
+        q.qid: ConditionResult(q.qid, "mask")
+        for q in survey.questions
+        if ((q.validation or {}).get("techniques") or {}).get("masks")
+    }
+    quotas = {
+        cell.id: ConditionResult(cell.id, "quota", detail=f"limit {cell.limit}")
+        for cell in cells
+    }
+    shown_at_least_once: set[str] = set()
+    dispositions: Counter = Counter()
+
+    for respondent in range(1, n + 1):
+        answers: dict[str, Any] = {}
+        status = STATUS_COMPLETE
+
+        for qid in survey.question_order():
+            question = by_qid.get(qid)
+            if question is None or question.type == QuestionType.INFO:
+                continue
+
+            if qid in bases:
+                bases[qid].eligible += 1
+            if not is_visible(question, answers):
+                continue
+            if qid in bases:
+                bases[qid].fired += 1
+            shown_at_least_once.add(qid)
+
+            allowed = _mask_allowed_codes(question, answers, by_qid)
+            if qid in masks:
+                masks[qid].eligible += 1
+                if allowed is not None and len(allowed) < len(question.options):
+                    masks[qid].fired += 1
+
+            value = _answer(question, rng, allowed)
+            if value is not None:
+                answers[qid] = value
+
+            terminated = terminating_question(survey, answers)
+            if terminated is not None:
+                screen_outs[terminated.qid].fired += 1
+                status = STATUS_TERMINATE
+                break
+
+            full = [
+                cell
+                for cell in matching_cells(cells, answers, decidable_only=True)
+                if counts[cell.id] >= cell.limit
+            ]
+            if full:
+                quotas[full[0].id].fired += 1
+                status = STATUS_OVERQUOTA
+                break
+
+        # A screen-out was only ever in a position to fire for a respondent who
+        # answered everything it tests. Counting it against all n would report a
+        # working screener as one that mostly misses.
+        for qid, result in screen_outs.items():
+            if is_decidable(by_qid[qid].terminate_if, answers):
+                result.eligible += 1
+
+        for cell in matching_cells(cells, answers):
+            quotas[cell.id].eligible += 1
+
+        if status == STATUS_COMPLETE:
+            for cell in matching_cells(cells, answers):
+                if counts[cell.id] >= cell.limit:
+                    status = STATUS_OVERQUOTA
+                    quotas[cell.id].fired += 1
+                    break
+                counts[cell.id] += 1
+                if counts[cell.id] >= cell.limit and quotas[cell.id].filled_at is None:
+                    quotas[cell.id].filled_at = respondent
+        dispositions[status] += 1
+    report.conditions = [
+        *sorted(screen_outs.values(), key=lambda c: c.qid),
+        *sorted(bases.values(), key=lambda c: c.qid),
+        *sorted(masks.values(), key=lambda c: c.qid),
+        *sorted(quotas.values(), key=lambda c: c.qid),
+    ]
+    # A condition nothing exercised is the finding this whole run exists for.
+    # It is evidence, not proof — 500 synthetic respondents may simply have
+    # missed a narrow path — which is why it is reported separately from the
+    # structurally impossible ones above.
+    report.never_fired = [c.qid for c in report.conditions if c.fired == 0]
+    report.questions_never_shown = [
+        qid
+        for qid in survey.question_order()
+        if qid in by_qid
+        and by_qid[qid].type != QuestionType.INFO
+        and qid not in shown_at_least_once
+    ]
+    report.dispositions = {
+        "complete": dispositions[STATUS_COMPLETE],
+        "terminate": dispositions[STATUS_TERMINATE],
+        "overquota": dispositions[STATUS_OVERQUOTA],
+    }
+    return report

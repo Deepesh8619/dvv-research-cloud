@@ -441,6 +441,21 @@ class FieldingLinkCreateRequest(FieldingRedirectsRequest):
     presentation choice, not an instrument edit)."""
 
     theme: str | None = None
+    # A condition that is provably unsatisfiable — a screen-out testing a code
+    # its question never offers — means the survey does not do what the document
+    # says. Opening a link is refused in that state; this is the deliberate
+    # override, recorded in the log so the decision is somebody's.
+    force: bool = False
+
+
+class DryRunRequest(BaseModel):
+    """Field a survey against synthetic respondents before real ones arrive."""
+
+    n: int = 500
+    seed: int = 20260903
+    #: Dry-run an existing link (its pinned survey and live quota cells) rather
+    #: than the currently approved questionnaire.
+    link_id: str | None = None
 
 
 # --- Correction loop (founders teach the questionnaire parser) ---
