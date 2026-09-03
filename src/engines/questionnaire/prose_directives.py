@@ -40,6 +40,11 @@ from src.engines.questionnaire.learned import (
     learned_type,
 )
 from src.engines.questionnaire.routing_prose import parse_routing
+from src.intake.questionnaire_loader import (
+    bracket_bodies,
+    is_directive_only,
+    strip_brackets,
+)
 
 # A leading question label: "S2.", "Q12a)", "P1:" — the segmenter already found
 # it, but the text still carries it and it is not part of the wording.
@@ -47,11 +52,8 @@ _LABEL_RE = re.compile(r"^\s*([A-Za-z]{0,3}\d+[a-z]?)\s*[.):]\s*")
 
 # A whole line that is only scripter directives. Real questionnaires put
 # SEVERAL on one line — "[SP] [IF D2 = 1]", "[IF S2=1] [MP] [RANDOMIZE a-f]" —
-# and a single-bracket pattern matched none of them: the line fell through to
-# the option parser, so "[SP]" became the question wording and the actual
-# question text became option 1.
-_DIRECTIVE_LINE_RE = re.compile(r"^\s*(?:\[[^\]]*\]\s*)+$")
-_DIRECTIVE_BODY_RE = re.compile(r"\[([^\]]*)\]")
+# and they nest. Reading them by bracket depth (`is_directive_only` /
+# `bracket_bodies`) is what keeps a directive line out of the answer list.
 
 # A directive too long for one line wraps mid-bracket:
 #
@@ -172,6 +174,26 @@ _ANCHOR_TAG = re.compile(r"\bANCHOR\b", re.I)
 # Pipe-separated points above a statement list is how these documents write a
 # rating grid; the statements below are the rows, not the answer options.
 _SCALE_ROW_RE = re.compile(r"^[^|]+(\|[^|]+){3,}$")
+
+# A section banner — "***** END OF RENT SECTION *****". It divides the
+# document; it is not an answer anybody can pick. Left in, it became option 1
+# of whatever numeric question happened to end the section.
+_SECTION_BANNER_RE = re.compile(r"^\s*\*{3,}")
+
+# The rule the respondent writes on: "_____", "$ ______", "____ %", or the same
+# alongside the widget directive that describes it ("[ Num box, 0-25]  ___").
+# It marks WHERE the answer goes, so reading it as an answer gave every
+# number-box question a phantom option and made the data map's "this column is
+# an open response" look like a disagreement.
+_ANSWER_BLANK_RE = re.compile(r"^[\s$%()·.\u2013\u2014_-]*$")
+
+
+def _is_answer_blank(line: str) -> bool:
+    without_directives = strip_brackets(line)
+    return "_" in without_directives and bool(
+        _ANSWER_BLANK_RE.match(without_directives)
+    )
+
 
 # A wording that opens with an all-caps CODE/RECODE instruction is addressed to
 # the scripter, not the respondent: "CODE AGE - BASED ON RESPONSES AT S1...".
@@ -308,11 +330,16 @@ def _infer_type(
     if taught is not None:
         return taught
 
-    for directive in directives or []:
-        for pattern, qtype in (*_TYPE_PATTERNS, *_PUNCH_DIRECTIVE_PATTERNS):
-            match = pattern.search(directive)
-            if match and not _blocked(qtype):
-                return qtype, f"[{directive}]"
+    # Widget directives first, across every directive, THEN the punch
+    # abbreviations. A number-box question states both — "[SP]" describes how
+    # its special codes ("888. Still enrolled") are punched, not what the
+    # question collects — and whichever was written first was winning.
+    for patterns in (_TYPE_PATTERNS, _PUNCH_DIRECTIVE_PATTERNS):
+        for directive in directives or []:
+            for pattern, qtype in patterns:
+                match = pattern.search(directive)
+                if match and not _blocked(qtype):
+                    return qtype, f"[{directive}]"
 
     for pattern, qtype in _TYPE_PATTERNS:
         match = pattern.search(text)
@@ -344,7 +371,7 @@ def parse_prose_question(
     # text. The wording is the first line that is not one of them; the rest,
     # before and after, go through the same directive/option pass below.
     head = next(
-        (i for i, ln in enumerate(lines) if not _DIRECTIVE_LINE_RE.match(ln)), None
+        (i for i, ln in enumerate(lines) if not is_directive_only(ln)), None
     )
     if head is None:
         return None
@@ -377,8 +404,8 @@ def parse_prose_question(
     scale_row: str | None = None
 
     for line in body_lines:
-        if _DIRECTIVE_LINE_RE.match(line):
-            for raw in _DIRECTIVE_BODY_RE.findall(line):
+        if is_directive_only(line):
+            for raw in bracket_bodies(line):
                 body = raw.strip()
                 directives.append(body)
                 taught_random = learned_randomize(patterns, body)
@@ -415,6 +442,16 @@ def parse_prose_question(
             # as this question's answer options.
             directives.append(line)
             scale_row = line
+            continue
+
+        if _SECTION_BANNER_RE.match(line):
+            directives.append(line.strip())
+            continue
+
+        if _is_answer_blank(line):
+            # Keep the widget directive it carries ("[Num box 1900-2014]") —
+            # that is the type declaration — and drop the rule itself.
+            directives.extend(b.strip() for b in bracket_bodies(line))
             continue
 
         if _INSTRUCTION_RE.match(line) and not options:
@@ -559,6 +596,31 @@ def parse_prose_question(
         # model resolve it, never drop a screen-out.
         fields.terminate_verbatim = "; ".join(terminate_lines)
         fields.missing.append("terminate")
+
+    if fields.qtype in (QuestionType.NUMERIC, QuestionType.OPEN_TEXT) and options:
+        # The scripter declared a number box or a text box, so there is no
+        # answer list — only the special codes written out beside it ("888.
+        # Still enrolled", "26. Over 25 percent"). Anything without a code of
+        # its own is instruction text or a stray line, and passing it off as an
+        # option makes an open column look like a coded one to every check
+        # downstream.
+        kept = [
+            option
+            for option, written in zip(options, written_codes, strict=False)
+            if written is not None
+        ]
+        if len(kept) != len(options):
+            fields.options = kept
+            if fields.terminate_if is not None and fields.terminate_if.values:
+                # A screen-out can only test a code that survived.
+                surviving = sorted(
+                    v for v in fields.terminate_if.values if v in {o.code for o in kept}
+                )
+                if surviving:
+                    fields.terminate_if.values = surviving
+                else:
+                    fields.terminate_if = None
+                    fields.missing.append("terminate")
 
     if not fields.text:
         fields.missing.append("text")

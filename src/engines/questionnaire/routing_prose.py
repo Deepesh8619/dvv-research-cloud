@@ -116,6 +116,15 @@ def _condition(text: str) -> Expression | None:
     if not text:
         return None
 
+    # One comparison FIRST. "ED0 = 3 or 4" is a single membership test whose
+    # values happen to be joined by "or"; splitting on that "or" left " 4" as a
+    # condition of its own and the whole base was thrown away. Parenthesised
+    # lists ("(D1 = 3, 4, 5, OR 6)") only worked because the split ignores
+    # anything inside brackets — the unparenthesised form is just as common.
+    direct = _atom(text)
+    if direct is not None:
+        return direct
+
     has_and = _split_top_level(text, _TOP_LEVEL_AND)
     has_or = _split_top_level(text, _TOP_LEVEL_OR)
     if has_and and has_or:

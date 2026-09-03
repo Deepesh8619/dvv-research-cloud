@@ -468,3 +468,19 @@ def test_a_real_answer_is_never_read_as_a_refusal() -> None:
     # The WHOLE label has to be the phrase. "Refused a loan" is an answer about
     # credit; "Not applicable to my situation" is a substantive choice.
     assert _non_response_codes(labelled) == set()
+
+
+def test_a_question_whose_type_we_could_not_read_is_not_judged_on_its_type() -> None:
+    """Unknown type defaults to `single`. Do not report the data for that."""
+    from src.engines.qc.discrepancy import _type_is_unresolved
+
+    known = Question(qid="Q1", text="t", type=QuestionType.SINGLE, options=[])
+    unread = Question(
+        qid="Q2",
+        text="t",
+        type=QuestionType.SINGLE,
+        options=[],
+        validation={"unresolved_fields": ["type"]},
+    )
+    assert _type_is_unresolved(known) is False
+    assert _type_is_unresolved(unread) is True

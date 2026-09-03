@@ -53,6 +53,33 @@ MAX_EXAMPLES = 5
 # findings, which is how a check stops being read at all.
 DEFAULT_SYSTEM_CODES = frozenset({-1, 0, 77, 88, 97, 98, 99, 998, 999, -99, -98})
 
+# Types whose answer IS a code list. A number box or a text box is not one of
+# them even when the questionnaire prints a few special codes beside it
+# ("888. Still enrolled" next to a year entry) — the column is still an open
+# response, so "the questionnaire has options, the data map says open" is only
+# a contradiction for the types below.
+# Extraction records the fields it could not resolve. A check must not assert
+# on one of them: a question whose type is unknown is given `single` as a
+# placeholder, and reporting "answered twice, but it is single-answer" off that
+# placeholder blames the data for something we never actually read.
+UNRESOLVED_FIELDS_KEY = "unresolved_fields"
+
+
+def _type_is_unresolved(question: Question) -> bool:
+    unresolved = (question.validation or {}).get(UNRESOLVED_FIELDS_KEY) or []
+    return "type" in unresolved
+
+
+CODED_QUESTION_TYPES = frozenset(
+    {
+        QuestionType.SINGLE,
+        QuestionType.MULTI,
+        QuestionType.GRID_SINGLE,
+        QuestionType.DROPDOWN,
+        QuestionType.RANK,
+    }
+)
+
 # A non-response category recognised by what its label SAYS, not by the number
 # it happens to carry. The conventional codes above only work when the file
 # uses them; a label-encoded export (a CSV of answer text) has no conventional
@@ -289,7 +316,12 @@ def check_against_questionnaire(
         # The questionnaire says this question has options, but the datamap
         # says the column holds an open number. That is a reading disagreement
         # worth ONE finding — not one per distinct value in the file.
-        if declared and datamap_says_open:
+        if (
+            declared
+            and datamap_says_open
+            and question.type in CODED_QUESTION_TYPES
+            and not _type_is_unresolved(question)
+        ):
             # An open-ended question usually has a derived companion holding
             # the bands or flags the conditions are actually written against
             # ("SS_AD_SPEND" is a number; "HID_SS_AD_SPEND" flags spend over
@@ -400,6 +432,12 @@ def check_against_questionnaire(
                 )
 
         if question.type is QuestionType.SINGLE and len(variables) > 1:
+            if _type_is_unresolved(question):
+                report.skipped.append(
+                    f"{qid}: single-vs-multi not checked — the extraction could "
+                    "not read this question's type"
+                )
+                continue
             counts["single"] += 1
             hits = [
                 index

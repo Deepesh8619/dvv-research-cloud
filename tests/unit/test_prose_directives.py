@@ -344,3 +344,81 @@ def test_only_one_line_is_absorbed_into_an_option() -> None:
         "First answer wrapped tail",
         "A separate unmarked line",
     ]
+
+
+# --- a number box is not an answer list --------------------------------------
+
+
+def test_section_banner_is_not_an_answer() -> None:
+    """"***** END OF RENT SECTION *****" divides the document; nobody picks it."""
+    fields = parse_prose_question(
+        "[NUMBER BOX range 1900-2014]\n"
+        "D6. In what year did you buy your current home?\n"
+        "***** END OF SCREENER/INCIDENCE SECTION *****\n"
+        "***** RENT SECTION *******",
+        "D6",
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.NUMERIC
+    assert fields.options == []
+
+
+def test_the_rule_the_answer_is_written_on_is_not_an_answer() -> None:
+    """"_____", "____ %" and "[Num box, 0-25] ___" mark WHERE the answer goes."""
+    fields = parse_prose_question(
+        "[NUMBER BOX]\n"
+        "I2. What percent of your income did you save?\n"
+        "____ %  [NUM-BOX 0 TO 100]",
+        "I2",
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.NUMERIC
+    assert fields.options == []
+    # The widget directive it carried is the type declaration — keep that.
+    assert any("NUM-BOX" in d for d in fields.directives)
+
+
+def test_open_entry_question_keeps_only_its_written_special_codes() -> None:
+    """A year box with "888. Still enrolled" beside it has one code, not two."""
+    fields = parse_prose_question(
+        "[NUMBER BOX]\n"
+        "ED4. In what year did you last attend?\n"
+        "_____ [Num Box, Range 1900 - 2014]\n"
+        "888. Still enrolled [SP]",
+        "ED4",
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.NUMERIC
+    assert [(o.code, o.label) for o in fields.options] == [(888, "Still enrolled")]
+
+
+def test_a_widget_directive_outranks_a_bare_punch_abbreviation() -> None:
+    """"[SP]" describes how the special codes punch, not what the question collects."""
+    fields = parse_prose_question(
+        "[SP]\n"
+        "K1B. At what age do you expect to retire fully?\n"
+        "[Num box PPAGE-99]\n"
+        "888. Will never stop working  [SP]\n"
+        "999. Not Sure  [SP]",
+        "K1B",
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.NUMERIC
+    assert [o.code for o in fields.options] == [888, 999]
+
+
+def test_a_directive_with_nested_brackets_is_still_a_directive() -> None:
+    """Real routing nests: "[ASK IF (K2_b=1 (yes) OR [K14a=2 (no)]) AND ...]".
+
+    A non-nesting pattern stopped at the inner "]", so the line fell through to
+    the answer parser and was glued onto the option above it.
+    """
+    fields = parse_prose_question(
+        "K16. What percent of your paycheck do you contribute?\n"
+        "888. Don't Know\n"
+        "[ASK IF (K2_b=1 (yes) OR [K14a=2 (no) or refused]) AND (D3 = 1 or 2)]",
+        "K16",
+    )
+    assert fields is not None
+    assert [o.label for o in fields.options] == ["Don't Know"]
+    assert any("ASK IF" in d for d in fields.directives)

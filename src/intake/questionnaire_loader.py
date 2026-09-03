@@ -97,9 +97,47 @@ _BOILERPLATE_CELLS = frozenset(
 # question table, not the preceding one.
 _NOTE_RE = re.compile(r"^\s*SCRIPTER\s*NOTE\b", re.IGNORECASE)
 
-# A line made up ONLY of bracketed scripter directives, e.g. "[SP] [IF D2 = 1]"
-# or "[NUMBER BOX range 1900-2014]". No respondent-facing prose.
-_DIRECTIVE_ONLY_RE = re.compile(r"^\s*(?:\[[^\]]*\]\s*)+$")
+# Bracketed directives NEST — real ones do, routinely:
+#
+#     [ASK IF (K2_b=1 (yes) OR [K14a=2 (no) or refused]) AND (D3 = 1 or 2)]
+#
+# A `\[[^\]]*\]` pattern stops at the inner `]`, so a nested directive matched
+# nothing, fell through to the answer parser and became an option. Scanning by
+# bracket depth reads them the way a person does.
+def bracket_bodies(text: str) -> list[str]:
+    """The top-level bracketed directive bodies in a line, nesting included."""
+    bodies: list[str] = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(text):
+        if ch == "[":
+            if depth == 0:
+                start = i + 1
+            depth += 1
+        elif ch == "]" and depth:
+            depth -= 1
+            if depth == 0:
+                bodies.append(text[start:i])
+    return bodies
+
+
+def strip_brackets(text: str) -> str:
+    """`text` with every bracketed group removed, nesting included."""
+    out: list[str] = []
+    depth = 0
+    for ch in text:
+        if ch == "[":
+            depth += 1
+        elif ch == "]" and depth:
+            depth -= 1
+        elif depth == 0:
+            out.append(ch)
+    return "".join(out)
+
+
+def is_directive_only(text: str) -> bool:
+    """True when a line is nothing but bracketed directives — no prose."""
+    return bool(text.strip()) and not strip_brackets(text).strip()
 # Routing directives name WHO gets asked. They are authored immediately above
 # the question they govern, so a run of them trailing a chunk belongs to the
 # NEXT question, not the one whose options just ended:
@@ -474,7 +512,7 @@ def _trailing_routing_directives(current: list[DocumentBlock]) -> list[DocumentB
     """
     tail: list[DocumentBlock] = []
     i = len(current)
-    while i > 0 and _DIRECTIVE_ONLY_RE.match(current[i - 1].text):
+    while i > 0 and is_directive_only(current[i - 1].text):
         i -= 1
     if i == 0 or i == len(current):
         return []

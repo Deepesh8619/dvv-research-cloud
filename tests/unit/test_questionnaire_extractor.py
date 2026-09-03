@@ -1068,3 +1068,57 @@ def test_progress_fires_before_the_reconciliation_prepass():
 
     # At least one beat before any chunk was finished.
     assert beats and beats[0][0] == 0, beats
+
+
+# --- a backend outage must not throw away what the parsers read --------------
+
+
+def test_parsed_options_survive_a_backend_outage(monkeypatch) -> None:
+    """The model being down is not a reason to forget nine perfectly-read options.
+
+    ED0 on the SHED instrument reads cleanly except for single-vs-multi, which
+    no directive states. It used to come back as an empty `info` placeholder the
+    moment a backend was unavailable — and with no options, nothing downstream
+    could align its codes or check a condition written against it. One outage
+    quietly disabled the checks on every question it touched.
+    """
+    from src.ai.router import BackendUnavailable
+    from src.engines.questionnaire import extractor as ex
+    from src.intake.questionnaire_loader import DocumentBlock, segment_into_questions
+
+    def _down(*args, **kwargs):
+        raise BackendUnavailable("all backends down")
+
+    monkeypatch.setattr(ex, "run_task", _down)
+
+    chunk = segment_into_questions([
+        DocumentBlock("paragraph", "ED0: What is the highest level of school you completed?", 0),
+        DocumentBlock("paragraph", "1. Less than High School degree", 1),
+        DocumentBlock("paragraph", "2. High school degree or GED", 2),
+        DocumentBlock("paragraph", "3. Some college but no degree", 3),
+    ])[0]
+
+    result = ex.extract_question(chunk)
+
+    assert [o.code for o in result.question.options] == [1, 2, 3]
+    assert result.question.text.startswith("What is the highest level")
+    # Still flagged, and it names exactly what was left unread.
+    assert result.flags
+    assert result.question.validation["unresolved_fields"] == ["type"]
+
+
+def test_a_chunk_with_nothing_readable_still_falls_back_to_a_placeholder(monkeypatch) -> None:
+    from src.ai.router import BackendUnavailable
+    from src.engines.questionnaire import extractor as ex
+    from src.intake.questionnaire_loader import DocumentBlock, segment_into_questions
+
+    monkeypatch.setattr(ex, "run_task", lambda *a, **k: (_ for _ in ()).throw(
+        BackendUnavailable("all backends down")
+    ))
+    chunk = segment_into_questions([
+        DocumentBlock("paragraph", "Q9. Tell us what you think about all of this", 0),
+    ])[0]
+
+    result = ex.extract_question(chunk)
+    assert result.question.options == []
+    assert result.flags

@@ -103,6 +103,24 @@ class Expression:
         )
 
 
+def _as_number(value: Any) -> float | None:
+    """`value` as a float, or None when it is not a number at all.
+
+    Booleans are excluded on purpose: `True > 0` is a Python accident, not a
+    respondent's answer.
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip().replace(",", ""))
+        except ValueError:
+            return None
+    return None
+
+
 def _as_selected_set(answer: Any) -> set[Any]:
     """Normalise a stored answer into a set of chosen codes.
 
@@ -159,17 +177,17 @@ def evaluate(expression: Expression, answers: dict[str, Any]) -> bool:
     if op == "ne":
         return answer != expression.value
 
-    # Numeric comparisons: guard against non-comparable / missing operands.
+    # Numeric comparisons, on numbers — including numbers stored as text. A CSV
+    # column holding "0".."100" alongside "Refused" imports as text, so "25" > 0
+    # raised TypeError (every respondent failed the condition) and "100" < "25"
+    # would have been "true" on string order. Both operands are read as numbers
+    # or the condition is simply not satisfied.
     if op in ("gt", "lt"):
-        target = expression.value
-        if target is None:
+        left = _as_number(answer)
+        right = _as_number(expression.value)
+        if left is None or right is None:
             return False
-        try:
-            if op == "gt":
-                return answer > target
-            return answer < target
-        except TypeError:
-            return False
+        return left > right if op == "gt" else left < right
 
     raise ValueError(f"unknown expression op: {op!r}")
 
