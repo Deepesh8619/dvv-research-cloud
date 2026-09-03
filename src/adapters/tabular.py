@@ -168,18 +168,54 @@ def read_tabular(path: str | Path) -> tuple[pd.DataFrame, DataMap]:
             datamap.add(Variable(name=name, label=label, type=VarType.TEXT, provenance=provenance))
 
     df = df.rename(columns=renames)
-
-    # Normalize every TEXT (open-end) column to a uniform string dtype. A raw
-    # object column can hold mixed Python types — respondents type "none" in one
-    # cell and 5 in another, and Excel preserves each cell's native type — which
-    # makes PyArrow (via pl.from_pandas() in the orchestrator's load step, before
-    # QC) infer the column as string from the first value and then raise
-    # "Expected bytes, got a 'int' object" on the first int cell. This is the
-    # production failure that surfaced as a QC-stage error. Covers both the
-    # inferred TEXT path above and datamap-sheet-parsed TEXT columns; nulls stay
-    # null so missingness/coding downstream still see them as empty.
-    text_cols = [v.name for v in datamap.variables if v.type == VarType.TEXT]
-    for name in text_cols:
-        df[name] = df[name].map(lambda v: str(v) if pd.notna(v) else None)
-
+    _normalize_mixed_columns(df, datamap)
     return df, datamap
+
+
+# Half the non-null cells have to survive a numeric read before we believe a
+# column the codebook calls coded really is coded. Below that, the codebook is
+# describing something the data is not, and the words are worth more than the
+# declaration.
+_NUMERIC_RESCUE_RATIO = 0.5
+
+
+def _normalize_mixed_columns(df: pd.DataFrame, datamap: DataMap) -> None:
+    """Give every column ONE Python type, in place.
+
+    Parquet — and PyArrow underneath it — allows a column exactly one type. A
+    raw object column can hold several: respondents type "none" in one cell and
+    5 in another, and Excel preserves each cell's native type. PyArrow then
+    infers the column from its first value and raises "Expected bytes, got a
+    'int' object" at the first cell that disagrees, which killed the ENTIRE
+    upload at the load step, before QC, over one cell in one column.
+
+    Normalising only the TEXT columns left the hole this closes: a column the
+    codebook declares as coded never went through the inference branch at all
+    (a parsed codebook entry wins and skips it), so nothing ever made its cells
+    agree with each other.
+
+    A column the codebook calls coded is read as numbers, and cells that are
+    not numbers become missing — the cross-check reports those as answers
+    outside the punch list, which is a finding a human can act on rather than a
+    stack trace. When a "coded" column is mostly words, the declaration is
+    simply wrong, so the column is kept as text and the data map is corrected
+    to say so — leaving it claiming codes it does not have would make every
+    later comparison meaningless.
+    """
+    by_name = {v.name: v for v in datamap.variables}
+    for name in df.columns:
+        if df[name].dtype != object:
+            continue
+        variable = by_name.get(name)
+        declared_text = variable is None or variable.type == VarType.TEXT
+        if not declared_text:
+            numeric = pd.to_numeric(df[name], errors="coerce")
+            non_null = df[name].notna().sum()
+            if non_null and numeric.notna().sum() >= non_null * _NUMERIC_RESCUE_RATIO:
+                df[name] = numeric
+                continue
+            # Mostly words in a column the codebook called coded: keep the
+            # words, and stop the data map from claiming codes it never had.
+            variable.type = VarType.TEXT
+            variable.values = {}
+        df[name] = df[name].map(lambda v: str(v) if pd.notna(v) else None)
