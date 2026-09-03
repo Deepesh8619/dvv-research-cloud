@@ -963,3 +963,63 @@ def test_backfill_definition_from_file(client, tmp_path):
     assert row.definition_json
     assert SurveyDefinition.from_json(row.definition_json)["Q1"].qid == "Q1"
     db.close()
+
+
+# --- the document itself, not only what we extracted from it -----------------
+
+
+def test_uploaded_questionnaire_can_be_downloaded_back(client) -> None:
+    """The .docx a client sent must outlive the restart that wipes the disk.
+
+    `definition_json` keeps the EXTRACTED questionnaire, which is what the tool
+    works from — but "which questionnaire is this wave running?" is answered by
+    the document, and a reviewer comparing our reading against the source needs
+    the file, not its name.
+    """
+    test_client, SessionLocal, _ = client
+    _make_study(SessionLocal)
+    _upload(test_client, filename="Wave 2 QRE.docx")
+    _wait_draft(test_client)
+
+    resp = test_client.get("/api/studies/study_q1/questionnaire/source")
+
+    assert resp.status_code == 200
+    assert resp.content == b"dummy-bytes"
+    assert "Wave 2 QRE.docx" in resp.headers["content-disposition"]
+
+
+def test_download_survives_the_on_disk_copy_being_deleted(client, tmp_path) -> None:
+    """Served from the database row, so a wiped disk changes nothing."""
+    import shutil
+
+    test_client, SessionLocal, _ = client
+    _make_study(SessionLocal)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    shutil.rmtree(tmp_path / "study_q1", ignore_errors=True)
+
+    resp = test_client.get("/api/studies/study_q1/questionnaire/source")
+    assert resp.status_code == 200
+    assert resp.content == b"dummy-bytes"
+
+
+def test_download_says_what_to_do_when_nothing_was_archived(client) -> None:
+    test_client, SessionLocal, _ = client
+    _make_study(SessionLocal)
+
+    resp = test_client.get("/api/studies/study_q1/questionnaire/source")
+    assert resp.status_code == 404
+    assert "no questionnaire" in resp.json()["detail"].lower()
+
+
+def test_the_wave_is_identified_by_filename_and_version(client) -> None:
+    """What the status endpoint already carries, pinned: this is wave tracking."""
+    test_client, SessionLocal, _ = client
+    _make_study(SessionLocal)
+    _upload(test_client, filename="Wave 2 QRE.docx")
+    body = _wait_draft(test_client)
+
+    assert body["source_filename"] == "Wave 2 QRE.docx"
+    assert body["version"] == 1
+    assert body["created_at"]

@@ -216,20 +216,22 @@ export default function ProjectPage() {
               Fielding
             </Link>
             {study.excel_path && (
-              <a
-                href={studiesApi.downloadUrl(study.id, 'excel')}
+              <button
+                type="button"
+                onClick={() => studiesApi.download(study.id, 'excel', `${study.client_name}.xlsx`)}
                 className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
               >
                 <DownloadIcon className="w-4 h-4" /> Excel
-              </a>
+              </button>
             )}
             {study.pptx_path && (
-              <a
-                href={studiesApi.downloadUrl(study.id, 'pptx')}
+              <button
+                type="button"
+                onClick={() => studiesApi.download(study.id, 'pptx', `${study.client_name}.pptx`)}
                 className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
               >
                 <DownloadIcon className="w-4 h-4" /> PowerPoint
-              </a>
+              </button>
             )}
             {study.status === 'approved_for_delivery' && !deliveryApproved && user?.role === 'owner' && (
               <button
@@ -385,7 +387,7 @@ function QuestionnaireChecksTab({
   }
   return (
     <div className="space-y-4">
-      <CrosscheckPanel studyId={study.id} />
+      <CrosscheckPanel studyId={study.id} dataFilename={study.source_filename} />
     </div>
   )
 }
@@ -652,12 +654,19 @@ function ReportsTab({ study }: { study: Study }) {
           <h2 className="font-semibold text-slate-900 mb-1">{item.title}</h2>
           <p className="text-sm text-slate-500 mb-5">{item.desc}</p>
           {item.available ? (
-            <a
-              href={studiesApi.downloadUrl(study.id, item.fmt)}
+            <button
+              type="button"
+              onClick={() =>
+                studiesApi.download(
+                  study.id,
+                  item.fmt,
+                  `${study.client_name}.${item.fmt === 'excel' ? 'xlsx' : 'pptx'}`,
+                )
+              }
               className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600"
             >
               <DownloadIcon className="w-4 h-4" /> Download
-            </a>
+            </button>
           ) : (
             <span className="text-sm text-slate-400">Not yet generated</span>
           )}

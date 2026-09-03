@@ -36,6 +36,9 @@ class StudyResponse(BaseModel):
     approval_chain: list[ApprovalRecord]
     excel_path: str | None = None
     pptx_path: str | None = None
+    # The data file as it was uploaded. Which file a wave ran on is a question
+    # a reviewer asks constantly, and it is the name on the download button.
+    source_filename: str | None = None
 
     class Config:
         from_attributes = True

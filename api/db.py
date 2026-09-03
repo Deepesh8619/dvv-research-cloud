@@ -169,6 +169,13 @@ class QuestionnaireDB(Base):
     # concern that belongs alongside the questionnaire's status, not baked into
     # the persisted instrument. A list of approved qids keeps it additive.
     approved_qids = Column(JSON, default=list)
+    # The uploaded .docx/.pdf itself, gzipped + base64. `definition_json` keeps
+    # the EXTRACTED questionnaire, which is what the tool works from — but the
+    # source document is what a client sent and what a reviewer compares
+    # against, and on the free tier the on-disk copy is wiped by every restart.
+    # Storing it here is what makes "which questionnaire is this wave running?"
+    # answerable, and downloadable, a month later.
+    source_file_b64 = Column(Text, nullable=True)
     created_at = Column(String)
     updated_at = Column(String)
 
@@ -646,6 +653,8 @@ def _ensure_new_columns():
             # (T16) — both added after `questionnaires` itself first deployed.
             "definition_json": "TEXT",
             "error_detail": "VARCHAR",
+            # The uploaded document itself, so it survives a restart.
+            "source_file_b64": "TEXT",
         },
         "studies": {
             # Durable DataMap storage — added after `studies` first deployed.
@@ -969,6 +978,50 @@ def create_chat_message(
     db.commit()
     db.refresh(msg)
     return msg
+
+
+# Anything larger than this is not worth carrying in a row — and Postgres
+# would be an odd place to put it. Shared by the data-file and questionnaire
+# archives so one cap governs both.
+MAX_ARCHIVED_SOURCE_BYTES = 25 * 1024 * 1024
+
+
+def compress_for_archive(path) -> str | None:
+    """gzip + base64 a file for storage in a row. None if it is too big to keep.
+
+    Render's free tier has no persistent disk, so an uploaded file lives only
+    until the next deploy or restart. A copy in the database is the difference
+    between "re-process this study" and "ask the client to send it again".
+    """
+    import base64
+    import gzip
+    from pathlib import Path as _Path
+
+    compressed = gzip.compress(_Path(path).read_bytes(), compresslevel=6)
+    if len(compressed) > MAX_ARCHIVED_SOURCE_BYTES:
+        return None
+    return base64.b64encode(compressed).decode("ascii")
+
+
+def decompress_archived(b64: str) -> bytes:
+    """The original bytes of a file stored by `compress_for_archive`."""
+    import base64
+    import gzip
+
+    return gzip.decompress(base64.b64decode(b64))
+
+
+def set_questionnaire_source_archive(
+    db: Session, questionnaire_id: str, source_file_b64: str
+) -> None:
+    """Store the uploaded document's bytes on its questionnaire row."""
+    questionnaire = (
+        db.query(QuestionnaireDB).filter(QuestionnaireDB.id == questionnaire_id).first()
+    )
+    if questionnaire:
+        questionnaire.source_file_b64 = source_file_b64
+        questionnaire.updated_at = datetime.now().isoformat()
+        db.commit()
 
 
 def create_questionnaire(
