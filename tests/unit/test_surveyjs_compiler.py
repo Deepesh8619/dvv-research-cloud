@@ -17,6 +17,7 @@ from src.core.survey_definition import (
 from src.renderers.surveyjs_compiler import (
     _expression_to_visibleif_string,
     compile_to_surveyjs,
+    display_warnings,
 )
 
 
@@ -267,3 +268,148 @@ def test_visibleif_nested_logical_tree():
     )
     result = _expression_to_visibleif_string(expr)
     assert result == "({S2} = 1) or (({S2} anyof [2]) and (not (({S1} < 25))))"
+
+
+# --- what a respondent actually reads ----------------------------------------
+
+
+def _with_techniques(question: Question, masks=None, pipes=None) -> Question:
+    question.validation = {
+        "techniques": {
+            "masks": masks or [],
+            "pipes": pipes or [],
+            "least_fill": False,
+        }
+    }
+    return question
+
+
+def _brands(qid: str, text: str, **kw) -> Question:
+    return Question(
+        qid=qid,
+        text=text,
+        type=QuestionType.MULTI,
+        options=[Option(code=c, label=f"Brand {c}") for c in (1, 2, 3)],
+        **kw,
+    )
+
+
+def _survey_of(*questions: Question) -> SurveyDefinition:
+    return SurveyDefinition(
+        study_id="s",
+        title="t",
+        questions=list(questions),
+        blocks=[Block(block_id="B1", question_ids=[q.qid for q in questions])],
+    )
+
+
+def _elements(survey: SurveyDefinition) -> dict:
+    return {
+        el.get("name", "html"): el
+        for page in compile_to_surveyjs(survey)["pages"]
+        for el in page["elements"]
+    }
+
+
+def test_a_pipe_becomes_the_respondents_own_answer() -> None:
+    """It used to reach the public as the instruction itself.
+
+    The compiler assumed piping needed no work because SurveyJS interpolates
+    "{qid}" markers "already present in question text". They are never present:
+    a questionnaire writes the instruction in prose.
+    """
+    q2 = _brands("Q2", "Which brands do you use?")
+    q3 = _with_techniques(
+        Question(
+            qid="Q3",
+            text="What do you like about [INSERT RESPONSE FROM Q2]?",
+            type=QuestionType.OPEN_TEXT,
+        ),
+        pipes=[{"source_qid": "Q2", "name": None, "verbatim": "INSERT RESPONSE FROM Q2"}],
+    )
+
+    assert _elements(_survey_of(q2, q3))["Q3"]["title"] == "What do you like about {Q2}?"
+
+
+def test_a_mask_narrows_the_option_list() -> None:
+    """Detected, stored, and then ignored — so everyone saw every option."""
+    q1 = _brands("Q1", "Which brands are you aware of?")
+    q2 = _with_techniques(
+        _brands("Q2", "Which of those do you use?"),
+        masks=[{"source_qid": "Q1", "mode": "selected", "exclude_qid": None, "verbatim": ""}],
+    )
+
+    assert _elements(_survey_of(q1, q2))["Q2"]["choicesVisibleIf"] == "{Q1} contains {item}"
+
+
+def test_a_not_selected_mask_narrows_the_other_way() -> None:
+    q1 = _brands("Q1", "Which brands are you aware of?")
+    q2 = _with_techniques(
+        _brands("Q2", "Which have you never tried?"),
+        masks=[
+            {"source_qid": "Q1", "mode": "not_selected", "exclude_qid": None, "verbatim": ""}
+        ],
+    )
+
+    assert _elements(_survey_of(q1, q2))["Q2"]["choicesVisibleIf"] == "{Q1} notcontains {item}"
+
+
+def test_a_mask_from_a_single_answer_question_compares_rather_than_contains() -> None:
+    """`contains` is for a list. A single-select answer is one value."""
+    q1 = Question(
+        qid="Q1",
+        text="Which brand do you use most?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=c, label=f"Brand {c}") for c in (1, 2, 3)],
+    )
+    q2 = _with_techniques(
+        _brands("Q2", "And which others?"),
+        masks=[
+            {"source_qid": "Q1", "mode": "not_selected", "exclude_qid": None, "verbatim": ""}
+        ],
+    )
+
+    assert _elements(_survey_of(q1, q2))["Q2"]["choicesVisibleIf"] == "{Q1} <> {item}"
+
+
+def test_no_scripter_directive_survives_into_the_title() -> None:
+    """Brackets are a scripting convention; parentheses are respondent language."""
+    q = _brands("Q2", "Which of those do you use? [SHOW ONLY ITEMS SELECTED AT Q1]")
+    q.options[2].label = "Other (Please specify): [ TXT ] ______"
+
+    element = _elements(_survey_of(q))["Q2"]
+    assert element["title"] == "Which of those do you use?"
+    # The parenthesised half is the respondent's, and it stays.
+    assert element["choices"][2]["text"] == "Other (Please specify): ______"
+
+
+def test_a_pipe_we_cannot_resolve_is_removed_and_reported() -> None:
+    """Nobody should read "[PHARMACY]". Nor should it ship unnoticed."""
+    q = _with_techniques(
+        Question(qid="Q4", text="Rate [PHARMACY] on value for money", type=QuestionType.OPEN_TEXT),
+        pipes=[{"source_qid": None, "name": "PHARMACY", "verbatim": "PHARMACY"}],
+    )
+    survey = _survey_of(q)
+
+    assert _elements(survey)["Q4"]["title"] == "Rate on value for money"
+    warning = next(w for w in display_warnings(survey) if w["qid"] == "Q4")
+    assert warning["kind"] == "unresolved_pipe"
+    assert "PHARMACY" in warning["detail"]
+
+
+def test_a_mask_whose_source_is_not_in_the_survey_is_reported() -> None:
+    q = _with_techniques(
+        _brands("Q2", "Which of those do you use?"),
+        masks=[{"source_qid": "Q99", "mode": "selected", "exclude_qid": None, "verbatim": ""}],
+    )
+    survey = _survey_of(q)
+
+    assert "choicesVisibleIf" not in _elements(survey)["Q2"]
+    warning = next(w for w in display_warnings(survey) if w["qid"] == "Q2")
+    assert warning["kind"] == "unenforceable_mask"
+    assert "everyone will see every option" in warning["detail"]
+
+
+def test_a_clean_survey_reports_nothing() -> None:
+    q1 = _brands("Q1", "Which brands are you aware of?")
+    assert display_warnings(_survey_of(q1)) == []
