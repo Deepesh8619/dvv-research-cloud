@@ -20,7 +20,8 @@ const KIND_LABELS: Record<string, string> = {
   undeclared_code: 'Answer not in the scripted punch list',
   single_multi: 'More than one answer to a single-answer question',
   out_of_range: 'Number outside the allowed range',
-  terminate_violated: 'Respondent who should have been screened out',
+  terminate_violated: 'Screened out, but kept answering',
+  terminate_recorded: 'Screened out and stopped there, as scripted',
   type_mismatch: 'Read as a coded question, but the data says otherwise',
   option_not_scripted: 'Option in the questionnaire with no punch in the data',
   punch_not_in_questionnaire: 'Punch in the data the questionnaire never offers',
@@ -45,6 +46,10 @@ export default function CrosscheckPanel({
 }) {
   const [report, setReport] = useState<CrosscheckReport | null>(null)
   const [questionnaire, setQuestionnaire] = useState<QuestionnaireStatus | null>(null)
+  // An `info` finding is a check that PASSED and is worth showing — "the
+  // screen-out held". Counting it as a discrepancy would report a clean file
+  // as a dirty one.
+  const problems = (report?.findings ?? []).filter((f) => f.severity !== 'info')
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -194,9 +199,9 @@ export default function CrosscheckPanel({
             <span
               className={`font-medium ${report.passed ? 'text-emerald-700' : 'text-red-700'}`}
             >
-              {report.passed
+              {problems.length === 0
                 ? 'No discrepancies found'
-                : `${report.findings.length} discrepanc${report.findings.length === 1 ? 'y' : 'ies'}`}
+                : `${problems.length} discrepanc${problems.length === 1 ? 'y' : 'ies'}`}
             </span>
             <span className="text-slate-500">{report.n_rows.toLocaleString()} respondents</span>
             <span className="text-slate-500">{report.linked_questions} questions linked</span>
@@ -222,7 +227,11 @@ export default function CrosscheckPanel({
                 >
                   <span
                     className={`w-1 rounded-full shrink-0 ${
-                      f.severity === 'error' ? 'bg-red-500' : 'bg-amber-400'
+                      f.severity === 'error'
+                        ? 'bg-red-500'
+                        : f.severity === 'info'
+                          ? 'bg-slate-300'
+                          : 'bg-amber-400'
                     }`}
                     aria-hidden="true"
                   />

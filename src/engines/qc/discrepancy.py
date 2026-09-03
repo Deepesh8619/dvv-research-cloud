@@ -14,7 +14,7 @@ Four checks, one per promise a question makes about its own data:
     undeclared_code    a value outside the question's declared option codes
     single_multi       more than one response to a single-answer question
     out_of_range       a numeric answer outside the stated range
-    terminate_violated a completed respondent the screen-out should have removed
+    terminate_violated a respondent the screen-out matched who kept answering
 
 `show_if` routing is deliberately NOT re-checked here — `linker.cross_validate_
 routing` already owns that and reports it in its own shape.
@@ -42,7 +42,7 @@ from src.core.survey_definition import (
     evaluate,
 )
 from src.engines.qc.variable_roles import find_companions
-from src.engines.questionnaire.linker import _read_rows, _row_value
+from src.engines.questionnaire.linker import _answered, _read_rows, _row_value
 
 # How many offending row numbers to keep per finding. Enough to start looking,
 # not so many that a systematically broken column produces a megabyte of noise.
@@ -199,6 +199,26 @@ def _bound_text(value: float | None) -> str:
     if value is None:
         return "any"
     return str(int(value)) if value == int(value) else str(value)
+
+
+def _downstream_variables(
+    survey: SurveyDefinition, link_map: dict[str, list[str]], qid: str
+) -> list[str]:
+    """Every linked column belonging to a question asked AFTER `qid`.
+
+    A screen-out is a promise about what happens next, so checking it needs to
+    know what "next" is. Questions are taken in the order the instrument
+    presents them (`question_order`), not the order the file happens to store
+    its columns in.
+    """
+    order = survey.question_order()
+    if qid not in order:
+        return []
+    return [
+        name
+        for later in order[order.index(qid) + 1 :]
+        for name in link_map.get(later, [])
+    ]
 
 
 def _declared_codes(question: Question) -> set[int]:
@@ -540,28 +560,73 @@ def check_against_questionnaire(
             report.skipped.append(f"{qid}: screen-out references an unlinked question")
             continue
         counts["terminate"] += 1
-        hits = []
+        # A screen-out makes two promises, and only the second one is a defect
+        # when it breaks. A respondent who matches it MAY legitimately sit in
+        # the file — plenty of exports keep the terminates — as long as the
+        # interview actually stopped. What must never happen is a respondent who
+        # matched the screen-out and then went on answering.
+        #
+        # Reporting mere presence as an error made every recorded terminate a
+        # finding, which on a file that keeps its terminates is a flood of red
+        # for a survey that behaved perfectly.
+        downstream = _downstream_variables(survey, link_map, qid)
+        continued: list[int] = []
+        stopped: list[int] = []
         for index, row in enumerate(rows, start=1):
             answers = {
                 ref: _row_value(row, link_map[ref])
                 for ref in referenced
                 if link_map.get(ref)
             }
-            if evaluate(question.terminate_if, answers):
-                hits.append(index)
-        if hits:
+            if not evaluate(question.terminate_if, answers):
+                continue
+            if downstream and _answered(row, downstream):
+                continued.append(index)
+            else:
+                stopped.append(index)
+
+        if continued:
             report.findings.append(
                 Discrepancy(
                     qid=qid,
                     kind="terminate_violated",
                     severity="error",
                     detail=(
-                        f"{qid} screens out these respondents, but they are present "
-                        "in the completed data."
+                        f"{qid} screens these respondents out, but they went on to "
+                        "answer later questions — the screen-out did not stop the "
+                        "interview."
                     ),
-                    n_rows=len(hits),
+                    n_rows=len(continued),
                     variables=link_map.get(qid, []),
-                    example_rows=hits[:MAX_EXAMPLES],
+                    example_rows=continued[:MAX_EXAMPLES],
+                )
+            )
+        if stopped:
+            # They matched the screen-out and are in the file. With a later
+            # question to look at, we can say the interview stopped where it
+            # should have — good news, reported so a reviewer can see the check
+            # ran. With nothing after it linked to a column, we cannot say, and
+            # a warning is the only honest grade for "did not stop, or did?".
+            verified = bool(downstream)
+            report.findings.append(
+                Discrepancy(
+                    qid=qid,
+                    kind="terminate_recorded",
+                    severity="info" if verified else "warning",
+                    detail=(
+                        f"{len(stopped)} respondents match {qid}'s screen-out and "
+                        + (
+                            "have no answers after it — the screen-out held. Expected "
+                            "only if this export keeps its terminates."
+                            if verified
+                            else "are present in the file, but no later question is "
+                            "linked to a column, so whether the interview actually "
+                            "stopped could not be checked."
+                        )
+                    ),
+                    n_rows=len(stopped),
+                    variables=link_map.get(qid, []),
+                    example_rows=stopped[:MAX_EXAMPLES],
                 )
             )
 
