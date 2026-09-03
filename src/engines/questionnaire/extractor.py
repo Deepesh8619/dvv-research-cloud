@@ -556,6 +556,10 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
         # not detecting it, because the review UI showed it as handled.
         randomize_options=fields.randomize,
         terminate_if=fields.terminate_if,
+        # The base the directive states. Without it `show_if` was empty on
+        # every prose document, so routing cross-validation and the condition
+        # audit had nothing to check even though the base was written down.
+        show_if=fields.show_if,
         source_text=chunk.chunk_text,
         source_location=chunk.provenance,
         validation=validation,
@@ -694,7 +698,19 @@ def extract_question(
             "questionnaire.extract", prompt, schema.EXTRACTION_SCHEMA
         )
     except (BackendUnavailable, ModelOutputError, KeyError) as exc:
-        result = ExtractionResult(question=_empty_question(chunk))
+        # Keep whatever the parsers already read. A question whose nine options
+        # were read perfectly and whose only unknown is single-vs-multi used to
+        # come back as an empty placeholder the moment a backend was down —
+        # throwing away work that cost nothing and is not in doubt. Downstream
+        # then had no options to align codes against and no answers to check,
+        # so one outage quietly disabled the checks on every question it hit.
+        # Flagged exactly as before, so it still lands in front of a reviewer.
+        if prose is not None and (prose.options or prose.qtype):
+            question = _question_from_prose(prose, chunk)
+            question.validation["unresolved_fields"] = sorted(prose.missing)
+            result = ExtractionResult(question=question)
+        else:
+            result = ExtractionResult(question=_empty_question(chunk))
         result.add_flag(_extraction_flag_for(exc))
         _stash_error(result.question, _EXTRACTION_ERROR_KEY, exc)
         return result

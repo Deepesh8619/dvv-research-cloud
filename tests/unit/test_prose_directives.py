@@ -242,3 +242,183 @@ def test_rank_instruction_is_its_own_type():
         "Q7",
     )
     assert fields.qtype is QuestionType.RANK
+
+
+# --- SP / MP punch abbreviations --------------------------------------------
+
+
+def test_sp_directive_types_a_question_single() -> None:
+    fields = parse_prose_question(
+        "[SP] [IF D2 = 1]\nD4A. Do you work full-time?\n1. Yes\n0. No", "D4A"
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.SINGLE
+
+
+def test_mp_directive_types_a_question_multi() -> None:
+    fields = parse_prose_question(
+        "[IF S2 = 2] [MP]\nR1. Why do you rent?\na. Cheaper\nb. Convenient", "R1"
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.MULTI
+
+
+def test_number_box_with_sp_is_numeric_not_single() -> None:
+    """'SP' inside a NUMBER BOX directive describes the widget, not the type."""
+    fields = parse_prose_question(
+        "[NUMBER BOX WITH SP]\nR3. What is your monthly rent?\n$ ______", "R3"
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.NUMERIC
+
+
+def test_bare_sp_in_prose_does_not_type_a_question() -> None:
+    """SP/MP are two-letter tokens; only a bracketed directive may claim them.
+
+    'SP' here is a brand abbreviation in the respondent's wording. Typing the
+    question off it would silently declare a multi-select single.
+    """
+    fields = parse_prose_question(
+        "Q9. Which SP brand did you buy?\n1. Brand A\n2. Brand B", "Q9"
+    )
+    assert fields is not None
+    assert fields.qtype is None
+    assert "type" in fields.missing
+
+
+def test_several_directives_on_one_line_are_all_read() -> None:
+    """"[IF S2=1] [MP] [RANDOMIZE a-f]" is one line and three instructions."""
+    fields = parse_prose_question(
+        "[IF S2 = 2] [MP] [RANDOMIZE a-f]\nR1. Why do you rent?\na. Cheaper\nb. Prefer it",
+        "R1",
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.MULTI
+    assert fields.randomize is True
+    # The wording is the question, not the directive line above it.
+    assert fields.text is not None and fields.text.startswith("Why do you rent")
+    assert [o.label for o in fields.options] == ["Cheaper", "Prefer it"]
+
+
+# --- an option's wording wraps too -------------------------------------------
+
+
+def test_wrapped_option_text_is_not_a_new_option() -> None:
+    """SHED's S2 wraps each of its three housing answers onto a second line.
+
+    Reading the tails as answers turned a 3-code question into a 6-code one
+    whose codes lined up with nothing in the data file.
+    """
+    fields = parse_prose_question(
+        "S2. Which best describes your housing arrangement?\n"
+        "1. I [IF PPMARIT=1, INSERT: (and/or my spouse)]\n"
+        "own [our/my] home\n"
+        "2. I [IF PPMARIT=1, INSERT: (and/or my spouse)]\n"
+        "pay rent\n"
+        "3. I [IF PPMARIT=1, INSERT: (and/or my spouse)]\n"
+        "do neither",
+        "S2",
+    )
+    assert fields is not None
+    assert [o.code for o in fields.options] == [1, 2, 3]
+    assert fields.options[0].label.endswith("own [our/my] home")
+    assert fields.options[1].label.endswith("pay rent")
+
+
+def test_a_list_written_without_markers_keeps_every_option() -> None:
+    """Continuation only ever follows a MARKED option, so an unmarked list is safe."""
+    fields = parse_prose_question(
+        "Q9. Do you agree?\nYes\nNo\nNot sure", "Q9"
+    )
+    assert fields is not None
+    assert [o.label for o in fields.options] == ["Yes", "No", "Not sure"]
+
+
+def test_only_one_line_is_absorbed_into_an_option() -> None:
+    """A second unmarked line starts a new option rather than growing the last."""
+    fields = parse_prose_question(
+        "Q9. Pick one\n1. First answer\nwrapped tail\nA separate unmarked line", "Q9"
+    )
+    assert fields is not None
+    assert [o.label for o in fields.options] == [
+        "First answer wrapped tail",
+        "A separate unmarked line",
+    ]
+
+
+# --- a number box is not an answer list --------------------------------------
+
+
+def test_section_banner_is_not_an_answer() -> None:
+    """"***** END OF RENT SECTION *****" divides the document; nobody picks it."""
+    fields = parse_prose_question(
+        "[NUMBER BOX range 1900-2014]\n"
+        "D6. In what year did you buy your current home?\n"
+        "***** END OF SCREENER/INCIDENCE SECTION *****\n"
+        "***** RENT SECTION *******",
+        "D6",
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.NUMERIC
+    assert fields.options == []
+
+
+def test_the_rule_the_answer_is_written_on_is_not_an_answer() -> None:
+    """"_____", "____ %" and "[Num box, 0-25] ___" mark WHERE the answer goes."""
+    fields = parse_prose_question(
+        "[NUMBER BOX]\n"
+        "I2. What percent of your income did you save?\n"
+        "____ %  [NUM-BOX 0 TO 100]",
+        "I2",
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.NUMERIC
+    assert fields.options == []
+    # The widget directive it carried is the type declaration — keep that.
+    assert any("NUM-BOX" in d for d in fields.directives)
+
+
+def test_open_entry_question_keeps_only_its_written_special_codes() -> None:
+    """A year box with "888. Still enrolled" beside it has one code, not two."""
+    fields = parse_prose_question(
+        "[NUMBER BOX]\n"
+        "ED4. In what year did you last attend?\n"
+        "_____ [Num Box, Range 1900 - 2014]\n"
+        "888. Still enrolled [SP]",
+        "ED4",
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.NUMERIC
+    assert [(o.code, o.label) for o in fields.options] == [(888, "Still enrolled")]
+
+
+def test_a_widget_directive_outranks_a_bare_punch_abbreviation() -> None:
+    """"[SP]" describes how the special codes punch, not what the question collects."""
+    fields = parse_prose_question(
+        "[SP]\n"
+        "K1B. At what age do you expect to retire fully?\n"
+        "[Num box PPAGE-99]\n"
+        "888. Will never stop working  [SP]\n"
+        "999. Not Sure  [SP]",
+        "K1B",
+    )
+    assert fields is not None
+    assert fields.qtype == QuestionType.NUMERIC
+    assert [o.code for o in fields.options] == [888, 999]
+
+
+def test_a_directive_with_nested_brackets_is_still_a_directive() -> None:
+    """Real routing nests: "[ASK IF (K2_b=1 (yes) OR [K14a=2 (no)]) AND ...]".
+
+    A non-nesting pattern stopped at the inner "]", so the line fell through to
+    the answer parser and was glued onto the option above it.
+    """
+    fields = parse_prose_question(
+        "K16. What percent of your paycheck do you contribute?\n"
+        "888. Don't Know\n"
+        "[ASK IF (K2_b=1 (yes) OR [K14a=2 (no) or refused]) AND (D3 = 1 or 2)]",
+        "K16",
+    )
+    assert fields is not None
+    assert [o.label for o in fields.options] == ["Don't Know"]
+    assert any("ASK IF" in d for d in fields.directives)

@@ -431,3 +431,56 @@ def test_an_open_question_whose_codes_live_in_a_companion_is_explained_not_blame
     assert finding.severity == "info"
     assert "HID_SS_AD_SPEND" in finding.detail
     assert not any(f.kind == "type_mismatch" for f in report.findings)
+
+
+# --- non-response values are not a disagreement about the instrument ---------
+
+
+def test_a_refused_punch_the_questionnaire_never_prints_is_not_a_finding() -> None:
+    """Every data file carries "Refused"; no questionnaire prints it.
+
+    Matching non-response by code alone only works when the file uses the
+    conventional numbers. A label-encoded export has no conventional numbers at
+    all, so each refusal became a finding a reviewer had to dismiss by hand.
+    """
+    from src.engines.qc.discrepancy import _non_response_codes
+
+    labelled = [
+        (1, "Much better off"),
+        (2, "About the same"),
+        (3, "Refused"),
+        (4, "Don\u2019t know"),
+        (5, "Prefer not to answer"),
+        (6, "(Not asked)"),
+        (7, "Don't know / Refused"),
+    ]
+    assert _non_response_codes(labelled) == {3, 4, 5, 6, 7}
+
+
+def test_a_real_answer_is_never_read_as_a_refusal() -> None:
+    from src.engines.qc.discrepancy import _non_response_codes
+
+    labelled = [
+        (1, "Refused a loan in the past 12 months"),
+        (2, "I don't know how to answer surveys"),
+        (3, "Not applicable to my situation"),
+    ]
+    # The WHOLE label has to be the phrase. "Refused a loan" is an answer about
+    # credit; "Not applicable to my situation" is a substantive choice.
+    assert _non_response_codes(labelled) == set()
+
+
+def test_a_question_whose_type_we_could_not_read_is_not_judged_on_its_type() -> None:
+    """Unknown type defaults to `single`. Do not report the data for that."""
+    from src.engines.qc.discrepancy import _type_is_unresolved
+
+    known = Question(qid="Q1", text="t", type=QuestionType.SINGLE, options=[])
+    unread = Question(
+        qid="Q2",
+        text="t",
+        type=QuestionType.SINGLE,
+        options=[],
+        validation={"unresolved_fields": ["type"]},
+    )
+    assert _type_is_unresolved(known) is False
+    assert _type_is_unresolved(unread) is True

@@ -44,3 +44,19 @@ def test_mixed_type_open_end_loads_and_pl_from_pandas_succeeds(tmp_path):
     # Values preserved as strings; the int cells are now "5", "3", ... not lost.
     assert "5" in plf["OE1"].to_list()
     assert "none" in plf["OE1"].to_list()
+
+
+def test_cp1252_csv_is_read_not_crashed(tmp_path) -> None:
+    """A curly apostrophe from Excel/SPSS must not kill the upload.
+
+    Byte 0x92 is a right single quote in cp1252 and invalid UTF-8; every US
+    federal and Excel-authored export carries them. Before the fallback this
+    raised UnicodeDecodeError straight out of pandas and up to the browser.
+    """
+    csv = tmp_path / "cp1252.csv"
+    # Written as raw bytes: 0x92 is the cp1252 right single quote and is not a
+    # legal UTF-8 lead byte, which is exactly the file the crash came from.
+    csv.write_bytes(b"Q1,Q2\r\nIt\x92s cheaper to rent,1\r\nDon\x92t know,2\r\n")
+    df, datamap = read_tabular(csv)
+    assert len(df) == 2
+    assert "Q1" in {v.name for v in datamap.variables}

@@ -28,6 +28,7 @@ any file, for ever. That is why `checked` is reported alongside the findings —
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,87 @@ MAX_EXAMPLES = 5
 # being written into the response list. Flagging these would bury the real
 # findings, which is how a check stops being read at all.
 DEFAULT_SYSTEM_CODES = frozenset({-1, 0, 77, 88, 97, 98, 99, 998, 999, -99, -98})
+
+# Types whose answer IS a code list. A number box or a text box is not one of
+# them even when the questionnaire prints a few special codes beside it
+# ("888. Still enrolled" next to a year entry) — the column is still an open
+# response, so "the questionnaire has options, the data map says open" is only
+# a contradiction for the types below.
+# Extraction records the fields it could not resolve. A check must not assert
+# on one of them: a question whose type is unknown is given `single` as a
+# placeholder, and reporting "answered twice, but it is single-answer" off that
+# placeholder blames the data for something we never actually read.
+UNRESOLVED_FIELDS_KEY = "unresolved_fields"
+
+
+def _type_is_unresolved(question: Question) -> bool:
+    unresolved = (question.validation or {}).get(UNRESOLVED_FIELDS_KEY) or []
+    return "type" in unresolved
+
+
+CODED_QUESTION_TYPES = frozenset(
+    {
+        QuestionType.SINGLE,
+        QuestionType.MULTI,
+        QuestionType.GRID_SINGLE,
+        QuestionType.DROPDOWN,
+        QuestionType.RANK,
+    }
+)
+
+# A non-response category recognised by what its label SAYS, not by the number
+# it happens to carry. The conventional codes above only work when the file
+# uses them; a label-encoded export (a CSV of answer text) has no conventional
+# codes at all, and a data map sheet is free to put "Refused" anywhere. Every
+# questionnaire omits these from its printed option list, so matching them by
+# number alone turned each one into a finding a reviewer had to dismiss.
+#
+# The WHOLE label has to be the phrase. A prefix match reads "Refused a loan in
+# the past 12 months" — a real answer in any credit study — as a refusal to
+# answer, and quietly drops a genuine option from the comparison.
+_NON_RESPONSE_PHRASE_RE = re.compile(
+    r"^(?:"
+    r"refus(?:ed|al)?|declined?(?:\s+to\s+answer)?|"
+    r"(?:do\s+not|don['\u2019]?t)\s+know|dk|"
+    r"no\s+answer|not\s+(?:asked|sure|stated|applicable|available)|"
+    r"prefer(?:red)?\s+not\s+to\s+(?:answer|say)|"
+    r"skipped?|missing|n\s*/\s*a"
+    r")$",
+    re.I,
+)
+# "(Don't know)" and "Refused." are the same category as "Refused".
+_NON_RESPONSE_TRIM_RE = re.compile(r"^[\s(\[]+|[\s).\]]+$")
+# "Don't know / Refused" is one category written as two phrases.
+_NON_RESPONSE_SPLIT_RE = re.compile(r"\s*(?:/|,|;|\bor\b)\s*", re.I)
+
+
+def _is_non_response(label: str) -> bool:
+    """True when a value label states a refusal / don't-know, not an answer."""
+    cleaned = _NON_RESPONSE_TRIM_RE.sub("", label or "")
+    if not cleaned:
+        return False
+    parts = [p for p in _NON_RESPONSE_SPLIT_RE.split(cleaned) if p]
+    return bool(parts) and all(_NON_RESPONSE_PHRASE_RE.match(p) for p in parts)
+
+
+def _non_response_codes(labelled: list[tuple[int, str]]) -> set[int]:
+    """Codes whose label states they are a refusal / don't-know, not an answer."""
+    return {code for code, label in labelled if _is_non_response(label)}
+
+
+def _datamap_labelled_codes(
+    datamap: DataMap | None, variables: list[str]
+) -> list[tuple[int, str]]:
+    """(code, label) for every value the data map declares on these columns."""
+    if datamap is None:
+        return []
+    by_name = {v.name: v for v in datamap.variables}
+    out: list[tuple[int, str]] = []
+    for name in variables:
+        variable = by_name.get(name)
+        if variable is not None and variable.values:
+            out.extend(variable.values.items())
+    return out
 
 
 @dataclass
@@ -234,7 +316,12 @@ def check_against_questionnaire(
         # The questionnaire says this question has options, but the datamap
         # says the column holds an open number. That is a reading disagreement
         # worth ONE finding — not one per distinct value in the file.
-        if declared and datamap_says_open:
+        if (
+            declared
+            and datamap_says_open
+            and question.type in CODED_QUESTION_TYPES
+            and not _type_is_unresolved(question)
+        ):
             # An open-ended question usually has a derived companion holding
             # the bands or flags the conditions are actually written against
             # ("SS_AD_SPEND" is a number; "HID_SS_AD_SPEND" flags spend over
@@ -276,8 +363,15 @@ def check_against_questionnaire(
                 )
         elif declared and datamap is not None and scripted is not None:
             # Punches vs questionnaire: what was scripted against what was asked.
-            missing_in_data = sorted(declared - scripted - system_codes)
-            extra_in_data = sorted(scripted - declared - system_codes)
+            # "Refused" living on either side is not a disagreement about the
+            # instrument — no questionnaire prints it and every data file has it.
+            ignorable = (
+                system_codes
+                | _non_response_codes(_datamap_labelled_codes(datamap, variables))
+                | _non_response_codes([(o.code, o.label) for o in question.options])
+            )
+            missing_in_data = sorted(declared - scripted - ignorable)
+            extra_in_data = sorted(scripted - declared - ignorable)
             if missing_in_data:
                 report.findings.append(
                     Discrepancy(
@@ -338,6 +432,12 @@ def check_against_questionnaire(
                 )
 
         if question.type is QuestionType.SINGLE and len(variables) > 1:
+            if _type_is_unresolved(question):
+                report.skipped.append(
+                    f"{qid}: single-vs-multi not checked — the extraction could "
+                    "not read this question's type"
+                )
+                continue
             counts["single"] += 1
             hits = [
                 index

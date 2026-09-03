@@ -281,3 +281,28 @@ def test_question_variable_link_round_trip():
     )
     restored = QuestionVariableLink.from_json(link.to_json())
     assert restored == link
+
+
+def test_numeric_comparison_reads_a_number_stored_as_text() -> None:
+    """A CSV column of "0".."100" mixed with "Refused" imports as text.
+
+    `"25" > 0` raised TypeError — caught and read as "condition not satisfied",
+    so every respondent failed a `[IF I2 > 0]` gate and the routing check
+    reported a 100% violation that was entirely ours.
+    """
+    from src.core.survey_definition import Expression, evaluate
+
+    gt_zero = Expression(op="gt", qid="I2", value=0)
+    assert evaluate(gt_zero, {"I2": "25"}) is True
+    assert evaluate(gt_zero, {"I2": "0"}) is False
+    assert evaluate(gt_zero, {"I2": 25}) is True
+    # Not a number at all: the condition is simply not satisfied.
+    assert evaluate(gt_zero, {"I2": "Refused"}) is False
+
+
+def test_numeric_comparison_does_not_fall_back_to_string_order() -> None:
+    """On string order "100" < "25" — a silently wrong answer, not an error."""
+    from src.core.survey_definition import Expression, evaluate
+
+    assert evaluate(Expression(op="lt", qid="Y", value=25), {"Y": "100"}) is False
+    assert evaluate(Expression(op="gt", qid="Y", value=25), {"Y": "100"}) is True
