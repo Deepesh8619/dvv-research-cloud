@@ -323,6 +323,11 @@ class FieldingLinkResponse(BaseModel):
     closed_at: str | None = None
     respondent_path: str
     unenforced_routing: list[str] = []
+    # Text a respondent would have been shown that we removed because it was a
+    # scripter directive we could not resolve — an unresolvable pipe leaves a
+    # gap in a sentence, a mask whose source is missing narrows nothing. Both
+    # are decisions for a human before the link reaches a panel.
+    display_issues: list[dict[str, str]] = []
     counts: dict = {}
     # Vendor redirect templates (T10); None when unset.
     redirect_complete: str | None = None

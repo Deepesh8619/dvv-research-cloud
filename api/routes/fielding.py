@@ -80,7 +80,7 @@ from src.core.survey_definition import (
     SurveyDefinition,
     evaluate,
 )
-from src.renderers.surveyjs_compiler import compile_to_surveyjs
+from src.renderers.surveyjs_compiler import compile_to_surveyjs, display_warnings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -278,8 +278,16 @@ async def create_link(
         f"[{study_id}] Fielding link {link.id} opened by {user.name} "
         f"(questionnaire {questionnaire.id} v{survey.version})"
     )
+    display_issues = display_warnings(survey)
+    if display_issues:
+        logger.warning(
+            f"[{study_id}] Fielding link {link.id} opened with {len(display_issues)} "
+            "question(s) whose respondent-facing text lost an unresolvable directive: "
+            + ", ".join(i["qid"] for i in display_issues[:10])
+        )
     response = _link_response(link, fielding_link_counts(db, link.id))
     response.unenforced_routing = unenforced
+    response.display_issues = display_issues
     return response
 
 
