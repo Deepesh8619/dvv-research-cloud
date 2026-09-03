@@ -12,7 +12,8 @@ sessions and an answers map. This mirrors the adapter contract in
 `src/adapters/tabular.py` (external data -> DataMap + pandas DataFrame) and is
 fully unit-testable.
 
-Per question type (v1 = COMPLETES ONLY, status_code == 10; document below):
+Per question type (`statuses` selects which dispositions become rows —
+completes only by default, every disposition for a delivery export):
   single / dropdown -> one SINGLE variable named the qid; numeric codes; value
       labels from Options; variable label = question text.
   multi -> exploded 0/1 dummies `{qid}r{code}` (Decipher multi-punch naming so
@@ -45,6 +46,18 @@ from src.core.models import DataMap, Variable, VarType
 from src.core.survey_definition import Question, QuestionType, SurveyDefinition
 
 STATUS_COMPLETE = 10  # Lucid/Cint convention (fielding key decision #7)
+STATUS_TERMINATE = 20
+STATUS_SECURITY = 30
+STATUS_OVERQUOTA = 40
+
+#: What each disposition means, as value labels on the exported status column.
+STATUS_LABELS = {
+    STATUS_COMPLETE: "Complete",
+    STATUS_TERMINATE: "Screened out",
+    STATUS_SECURITY: "Security screen-out",
+    STATUS_OVERQUOTA: "Over quota",
+}
+ALL_STATUSES = frozenset(STATUS_LABELS)
 
 # camelCase v-prefixed names match orchestrator._CAMEL_SYSTEM_RE (^[dvh][A-Z]),
 # so _is_paradata_variable (banner) AND _is_system_variable (stub) both skip
@@ -52,6 +65,7 @@ STATUS_COMPLETE = 10  # Lucid/Cint convention (fielding key decision #7)
 PARA_START = "vStartTime"
 PARA_END = "vEndTime"
 PARA_DURATION = "vDurationSec"
+PARA_STATUS = "vStatus"
 
 
 @dataclass
@@ -208,8 +222,14 @@ def _parse_iso(value: Any) -> datetime | None:
 
 
 def _paradata_variables() -> list[Variable]:
-    """Session start/end/duration columns (built row-wise from the sessions)."""
+    """Session status/start/end/duration columns (built row-wise from sessions)."""
     return [
+        # The disposition. Without it an export of every outcome is unreadable —
+        # a terminate and a complete look identical once the answers stop — and
+        # incidence, the number a client is actually buying, is not computable
+        # from a file of completes alone.
+        Variable(name=PARA_STATUS, label="Disposition", type=VarType.SINGLE,
+                 values=dict(STATUS_LABELS), provenance="fielding_paradata"),
         Variable(name=PARA_START, label="Interview start time", type=VarType.DATE,
                  provenance="fielding_paradata"),
         Variable(name=PARA_END, label="Interview end time", type=VarType.DATE,
@@ -238,22 +258,28 @@ def materialize_fielding(
     survey: SurveyDefinition,
     sessions: Iterable[Any],
     answers: Mapping[str, Mapping[str, Any]],
+    statuses: frozenset[int] = frozenset({STATUS_COMPLETE}),
 ) -> tuple[DataMap, pd.DataFrame]:
-    """Turn completed respondent sessions into a (DataMap, DataFrame) pair.
+    """Turn respondent sessions into a (DataMap, DataFrame) pair.
 
     Args:
         survey: the PINNED SurveyDefinition snapshot (from FieldingLinkDB.survey_json).
         sessions: respondent session objects (need `.id`, `.status_code`,
-            `.started_at`, `.completed_at`). Only status_code == 10 (complete)
-            rows become respondents — v1 is completes-only.
+            `.started_at`, `.completed_at`).
         answers: {session_id: {qid: value}} — value is a scalar code, a list
             (multi), a number, text, or a {row: col} grid dict.
+        statuses: which dispositions become rows. Defaults to completes only,
+            which is what the ANALYSIS artifacts want — a topline computed over
+            screened-out respondents is simply wrong. Pass `ALL_STATUSES` for a
+            delivery export: the terminates are the evidence the screen-outs
+            worked and the denominator of the incidence rate, and discarding
+            them means our own screen-out check can never see them.
 
     Returns a DataMap describing every emitted column and a wide pandas
-    DataFrame with one row per completed respondent (plus respondent_id and
+    DataFrame with one row per included respondent (plus respondent_id and
     paradata columns).
     """
-    completes = [s for s in sessions if getattr(s, "status_code", None) == STATUS_COMPLETE]
+    completes = [s for s in sessions if getattr(s, "status_code", None) in statuses]
     # Deterministic order: by start time then id, so respondent_id is stable
     # across re-materializations.
     completes.sort(key=lambda s: (str(getattr(s, "started_at", "") or ""), str(s.id)))
@@ -284,13 +310,15 @@ def materialize_fielding(
         cells = [spec.read(answers.get(s.id, {})) for s in completes]
         columns[spec.variable.name] = _pandas_series(spec.variable.type, cells)
 
-    starts, ends, durations = [], [], []
+    starts, ends, durations, dispositions = [], [], [], []
     for s in completes:
         start = _parse_iso(getattr(s, "started_at", None))
         end = _parse_iso(getattr(s, "completed_at", None))
         starts.append(start.isoformat() if start else None)
         ends.append(end.isoformat() if end else None)
         durations.append((end - start).total_seconds() if start and end else None)
+        dispositions.append(getattr(s, "status_code", None))
+    columns[PARA_STATUS] = _pandas_series(VarType.SINGLE, dispositions)
     columns[PARA_START] = _pandas_series(VarType.DATE, starts)
     columns[PARA_END] = _pandas_series(VarType.DATE, ends)
     columns[PARA_DURATION] = _pandas_series(VarType.NUMERIC, durations)

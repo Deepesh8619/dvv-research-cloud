@@ -833,9 +833,12 @@ async def download_deck(
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
 ):
-    """Download a deck ('excel'/'pptx') or the original data file ('source').
+    """Download a study artifact. (Authenticated users only)
 
-    (Authenticated users only.)"""
+    `excel`/`pptx` are the rendered decks, `source` is the data file as it was
+    uploaded, and `responses`/`spss` are the respondent-level delivery files
+    from a fielded link — every disposition, with the data map alongside.
+    """
     study = get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
@@ -861,7 +864,17 @@ async def download_deck(
             },
         )
 
-    if fmt == "excel":
+    if fmt in ("responses", "spss"):
+        # Respondent-level delivery files written by materialize: every
+        # disposition, with the data map travelling alongside the data.
+        suffix = "xlsx" if fmt == "responses" else "sav"
+        path = str(STUDIES_DIR / study_id / f"{study_id}_responses.{suffix}")
+        media = (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            if fmt == "responses"
+            else "application/x-spss-sav"
+        )
+    elif fmt == "excel":
         path = study.excel_path
         media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     elif fmt == "pptx":
@@ -869,7 +882,10 @@ async def download_deck(
         media = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     else:
         raise HTTPException(
-            status_code=400, detail="Format must be 'excel', 'pptx' or 'source'"
+            status_code=400,
+            detail=(
+                "Format must be 'excel', 'pptx', 'source', 'responses' or 'spss'"
+            ),
         )
 
     if not path or not Path(path).exists():
