@@ -76,6 +76,11 @@ def client(tmp_path, monkeypatch):
         return UserDB(id="u1", email="test@x.com", name="Test", role=state["role"], is_active=True)
 
     monkeypatch.setattr(materialize_module, "STUDIES_DIR", tmp_path)
+    # The download route resolves the same directory through its own module
+    # constant; both are `api.config.STUDIES_DIR` in production.
+    import api.routes.studies as studies_module
+
+    monkeypatch.setattr(studies_module, "STUDIES_DIR", tmp_path)
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_current_user] = override_get_current_user
@@ -230,3 +235,88 @@ def test_materialize_reviewer_403(client):
     state["role"] = "reviewer"
     resp = test_client.post(f"/api/studies/study_m1/fielding/links/{link_id}/materialize")
     assert resp.status_code == 403
+
+
+# --- delivery: every disposition, and the field report ------------------------
+
+
+def test_the_delivery_files_carry_every_disposition(client, tmp_path):
+    """`data.parquet` stays completes-only — a topline over screened-out people
+    is simply wrong — but a delivery carries the terminates. They are the
+    evidence the screen-outs worked and the denominator of the incidence rate.
+    """
+    test_client, sf, _ = client
+    _seed(sf)
+    link_resp = test_client.post("/api/studies/study_m1/fielding/links")
+    token, link_id = link_resp.json()["token"], link_resp.json()["id"]
+
+    _run_respondent(test_client, token, age=30, coffee=1, brands=[1], follow_up="ok")
+    _run_respondent(test_client, token, age=40, coffee=2, brands=[1, 2])
+    _run_respondent(test_client, token, age=15, coffee=1, brands=None)  # terminated
+
+    body = test_client.post(
+        f"/api/studies/study_m1/fielding/links/{link_id}/materialize"
+    ).json()
+
+    assert body["n_respondents"] == 2  # the analysis dataset is unchanged
+    assert body["delivery"]["n_rows"] == 3  # the delivery keeps the terminate
+    assert set(body["delivery"]["formats"]) == {"sav", "xlsx"}
+    assert (tmp_path / "study_m1" / "study_m1_responses.sav").exists()
+    assert (tmp_path / "study_m1" / "study_m1_responses.xlsx").exists()
+
+
+def test_the_spss_file_is_readable_and_keeps_its_labels(client, tmp_path):
+    """A .sav a client cannot open, or that opens as bare integers, is not a
+    deliverable."""
+    from src.adapters.spss import read_sav
+
+    test_client, sf, _ = client
+    _seed(sf)
+    link_resp = test_client.post("/api/studies/study_m1/fielding/links")
+    token, link_id = link_resp.json()["token"], link_resp.json()["id"]
+    _run_respondent(test_client, token, age=30, coffee=1, brands=[1], follow_up="ok")
+    _run_respondent(test_client, token, age=15, coffee=1, brands=None)
+    test_client.post(f"/api/studies/study_m1/fielding/links/{link_id}/materialize")
+
+    df, datamap = read_sav(str(tmp_path / "study_m1" / "study_m1_responses.sav"))
+
+    assert len(df) == 2
+    # The disposition column is what makes a mixed file readable at all.
+    assert datamap["vStatus"].values[10] == "Complete"
+    assert datamap["vStatus"].values[20] == "Screened out"
+    assert datamap["Q2"].label  # question wording travelled with the data
+
+
+def test_both_delivery_files_are_downloadable(client, tmp_path):
+    test_client, sf, _ = client
+    _seed(sf)
+    link_resp = test_client.post("/api/studies/study_m1/fielding/links")
+    token, link_id = link_resp.json()["token"], link_resp.json()["id"]
+    _run_respondent(test_client, token, age=30, coffee=1, brands=[1], follow_up="ok")
+    test_client.post(f"/api/studies/study_m1/fielding/links/{link_id}/materialize")
+
+    assert test_client.get("/api/studies/study_m1/download/spss").status_code == 200
+    assert test_client.get("/api/studies/study_m1/download/responses").status_code == 200
+
+
+def test_the_field_report_answers_the_morning_after_questions(client):
+    test_client, sf, _ = client
+    _seed(sf)
+    link_resp = test_client.post("/api/studies/study_m1/fielding/links")
+    token, link_id = link_resp.json()["token"], link_resp.json()["id"]
+
+    _run_respondent(test_client, token, age=30, coffee=1, brands=[1], follow_up="ok")
+    _run_respondent(test_client, token, age=40, coffee=2, brands=[1, 2])
+    _run_respondent(test_client, token, age=15, coffee=1, brands=None)
+
+    body = test_client.get(
+        f"/api/studies/study_m1/fielding/links/{link_id}/field-report"
+    ).json()
+
+    assert body["starts"] == 3
+    assert body["dispositions"]["complete"] == 2
+    assert body["dispositions"]["terminate"] == 1
+    assert body["incidence_pct"] == 66.7
+    # And WHICH screen-out removed them — recomputed, because the live route
+    # logs the decision and does not store it.
+    assert body["terminates_by_question"] == [{"qid": "Q1", "n": 1}]
