@@ -371,6 +371,7 @@ def parse_prose_question(
     show_if_verbatim = ""
     written_codes: list[int | None] = []
     stem_wraps_used = False
+    last_option_marked = False
     randomize = False
     randomize_evidence = ""
     scale_row: str | None = None
@@ -445,17 +446,30 @@ def parse_prose_question(
         tags = _OPTION_TAG_RE.search(line)
         label = _OPTION_TAG_RE.sub("", line).strip() if tags else line
         written = _OPTION_CODE_RE.match(label)
-        if written:
-            label = label[written.end() :].strip()
-        else:
-            lettered = _OPTION_LETTER_RE.match(label)
-            if lettered:
-                label = label[lettered.end() :].strip()
+        lettered = None if written else _OPTION_LETTER_RE.match(label)
+        marker = written or lettered
+        if marker:
+            label = label[marker.end() :].strip()
         if not label:
             continue
-        written_codes.append(int(written.group(1)) if written else None)
-        code = len(options) + 1
-        option = Option(code=code, label=label)
+
+        # An option's wording wraps too. A marker-less line following a MARKED
+        # option is the rest of that option, not a new one — SHED's S2 wraps
+        # each of its three housing answers, and reading the tails as answers
+        # turned a 3-code question into a 6-code one whose codes matched
+        # nothing in the data. Only one continuation line, and only after a
+        # marked option, so a list written entirely without markers is
+        # untouched.
+        continuation = bool(options) and last_option_marked and marker is None
+        if continuation:
+            option = options[-1]
+            option.label = f"{option.label} {label}".strip()
+            last_option_marked = False
+        else:
+            written_codes.append(int(written.group(1)) if written else None)
+            option = Option(code=len(options) + 1, label=label)
+            last_option_marked = marker is not None
+
         if tags:
             tag_text = tags.group("tags")
             taught_meanings = learned_option_tags(patterns, tag_text)
@@ -464,9 +478,10 @@ def parse_prose_question(
             if _ANCHOR_TAG.search(tag_text) or "anchor" in taught_meanings:
                 option.anchored = True
             if _TERMINATE_TAG.search(tag_text) or "terminate" in taught_meanings:
-                terminate_codes.append(code)
-                terminate_lines.append(f"{label} [{tag_text.strip()}]")
-        options.append(option)
+                terminate_codes.append(option.code)
+                terminate_lines.append(f"{option.label} [{tag_text.strip()}]")
+        if not continuation:
+            options.append(option)
 
     # Adopt the written codes only when EVERY option states one and they are
     # distinct. A partial list (wrapped option text, an unnumbered "Other")

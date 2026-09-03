@@ -7,6 +7,9 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "exercises_http_json: drives router.http_json directly, so the suite-wide no-network guard steps aside",
+]
 
 [tool.ruff]
 line-length = 100

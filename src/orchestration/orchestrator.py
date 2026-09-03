@@ -421,7 +421,10 @@ class StudyOrchestrator:
         Returns a summary dict (counts from the merge + whether tables were
         regenerated) for logging/API responses.
         """
-        from src.engines.questionnaire.label_merge import merge_labels_into_datamap
+        from src.engines.questionnaire.label_merge import (
+            merge_labels_into_datamap,
+            remap_data_codes,
+        )
 
         run_dir = Path(run_dir)
         datamap_path = run_dir / "datamap.json"
@@ -434,17 +437,23 @@ class StudyOrchestrator:
 
         datamap = DataMap.from_json(datamap_path.read_text())
         merge = merge_labels_into_datamap(survey, datamap)
+        # The data moves with the data map or the two disagree: a label-encoded
+        # export's codes are ours, not the script's, and the tables have to be
+        # cut on the questionnaire's numbering to mean anything.
+        n_columns_remapped = remap_data_codes(parquet_path, merge.code_remaps)
         # Persist the enriched datamap so the navigator/API see real labels too.
         datamap_path.write_text(datamap.to_json())
 
         summary = {
             "n_variables_relabelled": merge.n_variables_relabelled,
             "n_value_labels_applied": merge.n_value_labels_applied,
+            "n_codes_aligned": merge.n_codes_aligned,
+            "n_columns_remapped": n_columns_remapped,
             "skipped_code_mismatch": merge.skipped_code_mismatch,
             "unmatched_questions": merge.unmatched_questions,
             "tables_regenerated": False,
         }
-        if merge.n_variables_relabelled == 0:
+        if merge.n_variables_relabelled == 0 and n_columns_remapped == 0:
             return summary  # nothing changed; don't churn the decks
 
         tab_plan = auto_tab_plan(datamap, title=f"{client_name} — Topline Tables")

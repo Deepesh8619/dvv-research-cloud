@@ -969,13 +969,22 @@ async def crosscheck_study(
     question, the count and example row numbers so a researcher can open the
     file and see it for themselves.
     """
-    from api.db import list_questionnaires_for_study, record_audit, set_study_artifacts
+    from api.db import (
+        list_questionnaires_for_study,
+        record_audit,
+        set_study_artifacts,
+        update_study_paths,
+    )
     from src.core.models import DataMap
     from src.core.survey_definition import SurveyDefinition
     from src.engines.qc.condition_audit import audit_conditions
     from src.engines.qc.discrepancy import check_against_questionnaire
     from src.engines.qc.variable_roles import ROLE_LABELS, summarize, unexplained
     from src.engines.questionnaire.datamap_recovery import reconcile, recover_missing
+    from src.engines.questionnaire.label_merge import (
+        align_codes_to_questionnaire,
+        remap_data_codes,
+    )
     from src.engines.questionnaire.linker import link_questions_to_datamap
 
     study = get_study(db, study_id)
@@ -1022,13 +1031,28 @@ async def crosscheck_study(
     already = {link.qid for link in link_report.links}
     link_report.links.extend(link for link in recovered_links if link.qid not in already)
 
+    parquet_path = STUDIES_DIR / study_id / "data.parquet"
+
+    # A CSV/Excel export that ships answer TEXT has no codes of its own, so the
+    # importer numbers the answers alphabetically. The questionnaire's codes are
+    # the real ones — screen-outs, routing and the tab plan are all written
+    # against them — so before anything is compared, the invented numbering is
+    # replaced by the authored one wherever the option labels join the two
+    # unambiguously. Labels never move; only the arbitrary integer does. Codes
+    # that came from SPSS or a data map sheet are the script's own and are left
+    # exactly as they are.
+    alignment = align_codes_to_questionnaire(survey, datamap, link_report)
+    n_columns_remapped = 0
+    if alignment.code_remaps:
+        n_columns_remapped = remap_data_codes(parquet_path, alignment.code_remaps)
+        update_study_paths(db, study_id, datamap_json=datamap.to_json())
+
     # Audit the conditions against what was actually scripted before reading a
     # single respondent row. A screen-out testing codes that were never punched
     # fires for nobody, and the data check would report zero violations — which
     # reads exactly like a clean result.
     condition_audit = audit_conditions(survey, link_report.links, datamap)
 
-    parquet_path = STUDIES_DIR / study_id / "data.parquet"
     if not parquet_path.exists():
         # The run directory is ephemeral on the free tier; the durable copies
         # are enough to link, but the row-level checks need the actual rows.
@@ -1057,6 +1081,11 @@ async def crosscheck_study(
     payload = {
         **report.to_dict(),
         "linked_questions": len(link_report.links),
+        "codes_aligned_to_questionnaire": {
+            "variables": sorted(alignment.code_remaps),
+            "n_values": alignment.n_codes_aligned,
+            "n_columns_rewritten": n_columns_remapped,
+        },
         "unmatched_questions": link_report.unmatched_questions,
         "unmatched_variables": unexplained(datamap, matched),
         "conditions": condition_audit.to_dict(),

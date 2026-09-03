@@ -293,6 +293,7 @@ def _http_error(code, body, headers=None):
     )
 
 
+@pytest.mark.exercises_http_json
 def test_429_is_retried_using_the_providers_own_wait_hint(monkeypatch):
     """Groq's free tier caps TPM and one extraction prompt can exhaust it.
 
@@ -345,6 +346,7 @@ def test_429_is_retried_using_the_providers_own_wait_hint(monkeypatch):
     assert slept == [14.69]
 
 
+@pytest.mark.exercises_http_json
 def test_429_gives_up_after_bounded_retries(monkeypatch):
     """A genuinely exhausted quota must still fail, not hang forever."""
     monkeypatch.setattr(router.time, "sleep", lambda s: None)
@@ -359,6 +361,7 @@ def test_429_gives_up_after_bounded_retries(monkeypatch):
     assert "429" in str(exc.value)
 
 
+@pytest.mark.exercises_http_json
 def test_non_429_errors_are_not_retried(monkeypatch):
     """A 402 or 401 is not transient — retrying wastes time and hides the cause."""
     sleeps = []
@@ -386,6 +389,7 @@ def test_retry_after_header_wins_over_message_text(monkeypatch):
 # --- quota exhaustion: stop paying for a backend that said "come back later" --
 
 
+@pytest.mark.exercises_http_json
 def test_long_429_becomes_quota_exhausted_not_a_sleep(monkeypatch):
     """A daily limit says 'try again in 14m'. Sleeping through that per call
     would cost over an hour across one document."""

@@ -298,3 +298,49 @@ def test_several_directives_on_one_line_are_all_read() -> None:
     # The wording is the question, not the directive line above it.
     assert fields.text is not None and fields.text.startswith("Why do you rent")
     assert [o.label for o in fields.options] == ["Cheaper", "Prefer it"]
+
+
+# --- an option's wording wraps too -------------------------------------------
+
+
+def test_wrapped_option_text_is_not_a_new_option() -> None:
+    """SHED's S2 wraps each of its three housing answers onto a second line.
+
+    Reading the tails as answers turned a 3-code question into a 6-code one
+    whose codes lined up with nothing in the data file.
+    """
+    fields = parse_prose_question(
+        "S2. Which best describes your housing arrangement?\n"
+        "1. I [IF PPMARIT=1, INSERT: (and/or my spouse)]\n"
+        "own [our/my] home\n"
+        "2. I [IF PPMARIT=1, INSERT: (and/or my spouse)]\n"
+        "pay rent\n"
+        "3. I [IF PPMARIT=1, INSERT: (and/or my spouse)]\n"
+        "do neither",
+        "S2",
+    )
+    assert fields is not None
+    assert [o.code for o in fields.options] == [1, 2, 3]
+    assert fields.options[0].label.endswith("own [our/my] home")
+    assert fields.options[1].label.endswith("pay rent")
+
+
+def test_a_list_written_without_markers_keeps_every_option() -> None:
+    """Continuation only ever follows a MARKED option, so an unmarked list is safe."""
+    fields = parse_prose_question(
+        "Q9. Do you agree?\nYes\nNo\nNot sure", "Q9"
+    )
+    assert fields is not None
+    assert [o.label for o in fields.options] == ["Yes", "No", "Not sure"]
+
+
+def test_only_one_line_is_absorbed_into_an_option() -> None:
+    """A second unmarked line starts a new option rather than growing the last."""
+    fields = parse_prose_question(
+        "Q9. Pick one\n1. First answer\nwrapped tail\nA separate unmarked line", "Q9"
+    )
+    assert fields is not None
+    assert [o.label for o in fields.options] == [
+        "First answer wrapped tail",
+        "A separate unmarked line",
+    ]
