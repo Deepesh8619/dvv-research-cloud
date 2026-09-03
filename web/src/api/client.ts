@@ -285,8 +285,13 @@ export const studiesApi = {
     return api.delete(`/studies/${id}`)
   },
 
-  /** The rendered deck, or the data file exactly as it was uploaded. */
-  download: (id: string, what: 'excel' | 'pptx' | 'source', fallbackName: string) =>
+  /** A rendered deck, the data file exactly as it was uploaded, or the
+      respondent-level delivery files from a fielded link. */
+  download: (
+    id: string,
+    what: 'excel' | 'pptx' | 'source' | 'responses' | 'spss',
+    fallbackName: string,
+  ) =>
     downloadFile(`/studies/${id}/download/${what}`, fallbackName),
 }
 
@@ -584,6 +589,47 @@ export interface FieldingRedirects {
   redirect_security?: string | null
 }
 
+/** What a dry run found, before anyone real was pointed at the link. */
+export interface DryRunReport {
+  n_respondents: number
+  seed: number
+  passed: boolean
+  dispositions: { complete: number; terminate: number; overquota: number }
+  conditions: Array<{
+    qid: string
+    kind: 'screen_out' | 'base' | 'mask' | 'quota'
+    fired: number
+    eligible: number
+    filled_at: number | null
+    detail: string
+  }>
+  /** Nothing exercised these. Evidence — the run may have missed a narrow path. */
+  never_fired: string[]
+  /** Arithmetic: these cannot fire for any respondent who will ever live. */
+  impossible: Array<{ qid: string; kind: string; detail: string }>
+  questions_never_shown: string[]
+  display_issues: Array<{ qid: string; kind: string; detail: string }>
+  unenforced_routing: string[]
+}
+
+/** What actually happened in the field. */
+export interface FieldReport {
+  starts: number
+  dispositions: {
+    complete: number
+    terminate: number
+    security: number
+    overquota: number
+    in_progress: number
+  }
+  /** null, not 0, while nobody has been judged yet. */
+  incidence_pct: number | null
+  terminates_by_question: Array<{ qid: string; n: number }>
+  overquota_by_cell: Array<{ cell: string; n: number }>
+  median_loi_sec: number | null
+  dropoff_by_question: Array<{ qid: string; n: number }>
+}
+
 export interface FieldingLink extends FieldingRedirects {
   id: string
   study_id: string
@@ -614,6 +660,8 @@ export interface QuotaCell {
 }
 
 export interface MaterializeResult {
+  /** The delivery files: every disposition, with the data map alongside. */
+  delivery?: { n_rows: number; formats: string[] }
   n_respondents: number
   n_variables: number
   destination: string
@@ -650,10 +698,18 @@ export const fieldingApi = {
     api.get<{ study_id: string; links: FieldingLink[] }>(`/studies/${studyId}/fielding/links`),
 
   // `theme` (T24) is stamped into this link's pinned snapshot only.
-  createLink: async (studyId: string, redirects?: FieldingRedirects, theme?: string | null) =>
+  createLink: async (
+    studyId: string,
+    redirects?: FieldingRedirects,
+    theme?: string | null,
+    force = false,
+  ) =>
     api.post<FieldingLink>(`/studies/${studyId}/fielding/links`, {
       ...(redirects ?? {}),
       ...(theme ? { theme } : {}),
+      // Opening a link is refused while a condition can never be true. This is
+      // the deliberate override, and the server logs who chose it.
+      ...(force ? { force: true } : {}),
     }),
 
   closeLink: async (studyId: string, linkId: string) =>
@@ -684,6 +740,16 @@ export const fieldingApi = {
       `/studies/${studyId}/fielding/links/${linkId}/quotas/${quotaId}`,
       patch,
     ),
+
+  dryRun: async (studyId: string, n: number, seed: number, linkId?: string) =>
+    api.post<DryRunReport>(`/studies/${studyId}/fielding/dry-run`, {
+      n,
+      seed,
+      ...(linkId ? { link_id: linkId } : {}),
+    }),
+
+  fieldReport: async (studyId: string, linkId: string) =>
+    api.get<FieldReport>(`/studies/${studyId}/fielding/links/${linkId}/field-report`),
 
   materialize: async (studyId: string, linkId: string) =>
     api.post<MaterializeResult>(
