@@ -126,22 +126,69 @@ def test_a_numeric_answer_outside_the_stated_range_is_found(tmp_path):
     assert finding.example_rows == [2, 4]
 
 
-def test_a_respondent_the_screen_out_should_have_removed_is_found(tmp_path):
-    """The check the whole data phase exists for."""
-    screener = Question(
-        qid="S1",
-        text="Do you work in market research?",
-        type=QuestionType.SINGLE,
-        options=[Option(code=1, label="Yes"), Option(code=2, label="No")],
-        terminate_if=Expression.from_dict({"op": "in", "qid": "S1", "values": [1]}),
+def _screener_and_later() -> list[Question]:
+    """A screen-out on S1, and one question that comes after it."""
+    return [
+        Question(
+            qid="S1",
+            text="Do you work in market research?",
+            type=QuestionType.SINGLE,
+            options=[Option(code=1, label="Yes"), Option(code=2, label="No")],
+            terminate_if=Expression.from_dict({"op": "in", "qid": "S1", "values": [1]}),
+        ),
+        Question(qid="Q2", text="How satisfied are you?", type=QuestionType.NUMERIC),
+    ]
+
+
+_SCREENER_LINKS = [
+    QuestionVariableLink(qid="S1", variable_names=["S1"]),
+    QuestionVariableLink(qid="Q2", variable_names=["Q2"]),
+]
+
+
+def test_a_screened_out_respondent_who_kept_answering_is_an_error(tmp_path):
+    """The check the whole data phase exists for.
+
+    Row 3 punched the screen-out and then answered a later question. Whatever
+    the script was supposed to do, the interview did not stop.
+    """
+    path = _parquet(tmp_path, {"S1": [2, 2, 1, 2], "Q2": [7, 8, 9, 6]})
+    report = check_against_questionnaire(
+        _survey(_screener_and_later()), _SCREENER_LINKS, path
     )
+    finding = next(f for f in report.findings if f.kind == "terminate_violated")
+    assert finding.severity == "error"
+    assert finding.n_rows == 1
+    assert finding.example_rows == [3]
+
+
+def test_a_screened_out_respondent_with_no_later_answers_is_not_an_error(tmp_path):
+    """Plenty of exports keep their terminates. That is not a defect.
+
+    Calling mere presence an error made every recorded terminate red on a
+    survey that behaved perfectly.
+    """
+    path = _parquet(tmp_path, {"S1": [2, 2, 1, 2], "Q2": [7, 8, None, 6]})
+    report = check_against_questionnaire(
+        _survey(_screener_and_later()), _SCREENER_LINKS, path
+    )
+    assert not [f for f in report.findings if f.kind == "terminate_violated"]
+    finding = next(f for f in report.findings if f.kind == "terminate_recorded")
+    assert finding.severity == "info"
+    assert finding.n_rows == 1
+    assert "held" in finding.detail
+
+
+def test_with_nothing_asked_after_it_enforcement_is_a_warning_not_a_pass(tmp_path):
+    """"Nothing found" and "could not look" must never read the same."""
+    screener = _screener_and_later()[0]
     path = _parquet(tmp_path, {"S1": [2, 2, 1, 2]})
     report = check_against_questionnaire(
         _survey([screener]), [QuestionVariableLink(qid="S1", variable_names=["S1"])], path
     )
-    finding = next(f for f in report.findings if f.kind == "terminate_violated")
-    assert finding.n_rows == 1
-    assert finding.example_rows == [3]
+    finding = next(f for f in report.findings if f.kind == "terminate_recorded")
+    assert finding.severity == "warning"
+    assert "could not be checked" in finding.detail
 
 
 def test_a_screen_out_it_cannot_evaluate_is_reported_as_skipped_not_passed(tmp_path):
@@ -484,3 +531,81 @@ def test_a_question_whose_type_we_could_not_read_is_not_judged_on_its_type() -> 
     )
     assert _type_is_unresolved(known) is False
     assert _type_is_unresolved(unread) is True
+
+
+def test_an_under_18_who_answered_the_rest_of_the_survey_is_caught(tmp_path):
+    """The screener case a DP shop is actually paid to catch.
+
+    "TERMINATE IF UNDER 18" is a promise about every record in the file: the
+    punch must be consistent with the age, and anyone the age screens out must
+    have stopped there. Row 2 is 16 and answered three more questions; row 4 is
+    16 and stopped, which is what a correctly-scripted terminate looks like.
+    """
+    questions = [
+        Question(
+            qid="AGE",
+            text="What is your age?",
+            type=QuestionType.NUMERIC,
+            terminate_if=Expression.from_dict(
+                {
+                    "op": "lt",
+                    "qid": "AGE",
+                    "value": 18,
+                    "verbatim_text": "TERMINATE IF UNDER 18",
+                }
+            ),
+        ),
+        Question(qid="Q2", text="Which brands do you know?", type=QuestionType.NUMERIC),
+        Question(qid="Q3", text="How often do you buy?", type=QuestionType.NUMERIC),
+    ]
+    path = _parquet(
+        tmp_path,
+        {
+            "AGE": [34, 16, 52, 16],
+            "Q2": [1, 2, 1, None],
+            "Q3": [3, 4, 2, None],
+        },
+    )
+    links = [
+        QuestionVariableLink(qid=q, variable_names=[q]) for q in ("AGE", "Q2", "Q3")
+    ]
+
+    report = check_against_questionnaire(_survey(questions), links, path)
+
+    violated = next(f for f in report.findings if f.kind == "terminate_violated")
+    assert violated.severity == "error"
+    assert violated.n_rows == 1
+    assert violated.example_rows == [2]  # the 16-year-old who kept going
+
+    held = next(f for f in report.findings if f.kind == "terminate_recorded")
+    assert held.n_rows == 1
+    assert held.example_rows == [4]  # the 16-year-old who stopped
+
+    # And the check is reported as having run, so a clean file cannot be
+    # confused with an unchecked one.
+    assert report.checked.get("terminate") == 1
+
+
+def test_an_age_stored_as_text_still_screens_out(tmp_path):
+    """A CSV of ages mixed with "Refused" imports as text, not numbers."""
+    questions = [
+        Question(
+            qid="AGE",
+            text="What is your age?",
+            type=QuestionType.NUMERIC,
+            terminate_if=Expression.from_dict({"op": "lt", "qid": "AGE", "value": 18}),
+        ),
+        Question(qid="Q2", text="Which brands?", type=QuestionType.NUMERIC),
+    ]
+    # Written directly: `_parquet` types every column INTEGER, and the whole
+    # point of this case is a column that is not one.
+    import polars as pl
+
+    path = tmp_path / "text_age.parquet"
+    pl.DataFrame({"AGE": ["34", "16", "Refused"], "Q2": [1, 2, 3]}).write_parquet(path)
+    links = [QuestionVariableLink(qid=q, variable_names=[q]) for q in ("AGE", "Q2")]
+
+    report = check_against_questionnaire(_survey(questions), links, path)
+
+    violated = next(f for f in report.findings if f.kind == "terminate_violated")
+    assert violated.example_rows == [2]
