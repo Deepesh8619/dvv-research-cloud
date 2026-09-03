@@ -62,6 +62,7 @@ from api.db import (
     upsert_respondent_answer,
 )
 from api.models import (
+    DryRunRequest,
     FieldingLinkCreateRequest,
     FieldingLinkListResponse,
     FieldingLinkResponse,
@@ -80,6 +81,8 @@ from src.core.survey_definition import (
     SurveyDefinition,
     evaluate,
 )
+from src.engines.fielding.decisions import QuotaCell, unsatisfiable_conditions
+from src.engines.fielding.dryrun import simulate
 from src.renderers.surveyjs_compiler import compile_to_surveyjs, display_warnings
 
 logger = logging.getLogger(__name__)
@@ -264,6 +267,27 @@ async def create_link(
         created_by=user.email,
         redirects=redirects,
     )
+    # A condition that can never be true is not a warning: the survey does not
+    # do what the document says it does, and every downstream number will be
+    # computed on the wrong people. It looks perfect until the data comes back.
+    impossible = unsatisfiable_conditions(survey)
+    if impossible and not (body.force if body else False):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This questionnaire has "
+                f"{len(impossible)} condition(s) that can never be true: "
+                + "; ".join(i["detail"] for i in impossible[:3])
+                + (" …" if len(impossible) > 3 else "")
+                + " Fix them, or open the link with force=true to field it anyway."
+            ),
+        )
+    if impossible:
+        logger.warning(
+            f"[{study_id}] Link opened with force despite "
+            f"{len(impossible)} unsatisfiable condition(s) by {user.email}"
+        )
+
     unenforced = _unenforced_routing(survey)
     if unenforced:
         # Not a refusal: a link is often opened deliberately for a soft launch.
@@ -289,6 +313,62 @@ async def create_link(
     response.unenforced_routing = unenforced
     response.display_issues = display_issues
     return response
+
+
+@router.post("/studies/{study_id}/fielding/dry-run")
+async def dry_run(
+    study_id: str,
+    body: DryRunRequest | None = None,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Field the survey against synthetic respondents. (Owner/Analyst)
+
+    The point is not to produce data — it is to find out what the script DOES
+    to people before a panel is pointed at it. A screen-out that fires for
+    nobody, a base that hides a question from everyone, a mask that never
+    narrows anything, a quota that fills at respondent 108 of 500: each is
+    invisible in the document and obvious in the run, and each costs real money
+    once the link is live.
+
+    Runs against the currently approved questionnaire, or against an existing
+    link's PINNED survey and live quota counts when `link_id` is given — which
+    is how you check what a link already in the field will do next.
+    """
+    request = body or DryRunRequest()
+    if request.link_id:
+        link = _owner_link(db, study_id, request.link_id)
+        survey = SurveyDefinition.from_json(link.survey_json)
+        cells = [
+            QuotaCell(
+                id=cell.id,
+                condition=Expression.from_dict(json.loads(cell.condition_json)),
+                limit=cell.cell_limit,
+                count=cell.count,
+            )
+            for cell in list_quota_cells(db, link.id)
+        ]
+    else:
+        questionnaire = _approved_questionnaire(db, study_id)
+        payload = _read_definition_json(db, questionnaire)
+        if payload is None:
+            raise HTTPException(
+                status_code=500, detail="Approved questionnaire has no definition"
+            )
+        survey = SurveyDefinition.from_json(payload)
+        cells = []
+
+    report = simulate(survey, cells, n=request.n, seed=request.seed)
+    logger.info(
+        f"[{study_id}] Dry run by {user.name}: {report.n_respondents} respondents, "
+        f"{report.dispositions}, {len(report.never_fired)} condition(s) never fired"
+    )
+    return {
+        **report.to_dict(),
+        "display_issues": display_warnings(survey),
+        "unenforced_routing": _unenforced_routing(survey),
+        "run_by": user.name,
+    }
 
 
 @router.get(
