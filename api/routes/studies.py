@@ -1015,7 +1015,10 @@ async def crosscheck_study(
         align_codes_to_questionnaire,
         remap_data_codes,
     )
-    from src.engines.questionnaire.linker import link_questions_to_datamap
+    from src.engines.questionnaire.linker import (
+        cross_validate_routing,
+        link_questions_to_datamap,
+    )
 
     study = get_study(db, study_id)
     if not study:
@@ -1111,6 +1114,13 @@ async def crosscheck_study(
     # hidden variables, MaxDiff design columns and system fields that are
     # SUPPOSED to be absent from a questionnaire. Report what each column is
     # for, and list only the ones genuinely worth chasing.
+    # The base — who each question was supposed to be asked of — checked
+    # against who actually answered it, respondent by respondent. This has
+    # existed since the linker was written and was never called from here, so
+    # every "[IF S2 = 2]" in a document was read, compiled, and then never
+    # compared to anybody.
+    routing = cross_validate_routing(survey, link_report.links, parquet_path)
+
     matched = {name for link in link_report.links for name in link.variable_names}
     by_qid = {q.qid: q for q in survey.questions}
     variable_labels = {v.name: (v.label or "") for v in datamap.variables}
@@ -1127,6 +1137,20 @@ async def crosscheck_study(
         "unmatched_questions": link_report.unmatched_questions,
         "unmatched_variables": unexplained(datamap, matched),
         "conditions": condition_audit.to_dict(),
+        "routing": {
+            "n_checked": sum(1 for r in routing if r.checked),
+            "n_unchecked": sum(1 for r in routing if not r.checked),
+            "issues": [
+                {
+                    "qid": r.qid,
+                    "agreement_pct": round(r.agreement_pct, 1),
+                    "detail": r.detail,
+                    "checked": r.checked,
+                }
+                for r in routing
+                if r.flagged or not r.checked
+            ],
+        },
         # A variable name in the data need not equal the qid in the document.
         # The linker falls back to matching on question TEXT, which is right
         # far more often than not — but it is a judgement, and a wrong one

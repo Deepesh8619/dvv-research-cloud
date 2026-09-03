@@ -609,3 +609,138 @@ def test_an_age_stored_as_text_still_screens_out(tmp_path):
 
     violated = next(f for f in report.findings if f.kind == "terminate_violated")
     assert violated.example_rows == [2]
+
+
+# --- masking and piping, per record ------------------------------------------
+
+
+def _masked(mode: str, source="Q1", exclude=None) -> Question:
+    return Question(
+        qid="Q2",
+        text="Which of those do you use most?",
+        type=QuestionType.MULTI,
+        options=[Option(code=c, label=f"Brand {c}") for c in (1, 2, 3)],
+        validation={
+            "techniques": {
+                "masks": [
+                    {"source_qid": source, "mode": mode, "exclude_qid": exclude,
+                     "verbatim": "SHOW ONLY ITEMS SELECTED AT Q1"}
+                ],
+                "pipes": [],
+                "least_fill": False,
+            }
+        },
+    )
+
+
+_AWARE = Question(
+    qid="Q1",
+    text="Which brands are you aware of?",
+    type=QuestionType.MULTI,
+    options=[Option(code=c, label=f"Brand {c}") for c in (1, 2, 3)],
+)
+_MASK_LINKS = [
+    QuestionVariableLink(qid="Q1", variable_names=["Q1_1", "Q1_2", "Q1_3"]),
+    QuestionVariableLink(qid="Q2", variable_names=["Q2_1", "Q2_2", "Q2_3"]),
+]
+
+
+def _mask_parquet(tmp_path):
+    """Row 1 answers inside the mask; row 2 answers an option it never chose."""
+    import polars as pl
+
+    path = tmp_path / "mask.parquet"
+    pl.DataFrame(
+        {
+            "Q1_1": [1, 1], "Q1_2": [0, 0], "Q1_3": [0, 0],
+            "Q2_1": [1, 0], "Q2_2": [0, 1], "Q2_3": [0, 0],
+        }
+    ).write_parquet(path)
+    return path
+
+
+def test_an_answer_outside_a_selected_mask_is_found(tmp_path):
+    report = check_against_questionnaire(
+        _survey([_AWARE, _masked("selected")]), _MASK_LINKS, _mask_parquet(tmp_path)
+    )
+    finding = next(f for f in report.findings if f.kind == "mask_violated")
+    assert finding.example_rows == [2]
+    assert "did not choose there" in finding.detail
+
+
+def test_a_not_selected_mask_is_the_same_question_from_the_other_side(tmp_path):
+    """"SHOW ITEMS NOT SELECTED AT Q1" was skipped entirely before."""
+    report = check_against_questionnaire(
+        _survey([_AWARE, _masked("not_selected")]), _MASK_LINKS, _mask_parquet(tmp_path)
+    )
+    finding = next(f for f in report.findings if f.kind == "mask_violated")
+    assert finding.example_rows == [1]  # row 1 answered exactly what it chose at Q1
+    assert report.checked.get("mask") == 1
+
+
+def test_a_full_list_mask_says_it_was_not_checked(tmp_path):
+    """Everyone sees the same list, so there is no per-respondent rule to test."""
+    report = check_against_questionnaire(
+        _survey([_AWARE, _masked("full_list")]), _MASK_LINKS, _mask_parquet(tmp_path)
+    )
+    assert not [f for f in report.findings if f.kind == "mask_violated"]
+    assert any("full list" in s for s in report.skipped)
+    assert "mask" not in report.checked
+
+
+def test_a_question_piping_from_an_unanswered_question_is_found(tmp_path):
+    """The respondent was shown "How satisfied are you with ?" — with a hole."""
+    import polars as pl
+
+    piped = Question(
+        qid="Q9",
+        text="What do you like about [INSERT RESPONSE FROM Q8]?",
+        type=QuestionType.OPEN_TEXT,
+        validation={
+            "techniques": {
+                "masks": [],
+                "pipes": [{"source_qid": "Q8", "name": None,
+                           "verbatim": "INSERT RESPONSE FROM Q8"}],
+                "least_fill": False,
+            }
+        },
+    )
+    source = Question(qid="Q8", text="Favourite brand?", type=QuestionType.SINGLE)
+    path = tmp_path / "pipe.parquet"
+    pl.DataFrame({"Q8": [1, None, 2], "Q9": [1, 1, None]}).write_parquet(path)
+    links = [
+        QuestionVariableLink(qid="Q8", variable_names=["Q8"]),
+        QuestionVariableLink(qid="Q9", variable_names=["Q9"]),
+    ]
+
+    report = check_against_questionnaire(_survey([source, piped]), links, path)
+
+    finding = next(f for f in report.findings if f.kind == "pipe_source_empty")
+    assert finding.example_rows == [2]
+    assert report.checked.get("pipe") == 1
+
+
+def test_a_pipe_the_document_names_in_scripter_terms_is_reported_not_passed(tmp_path):
+    import polars as pl
+
+    piped = Question(
+        qid="Q9",
+        text="What do you like about [PHARMACY]?",
+        type=QuestionType.OPEN_TEXT,
+        validation={
+            "techniques": {
+                "masks": [],
+                "pipes": [{"source_qid": None, "name": "PHARMACY", "verbatim": "[PHARMACY]"}],
+                "least_fill": False,
+            }
+        },
+    )
+    path = tmp_path / "pipe2.parquet"
+    pl.DataFrame({"Q9": [1, 1]}).write_parquet(path)
+
+    report = check_against_questionnaire(
+        _survey([piped]), [QuestionVariableLink(qid="Q9", variable_names=["Q9"])], path
+    )
+
+    assert not [f for f in report.findings if f.kind == "pipe_source_empty"]
+    assert any("PHARMACY" in s for s in report.skipped)

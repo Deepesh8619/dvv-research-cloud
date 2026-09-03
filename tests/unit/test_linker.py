@@ -251,12 +251,21 @@ def test_question_without_show_if_is_not_checked(tmp_path):
     assert results == []
 
 
-def test_show_if_referencing_unlinked_qid_is_skipped(tmp_path):
-    # Q2's show_if references Q1, but Q1 has no link -> uncheckable, skipped.
+def test_show_if_referencing_unlinked_qid_is_reported_as_unchecked(tmp_path):
+    """Q2's base tests Q1, and Q1 has no column — so the base cannot be checked.
+
+    Dropping it silently let a base nobody could verify read exactly like a
+    base that held. It is returned with `checked=False` instead, and its
+    agreement percentage is not a score anyone should read.
+    """
     survey = _brand_survey()
     links = [QuestionVariableLink(qid="Q2", variable_names=["Q2"])]
     path = tmp_path / "data.parquet"
     pq.write_table(pa.table({"Q2": [10, None]}), str(path))
 
     results = cross_validate_routing(survey, links, path)
-    assert results == []
+
+    assert [r.qid for r in results] == ["Q2"]
+    assert results[0].checked is False
+    assert results[0].flagged is False
+    assert "Q1" in results[0].detail

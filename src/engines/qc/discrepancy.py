@@ -315,7 +315,14 @@ def check_against_questionnaire(
         report.skipped.append("data file has no rows")
         return report
 
-    counts = {"codes": 0, "single": 0, "range": 0, "terminate": 0, "mask": 0}
+    counts = {
+        "codes": 0,
+        "single": 0,
+        "range": 0,
+        "terminate": 0,
+        "mask": 0,
+        "pipe": 0,
+    }
     companions = find_companions(datamap) if datamap is not None else {}
 
     for qid, variables in sorted(link_map.items()):
@@ -513,10 +520,9 @@ def check_against_questionnaire(
         question = by_qid.get(qid)
         if question is None:
             continue
-        masks = ((question.validation or {}).get("techniques") or {}).get("masks") or []
-        for mask in masks:
-            if mask.get("mode") != "selected":
-                continue  # full_list / not_selected need the source's option list, not answers
+        techniques = (question.validation or {}).get("techniques") or {}
+        for mask in techniques.get("masks") or []:
+            mode = mask.get("mode")
             source = mask.get("source_qid")
             source_vars = link_map.get(source)
             source_question = by_qid.get(source)
@@ -525,28 +531,117 @@ def check_against_questionnaire(
                     f"{qid}: masked from {source}, which is not linked to a variable"
                 )
                 continue
+            if mode == "full_list":
+                # No per-respondent restriction to test: everyone sees the same
+                # list. An answer outside it is an undeclared code, which the
+                # codes check above already reports. Said out loud so this does
+                # not read as a mask that was verified.
+                report.skipped.append(
+                    f"{qid}: shows {source}'s full list, so there is no "
+                    "per-respondent restriction to check"
+                )
+                continue
+
+            exclude_qid = mask.get("exclude_qid")
+            exclude_vars = link_map.get(exclude_qid) if exclude_qid else None
+            exclude_question = by_qid.get(exclude_qid) if exclude_qid else None
+            if mode == "list_except" and (not exclude_vars or exclude_question is None):
+                report.skipped.append(
+                    f"{qid}: excludes what was chosen at {exclude_qid}, which is not "
+                    "linked to a variable"
+                )
+                continue
+
             counts["mask"] += 1
             hits = []
             for index, row in enumerate(rows, start=1):
+                shown = set(_selected_codes(row, variables, question)) - set(system_codes)
+                if not shown:
+                    continue  # never answered this question
+                if mode == "list_except":
+                    barred = set(_selected_codes(row, exclude_vars, exclude_question))
+                    if shown & barred:
+                        hits.append(index)
+                    continue
                 chosen = set(_selected_codes(row, source_vars, source_question))
                 if not chosen:
                     continue  # never answered the source; nothing to mask against
-                shown = set(_selected_codes(row, variables, question))
-                if shown - chosen - set(system_codes):
+                # `selected` may only hold what they chose there; `not_selected`
+                # may hold only what they did NOT. Both are the same question
+                # asked from opposite sides.
+                offending = shown - chosen if mode == "selected" else shown & chosen
+                if offending:
                     hits.append(index)
             if hits:
+                described = {
+                    "selected": (
+                        f"should only offer options the respondent selected at {source}, "
+                        "but some answered it with codes they did not choose there"
+                    ),
+                    "not_selected": (
+                        f"should only offer options the respondent did NOT select at "
+                        f"{source}, but some answered it with codes they did choose there"
+                    ),
+                    "list_except": (
+                        f"should exclude whatever the respondent chose at {exclude_qid}, "
+                        "but some answered it with exactly those codes"
+                    ),
+                }[mode]
                 report.findings.append(
                     Discrepancy(
                         qid=qid,
                         kind="mask_violated",
                         severity="error",
-                        detail=(
-                            f"{qid} should only offer options the respondent selected at "
-                            f"{source}, but some answered it with codes they did not choose "
-                            "there."
-                        ),
+                        detail=f"{qid} {described}.",
                         n_rows=len(hits),
                         variables=variables,
+                        example_rows=hits[:MAX_EXAMPLES],
+                    )
+                )
+
+    # --- Piping ------------------------------------------------------------
+    # A piped question shows an earlier answer inside its own wording. When the
+    # source is empty the respondent is shown a sentence with a hole in it —
+    # "How satisfied are you with ?" — which no other check can see, because
+    # every column involved looks perfectly valid on its own.
+    for qid, variables in sorted(link_map.items()):
+        question = by_qid.get(qid)
+        if question is None:
+            continue
+        for pipe in ((question.validation or {}).get("techniques") or {}).get("pipes") or []:
+            source = pipe.get("source_qid")
+            if not source:
+                report.skipped.append(
+                    f"{qid}: pipes in '{pipe.get('name') or 'a value'}', which the "
+                    "document names in scripter terms rather than as a question id"
+                )
+                continue
+            source_vars = link_map.get(source)
+            if not source_vars:
+                report.skipped.append(
+                    f"{qid}: pipes from {source}, which is not linked to a variable"
+                )
+                continue
+            counts["pipe"] += 1
+            hits = [
+                index
+                for index, row in enumerate(rows, start=1)
+                if _answered(row, variables) and not _answered(row, source_vars)
+            ]
+            if hits:
+                report.findings.append(
+                    Discrepancy(
+                        qid=qid,
+                        kind="pipe_source_empty",
+                        severity="error",
+                        detail=(
+                            f"{qid} pipes the answer to {source} into its own wording, but "
+                            "some respondents answered it with nothing recorded at "
+                            f"{source} — they were shown a gap where the piped text "
+                            "should have been."
+                        ),
+                        n_rows=len(hits),
+                        variables=variables + source_vars,
                         example_rows=hits[:MAX_EXAMPLES],
                     )
                 )
