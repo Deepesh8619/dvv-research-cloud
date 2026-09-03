@@ -276,6 +276,9 @@ class RoutingValidation:
     agreement_pct: float
     flagged: bool
     detail: str
+    #: False when the base could not be evaluated at all. `agreement_pct` is
+    #: meaningless then, and a reader must not mistake it for a score.
+    checked: bool = True
 
 
 def _links_by_qid(
@@ -376,15 +379,34 @@ def cross_validate_routing(
     # Which questions can we actually check? Need a show_if, a link for this
     # question, and a link for every qid the show_if references.
     checkable: list[Question] = []
+    unchecked: list[RoutingValidation] = []
     columns_needed: set[str] = set()
     for qid in survey.question_order():
         if qid not in survey:
             continue
         q = survey[qid]
-        if q.show_if is None or qid not in link_map:
+        if q.show_if is None:
             continue
         refs = q.show_if.referenced_qids()
-        if any(ref not in link_map for ref in refs):
+        missing = [ref for ref in refs if ref not in link_map]
+        if qid not in link_map or missing:
+            # Not checkable — and saying nothing about it would let a base
+            # nobody could verify pass as a base that held.
+            unchecked.append(
+                RoutingValidation(
+                    qid=qid,
+                    agreement_pct=0.0,
+                    flagged=False,
+                    detail=(
+                        f"not checked: {qid} is not linked to a column"
+                        if qid not in link_map
+                        else "not checked: its base tests "
+                        + ", ".join(missing)
+                        + ", which no column could be found for"
+                    ),
+                    checked=False,
+                )
+            )
             continue
         checkable.append(q)
         columns_needed.update(link_map[qid].variable_names)
@@ -392,13 +414,13 @@ def cross_validate_routing(
             columns_needed.update(link_map[ref].variable_names)
 
     if not checkable:
-        return []
+        return unchecked
 
     rows = _read_rows(parquet_path, sorted(columns_needed))
     if not rows:
-        return []
+        return unchecked
 
-    results: list[RoutingValidation] = []
+    results: list[RoutingValidation] = list(unchecked)
     for q in checkable:
         link = link_map[q.qid]
         refs = sorted(q.show_if.referenced_qids())

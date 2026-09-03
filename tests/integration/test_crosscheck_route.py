@@ -167,3 +167,19 @@ def test_the_result_is_stored_and_read_back(client) -> None:
     stored = test_client.get("/api/studies/s1/crosscheck").json()
     assert stored["report"] is not None
     assert stored["report"]["linked_questions"] == 1
+
+
+def test_the_base_of_every_question_is_reported(client) -> None:
+    """Bases were compiled from the document and then never compared to anyone.
+
+    `cross_validate_routing` has existed since the linker was written and the
+    cross-check route never called it, so every "[IF S2 = 2]" was read, turned
+    into a real condition, and then checked against nobody.
+    """
+    test_client, SessionLocal, _ = client
+    _seed(SessionLocal)
+
+    body = test_client.post("/api/studies/s1/crosscheck").json()
+
+    assert "routing" in body
+    assert set(body["routing"]) == {"n_checked", "n_unchecked", "issues"}

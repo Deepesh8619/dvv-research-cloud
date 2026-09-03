@@ -782,6 +782,13 @@ export interface CrosscheckReport {
   unmatched_variables: string[]
   variable_roles?: Array<{ role: string; label: string; n: number }>
   hidden_variables?: string[]
+  /** Each question's base — who it was meant to be asked of — checked against
+      who actually answered it, respondent by respondent. */
+  routing?: {
+    n_checked: number
+    n_unchecked: number
+    issues: Array<{ qid: string; agreement_pct: number; detail: string; checked: boolean }>
+  }
   /** Conditions audited against the data map before any row was read. */
   conditions?: {
     passed: boolean

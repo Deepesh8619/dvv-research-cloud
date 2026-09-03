@@ -26,6 +26,7 @@ const KIND_LABELS: Record<string, string> = {
   option_not_scripted: 'Option in the questionnaire with no punch in the data',
   punch_not_in_questionnaire: 'Punch in the data the questionnaire never offers',
   mask_violated: 'Answer outside the masked option list',
+  pipe_source_empty: 'Piped text with nothing to pipe in',
   coded_in_companion: 'Open response — its codes live in a derived variable',
 }
 
@@ -293,6 +294,36 @@ export default function CrosscheckPanel({
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {/* Who each question was actually asked of, against who it was
+              supposed to be asked of. A base that never held is a hole in the
+              sample, and nothing in the raw data looks wrong. */}
+          {report.routing && (report.routing.issues.length > 0 || report.routing.n_checked > 0) && (
+            <div className="border border-slate-200 rounded-md px-3 py-2.5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">
+                Bases checked against who answered
+              </p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {report.routing.n_checked} verified against the data
+                {report.routing.n_unchecked > 0
+                  ? ` · ${report.routing.n_unchecked} could not be checked`
+                  : ''}
+              </p>
+              {report.routing.issues.length > 0 && (
+                <ul className="mt-1.5 space-y-1">
+                  {report.routing.issues.map((r) => (
+                    <li key={r.qid} className="text-sm text-slate-700">
+                      <span className="font-mono text-xs text-slate-600">{r.qid}</span>
+                      {r.checked ? (
+                        <span className="text-slate-500"> · {r.agreement_pct}% agree</span>
+                      ) : null}{' '}
+                      — {r.detail}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 
