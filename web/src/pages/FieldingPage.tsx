@@ -4,11 +4,14 @@ import axios from 'axios'
 import {
   fieldingApi,
   questionnaireApi,
+  studiesApi,
   FieldingLink,
   FieldingRedirects,
   QuotaCell,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import DryRunPanel from '../components/DryRunPanel'
+import FieldReportPanel from '../components/FieldReportPanel'
 import { CardListSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import ThemeSelect from '../components/ThemeSelect'
@@ -270,6 +273,8 @@ function LinkCard({
   const [error, setError] = useState<string | null>(null)
   const [materializeMsg, setMaterializeMsg] = useState<string | null>(null)
   const [showQuotas, setShowQuotas] = useState(false)
+  const [showReport, setShowReport] = useState(false)
+  const [delivery, setDelivery] = useState<string[]>([])
 
   const publicUrl = `${window.location.origin}${link.respondent_path}`
   const c = link.counts
@@ -294,8 +299,11 @@ function LinkCard({
     setMaterializeMsg(null)
     try {
       const res = await fieldingApi.materialize(studyId, link.id)
+      const dl = res.data.delivery
+      setDelivery(dl?.formats ?? [])
       setMaterializeMsg(
-        `Materialized ${res.data.n_respondents} respondents × ${res.data.n_variables} variables.`,
+        `Materialized ${res.data.n_respondents} respondents × ${res.data.n_variables} variables` +
+          (dl ? `. Delivery files carry all ${dl.n_rows}, every disposition.` : '.'),
       )
       onChanged()
     } catch (err) {
@@ -366,7 +374,41 @@ function LinkCard({
           </Link>
         </div>
       )}
+      {/* The delivery files, distinct from the tab deck: respondent-level, every
+          disposition, with the data map travelling alongside the data. */}
+      {delivery.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-slate-500">Deliver to the client:</span>
+          {delivery.includes('spss') && (
+            <button
+              type="button"
+              onClick={() => studiesApi.download(studyId, 'spss', `${studyId}.sav`)}
+              className="text-xs border border-slate-300 text-slate-700 font-medium px-3 py-1.5 rounded-md hover:bg-slate-50"
+            >
+              SPSS (.sav)
+            </button>
+          )}
+          {delivery.includes('xlsx') && (
+            <button
+              type="button"
+              onClick={() => studiesApi.download(studyId, 'responses', `${studyId}.xlsx`)}
+              className="text-xs border border-slate-300 text-slate-700 font-medium px-3 py-1.5 rounded-md hover:bg-slate-50"
+            >
+              Responses + data map (.xlsx)
+            </button>
+          )}
+        </div>
+      )}
       {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+
+      <button
+        type="button"
+        onClick={() => setShowReport((r) => !r)}
+        className="mt-3 mr-4 text-xs text-slate-500 hover:text-slate-700"
+      >
+        {showReport ? '▾ Hide field report' : '▸ Field report'}
+      </button>
+      {showReport && <FieldReportPanel studyId={studyId} linkId={link.id} />}
 
       <button
         type="button"
@@ -397,14 +439,16 @@ function CreatePanel({
 }) {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [blocked, setBlocked] = useState<string | null>(null)
   const [showRedirects, setShowRedirects] = useState(false)
   const [redirects, setRedirects] = useState<FieldingRedirects>({})
   // '' = inherit the survey's default theme (don't stamp an override on the link).
   const [theme, setTheme] = useState<string>('')
 
-  const handleCreate = async () => {
+  const handleCreate = async (force = false) => {
     setCreating(true)
     setError(null)
+    if (!force) setBlocked(null)
     try {
       const payload = Object.fromEntries(
         Object.entries(redirects).filter(([, v]) => v && String(v).trim()),
@@ -413,13 +457,19 @@ function CreatePanel({
         studyId,
         Object.keys(payload).length ? payload : undefined,
         theme || undefined,
+        force,
       )
       setRedirects({})
       setTheme('')
       setShowRedirects(false)
+      setBlocked(null)
       onCreated()
     } catch (err) {
-      setError(errorMessage(err) || 'Could not create fielding link')
+      const message = errorMessage(err) || 'Could not create fielding link'
+      // A condition that can never be true is not an error the user typed —
+      // it is a defect in the script, and it has a fix and an override.
+      if (message.includes('never be true')) setBlocked(message)
+      else setError(message)
     } finally {
       setCreating(false)
     }
@@ -437,7 +487,7 @@ function CreatePanel({
           </p>
         </div>
         <button
-          onClick={handleCreate}
+          onClick={() => handleCreate(false)}
           disabled={creating || !canCreate}
           title={canCreate ? '' : 'The study needs an approved questionnaire first'}
           className="bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600 disabled:opacity-50 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
@@ -445,6 +495,36 @@ function CreatePanel({
           {creating ? 'Creating…' : 'Create link'}
         </button>
       </div>
+
+      {blocked && (
+        <div className="mt-3 border border-red-200 bg-red-50/60 rounded-md px-3 py-2.5">
+          <p className="text-sm font-medium text-red-800">
+            This link was not opened: the survey does not do what the document says.
+          </p>
+          <p className="text-sm text-slate-700 mt-1">{blocked}</p>
+          <p className="text-xs text-slate-500 mt-1.5">
+            A screener that cannot screen looks perfect right up until the data comes back
+            with the wrong people in it. Fix the condition on the questionnaire, or field it
+            anyway — the decision is recorded against your name.
+          </p>
+          <div className="flex flex-wrap gap-2 mt-2.5">
+            <Link
+              to={`/projects/${studyId}/questionnaire`}
+              className="text-xs bg-primary-500 text-white font-medium px-3 py-1.5 rounded-md hover:bg-primary-600"
+            >
+              Fix the questionnaire
+            </Link>
+            <button
+              type="button"
+              onClick={() => handleCreate(true)}
+              disabled={creating}
+              className="text-xs border border-red-300 text-red-700 font-medium px-3 py-1.5 rounded-md hover:bg-red-50 disabled:opacity-50"
+            >
+              Field it anyway
+            </button>
+          </div>
+        </div>
+      )}
 
       {!canCreate && (
         <p className="text-xs text-amber-600 mt-2">
@@ -598,6 +678,10 @@ export default function FieldingPage() {
           </button>
         </div>
       )}
+
+      {/* Before the link, not after it: the whole point is to know what the
+          script does to people while it is still cheap to change. */}
+      {canCreate && <DryRunPanel studyId={studyId!} canRun={canWrite} />}
 
       <CreatePanel studyId={studyId!} canCreate={canCreate} canWrite={canWrite} onCreated={load} />
 
