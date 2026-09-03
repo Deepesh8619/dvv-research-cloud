@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import axios from 'axios'
 
-import { CrosscheckReport, studiesApi } from '../api/client'
+import { CrosscheckReport, QuestionnaireStatus, questionnaireApi, studiesApi } from '../api/client'
 
 /**
  * Check the collected data against the questionnaire it was collected under.
@@ -36,8 +36,15 @@ const CHECK_LABELS: Record<string, string> = {
   mask: 'masked option lists',
 }
 
-export default function CrosscheckPanel({ studyId }: { studyId: string }) {
+export default function CrosscheckPanel({
+  studyId,
+  dataFilename,
+}: {
+  studyId: string
+  dataFilename?: string | null
+}) {
   const [report, setReport] = useState<CrosscheckReport | null>(null)
+  const [questionnaire, setQuestionnaire] = useState<QuestionnaireStatus | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -47,6 +54,14 @@ export default function CrosscheckPanel({ studyId }: { studyId: string }) {
   // check had never run. The work was done, paid for, then hidden.
   useEffect(() => {
     let cancelled = false
+    questionnaireApi
+      .status(studyId)
+      .then((res) => {
+        if (!cancelled) setQuestionnaire(res.data)
+      })
+      .catch(() => {
+        /* none uploaded yet — the strip below just says so */
+      })
     studiesApi
       .storedCrosscheck(studyId)
       .then((res) => {
@@ -100,6 +115,66 @@ export default function CrosscheckPanel({ studyId }: { studyId: string }) {
       {error && (
         <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mt-4">
           {error}
+        </p>
+      )}
+
+      {/* Which files this wave actually ran on, and a way to get them back.
+          Both are served from the database, so they outlive the restart that
+          wipes the disk — which is exactly when someone needs to check what
+          the client sent. */}
+      <dl className="mt-4 grid gap-x-6 gap-y-2 sm:grid-cols-2 text-sm">
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <dt className="text-slate-500">Questionnaire</dt>
+          {questionnaire?.source_filename ? (
+            <>
+              <dd className="font-medium text-slate-800">
+                {questionnaire.source_filename}
+              </dd>
+              <span className="text-xs text-slate-500">
+                v{questionnaire.version}
+                {questionnaire.created_at
+                  ? ` · ${new Date(questionnaire.created_at).toLocaleDateString()}`
+                  : ''}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  questionnaireApi.downloadSource(studyId, questionnaire.source_filename)
+                }
+                className="text-xs font-medium text-primary-600 hover:underline"
+              >
+                Download
+              </button>
+            </>
+          ) : (
+            <dd className="text-slate-400">None uploaded</dd>
+          )}
+        </div>
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <dt className="text-slate-500">Data file</dt>
+          {dataFilename ? (
+            <>
+              <dd className="font-medium text-slate-800">{dataFilename}</dd>
+              <button
+                type="button"
+                onClick={() => studiesApi.download(studyId, 'source', dataFilename)}
+                className="text-xs font-medium text-primary-600 hover:underline"
+              >
+                Download
+              </button>
+            </>
+          ) : (
+            <dd className="text-slate-400">None uploaded</dd>
+          )}
+        </div>
+      </dl>
+
+      {report?.data_file_available === false && (
+        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mt-4">
+          The respondent rows are no longer on disk (the server restarted), so the
+          row-level checks below were skipped. Everything that compares the
+          questionnaire against the data map still ran. Use Re-process to rebuild the
+          data from the archived upload, then run this again.
         </p>
       )}
 

@@ -10,6 +10,29 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api',
 })
 
+/**
+ * Download a file through the API client rather than a plain <a href>.
+ *
+ * An `<a href="/api/...">` carries neither of the two things a download needs:
+ * the JWT (the endpoints require a Bearer token) and the configured base URL.
+ * Deployed, the frontend is on a different origin from the backend, so that
+ * relative path hit the SPA rewrite and handed the user index.html named
+ * "excel" — the Excel and PowerPoint buttons had been doing exactly that.
+ */
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const res = await api.get(path, { responseType: 'blob' })
+  const disposition = res.headers['content-disposition'] as string | undefined
+  const filename = disposition?.match(/filename="?([^"]+)"?/)?.[1] || fallbackName
+  const url = URL.createObjectURL(res.data as Blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 // Request interceptor: attach JWT token
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('authToken')
@@ -53,6 +76,9 @@ export interface Study {
   }>
   excel_path?: string | null
   pptx_path?: string | null
+  /** The data file as it was uploaded — the name on its download button, and
+      the answer to "which file did this wave run on?". */
+  source_filename?: string | null
 }
 
 export interface StudyListResponse {
@@ -259,7 +285,9 @@ export const studiesApi = {
     return api.delete(`/studies/${id}`)
   },
 
-  downloadUrl: (id: string, fmt: 'excel' | 'pptx') => `/api/studies/${id}/download/${fmt}`,
+  /** The rendered deck, or the data file exactly as it was uploaded. */
+  download: (id: string, what: 'excel' | 'pptx' | 'source', fallbackName: string) =>
+    downloadFile(`/studies/${id}/download/${what}`, fallbackName),
 }
 
 // --- Questionnaire review types ---------------------------------------------
@@ -440,6 +468,11 @@ export const codingApi = {
 export const questionnaireApi = {
   status: async (studyId: string) =>
     api.get<QuestionnaireStatus>(`/studies/${studyId}/questionnaire`),
+
+  /** The questionnaire document as it was uploaded — served from the database
+      copy, so it still works after a restart has wiped the disk. */
+  downloadSource: (studyId: string, fallbackName: string) =>
+    downloadFile(`/studies/${studyId}/questionnaire/source`, fallbackName),
 
   upload: async (studyId: string, file: File, onProgress?: (pct: number) => void) => {
     const formData = new FormData()
@@ -740,6 +773,9 @@ export interface CrosscheckReport {
   skipped: string[]
   findings: Discrepancy[]
   linked_questions: number
+  /** False when the respondent rows were gone (a restart wipes the disk): the
+      questionnaire-side checks still ran, the row-level ones did not. */
+  data_file_available?: boolean
   unmatched_questions: string[]
   /** Columns that SHOULD map to a question and do not — hidden variables,
       MaxDiff design and system columns are excluded, being correctly absent. */

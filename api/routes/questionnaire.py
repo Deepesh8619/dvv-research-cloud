@@ -24,19 +24,23 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from api.auth import UserRole, get_current_user, require_role
 from api.config import STUDIES_DIR
 from api.db import (
+    MAX_ARCHIVED_SOURCE_BYTES,
     UserDB,
+    compress_for_archive,
     create_questionnaire,
+    decompress_archived,
     get_db,
     get_study,
     list_questionnaires_for_study,
     set_questionnaire_approved_qids,
     set_questionnaire_definition,
+    set_questionnaire_source_archive,
     update_questionnaire_status,
 )
 from api.models import (
@@ -507,6 +511,21 @@ async def upload_questionnaire(
             f.write(chunk)
     logger.info(f"[{study_id}] Questionnaire {questionnaire.id} uploaded: {file_path}")
 
+    # Keep the document itself, not only what we extracted from it. On the free
+    # tier the on-disk copy dies with the next restart, and a reviewer asking
+    # "which questionnaire is this wave running?" needs the file, not a name.
+    try:
+        archived = compress_for_archive(file_path)
+        if archived:
+            set_questionnaire_source_archive(db, questionnaire.id, archived)
+        else:
+            logger.info(
+                f"[{study_id}] questionnaire not archived: over "
+                f"{MAX_ARCHIVED_SOURCE_BYTES} bytes compressed"
+            )
+    except Exception as exc:  # never fail an upload over the archive copy
+        logger.warning(f"[{study_id}] questionnaire archive failed (non-fatal): {exc}")
+
     definition_path = _definition_path(study_id, questionnaire.id)
     thread = threading.Thread(
         target=_run_extraction,
@@ -520,6 +539,45 @@ async def upload_questionnaire(
         study_id=study_id,
         status="processing",
         message=f"Questionnaire {file.filename} uploaded. Extraction started.",
+    )
+
+
+@router.get("/studies/{study_id}/questionnaire/source")
+async def download_questionnaire_source(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """Download the questionnaire document as it was uploaded. (Authenticated)
+
+    Served from the database copy, so it still works after the restart that
+    wiped the disk — which is exactly when someone needs to see what the client
+    actually sent.
+    """
+    questionnaire = _latest_questionnaire(db, study_id)
+    if not questionnaire:
+        raise HTTPException(
+            status_code=404, detail="No questionnaire has been uploaded for this project"
+        )
+    if not questionnaire.source_file_b64:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "This questionnaire was uploaded before documents were archived, "
+                "and the on-disk copy is gone. Re-upload it to make it downloadable."
+            ),
+        )
+
+    filename = questionnaire.source_filename or f"{questionnaire.id}.docx"
+    media = (
+        "application/pdf"
+        if filename.lower().endswith(".pdf")
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    return Response(
+        content=decompress_archived(questionnaire.source_file_b64),
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

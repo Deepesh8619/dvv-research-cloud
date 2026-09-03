@@ -7,7 +7,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -56,40 +65,36 @@ MAX_ARCHIVED_SOURCE_BYTES = 25 * 1024 * 1024
 
 def _archive_source_file(job_db, study_id: str, file_path: Path) -> None:
     """Best-effort: gzip+base64 the upload into the study row (size-capped)."""
-    import base64
-    import gzip
-
-    from api.db import set_study_artifacts
+    from api.db import compress_for_archive, set_study_artifacts
 
     try:
-        compressed = gzip.compress(file_path.read_bytes(), compresslevel=6)
-        if len(compressed) > MAX_ARCHIVED_SOURCE_BYTES:
+        archived = compress_for_archive(file_path)
+        if archived is None:
             logger.info(
-                f"[{study_id}] source not archived: {len(compressed)} bytes compressed "
-                f"exceeds cap ({MAX_ARCHIVED_SOURCE_BYTES})"
+                f"[{study_id}] source not archived: over {MAX_ARCHIVED_SOURCE_BYTES} "
+                "bytes compressed"
             )
             return
         set_study_artifacts(
             job_db,
             study_id,
             source_filename=file_path.name,
-            source_file_b64=base64.b64encode(compressed).decode("ascii"),
+            source_file_b64=archived,
         )
-        logger.info(f"[{study_id}] source archived to DB ({len(compressed)} bytes gz)")
+        logger.info(f"[{study_id}] source archived to DB ({len(archived)} b64 chars)")
     except Exception as exc:
         logger.warning(f"[{study_id}] source archive failed (non-fatal): {exc}")
 
 
 def _restore_source_file(study, upload_dir: Path) -> Path | None:
     """Rebuild the original upload from the DB archive; None if not archived."""
-    import base64
-    import gzip
+    from api.db import decompress_archived
 
     if not study.source_file_b64 or not study.source_filename:
         return None
     upload_dir.mkdir(parents=True, exist_ok=True)
     path = upload_dir / study.source_filename
-    path.write_bytes(gzip.decompress(base64.b64decode(study.source_file_b64)))
+    path.write_bytes(decompress_archived(study.source_file_b64))
     return path
 
 
@@ -828,10 +833,33 @@ async def download_deck(
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
 ):
-    """Download the rendered Excel or PowerPoint deck. (Authenticated users only)"""
+    """Download a deck ('excel'/'pptx') or the original data file ('source').
+
+    (Authenticated users only.)"""
     study = get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
+
+    if fmt == "source":
+        # The data file exactly as it was uploaded. Served from the database
+        # copy so it still works after the restart that wiped the disk.
+        if not study.source_file_b64 or not study.source_filename:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "This project's data file was uploaded before files were "
+                    "archived, or was too large to keep. Nothing to download."
+                ),
+            )
+        from api.db import decompress_archived
+
+        return Response(
+            content=decompress_archived(study.source_file_b64),
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{study.source_filename}"'
+            },
+        )
 
     if fmt == "excel":
         path = study.excel_path
@@ -840,7 +868,9 @@ async def download_deck(
         path = study.pptx_path
         media = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     else:
-        raise HTTPException(status_code=400, detail="Format must be 'excel' or 'pptx'")
+        raise HTTPException(
+            status_code=400, detail="Format must be 'excel', 'pptx' or 'source'"
+        )
 
     if not path or not Path(path).exists():
         raise HTTPException(status_code=404, detail=f"No {fmt} deck rendered for this study")
@@ -1053,14 +1083,14 @@ async def crosscheck_study(
     # reads exactly like a clean result.
     condition_audit = audit_conditions(survey, link_report.links, datamap)
 
-    if not parquet_path.exists():
-        # The run directory is ephemeral on the free tier; the durable copies
-        # are enough to link, but the row-level checks need the actual rows.
-        raise HTTPException(
-            status_code=409,
-            detail="The data file is no longer on disk (the server restarted). "
-            "Use Re-process to rebuild it, then run the cross-check.",
-        )
+    # The run directory is ephemeral on the free tier, so the rows can be gone
+    # while the durable copies (questionnaire, data map) are intact. That used
+    # to 409 — throwing away the linking, the reconciliation and the condition
+    # audit that had ALREADY been computed above and need no respondent rows at
+    # all, and leaving the reviewer a yellow banner where a real report belongs.
+    # Everything that can still be answered is answered; the row-level checks
+    # say plainly that they were not run, and why.
+    has_rows = parquet_path.exists()
 
     # The datamap is passed deliberately: it is the authority on what each
     # column actually holds. Without it, a question the extractor mis-read as
@@ -1070,6 +1100,13 @@ async def crosscheck_study(
     report = check_against_questionnaire(
         survey, link_report.links, parquet_path, datamap=datamap
     )
+    if not has_rows:
+        report.skipped.append(
+            "Every check that needs respondent rows — answer codes, single-vs-multi, "
+            "numeric ranges, screen-outs — was not run: the data file is no longer on "
+            "disk (the server restarted). Use Re-process to rebuild it from the "
+            "archived upload, then run this again."
+        )
     # "412 variables no question claimed" is not a finding — most of those are
     # hidden variables, MaxDiff design columns and system fields that are
     # SUPPOSED to be absent from a questionnaire. Report what each column is
@@ -1081,6 +1118,7 @@ async def crosscheck_study(
     payload = {
         **report.to_dict(),
         "linked_questions": len(link_report.links),
+        "data_file_available": has_rows,
         "codes_aligned_to_questionnaire": {
             "variables": sorted(alignment.code_remaps),
             "n_values": alignment.n_codes_aligned,
