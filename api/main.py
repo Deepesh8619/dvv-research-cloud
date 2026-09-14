@@ -179,6 +179,10 @@ try:
 
     app.include_router(codeframes.router, prefix="/api")
     logger.info("✅ Codeframe-library routes loaded")
+    from api.routes import copilot
+
+    app.include_router(copilot.router, prefix="/api")
+    logger.info("✅ Copilot routes loaded")
 except Exception as e:
     logger.warning(f"Routes not yet available: {e}")
 

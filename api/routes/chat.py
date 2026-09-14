@@ -137,41 +137,37 @@ def _load_deck(study_dir: Path) -> dict:
         return {}
 
 
-def _load_approved_survey(study_id: str | None) -> SurveyDefinition | None:
-    """Load a study's approved questionnaire SurveyDefinition, or None.
+def _load_approved_survey(study_id: str | None, db=None) -> SurveyDefinition | None:
+    """A study's approved questionnaire, or None — never raises.
 
-    Reuses the questionnaire route's storage convention: the QuestionnaireDB row
-    carries the on-disk path to the SurveyDefinition JSON (via
-    list_questionnaires_for_study). We only surface an APPROVED questionnaire to
-    the navigator — a draft/in-review instrument is still being corrected, so the
-    Steward should treat it as "not available yet" rather than quote unreviewed
-    extractions. Returns None (never raises) for every degraded case — no
-    study_id, no questionnaire, none approved, missing/corrupt file — so the
-    Steward tools can report a clean "not available" instead of a stack trace.
+    Only an APPROVED instrument is surfaced: a draft is still being corrected,
+    so the tools treat it as "not available yet" rather than quote unreviewed
+    extractions. Reads the durable database copy through the questionnaire
+    route's own reader. It used to read only the on-disk file, which a
+    free-tier restart wipes — every questionnaire tool then answered "no
+    approved questionnaire" for projects that had one. Uses the caller's
+    session when given one, so it reads the same database as the request.
     """
     if not study_id:
         return None
     from api.db import SessionLocal, list_questionnaires_for_study
+    from api.routes.questionnaire import _read_definition_json
 
-    db = SessionLocal()
+    session = db or SessionLocal()
     try:
-        questionnaires = list_questionnaires_for_study(db, study_id)
-    except Exception:
+        for questionnaire in list_questionnaires_for_study(session, study_id):  # newest first
+            if questionnaire.status != "approved":
+                continue
+            payload = _read_definition_json(session, questionnaire)
+            if payload:
+                return SurveyDefinition.from_json(payload)
+        return None
+    except Exception:  # noqa: BLE001 - degraded read = "not available", not a 500
+        logger.exception(f"[{study_id}] approved questionnaire unreadable")
         return None
     finally:
-        db.close()
-
-    for questionnaire in questionnaires:  # most-recent first
-        if questionnaire.status != "approved" or not questionnaire.definition_path:
-            continue
-        path = Path(questionnaire.definition_path)
-        if not path.exists():
-            continue
-        try:
-            return SurveyDefinition.from_json(path.read_text())
-        except Exception:
-            return None
-    return None
+        if db is None:
+            session.close()
 
 
 MAX_CONTEXT_VARS = 150

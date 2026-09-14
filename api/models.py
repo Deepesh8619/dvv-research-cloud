@@ -1,6 +1,8 @@
 """Pydantic models for API requests/responses."""
 
-from pydantic import BaseModel, EmailStr
+from typing import Literal
+
+from pydantic import BaseModel, EmailStr, Field
 
 
 class StudyMetadata(BaseModel):
@@ -588,3 +590,40 @@ class SaveCodeframeRequest(BaseModel):
     codeframe: dict
     study_id: str | None = None
     client_name: str | None = None
+
+
+# --- Copilot ---
+
+
+class CopilotTurn(BaseModel):
+    """One earlier turn, sent back by the browser (the copilot keeps no state)."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=4000)
+
+
+class CopilotRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    history: list[CopilotTurn] = Field(default_factory=list, max_length=12)
+    #: The project the user is looking at, if any — context, not a permission.
+    study_id: str | None = None
+
+
+class CopilotProposal(BaseModel):
+    """An action the copilot prepared. Nothing has happened until the user
+    confirms, when the browser sends `method path body` as that user."""
+
+    id: str
+    kind: str
+    title: str
+    detail: str
+    method: Literal["POST", "PATCH"]
+    path: str
+    body: dict = Field(default_factory=dict)
+
+
+class CopilotResponse(BaseModel):
+    reply: str
+    proposals: list[CopilotProposal] = Field(default_factory=list)
+    tools_used: list[str] = Field(default_factory=list)
+    answered_by: str

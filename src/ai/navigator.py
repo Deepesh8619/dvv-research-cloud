@@ -380,12 +380,12 @@ _KNOWN_TOOLS = {t["name"] for t in TOOLS}
 _TEXT_TOOLCALL_RE = re.compile(r"<function[=(]\s*([A-Za-z_]\w*)\s*[)>]?\s*(\{.*?\})", re.DOTALL)
 
 
-def _parse_text_tool_calls(content: str) -> list[dict]:
+def _parse_text_tool_calls(content: str, known: frozenset | set = frozenset()) -> list[dict]:
     """Recover tool calls the model wrote as text into structured-call dicts."""
     calls = []
     for i, m in enumerate(_TEXT_TOOLCALL_RE.finditer(content or "")):
         name, raw_args = m.group(1), m.group(2)
-        if name not in _KNOWN_TOOLS:
+        if name not in (known or _KNOWN_TOOLS):
             continue
         try:
             json.loads(raw_args)  # validate; keep as string for the executor path
@@ -397,7 +397,7 @@ def _parse_text_tool_calls(content: str) -> list[dict]:
     return calls
 
 
-def _repair_malformed_tool_call(fn: dict) -> dict | None:
+def _repair_malformed_tool_call(fn: dict, known: frozenset | set = frozenset()) -> dict | None:
     """Recover a structured tool call whose name and JSON arguments got fused
     into one string by the model — observed on llama-3.3/Groq as
     function.name == 'query_data{"sql": "..."}' instead of a bare tool name
@@ -411,15 +411,16 @@ def _repair_malformed_tool_call(fn: dict) -> dict | None:
     HTTP 400 "tool call validation failed", taking down the whole
     conversation instead of just one bad call.
     """
+    known = known or _KNOWN_TOOLS
     name = fn.get("name", "")
-    if name in _KNOWN_TOOLS:
+    if name in known:
         return {"name": name, "arguments": fn.get("arguments") or "{}"}
 
     brace = name.find("{")
     if brace == -1:
         return None
     real_name, embedded_json = name[:brace], name[brace:]
-    if real_name not in _KNOWN_TOOLS:
+    if real_name not in known:
         return None
     try:
         json.loads(embedded_json)  # validate before trusting it as arguments
@@ -472,6 +473,7 @@ def _compatible_chat(
     timeout: int,
     with_tools: bool = True,
     tools_subset: list[str] | None = None,
+    tools_schema: list[dict] | None = None,
 ) -> dict:
     """One chat-completions call to an open-model provider, with one 429 retry.
 
@@ -479,22 +481,19 @@ def _compatible_chat(
     format — it is a protocol, not a vendor). with_tools=False forces a plain
     text answer, used for the final "now summarize" turn. tools_subset limits
     the schemas to one specialist's tools; None sends the full registry.
+    tools_schema sends a caller's own tool set instead (the copilot's).
+    key_env=None is a keyless local endpoint (Ollama on the client's server).
     """
-    api_key = os.environ.get(key_env)
-    if not api_key:
-        raise BackendUnavailable(f"{key_env} not set")
+    headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
+    if key_env is not None:
+        api_key = os.environ.get(key_env)
+        if not api_key:
+            raise BackendUnavailable(f"{key_env} not set")
+        headers["Authorization"] = f"Bearer {api_key}"
     body_obj = {"model": model, "max_tokens": 1500, "temperature": 0, "messages": messages}
     if with_tools:
-        body_obj["tools"] = _groq_tools(tools_subset)
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(body_obj).encode(),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "User-Agent": USER_AGENT,
-        },
-    )
+        body_obj["tools"] = tools_schema if tools_schema is not None else _groq_tools(tools_subset)
+    request = urllib.request.Request(url, data=json.dumps(body_obj).encode(), headers=headers)
     # A burst of questions can exhaust a free per-minute budget; the 429 says
     # how long to wait. One short retry keeps the good model; a long backoff
     # still falls through rather than hanging the request.
@@ -577,6 +576,9 @@ def _run_agent_loop(
     timeout: int,
     intent: str | None,
     specialist: str | None,
+    system_prompt: str | None = None,
+    max_turns: int = MAX_AGENT_TURNS,
+    known_tools: frozenset | None = None,
 ) -> tuple[str, list[dict]]:
     """Shared multi-tool agent loop for any chat-completions backend (Groq,
     Cerebras). chat_fn must accept (messages, timeout, with_tools=,
@@ -585,14 +587,17 @@ def _run_agent_loop(
     if specialist is None and intent is not None:
         specialist = specialist_for_intent(intent)
 
-    system_prompt = SYSTEM_PROMPT.format(context=context)
     tools_subset: list[str] | None = None
-    if specialist:
-        tools_subset = tools_for_specialist(specialist, compound=is_compound_request(question))
-        fragment = SPECIALISTS.get(specialist, SPECIALISTS["analyst"]).prompt_fragment
-        system_prompt += f"\n\n{fragment}"
-    elif intent:
-        system_prompt += f"\n\nClassified intent: {intent}. Focus on this analysis task."
+    if system_prompt is None:  # the navigator's own prompt (a caller may bring its own)
+        system_prompt = SYSTEM_PROMPT.format(context=context)
+        if specialist:
+            tools_subset = tools_for_specialist(
+                specialist, compound=is_compound_request(question)
+            )
+            fragment = SPECIALISTS.get(specialist, SPECIALISTS["analyst"]).prompt_fragment
+            system_prompt += f"\n\n{fragment}"
+        elif intent:
+            system_prompt += f"\n\nClassified intent: {intent}. Focus on this analysis task."
 
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
     for turn in history or []:
@@ -602,7 +607,7 @@ def _run_agent_loop(
     tool_results: list[dict] = []
     reply = ""
 
-    for _ in range(MAX_AGENT_TURNS):
+    for _ in range(max_turns):
         body = chat_fn(messages, timeout, tools_subset=tools_subset)
         choices = body.get("choices", [])
         if not choices:
@@ -617,7 +622,7 @@ def _run_agent_loop(
         # structured tool_calls field. Recover those so the call still executes
         # rather than leaking raw markup to the user.
         if not raw_calls:
-            recovered = _parse_text_tool_calls(content)
+            recovered = _parse_text_tool_calls(content, known_tools)
             if recovered:
                 raw_calls = recovered
                 content = ""  # the markup wasn't a real answer
@@ -630,7 +635,7 @@ def _run_agent_loop(
             # every later turn, not just this one.
             sanitized = []
             for call in raw_calls:
-                fixed = _repair_malformed_tool_call(call.get("function", {}))
+                fixed = _repair_malformed_tool_call(call.get("function", {}), known_tools)
                 if fixed is not None:
                     sanitized.append({**call, "function": fixed})
             raw_calls = sanitized
