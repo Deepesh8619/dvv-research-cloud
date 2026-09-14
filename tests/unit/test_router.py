@@ -568,3 +568,51 @@ def test_a_local_only_deployment_waits_for_its_model(monkeypatch):
 def test_a_local_model_with_a_cloud_fallback_is_still_capped(monkeypatch):
     """A hung local model must not stall a request a cloud backend could answer."""
     assert _timeouts_seen(monkeypatch, cloud_key=True)["ollama"] == 30
+
+
+# --- The NDA rule holds on every path, not only the extraction chain ---------
+
+
+def test_a_task_pinned_to_claude_is_rerouted_to_open_weights(monkeypatch):
+    """report.narrative is pinned to Claude; with the rule on it must not go there."""
+    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
+    for var in ("GROQ_API_KEY", "OPENAI_API_KEY", "HF_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    hosts: list[str] = []
+
+    def fake_http_json(request, timeout):
+        hosts.append(request.full_url)
+        if "11434" in request.full_url:
+            raise urllib.error.URLError("connection refused")
+        assert "anthropic" not in request.full_url, "client data sent to a proprietary vendor"
+        return _openai_body(json.dumps({"answer": "open-weights"}))
+
+    monkeypatch.setattr(router, "http_json", fake_http_json)
+    resp = run_task("report.narrative", "prompt", _SCHEMA)
+    assert resp.backend == "cerebras"
+    assert not any("anthropic" in h for h in hosts)
+
+
+def test_proprietary_backends_refuse_outright_under_the_rule(monkeypatch):
+    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "1")
+    monkeypatch.setattr(router, "http_json", lambda *a, **k: pytest.fail("network reached"))
+    for backend in ("claude", "openai"):
+        with pytest.raises(router.BackendUnavailable, match="LLM_OPEN_WEIGHTS_ONLY"):
+            router._run_one(backend, "m", "prompt", _SCHEMA, 5)
+
+
+def test_the_data_chat_cannot_fall_back_to_a_proprietary_vendor(monkeypatch):
+    from src.ai import navigator
+
+    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    monkeypatch.setattr(navigator, "http_json", lambda *a, **k: pytest.fail("network reached"))
+    # navigator's own reference: another test in this file reloads `router`,
+    # after which router.BackendUnavailable is a different class object.
+    with pytest.raises(navigator.BackendUnavailable, match="LLM_OPEN_WEIGHTS_ONLY"):
+        navigator._openai_chat([{"role": "user", "content": "q"}], 5)
+    with pytest.raises(navigator.BackendUnavailable, match="LLM_OPEN_WEIGHTS_ONLY"):
+        navigator._claude_messages([{"role": "user", "content": "q"}], "sys", 5)

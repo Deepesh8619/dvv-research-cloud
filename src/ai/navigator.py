@@ -18,7 +18,14 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
-from src.ai.router import USER_AGENT, BackendUnavailable, ModelOutputError, http_json, run_task
+from src.ai.router import (
+    USER_AGENT,
+    BackendUnavailable,
+    ModelOutputError,
+    http_json,
+    open_weights_only,
+    run_task,
+)
 from src.ai.specialists import (
     SPECIALISTS,
     is_compound_request,
@@ -373,6 +380,13 @@ TOOLS = [
 
 
 def _claude_messages(messages: list[dict], system: str, timeout: int) -> dict:
+    if open_weights_only():
+        # The NDA rule lives HERE, in the one function every proprietary call
+        # goes through, so no caller can route client text past it. Before this
+        # the data chat fell back to this vendor whenever its key was present.
+        raise BackendUnavailable(
+            "Anthropic is proprietary and LLM_OPEN_WEIGHTS_ONLY is on", config_error=True
+        )
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise BackendUnavailable("ANTHROPIC_API_KEY not set")
@@ -548,6 +562,13 @@ def _openai_chat(
     when Groq fails — no separate rate-limit retry logic here since this
     path is only hit when Groq has already failed, not on every question.
     """
+    if open_weights_only():
+        # The NDA rule lives HERE, in the one function every proprietary call
+        # goes through, so no caller can route client text past it. Before this
+        # the data chat fell back to this vendor whenever its key was present.
+        raise BackendUnavailable(
+            "OpenAI is proprietary and LLM_OPEN_WEIGHTS_ONLY is on", config_error=True
+        )
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise BackendUnavailable("OPENAI_API_KEY not set")

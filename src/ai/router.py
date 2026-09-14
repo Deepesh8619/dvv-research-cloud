@@ -637,6 +637,9 @@ _EXTRACTION_MODELS = {
 # questionnaires to a proprietary vendor. Defaults ON: for market research the
 # constraint is contractual (client NDAs), not a preference, and a default that
 # has to be remembered is a default that gets forgotten.
+PROPRIETARY_BACKENDS = frozenset({"openai", "claude"})
+
+
 def open_weights_only() -> bool:
     """True when only open-weight backends may serve LLM tasks."""
     return os.environ.get("LLM_OPEN_WEIGHTS_ONLY", "1").strip().lower() not in (
@@ -722,7 +725,12 @@ def run_task(
         raise KeyError(f"no route configured for task: {task}")
     # "auto" defers to the Ollama → Groq → OpenAI → Claude fallback chain,
     # trying each configured backend until one succeeds.
-    if route["backend"] == "auto":
+    # A task pinned to a proprietary vendor (report.narrative -> Claude) is
+    # re-routed to the open-weights chain while the NDA rule is on, so the
+    # feature keeps working without the client's data leaving for that vendor.
+    if route["backend"] == "auto" or (
+        route["backend"] in PROPRIETARY_BACKENDS and open_weights_only()
+    ):
         return _run_chain(_extraction_chain(), prompt, schema, timeout)
     return _run_one(route["backend"], route["model"], prompt, schema, timeout)
 
@@ -731,6 +739,11 @@ def _run_one(
     backend: str, model: str, prompt: str, schema: dict, timeout: int
 ) -> AIResponse:
     """Dispatch one concrete backend and wrap the result."""
+    if backend in PROPRIETARY_BACKENDS and open_weights_only():
+        # Last line of defence: whatever path got here, the rule holds.
+        raise BackendUnavailable(
+            f"{backend} is proprietary and LLM_OPEN_WEIGHTS_ONLY is on", config_error=True
+        )
     if backend == "ollama":
         content = _ollama_generate(model, prompt, schema, timeout)
     elif backend == "groq":
