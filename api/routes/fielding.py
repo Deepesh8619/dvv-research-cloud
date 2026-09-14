@@ -42,6 +42,7 @@ from api.db import (
     create_quota_cell,
     create_respondent_session,
     decrement_quota_cell,
+    delete_respondent_answers,
     fielding_link_counts,
     get_db,
     get_fielding_link,
@@ -55,6 +56,7 @@ from api.db import (
     list_questionnaires_for_study,
     list_quota_cells,
     list_respondent_sessions,
+    set_fielding_link_soft_launch,
     set_quota_cell_condition,
     set_respondent_session_status,
     touch_respondent_session,
@@ -73,6 +75,7 @@ from api.models import (
     RespondentAnswersRequest,
     RespondentEntryResponse,
     RespondentSessionResponse,
+    SoftLaunchRequest,
 )
 from api.routes.questionnaire import _read_definition_json
 from src.core.survey_definition import (
@@ -197,6 +200,11 @@ def _link_response(link, counts: dict | None = None) -> FieldingLinkResponse:
         redirect_terminate=link.redirect_terminate,
         redirect_overquota=link.redirect_overquota,
         redirect_security=link.redirect_security,
+        soft_launch_limit=link.soft_launch_limit,
+        soft_launch_reached=(
+            link.soft_launch_limit is not None
+            and (counts or {}).get("completes", 0) >= link.soft_launch_limit
+        ),
     )
 
 
@@ -266,6 +274,7 @@ async def create_link(
         survey_json=payload,
         created_by=user.email,
         redirects=redirects,
+        soft_launch_limit=body.soft_launch_limit if body else None,
     )
     # A condition that can never be true is not a warning: the survey does not
     # do what the document says it does, and every downstream number will be
@@ -419,6 +428,34 @@ async def close_link(
     return _link_response(link, fielding_link_counts(db, link.id))
 
 
+@router.patch(
+    "/studies/{study_id}/fielding/links/{link_id}/soft-launch",
+    response_model=FieldingLinkResponse,
+)
+async def set_soft_launch(
+    study_id: str,
+    link_id: str,
+    body: SoftLaunchRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Hold a link at N completes, or release it to full sample. (Owner/Analyst)
+
+    One endpoint for both halves of the launch: `limit=50` holds, `limit=null`
+    releases. Release is the moment a human takes responsibility for the data —
+    run the soft-launch check first, because after this the money is spent.
+    """
+    _owner_link(db, study_id, link_id)
+    if body.limit is not None and body.limit < 1:
+        raise HTTPException(status_code=422, detail="Soft-launch limit must be at least 1")
+    link = set_fielding_link_soft_launch(db, link_id, body.limit)
+    logger.info(
+        f"[{study_id}] Fielding link {link_id} soft launch "
+        f"{'released' if body.limit is None else f'held at {body.limit}'} by {user.name}"
+    )
+    return _link_response(link, fielding_link_counts(db, link.id))
+
+
 # --- Quota management (owner/analyst) ---------------------------------------
 
 
@@ -561,6 +598,25 @@ async def enter_survey(token: str, request: Request, db: Session = Depends(get_d
         return RespondentEntryResponse(session_id="", status="closed", surveyjs_json={})
 
     entry_params = dict(request.query_params)
+    sessions = list_respondent_sessions(db, link.id)
+
+    # Soft-launch hold: once the launch batch is complete, stop admitting NEW
+    # respondents so a scripting error surfaces at n=50 instead of n=800 — the
+    # whole point of a soft launch. Sessions already IN PROGRESS are deliberately
+    # not killed (those are real people mid-interview), so completes can overshoot
+    # the limit by the number in flight; that is correct, not a rounding bug.
+    # A held link is `paused`, never `closed`: releasing it resumes the same link.
+    # Arrivals are bounced on the over-quota redirect when one is set, which is
+    # what a panel expects for "we can't use you right now" — and no session row
+    # is written, so a hold never invents dispositions the field never had.
+    limit = link.soft_launch_limit
+    if limit is not None and sum(1 for s in sessions if s.status_code == STATUS_COMPLETE) >= limit:
+        return RespondentEntryResponse(
+            session_id="",
+            status="paused",
+            surveyjs_json={},
+            redirect_url=_apply_redirect_template(link.redirect_overquota, entry_params),
+        )
 
     # Security screen-out (status 30): a panel `pid` that already has a terminal
     # session on this link is a duplicate/fraud signal — don't re-serve the
@@ -569,7 +625,7 @@ async def enter_survey(token: str, request: Request, db: Session = Depends(get_d
     pid = (entry_params.get("pid") or "").strip()
     if pid and any(
         s.status_code is not None and (s.entry_params or {}).get("pid") == pid
-        for s in list_respondent_sessions(db, link.id)
+        for s in sessions
     ):
         session = create_respondent_session(db, link.id, entry_params=entry_params)
         set_respondent_session_status(db, session.id, STATUS_SECURITY)
@@ -648,11 +704,21 @@ async def submit_answers(
         if not question.terminate_if.referenced_qids().issubset(answers.keys()):
             continue
         if evaluate(question.terminate_if, answers):
+            # A page can carry answers to questions AFTER the one that screens
+            # the respondent out — they were all submitted together, before the
+            # server got to judge any of them. Those answers are not data this
+            # study is entitled to: the interview stopped at `question`. Keeping
+            # them would put screened-out people into every downstream base and
+            # would make our own screen-out check flag our own data forever.
+            order = survey.question_order()
+            after = set(order[order.index(question.qid) + 1 :]) if question.qid in order else set()
+            dropped = delete_respondent_answers(db, session_id, sorted(after & answers.keys()))
             set_respondent_session_status(db, session_id, STATUS_TERMINATE)
             session = get_respondent_session(db, session_id)
             logger.info(
                 f"[{link.study_id}] Session {session_id} terminated by "
                 f"{question.qid}.terminate_if"
+                + (f" (dropped {dropped} post-screen-out answer(s))" if dropped else "")
             )
             return _with_redirect(
                 {"terminated": True, "status_code": STATUS_TERMINATE}, link, session

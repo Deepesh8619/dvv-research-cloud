@@ -593,3 +593,172 @@ def test_the_refusal_can_be_overridden_deliberately(client) -> None:
     )
 
     assert resp.status_code == 200
+
+
+# --- Soft launch ------------------------------------------------------------
+
+
+def _complete_one(test_client, token):
+    """Enter and complete one respondent; returns the session id."""
+    sid = test_client.get(f"/api/r/{token}").json()["session_id"]
+    test_client.post(
+        f"/api/r/{token}/sessions/{sid}/answers", json={"answers": {"Q1": 30, "Q2": 1}}
+    )
+    test_client.post(f"/api/r/{token}/sessions/{sid}/complete")
+    return sid
+
+
+def test_soft_launch_holds_entry_once_the_batch_is_complete(client):
+    """The whole point: after N completes the link stops admitting NEW people."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = test_client.post(
+        "/api/studies/study_f1/fielding/links", json={"soft_launch_limit": 1}
+    ).json()
+    token = link["token"]
+    assert link["soft_launch_limit"] == 1
+    assert link["soft_launch_reached"] is False
+
+    _complete_one(test_client, token)
+
+    held = test_client.get(f"/api/r/{token}").json()
+    assert held["status"] == "paused"
+    assert held["session_id"] == ""
+    assert held["surveyjs_json"] == {}
+    # A hold must not invent a disposition the field never had.
+    db = sf()
+    assert db.query(RespondentSessionDB).count() == 1
+    db.close()
+
+
+def test_soft_launch_does_not_kill_respondents_already_in_flight(client):
+    """Someone mid-interview when the batch fills still finishes — real people."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    token = test_client.post(
+        "/api/studies/study_f1/fielding/links", json={"soft_launch_limit": 1}
+    ).json()["token"]
+
+    in_flight = test_client.get(f"/api/r/{token}").json()["session_id"]
+    _complete_one(test_client, token)  # batch is now full
+    assert test_client.get(f"/api/r/{token}").json()["status"] == "paused"
+
+    # ...but the one already inside is unaffected, so completes overshoot by 1.
+    done = test_client.post(f"/api/r/{token}/sessions/{in_flight}/complete")
+    assert done.json() == {"status_code": 10, "complete": True}
+
+
+def test_release_resumes_the_same_link(client):
+    """Release is a PATCH to null — the link and its token stay the same."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = test_client.post(
+        "/api/studies/study_f1/fielding/links", json={"soft_launch_limit": 1}
+    ).json()
+    token, link_id = link["token"], link["id"]
+    _complete_one(test_client, token)
+    assert test_client.get(f"/api/r/{token}").json()["status"] == "paused"
+
+    released = test_client.patch(
+        f"/api/studies/study_f1/fielding/links/{link_id}/soft-launch", json={"limit": None}
+    )
+    assert released.status_code == 200
+    assert released.json()["soft_launch_limit"] is None
+    assert released.json()["soft_launch_reached"] is False
+
+    resumed = test_client.get(f"/api/r/{token}").json()
+    assert resumed["status"] == "open"
+    assert resumed["session_id"]
+    assert resumed["surveyjs_json"]
+
+
+def test_hold_can_be_applied_after_the_link_is_already_open(client):
+    """A live link can be paused without closing it."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = test_client.post("/api/studies/study_f1/fielding/links").json()
+    token, link_id = link["token"], link["id"]
+    _complete_one(test_client, token)
+    assert test_client.get(f"/api/r/{token}").json()["status"] == "open"
+
+    resp = test_client.patch(
+        f"/api/studies/study_f1/fielding/links/{link_id}/soft-launch", json={"limit": 1}
+    )
+    assert resp.json()["soft_launch_reached"] is True
+    assert test_client.get(f"/api/r/{token}").json()["status"] == "paused"
+
+
+def test_held_link_bounces_arrivals_on_the_overquota_redirect(client):
+    """A panel expects a redirect, not a dead end, for 'we can't use you now'."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    token = test_client.post(
+        "/api/studies/study_f1/fielding/links",
+        json={"soft_launch_limit": 1, "redirect_overquota": "https://panel.example/oq?rid={rid}"},
+    ).json()["token"]
+    _complete_one(test_client, token)
+
+    held = test_client.get(f"/api/r/{token}?rid=abc123").json()
+    assert held["status"] == "paused"
+    assert held["redirect_url"] == "https://panel.example/oq?rid=abc123"
+
+
+def test_closed_beats_paused(client):
+    """A closed link reports closed even while a hold is set — closed is final."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = test_client.post(
+        "/api/studies/study_f1/fielding/links", json={"soft_launch_limit": 1}
+    ).json()
+    _complete_one(test_client, link["token"])
+    test_client.post(f"/api/studies/study_f1/fielding/links/{link['id']}/close")
+    assert test_client.get(f"/api/r/{link['token']}").json()["status"] == "closed"
+
+
+def test_soft_launch_limit_must_be_at_least_one(client):
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link_id = test_client.post("/api/studies/study_f1/fielding/links").json()["id"]
+    resp = test_client.patch(
+        f"/api/studies/study_f1/fielding/links/{link_id}/soft-launch", json={"limit": 0}
+    )
+    assert resp.status_code == 422
+
+
+def test_soft_launch_patch_unknown_link_404(client):
+    test_client, sf, _ = client
+    _make_study(sf)
+    resp = test_client.patch(
+        "/api/studies/study_f1/fielding/links/nope/soft-launch", json={"limit": 5}
+    )
+    assert resp.status_code == 404
+
+
+def test_a_screen_out_discards_answers_given_after_it_on_the_same_page(client):
+    """Q1 screens the respondent out, so Q2/Q3 from the same submit are not data.
+
+    They were sent together, before the server could judge any of them. Keeping
+    them would put screened-out people into every downstream base — and our own
+    QC check reads exactly that as "the screen-out did not stop the interview".
+    """
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    token = _create_link(test_client).json()["token"]
+    sid = test_client.get(f"/api/r/{token}").json()["session_id"]
+
+    resp = test_client.post(
+        f"/api/r/{token}/sessions/{sid}/answers",
+        json={"answers": {"Q1": 16, "Q2": 1, "Q3": "Brand X"}},
+    )
+    assert resp.json()["terminated"] is True
+
+    # Q1 — the screening answer itself — is kept: it is the evidence.
+    assert test_client.get(f"/api/r/{token}/sessions/{sid}").json()["answers"] == {"Q1": 16}

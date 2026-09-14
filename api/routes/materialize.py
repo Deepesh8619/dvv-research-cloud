@@ -218,3 +218,81 @@ async def field_report(
     ]
     report = build_field_report(survey, sessions, answers, cells)
     return {**report.to_dict(), "link_id": link_id, "run_by": user.name}
+
+
+@router.get("/studies/{study_id}/fielding/links/{link_id}/soft-launch-check")
+async def soft_launch_check(
+    study_id: str,
+    link_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Everything worth knowing before releasing the rest of the sample. (Owner/Analyst)
+
+    A soft launch is only worth the pause if something is actually inspected
+    during it. This runs, on the completes captured SO FAR, the same QC
+    cross-check the platform runs on a delivered dataset — punches that aren't
+    in the questionnaire, screen-outs that let people carry on answering, masks
+    that didn't narrow, pipes with an empty source — plus the field report
+    (incidence, which screen-out removed people, where they dropped off).
+
+    Read-only: nothing is written to the study, so running it never disturbs
+    analysis artifacts from an earlier materialize. Terminates are INCLUDED in
+    the checked rows on purpose — they are the only evidence the screen-outs
+    fired at all.
+    """
+    import json as _json
+    import tempfile
+    from pathlib import Path
+
+    from api.db import list_quota_cells
+    from src.core.survey_definition import Expression, QuestionVariableLink
+    from src.engines.fielding.decisions import QuotaCell
+    from src.engines.fielding.field_report import build_field_report
+    from src.engines.qc.discrepancy import check_against_questionnaire
+
+    link = get_fielding_link(db, link_id)
+    if not link or link.study_id != study_id:
+        raise HTTPException(status_code=404, detail="Fielding link not found")
+
+    survey = SurveyDefinition.from_json(link.survey_json)
+    sessions = list_respondent_sessions(db, link_id)
+    answers = {s.id: get_session_answers_map(db, s.id) for s in sessions}
+    n_completes = sum(1 for s in sessions if s.status_code == STATUS_COMPLETE)
+
+    cells = [
+        QuotaCell(
+            id=cell.id,
+            condition=Expression.from_dict(_json.loads(cell.condition_json)),
+            limit=cell.cell_limit,
+            count=cell.count,
+        )
+        for cell in list_quota_cells(db, link_id)
+    ]
+    report = build_field_report(survey, sessions, answers, cells)
+
+    datamap, df = materialize_fielding(survey, sessions, answers, statuses=ALL_STATUSES)
+    # We KNOW the question->variable mapping here (materialize stamped question_ref
+    # on every column it emitted), so the fuzzy linker an uploaded file needs is
+    # neither required nor wanted — an exact join can't mis-link.
+    by_qid: dict[str, list[str]] = {}
+    for var in datamap.variables:
+        if var.question_ref:
+            by_qid.setdefault(var.question_ref, []).append(var.name)
+    links = [QuestionVariableLink(qid=qid, variable_names=names) for qid, names in by_qid.items()]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        parquet_path = Path(tmp) / "soft_launch.parquet"
+        pl.from_pandas(df, nan_to_null=True).write_parquet(str(parquet_path))
+        crosscheck = check_against_questionnaire(survey, links, parquet_path, datamap=datamap)
+
+    return {
+        "link_id": link_id,
+        "soft_launch_limit": link.soft_launch_limit,
+        "held": link.soft_launch_limit is not None and n_completes >= link.soft_launch_limit,
+        "n_completes": n_completes,
+        "n_checked_rows": int(len(df)),
+        "crosscheck": crosscheck.to_dict(),
+        "field_report": report.to_dict(),
+        "run_by": user.name,
+    }

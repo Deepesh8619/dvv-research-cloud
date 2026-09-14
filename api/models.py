@@ -334,6 +334,11 @@ class FieldingLinkResponse(BaseModel):
     redirect_terminate: str | None = None
     redirect_overquota: str | None = None
     redirect_security: str | None = None
+    # Soft launch: hold the link at this many completes (None = no hold).
+    # `soft_launch_reached` is the live answer to "is it holding right now?",
+    # computed from counts so the UI never has to do the comparison itself.
+    soft_launch_limit: int | None = None
+    soft_launch_reached: bool = False
 
 
 class FieldingLinkListResponse(BaseModel):
@@ -349,7 +354,10 @@ class RespondentEntryResponse(BaseModel):
     the server enforces `terminate_if`)."""
 
     session_id: str
-    status: str = "open"  # open | closed
+    # open | closed | paused. `paused` is a soft-launch hold: the link is still
+    # live and will admit respondents again once it is released, which is why it
+    # is NOT reported as closed.
+    status: str = "open"
     surveyjs_json: dict = {}
     current_page: int = 0
     # Optional segment theme slug from the pinned survey's metadata (e.g. "fmcg"),
@@ -441,11 +449,20 @@ class FieldingLinkCreateRequest(FieldingRedirectsRequest):
     presentation choice, not an instrument edit)."""
 
     theme: str | None = None
+    # Open the link already held at this many completes (the soft launch). The
+    # normal launch order is: open held at ~50, check the data, then release.
+    soft_launch_limit: int | None = None
     # A condition that is provably unsatisfiable — a screen-out testing a code
     # its question never offers — means the survey does not do what the document
     # says. Opening a link is refused in that state; this is the deliberate
     # override, recorded in the log so the decision is somebody's.
     force: bool = False
+
+
+class SoftLaunchRequest(BaseModel):
+    """Set or release a link's soft-launch hold. `limit=None` releases it."""
+
+    limit: int | None = None
 
 
 class DryRunRequest(BaseModel):

@@ -223,6 +223,9 @@ class FieldingLinkDB(Base):
     redirect_terminate = Column(String, nullable=True)
     redirect_overquota = Column(String, nullable=True)
     redirect_security = Column(String, nullable=True)
+    # Soft launch (T25): while set, the link stops admitting NEW respondents
+    # once this many completes exist. NULL = no hold, field to the full sample.
+    soft_launch_limit = Column(Integer, nullable=True)
 
 
 class RespondentSessionDB(Base):
@@ -689,6 +692,8 @@ def _ensure_new_columns():
             "redirect_terminate": "VARCHAR",
             "redirect_overquota": "VARCHAR",
             "redirect_security": "VARCHAR",
+            # Soft launch hold (T25).
+            "soft_launch_limit": "INTEGER",
         },
     }
     inspector = inspect(engine)
@@ -1143,6 +1148,7 @@ def create_fielding_link(
     survey_json: str,
     created_by: str,
     redirects: dict | None = None,
+    soft_launch_limit: int | None = None,
 ) -> "FieldingLinkDB":
     """Open a fielding link, pinning the approved SurveyDefinition JSON snapshot.
 
@@ -1167,6 +1173,7 @@ def create_fielding_link(
         redirect_terminate=redirects.get("redirect_terminate"),
         redirect_overquota=redirects.get("redirect_overquota"),
         redirect_security=redirects.get("redirect_security"),
+        soft_launch_limit=soft_launch_limit,
     )
     db.add(link)
     db.commit()
@@ -1303,6 +1310,27 @@ def upsert_respondent_answer(
     return answer
 
 
+def delete_respondent_answers(db: Session, session_id: str, qids: list[str]) -> int:
+    """Drop a session's answers to `qids`. Returns how many rows went.
+
+    Used when a screen-out fires: answers the respondent gave on the SAME page,
+    to questions that come after the terminating one, are not data the study is
+    allowed to have — the interview stopped there.
+    """
+    if not qids:
+        return 0
+    n = (
+        db.query(RespondentAnswerDB)
+        .filter(
+            RespondentAnswerDB.session_id == session_id,
+            RespondentAnswerDB.qid.in_(qids),
+        )
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return n
+
+
 def list_respondent_answers(db: Session, session_id: str) -> list["RespondentAnswerDB"]:
     """All answer rows for a session (order stable by qid)."""
     return (
@@ -1342,6 +1370,22 @@ def list_respondent_sessions(db: Session, fielding_link_id: str) -> list["Respon
         .filter(RespondentSessionDB.fielding_link_id == fielding_link_id)
         .all()
     )
+
+
+def set_fielding_link_soft_launch(
+    db: Session, link_id: str, limit: int | None
+) -> "FieldingLinkDB":
+    """Set or clear a link's soft-launch hold.
+
+    `limit=None` releases the hold (field to the full sample); an int re-holds
+    at that many completes, so the same call both pauses and releases.
+    """
+    link = get_fielding_link(db, link_id)
+    if link:
+        link.soft_launch_limit = limit
+        db.commit()
+        db.refresh(link)
+    return link
 
 
 def set_fielding_link_redirects(db: Session, link_id: str, redirects: dict) -> "FieldingLinkDB":
