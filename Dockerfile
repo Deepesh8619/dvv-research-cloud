@@ -28,4 +28,6 @@ COPY --from=web /web/dist ./web/dist
 RUN mkdir -p /app/studies
 
 # The host injects $PORT. Shell form so it actually expands.
-CMD uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# `python -m uvicorn`: the exact start path the process pool (api/heavy.py) was
+# benchmarked under; spawned workers re-import __main__ safely this way.
+CMD python -m uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}

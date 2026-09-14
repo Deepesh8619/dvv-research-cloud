@@ -543,7 +543,7 @@ async def upload_questionnaire(
 
 
 @router.get("/studies/{study_id}/questionnaire/source")
-async def download_questionnaire_source(
+def download_questionnaire_source(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -585,7 +585,7 @@ async def download_questionnaire_source(
     "/studies/{study_id}/questionnaire/authored",
     response_model=QuestionnaireStatusResponse,
 )
-async def create_authored_questionnaire(
+def create_authored_questionnaire(
     study_id: str,
     request: QuestionnaireCreateRequest,
     db: Session = Depends(get_db),
@@ -643,7 +643,7 @@ def _latest_questionnaire(db: Session, study_id: str):
     "/studies/{study_id}/questionnaire",
     response_model=QuestionnaireStatusResponse,
 )
-async def get_questionnaire_status(
+def get_questionnaire_status(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -675,7 +675,7 @@ async def get_questionnaire_status(
     "/studies/{study_id}/questionnaire/settings",
     response_model=QuestionnaireStatusResponse,
 )
-async def update_questionnaire_settings(
+def update_questionnaire_settings(
     study_id: str,
     request: QuestionnaireSettingsRequest,
     db: Session = Depends(get_db),
@@ -700,7 +700,7 @@ async def update_questionnaire_settings(
 
 
 @router.get("/studies/{study_id}/questionnaire/questions")
-async def list_questions(
+def list_questions(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -718,7 +718,7 @@ async def list_questions(
 
 
 @router.get("/studies/{study_id}/questionnaire/questions/{qid}")
-async def get_question(
+def get_question(
     study_id: str,
     qid: str,
     db: Session = Depends(get_db),
@@ -822,7 +822,7 @@ def _apply_update(question, request: QuestionUpdateRequest) -> None:
 
 
 @router.patch("/studies/{study_id}/questionnaire/questions/{qid}")
-async def update_question(
+def update_question(
     study_id: str,
     qid: str,
     request: QuestionUpdateRequest,
@@ -894,7 +894,7 @@ async def update_question(
 
 
 @router.post("/studies/{study_id}/questionnaire/questions")
-async def add_question(
+def add_question(
     study_id: str,
     request: QuestionCreateRequest,
     db: Session = Depends(get_db),
@@ -956,7 +956,7 @@ async def add_question(
 
 
 @router.delete("/studies/{study_id}/questionnaire/questions/{qid}")
-async def delete_question(
+def delete_question(
     study_id: str,
     qid: str,
     db: Session = Depends(get_db),
@@ -1003,7 +1003,7 @@ async def delete_question(
 
 
 @router.put("/studies/{study_id}/questionnaire/questions/order")
-async def reorder_questions(
+def reorder_questions(
     study_id: str,
     request: QuestionOrderRequest,
     db: Session = Depends(get_db),
@@ -1054,7 +1054,7 @@ async def reorder_questions(
 
 
 @router.post("/studies/{study_id}/questionnaire/questions/{qid}/approve")
-async def approve_question(
+def approve_question(
     study_id: str,
     qid: str,
     db: Session = Depends(get_db),
@@ -1101,7 +1101,7 @@ async def approve_question(
 
 
 @router.post("/studies/{study_id}/questionnaire/questions/approve-clean")
-async def approve_clean(
+def approve_clean(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
@@ -1150,7 +1150,7 @@ async def approve_clean(
 
 
 @router.post("/studies/{study_id}/questionnaire/approve-all")
-async def approve_all(
+def approve_all(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),

@@ -35,7 +35,7 @@ router = APIRouter()
 
 
 @router.post("/auth/login", response_model=LoginResponse)
-async def login(
+def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
@@ -75,7 +75,7 @@ async def login(
 
 
 @router.post("/auth/emergency-reset")
-async def emergency_reset(
+def emergency_reset(
     request: EmergencyResetRequest,
     db: Session = Depends(get_db),
 ):
@@ -129,7 +129,7 @@ async def emergency_reset(
 
 
 @router.get("/auth/me", response_model=UserResponse)
-async def get_me(user: UserDB = Depends(get_current_user)):
+def get_me(user: UserDB = Depends(get_current_user)):
     """Get current authenticated user."""
     return UserResponse(
         id=user.id,
@@ -142,7 +142,7 @@ async def get_me(user: UserDB = Depends(get_current_user)):
 
 
 @router.get("/auth/users", response_model=list[UserResponse])
-async def list_all_users(
+def list_all_users(
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER)),
 ):
@@ -162,7 +162,7 @@ async def list_all_users(
 
 
 @router.post("/auth/users", response_model=UserResponse)
-async def create_new_user(
+def create_new_user(
     request: CreateUserRequest,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER)),

@@ -50,7 +50,7 @@ def _library_rows(db: Session, client_name: str | None = None) -> list[dict]:
 
 
 @router.get("/codeframes/suggest")
-async def suggest_codeframes(
+def suggest_codeframes(
     question: str,
     client_name: str | None = None,
     db: Session = Depends(get_db),
@@ -73,7 +73,7 @@ async def suggest_codeframes(
 
 
 @router.get("/codeframes/{entry_id}")
-async def get_codeframe(
+def get_codeframe(
     entry_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -98,7 +98,7 @@ async def get_codeframe(
 
 
 @router.post("/codeframes")
-async def save_codeframe(
+def save_codeframe(
     request: SaveCodeframeRequest,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
@@ -137,7 +137,7 @@ async def save_codeframe(
 
 
 @router.post("/codeframes/{entry_id}/reuse")
-async def mark_reused(
+def mark_reused(
     entry_id: str,
     study_id: str | None = None,
     db: Session = Depends(get_db),
@@ -163,7 +163,7 @@ async def mark_reused(
 
 
 @router.get("/codeframes")
-async def list_codeframes(
+def list_codeframes(
     client_name: str | None = None,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),

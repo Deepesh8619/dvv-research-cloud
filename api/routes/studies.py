@@ -295,7 +295,7 @@ async def upload_study(
 
 
 @router.post("/studies", response_model=StudyResponse)
-async def create_empty_study(
+def create_empty_study(
     request: CreateStudyRequest,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
@@ -328,7 +328,7 @@ async def create_empty_study(
 
 
 @router.post("/studies/{study_id}/reprocess")
-async def reprocess_study(
+def reprocess_study(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
@@ -375,7 +375,7 @@ async def reprocess_study(
 
 
 @router.get("/studies", response_model=StudyListResponse)
-async def list_all_studies(
+def list_all_studies(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     status: str = Query(None),
@@ -419,7 +419,7 @@ async def list_all_studies(
 
 
 @router.get("/studies/{study_id}", response_model=StudyResponse)
-async def get_study_detail(
+def get_study_detail(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -466,7 +466,7 @@ async def get_study_detail(
 
 
 @router.post("/studies/{study_id}/approve/{gate}")
-async def approve_study_gate(
+def approve_study_gate(
     study_id: str,
     gate: str,
     request: ApprovalRequest,
@@ -496,7 +496,7 @@ async def approve_study_gate(
 
 
 @router.get("/studies/{study_id}/crosstabs")
-async def get_crosstabs(
+def get_crosstabs(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -537,7 +537,7 @@ def _run_artifacts(study, what: str) -> tuple[Path, Path]:
 
 
 @router.get("/studies/{study_id}/tracking/{baseline_id}")
-async def get_tracking(
+def get_tracking(
     study_id: str,
     baseline_id: str,
     db: Session = Depends(get_db),
@@ -627,7 +627,7 @@ def _uncoded_open_ends_payload(study) -> dict:
 
 
 @router.get("/studies/{study_id}/coding")
-async def get_coding(
+def get_coding(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -659,7 +659,7 @@ async def get_coding(
 
 
 @router.patch("/studies/{study_id}/coding/{variable}/{respondent_id}")
-async def resolve_coding_item(
+def resolve_coding_item(
     study_id: str,
     variable: str,
     respondent_id: int,
@@ -733,7 +733,7 @@ async def resolve_coding_item(
 
 
 @router.get("/studies/{study_id}/charts/{filename}")
-async def get_chart(
+def get_chart(
     study_id: str,
     filename: str,
     db: Session = Depends(get_db),
@@ -765,7 +765,7 @@ async def get_chart(
 
 
 @router.get("/studies/{study_id}/profile")
-async def get_study_profile(
+def get_study_profile(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -827,7 +827,7 @@ async def get_study_profile(
 
 
 @router.get("/studies/{study_id}/download/{fmt}")
-async def download_deck(
+def download_deck(
     study_id: str,
     fmt: str,
     db: Session = Depends(get_db),
@@ -895,7 +895,7 @@ async def download_deck(
 
 
 @router.delete("/studies/{study_id}")
-async def delete_study(
+def delete_study(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER)),
@@ -912,7 +912,7 @@ async def delete_study(
 
 
 @router.post("/studies/{study_id}/share", response_model=ShareLinkResponse)
-async def create_study_share_link(
+def create_study_share_link(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
@@ -947,7 +947,7 @@ async def create_study_share_link(
 
 
 @router.post("/studies/{study_id}/share/revoke")
-async def revoke_study_share_link(
+def revoke_study_share_link(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
@@ -968,7 +968,7 @@ async def revoke_study_share_link(
 
 
 @router.get("/studies/{study_id}/crosscheck")
-async def get_crosscheck(
+def get_crosscheck(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -995,7 +995,7 @@ async def get_crosscheck(
 
 
 @router.post("/studies/{study_id}/crosscheck")
-async def crosscheck_study(
+def crosscheck_study(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),

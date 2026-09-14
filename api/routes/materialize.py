@@ -23,9 +23,9 @@ from api.auth import UserRole, require_role
 from api.config import STUDIES_DIR
 from api.db import (
     UserDB,
+    answers_by_session,
     get_db,
     get_fielding_link,
-    get_session_answers_map,
     get_study,
     list_respondent_sessions,
     set_study_artifacts,
@@ -48,7 +48,7 @@ router = APIRouter()
 
 
 @router.post("/studies/{study_id}/fielding/links/{link_id}/materialize")
-async def materialize_link(
+def materialize_link(
     study_id: str,
     link_id: str,
     db: Session = Depends(get_db),
@@ -74,7 +74,7 @@ async def materialize_link(
             detail="No completed sessions to materialize (need at least one status_code=10)",
         )
 
-    answers = {s.id: get_session_answers_map(db, s.id) for s in completes}
+    answers = answers_by_session(db, link_id)  # one query, not one per respondent
     datamap, df = materialize_fielding(survey, completes, answers)
 
     # Write to the run-dir convention the read path expects. Reuse the study's
@@ -114,7 +114,7 @@ async def materialize_link(
     # data.parquet stays completes-only — but a delivery carries every
     # disposition, because the terminates are the evidence the screen-outs
     # worked and the denominator of the incidence rate the client is buying.
-    all_answers = {s.id: get_session_answers_map(db, s.id) for s in sessions}
+    all_answers = answers  # answers_by_session already holds every disposition
     delivery_map, delivery_df = materialize_fielding(
         survey, sessions, all_answers, statuses=ALL_STATUSES
     )
@@ -179,7 +179,7 @@ def _write_labelled_xlsx(df, datamap, path) -> None:
 
 
 @router.get("/studies/{study_id}/fielding/links/{link_id}/field-report")
-async def field_report(
+def field_report(
     study_id: str,
     link_id: str,
     db: Session = Depends(get_db),
@@ -202,11 +202,12 @@ async def field_report(
     if not link or link.study_id != study_id:
         raise HTTPException(status_code=404, detail="Fielding link not found")
 
-    from api.db import list_quota_cells
+    from api.db import answers_by_session, list_quota_cells
+    from api.heavy import plain_sessions, run_heavy
 
     survey = SurveyDefinition.from_json(link.survey_json)
     sessions = list_respondent_sessions(db, link_id)
-    answers = {s.id: get_session_answers_map(db, s.id) for s in sessions}
+    answers = answers_by_session(db, link_id)
     cells = [
         QuotaCell(
             id=cell.id,
@@ -216,12 +217,12 @@ async def field_report(
         )
         for cell in list_quota_cells(db, link_id)
     ]
-    report = build_field_report(survey, sessions, answers, cells)
+    report = run_heavy(build_field_report, survey, plain_sessions(sessions), answers, cells)
     return {**report.to_dict(), "link_id": link_id, "run_by": user.name}
 
 
 @router.get("/studies/{study_id}/fielding/links/{link_id}/soft-launch-check")
-async def soft_launch_check(
+def soft_launch_check(
     study_id: str,
     link_id: str,
     db: Session = Depends(get_db),
@@ -242,14 +243,12 @@ async def soft_launch_check(
     fired at all.
     """
     import json as _json
-    import tempfile
-    from pathlib import Path
 
-    from api.db import list_quota_cells
-    from src.core.survey_definition import Expression, QuestionVariableLink
+    from api.db import answers_by_session, list_quota_cells
+    from api.heavy import plain_sessions, run_heavy
+    from src.core.survey_definition import Expression
     from src.engines.fielding.decisions import QuotaCell
-    from src.engines.fielding.field_report import build_field_report
-    from src.engines.qc.discrepancy import check_against_questionnaire
+    from src.engines.fielding.launch_check import launch_check
 
     link = get_fielding_link(db, link_id)
     if not link or link.study_id != study_id:
@@ -257,9 +256,7 @@ async def soft_launch_check(
 
     survey = SurveyDefinition.from_json(link.survey_json)
     sessions = list_respondent_sessions(db, link_id)
-    answers = {s.id: get_session_answers_map(db, s.id) for s in sessions}
     n_completes = sum(1 for s in sessions if s.status_code == STATUS_COMPLETE)
-
     cells = [
         QuotaCell(
             id=cell.id,
@@ -269,30 +266,14 @@ async def soft_launch_check(
         )
         for cell in list_quota_cells(db, link_id)
     ]
-    report = build_field_report(survey, sessions, answers, cells)
-
-    datamap, df = materialize_fielding(survey, sessions, answers, statuses=ALL_STATUSES)
-    # We KNOW the question->variable mapping here (materialize stamped question_ref
-    # on every column it emitted), so the fuzzy linker an uploaded file needs is
-    # neither required nor wanted — an exact join can't mis-link.
-    by_qid: dict[str, list[str]] = {}
-    for var in datamap.variables:
-        if var.question_ref:
-            by_qid.setdefault(var.question_ref, []).append(var.name)
-    links = [QuestionVariableLink(qid=qid, variable_names=names) for qid, names in by_qid.items()]
-
-    with tempfile.TemporaryDirectory() as tmp:
-        parquet_path = Path(tmp) / "soft_launch.parquet"
-        pl.from_pandas(df, nan_to_null=True).write_parquet(str(parquet_path))
-        crosscheck = check_against_questionnaire(survey, links, parquet_path, datamap=datamap)
-
+    result = run_heavy(
+        launch_check, survey, plain_sessions(sessions), answers_by_session(db, link_id), cells
+    )
     return {
         "link_id": link_id,
         "soft_launch_limit": link.soft_launch_limit,
         "held": link.soft_launch_limit is not None and n_completes >= link.soft_launch_limit,
         "n_completes": n_completes,
-        "n_checked_rows": int(len(df)),
-        "crosscheck": crosscheck.to_dict(),
-        "field_report": report.to_dict(),
+        **result,
         "run_by": user.name,
     }

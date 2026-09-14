@@ -537,7 +537,7 @@ def _make_executor(
 
 
 @router.post("/studies/{study_id}/chat", response_model=ChatResponse)
-async def chat_with_study(
+def chat_with_study(
     study_id: str,
     request: ChatRequest,
     db: Session = Depends(get_db),
@@ -640,7 +640,7 @@ async def chat_with_study(
 
 
 @router.get("/studies/{study_id}/chat/history")
-async def get_chat_history(
+def get_chat_history(
     study_id: str,
     limit: int = 50,
     db: Session = Depends(get_db),

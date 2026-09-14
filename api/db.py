@@ -250,6 +250,10 @@ class RespondentSessionDB(Base):
     fielding_link_id = Column(String, index=True)
     status_code = Column(Integer, nullable=True)  # None|10|20|30|40
     entry_params = Column(JSON, default=dict)
+    # The panel's respondent id, copied out of entry_params so the duplicate
+    # check at entry is one indexed lookup instead of a scan of every session.
+    # '' = entered without one. Added after the table shipped (_ensure_new_columns).
+    pid = Column(String, nullable=True)  # indexed with fielding_link_id in init_db
     current_page = Column(Integer, default=0)
     started_at = Column(String)
     last_seen_at = Column(String)
@@ -613,6 +617,15 @@ def init_db():
     """Initialize database tables."""
     Base.metadata.create_all(bind=engine)
     _ensure_new_columns()
+    # create_all only indexes NEW tables; an ALTERed-in column needs its own.
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_respondent_sessions_link_pid "
+            "ON respondent_sessions (fielding_link_id, pid)"
+        ))
+    backfill_session_pids()
     seed_admin_user()
 
 
@@ -694,6 +707,9 @@ def _ensure_new_columns():
             "redirect_security": "VARCHAR",
             # Soft launch hold (T25).
             "soft_launch_limit": "INTEGER",
+        },
+        "respondent_sessions": {
+            "pid": "VARCHAR",
         },
     }
     inspector = inspect(engine)
@@ -1226,6 +1242,7 @@ def create_respondent_session(
         fielding_link_id=fielding_link_id,
         status_code=None,
         entry_params=entry_params or {},
+        pid=str((entry_params or {}).get("pid") or "").strip(),
         current_page=0,
         started_at=now,
         last_seen_at=now,
@@ -1348,19 +1365,85 @@ def get_session_answers_map(db: Session, session_id: str) -> dict:
 
 def fielding_link_counts(db: Session, link_id: str) -> dict:
     """Per-link session tallies by Lucid/Cint status code: starts, completes (10),
-    terminates (20), security (30), overquota (40) — the field-monitor buckets."""
-    sessions = (
-        db.query(RespondentSessionDB)
+    terminates (20), security (30), overquota (40) — the field-monitor buckets.
+
+    One GROUP BY, not every session row pulled into Python: the field monitor
+    polls this for every link on the page."""
+    from sqlalchemy import func
+
+    by_status = dict(
+        db.query(RespondentSessionDB.status_code, func.count())
         .filter(RespondentSessionDB.fielding_link_id == link_id)
+        .group_by(RespondentSessionDB.status_code)
         .all()
     )
     return {
-        "starts": len(sessions),
-        "completes": sum(1 for s in sessions if s.status_code == 10),
-        "terminates": sum(1 for s in sessions if s.status_code == 20),
-        "security": sum(1 for s in sessions if s.status_code == 30),
-        "overquota": sum(1 for s in sessions if s.status_code == 40),
+        "starts": sum(by_status.values()),
+        "completes": by_status.get(10, 0),
+        "terminates": by_status.get(20, 0),
+        "security": by_status.get(30, 0),
+        "overquota": by_status.get(40, 0),
     }
+
+
+def count_completes(db: Session, link_id: str) -> int:
+    """Completes on a link, counted in SQL (the soft-launch gate runs per entry)."""
+    return (
+        db.query(RespondentSessionDB)
+        .filter(
+            RespondentSessionDB.fielding_link_id == link_id,
+            RespondentSessionDB.status_code == 10,
+        )
+        .count()
+    )
+
+
+def pid_already_finished(db: Session, link_id: str, pid: str) -> bool:
+    """Has this panel respondent already reached a terminal status on this link?"""
+    return (
+        db.query(RespondentSessionDB.id)
+        .filter(
+            RespondentSessionDB.fielding_link_id == link_id,
+            RespondentSessionDB.pid == pid,
+            RespondentSessionDB.status_code.isnot(None),
+        )
+        .first()
+        is not None
+    )
+
+
+def answers_by_session(db: Session, link_id: str) -> dict[str, dict]:
+    """Every session's answers on a link as {session_id: {qid: value}}, in ONE query.
+
+    Replaces one query per respondent: 2,001 queries for a 2,000-respondent
+    field report before this.
+    """
+    rows = (
+        db.query(RespondentAnswerDB.session_id, RespondentAnswerDB.qid, RespondentAnswerDB.value)
+        .join(RespondentSessionDB, RespondentSessionDB.id == RespondentAnswerDB.session_id)
+        .filter(RespondentSessionDB.fielding_link_id == link_id)
+        .all()
+    )
+    out: dict[str, dict] = {}
+    for session_id, qid, value in rows:
+        out.setdefault(session_id, {})[qid] = value
+    return out
+
+
+def backfill_session_pids() -> int:
+    """Fill `pid` on sessions created before the column existed. Idempotent.
+
+    Rows without a pid get '' so they are not re-examined on every boot.
+    """
+    db = SessionLocal()
+    try:
+        rows = db.query(RespondentSessionDB).filter(RespondentSessionDB.pid.is_(None)).all()
+        for row in rows:
+            row.pid = str((row.entry_params or {}).get("pid") or "").strip()
+        db.commit()
+        return len(rows)
+    finally:
+        db.close()
 
 
 def list_respondent_sessions(db: Session, fielding_link_id: str) -> list["RespondentSessionDB"]:

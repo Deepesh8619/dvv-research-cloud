@@ -38,6 +38,7 @@ from api.auth import UserRole, get_current_user, require_role
 from api.db import (
     UserDB,
     close_fielding_link,
+    count_completes,
     create_fielding_link,
     create_quota_cell,
     create_respondent_session,
@@ -56,6 +57,7 @@ from api.db import (
     list_questionnaires_for_study,
     list_quota_cells,
     list_respondent_sessions,
+    pid_already_finished,
     set_fielding_link_soft_launch,
     set_quota_cell_condition,
     set_respondent_session_status,
@@ -63,6 +65,7 @@ from api.db import (
     update_quota_cell_limit,
     upsert_respondent_answer,
 )
+from api.heavy import run_heavy
 from api.models import (
     DryRunRequest,
     FieldingLinkCreateRequest,
@@ -235,7 +238,7 @@ def _approved_questionnaire(db: Session, study_id: str):
     "/studies/{study_id}/fielding/links",
     response_model=FieldingLinkResponse,
 )
-async def create_link(
+def create_link(
     study_id: str,
     body: FieldingLinkCreateRequest | None = None,
     db: Session = Depends(get_db),
@@ -325,7 +328,7 @@ async def create_link(
 
 
 @router.post("/studies/{study_id}/fielding/dry-run")
-async def dry_run(
+def dry_run(
     study_id: str,
     body: DryRunRequest | None = None,
     db: Session = Depends(get_db),
@@ -367,7 +370,7 @@ async def dry_run(
         survey = SurveyDefinition.from_json(payload)
         cells = []
 
-    report = simulate(survey, cells, n=request.n, seed=request.seed)
+    report = run_heavy(simulate, survey, cells, n=request.n, seed=request.seed)
     logger.info(
         f"[{study_id}] Dry run by {user.name}: {report.n_respondents} respondents, "
         f"{report.dispositions}, {len(report.never_fired)} condition(s) never fired"
@@ -384,7 +387,7 @@ async def dry_run(
     "/studies/{study_id}/fielding/links",
     response_model=FieldingLinkListResponse,
 )
-async def list_links(
+def list_links(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -404,7 +407,7 @@ async def list_links(
     "/studies/{study_id}/fielding/links/{link_id}/close",
     response_model=FieldingLinkResponse,
 )
-async def close_link(
+def close_link(
     study_id: str,
     link_id: str,
     db: Session = Depends(get_db),
@@ -432,7 +435,7 @@ async def close_link(
     "/studies/{study_id}/fielding/links/{link_id}/soft-launch",
     response_model=FieldingLinkResponse,
 )
-async def set_soft_launch(
+def set_soft_launch(
     study_id: str,
     link_id: str,
     body: SoftLaunchRequest,
@@ -492,7 +495,7 @@ def _quotas_response(db: Session, link_id: str) -> QuotaCellsResponse:
     "/studies/{study_id}/fielding/links/{link_id}/quotas",
     response_model=QuotaCellsResponse,
 )
-async def create_quotas(
+def create_quotas(
     study_id: str,
     link_id: str,
     body: QuotaCellsCreateRequest,
@@ -515,7 +518,7 @@ async def create_quotas(
     "/studies/{study_id}/fielding/links/{link_id}/quotas",
     response_model=QuotaCellsResponse,
 )
-async def list_quotas(
+def list_quotas(
     study_id: str,
     link_id: str,
     db: Session = Depends(get_db),
@@ -530,7 +533,7 @@ async def list_quotas(
     "/studies/{study_id}/fielding/links/{link_id}/quotas/{quota_id}",
     response_model=QuotaCellResponse,
 )
-async def update_quota(
+def update_quota(
     study_id: str,
     link_id: str,
     quota_id: str,
@@ -585,7 +588,7 @@ def _resolve_session(db: Session, link, session_id: str):
 
 
 @router.get("/r/{token}", response_model=RespondentEntryResponse)
-async def enter_survey(token: str, request: Request, db: Session = Depends(get_db)):
+def enter_survey(token: str, request: Request, db: Session = Depends(get_db)):
     """Respondent entry: create a session and return the compiled SurveyJS JSON.
 
     A closed link returns a clean `status="closed"` payload (no session, empty
@@ -598,7 +601,6 @@ async def enter_survey(token: str, request: Request, db: Session = Depends(get_d
         return RespondentEntryResponse(session_id="", status="closed", surveyjs_json={})
 
     entry_params = dict(request.query_params)
-    sessions = list_respondent_sessions(db, link.id)
 
     # Soft-launch hold: once the launch batch is complete, stop admitting NEW
     # respondents so a scripting error surfaces at n=50 instead of n=800 — the
@@ -610,7 +612,7 @@ async def enter_survey(token: str, request: Request, db: Session = Depends(get_d
     # what a panel expects for "we can't use you right now" — and no session row
     # is written, so a hold never invents dispositions the field never had.
     limit = link.soft_launch_limit
-    if limit is not None and sum(1 for s in sessions if s.status_code == STATUS_COMPLETE) >= limit:
+    if limit is not None and count_completes(db, link.id) >= limit:
         return RespondentEntryResponse(
             session_id="",
             status="paused",
@@ -623,10 +625,7 @@ async def enter_survey(token: str, request: Request, db: Session = Depends(get_d
     # survey. Record the attempt with status 30 and hand back the terminal
     # payload (redirect_security substituted) instead of the questionnaire.
     pid = (entry_params.get("pid") or "").strip()
-    if pid and any(
-        s.status_code is not None and (s.entry_params or {}).get("pid") == pid
-        for s in sessions
-    ):
+    if pid and pid_already_finished(db, link.id, pid):
         session = create_respondent_session(db, link.id, entry_params=entry_params)
         set_respondent_session_status(db, session.id, STATUS_SECURITY)
         session = get_respondent_session(db, session.id)
@@ -665,7 +664,7 @@ def _terminal_payload(session) -> dict:
 
 
 @router.post("/r/{token}/sessions/{session_id}/answers")
-async def submit_answers(
+def submit_answers(
     token: str,
     session_id: str,
     body: RespondentAnswersRequest,
@@ -745,7 +744,7 @@ async def submit_answers(
 
 
 @router.post("/r/{token}/sessions/{session_id}/complete")
-async def complete_survey(
+def complete_survey(
     token: str,
     session_id: str,
     db: Session = Depends(get_db),
@@ -806,7 +805,7 @@ async def complete_survey(
     "/r/{token}/sessions/{session_id}",
     response_model=RespondentSessionResponse,
 )
-async def resume_session(
+def resume_session(
     token: str,
     session_id: str,
     db: Session = Depends(get_db),
