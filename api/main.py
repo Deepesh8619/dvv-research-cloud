@@ -5,11 +5,13 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from api.config import CORS_ORIGINS, LOG_LEVEL
+from api.config import CORS_ORIGINS, DATABASE_URL, LOG_LEVEL
 from api.db import init_db
+from api.licence import ALWAYS_OPEN
+from api.licence import load as load_licence
 
 # Setup logging
 logging.basicConfig(
@@ -29,7 +31,34 @@ app = FastAPI(
     description="End-to-end survey data processing pipeline",
 )
 
-# CORS
+# Refuses to boot on a real database without a valid licence (api/licence.py).
+LICENCE = load_licence(DATABASE_URL)
+if LICENCE:
+    logger.info(f"✅ Licensed to {LICENCE.client} until {LICENCE.expires}")
+
+
+@app.middleware("http")
+async def licence_gate(request, call_next):
+    """After the grace period, the management API stops; survey links do not."""
+    path = request.url.path
+    if (
+        LICENCE is not None
+        and path.startswith("/api/")
+        and not path.startswith(ALWAYS_OPEN)
+        and LICENCE.state() == "expired"
+    ):
+        return JSONResponse(
+            {
+                "detail": f"This DVV Research Cloud licence expired on "
+                f"{LICENCE.expires:%d %b %Y}. Contact DVV to renew. "
+                "Live survey links keep working."
+            },
+            status_code=402,
+        )
+    return await call_next(request)
+
+
+# CORS — registered after the licence gate so it wraps it (outermost).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -79,30 +108,31 @@ async def health():
     live yet?" was previously unanswerable without opening the Render dashboard
     — and on a free plan that redeploys on every push, it is the first thing
     worth checking when behaviour does not match the code in front of you.
-    Render injects RENDER_GIT_COMMIT automatically; locally it is absent and
+    Railway injects RAILWAY_GIT_COMMIT_SHA (Render: RENDER_GIT_COMMIT); locally it is absent and
     the field reads "unknown".
     """
     import os
 
     from src.ai.router import llm_key_presence
 
-    commit = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or ""
+    commit = (
+        os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+        or os.environ.get("RENDER_GIT_COMMIT")
+        or os.environ.get("GIT_COMMIT")
+        or ""
+    )
     return {
         "status": "ok",
         "service": "dvv-research-api",
         "commit": commit[:12] or "unknown",
+        # State + date only: the client name is not for a public endpoint.
+        "licence": (
+            {"state": LICENCE.state(), "expires": LICENCE.expires.isoformat()}
+            if LICENCE
+            else None
+        ),
         "llm_keys": llm_key_presence(),
     }
-
-
-# Root redirect
-@app.get("/")
-async def root():
-    """Redirect to API docs."""
-    return JSONResponse(
-        {"message": "DVV Research Cloud API", "docs": "/docs"},
-        status_code=200,
-    )
 
 
 # Import routes
@@ -153,11 +183,38 @@ except Exception as e:
     logger.warning(f"Routes not yet available: {e}")
 
 
-# Static files (React build - optional)
+def mount_web(target: FastAPI, dist: Path) -> None:
+    """Serve the React build from this same origin.
+
+    One origin means no CORS, no API URL baked into a bundle, and one deploy for
+    the whole product. `StaticFiles(html=True)` alone would 404 a deep link like
+    /r/<token> or /projects/x/fielding on refresh — for a respondent link a panel
+    hands out, that is the whole product — so unknown paths fall back to
+    index.html. Unknown /api paths stay a JSON 404, never the app shell.
+    """
+    root = dist.resolve()
+    target.mount("/assets", StaticFiles(directory=root / "assets"), name="assets")
+
+    @target.get("/{path:path}", include_in_schema=False)
+    async def spa(path: str):
+        if path.startswith("api/"):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        file = (root / path).resolve()
+        if path and file.is_file() and root in file.parents:  # no ../ escapes
+            return FileResponse(file)
+        return FileResponse(root / "index.html")
+
+
 web_build_path = Path(__file__).parent.parent / "web" / "dist"
-if web_build_path.exists():
-    app.mount("/", StaticFiles(directory=str(web_build_path), html=True), name="static")
+if (web_build_path / "index.html").exists():
+    mount_web(app, web_build_path)
     logger.info("✅ React static files mounted")
+else:
+
+    @app.get("/")
+    async def root():
+        """API-only run (no web build): point at the docs."""
+        return JSONResponse({"message": "DVV Research Cloud API", "docs": "/docs"})
 
 
 @app.on_event("startup")

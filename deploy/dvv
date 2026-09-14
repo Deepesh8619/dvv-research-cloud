@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Operate one client's DVV Research Cloud. Run from anywhere; acts on this directory.
+#
+#   ./dvv init <client-slug> <domain> <admin-email>   first-time setup, writes .env
+#   ./dvv up                                          start / apply .env changes
+#   ./dvv status                                      containers, health, licence
+#   ./dvv logs [service]                              follow logs
+#   ./dvv backup                                      back up now
+#   ./dvv restore <db-*.dump> [files-*.tgz]           restore (takes a backup first)
+#   ./dvv upgrade                                     backup, update, roll back if unhealthy
+set -euo pipefail
+cd "$(dirname "$0")"
+dc() { docker compose "$@"; }
+
+health() {  # 0 when the app answers /api/health from inside its container
+  dc exec -T app python -c "import urllib.request,sys; sys.stdout.write(urllib.request.urlopen('http://localhost:8000/api/health', timeout=5).read().decode())" 2>/dev/null
+}
+
+wait_healthy() {  # up to ~3 minutes: first boot builds indexes, pulls nothing
+  for _ in $(seq 36); do health >/dev/null && return 0; sleep 5; done
+  return 1
+}
+
+pull_model() {  # only when this client runs the local AI model
+  if grep -q '^COMPOSE_PROFILES=.*local-ai' .env; then
+    model=$(grep '^OLLAMA_EXTRACT_MODEL=' .env | cut -d= -f2); model=${model:-llama3.2:3b}
+    echo "Pulling local model $model (first time only; a few GB)..."
+    dc exec -T ollama ollama pull "$model"
+  fi
+}
+
+case "${1:-}" in
+  init)
+    [ $# -eq 4 ] || { echo "usage: ./dvv init <client-slug> <domain> <admin-email>"; exit 1; }
+    [ -e .env ] && { echo ".env already exists — refusing to overwrite a live client's secrets."; exit 1; }
+    rand() { openssl rand -base64 36 | tr -d '/+=' | cut -c1-"$1"; }
+    admin_pw=$(rand 20)
+    sed -e "s/^CLIENT_SLUG=.*/CLIENT_SLUG=$2/" \
+        -e "s/^DOMAIN=.*/DOMAIN=$3/" \
+        -e "s/^ADMIN_EMAIL=.*/ADMIN_EMAIL=$4/" \
+        -e "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=$admin_pw/" \
+        -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(rand 32)/" \
+        -e "s/^JWT_SECRET=.*/JWT_SECRET=$(rand 48)/" \
+        .env.example > .env
+    chmod 600 .env
+    echo "Wrote .env for $2. Owner login: $4 / $admin_pw  (shown once — store it)."
+    echo "Next: paste DVV_LICENCE into .env, choose the AI mode, then ./dvv up"
+    ;;
+  up)
+    dc up -d --build
+    if ! wait_healthy; then echo "App did not become healthy:"; dc logs --tail 60 app; exit 1; fi
+    pull_model
+    echo "Up. $(health)"
+    ;;
+  status)
+    dc ps
+    echo; health && echo || echo "app: NOT answering /api/health"
+    echo; ls -1t backups/db-*.dump 2>/dev/null | head -1 | sed 's/^/latest backup: /' || echo "latest backup: none yet"
+    ;;
+  logs)
+    dc logs -f --tail 100 "${@:2}"
+    ;;
+  backup)
+    dc exec -T backup bash /backup.sh once
+    ;;
+  restore)
+    [ -f "${2:-}" ] || { echo "usage: ./dvv restore backups/db-<stamp>.dump [backups/files-<stamp>.tgz]"; exit 1; }
+    echo "Safety backup of the current state first..."; dc exec -T backup bash /backup.sh once
+    dc stop app
+    trap 'dc start app' EXIT  # whatever happens below, never leave the app stopped
+    # pg_restore exits non-zero on harmless warnings too; report, don't abort.
+    dc exec -T db pg_restore -U dvv -d dvv --clean --if-exists --no-owner < "$2" \
+      || echo "pg_restore reported problems — read the output above before trusting this restore."
+    if [ -n "${3:-}" ]; then
+      dc run --rm --no-deps -T -v "$(cd "$(dirname "$3")" && pwd):/restore:ro" --entrypoint sh app \
+        -c "find /app/studies -mindepth 1 -delete && tar xzf /restore/$(basename "$3") -C /app/studies"
+    fi
+    trap - EXIT; dc start app
+    wait_healthy && echo "Restored and healthy." || { echo "Restored, but the app is not healthy:"; dc logs --tail 60 app; exit 1; }
+    ;;
+  upgrade)
+    echo "Backing up before upgrading..."; dc exec -T backup bash /backup.sh once
+    previous=$(git rev-parse HEAD)
+    git pull --ff-only
+    [ "$(git rev-parse HEAD)" = "$previous" ] && { echo "Already on the latest version."; exit 0; }
+    dc up -d --build app
+    if wait_healthy; then
+      echo "Upgraded $(git rev-parse --short "$previous") -> $(git rev-parse --short HEAD). $(health)"
+    else
+      # Schema changes are additive only (api/db.py:_ensure_new_columns), so
+      # the previous code runs fine against the upgraded database.
+      echo "New version is NOT healthy — rolling back to $(git rev-parse --short "$previous")."
+      dc logs --tail 60 app
+      git reset -q --hard "$previous" && dc up -d --build app && wait_healthy \
+        && echo "Rolled back; still on $(git rev-parse --short "$previous")." \
+        || echo "ROLLBACK ALSO UNHEALTHY — restore from backups/ with ./dvv restore"
+      exit 1
+    fi
+    ;;
+  *)
+    sed -n '2,11p' "$0"; exit 1
+    ;;
+esac

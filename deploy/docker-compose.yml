@@ -1,0 +1,90 @@
+# One client's complete DVV Research Cloud: web app + API, Postgres, HTTPS,
+# nightly backups, and (optionally) a local AI model. Nothing outside this file.
+#
+# Operated through ./dvv — see DEPLOY.md. Settings live in deploy/.env.
+
+name: dvv-${CLIENT_SLUG:?set CLIENT_SLUG in deploy/.env}
+
+services:
+  app:
+    build: ..
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://dvv:${POSTGRES_PASSWORD:?}@db:5432/dvv
+      PUBLIC_BASE_URL: https://${DOMAIN:?}
+      # Local model when the local-ai profile is on; otherwise nothing listens
+      # here, the attempt fails instantly and the cloud keys (if any) answer.
+      OLLAMA_HOST: http://ollama:11434
+    volumes:
+      - studies:/app/studies
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dvv
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: dvv
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dvv -d dvv"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Automatic HTTPS for ${DOMAIN}: certificates are fetched and renewed on
+  # their own once the domain's DNS points at this server.
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:?}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [app]
+
+  backup:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: dvv
+      PGPASSWORD: ${POSTGRES_PASSWORD:?}
+      PGDATABASE: dvv
+      BACKUP_HOUR: ${BACKUP_HOUR:-2}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./backup.sh:/backup.sh:ro
+      - studies:/studies:ro
+      - ./backups:/backups
+    entrypoint: ["bash", "/backup.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Enabled per client with COMPOSE_PROFILES=local-ai in deploy/.env.
+  ollama:
+    image: ollama/ollama
+    restart: unless-stopped
+    profiles: [local-ai]
+    volumes:
+      - ollama_models:/root/.ollama
+
+volumes:
+  pgdata:
+  studies:
+  caddy_data:
+  ollama_models:

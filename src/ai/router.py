@@ -790,10 +790,13 @@ def _run_chain(
             all_config_errors = False
             last_exc = BackendUnavailable(failures[-1])
             continue
-        # Cap Ollama's attempt so a hung local model can't stall the chain.
+        # Cap Ollama's attempt so a hung local model can't stall the chain —
+        # but only when something comes after it. For a local-only deployment
+        # Ollama IS the chain, and a CPU-served answer that takes 40s must be
+        # waited for, not cut off with nothing left to fall back to.
         attempt_timeout = (
             min(timeout, _OLLAMA_CHAIN_TIMEOUT)
-            if candidate["backend"] == "ollama"
+            if candidate["backend"] == "ollama" and candidate is not chain[-1]
             else timeout
         )
         try:

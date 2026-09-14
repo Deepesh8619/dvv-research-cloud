@@ -536,3 +536,35 @@ def test_fallback_models_can_be_disabled(monkeypatch):
     finally:
         monkeypatch.delenv("GROQ_FALLBACK_MODELS", raising=False)
         importlib.reload(router)
+
+
+def _timeouts_seen(monkeypatch, cloud_key: bool) -> dict[str, int]:
+    """Run one extraction and record the timeout each backend was given."""
+    for var in ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "HF_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    if cloud_key:
+        monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
+    else:
+        monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    seen: dict[str, int] = {}
+
+    def fake_http_json(request, timeout):
+        backend = "ollama" if "11434" in request.full_url else "cloud"
+        seen[backend] = timeout
+        if backend == "ollama":
+            return {"response": json.dumps({"answer": "local"})}
+        raise AssertionError("cloud should not be reached")
+
+    monkeypatch.setattr(router, "http_json", fake_http_json)
+    run_task("questionnaire.extract", "prompt", _SCHEMA, timeout=120)
+    return seen
+
+
+def test_a_local_only_deployment_waits_for_its_model(monkeypatch):
+    """Ollama is the whole chain: cutting it off at 30s leaves nothing to answer."""
+    assert _timeouts_seen(monkeypatch, cloud_key=False)["ollama"] == 120
+
+
+def test_a_local_model_with_a_cloud_fallback_is_still_capped(monkeypatch):
+    """A hung local model must not stall a request a cloud backend could answer."""
+    assert _timeouts_seen(monkeypatch, cloud_key=True)["ollama"] == 30
