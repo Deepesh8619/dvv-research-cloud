@@ -38,7 +38,7 @@ NARRATIVE_PROMPT = (
 
 
 def generate_narrative(result: CrosstabResult, timeout: int = 60) -> tuple[str, str]:
-    """Generate a headline and insight for one table via Claude."""
+    """Generate a headline and insight for one table via the model router (open models)."""
     table_lines = []
     for i, label in enumerate(result.row_labels):
         pcts = " | ".join(f"{result.col_pct[i, j]:.0f}%" for j in range(len(result.columns)))

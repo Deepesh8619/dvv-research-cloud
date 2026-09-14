@@ -160,7 +160,7 @@ class QuestionnaireDB(Base):
     definition_json = Column(Text, nullable=True)  # authoritative SurveyDefinition JSON string
     definition_path = Column(String, nullable=True)  # vestigial: ephemeral on-disk copy
     # Human-readable reason set when status flips to 'error' (e.g. the extractor's
-    # circuit-breaker message naming a missing ANTHROPIC_API_KEY). Surfaced by the
+    # circuit-breaker message naming a missing GROQ_API_KEY). Surfaced by the
     # status endpoint so a reviewer sees the root cause, not a bare 'error' (T16).
     error_detail = Column(String, nullable=True)
     # Per-question approval is tracked here (API-layer review state) rather than

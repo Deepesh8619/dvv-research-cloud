@@ -4,7 +4,7 @@ This is the second (LLM) stage of questionnaire ingestion. `questionnaire_loader
 turns a .docx/PDF into deterministic `QuestionChunk`s; this module turns each
 chunk into a structured `Question` via a three-step pipeline:
 
-    1. extract   — one schema-constrained LLM call per chunk (Claude via router)
+    1. extract   — one schema-constrained LLM call per chunk (open-weight model via router)
     2. validate  — deterministic, no LLM: duplicate codes, empty options,
                    self-referential / ambiguous routing
     3. verify    — a second grounded LLM call that audits the extraction against
@@ -93,7 +93,7 @@ _ROUTING_VERBATIM_KEY = "routing_verbatim"
 # pass, `verification_error` for a failed verify pass — each is
 # {"error_type": <exc class name>, "error_detail": <str(exc)>}. Preserved so a
 # reviewer (and the T8 navigator) sees the real root cause instead of an opaque
-# flag; str(BackendUnavailable("ANTHROPIC_API_KEY not set")) names it exactly.
+# flag; str(BackendUnavailable("GROQ_API_KEY not set")) names it exactly.
 _EXTRACTION_ERROR_KEY = "extraction_error"
 _VERIFICATION_ERROR_KEY = "verification_error"
 

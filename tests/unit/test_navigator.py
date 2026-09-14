@@ -7,7 +7,6 @@ import polars as pl
 import pytest
 
 from api.routes.chat import _make_executor, _run_sql
-from src.ai.navigator import navigate
 from src.core.models import DataMap, Variable, VarType
 
 
@@ -92,40 +91,6 @@ def test_live_table_with_filter(study_dir):
     assert result["table"]["columns"][0]["base"] == 20
 
 
-def test_navigate_agent_loop_executes_tools():
-    """Mocked model: first turn requests a tool, second turn answers."""
-    calls = []
-
-    def fake_claude(messages, system, timeout):
-        calls.append(messages)
-        if len(calls) == 1:
-            return {
-                "content": [
-                    {"type": "text", "text": "Let me check."},
-                    {
-                        "type": "tool_use",
-                        "id": "tu_1",
-                        "name": "query_data",
-                        "input": {"sql": "SELECT 1"},
-                    },
-                ]
-            }
-        return {"content": [{"type": "text", "text": "There are 40 respondents."}]}
-
-    executed = []
-
-    def executor(name, params):
-        executed.append((name, params))
-        return {"success": True, "rows": [{"n": 40}]}
-
-    with patch("src.ai.navigator._claude_messages", side_effect=fake_claude):
-        reply, tool_results = navigate("How many respondents?", "ctx", executor)
-
-    assert reply == "There are 40 respondents."  # final turn only, not the narration
-    assert executed == [("query_data", {"sql": "SELECT 1"})]
-    assert tool_results[0]["tool"] == "query_data"
-    # Second model call must contain the tool result
-    assert calls[1][-1]["content"][0]["type"] == "tool_result"
 
 
 def test_navigate_basic_executes_single_tool(study_dir):
@@ -392,15 +357,14 @@ def test_navigate_groq_drops_unrecoverable_call_without_poisoning_history():
             navigate_groq("some question", "ctx", executor)
 
 
-def test_navigate_openai_agent_loop():
-    """OpenAI fallback path: same agent loop as Groq (shared via
-    _run_agent_loop), driving the same tool executor with OpenAI-shaped
-    tool_calls."""
+def test_navigate_cerebras_agent_loop():
+    """Cerebras fallback path: the same agent loop as Groq (shared via
+    _run_agent_loop), driving the same tool executor with standard tool_calls."""
     from unittest.mock import patch as _patch
 
     calls = []
 
-    def fake_openai(messages, timeout, **kwargs):
+    def fake_cerebras(messages, timeout, **kwargs):
         calls.append(messages)
         if len(calls) == 1:
             return {
@@ -431,22 +395,22 @@ def test_navigate_openai_agent_loop():
         executed.append((name, params))
         return {"success": True, "rows": [{"n": 40}]}
 
-    with _patch("src.ai.navigator._openai_chat", side_effect=fake_openai):
-        from src.ai.navigator import navigate_openai
+    with _patch("src.ai.navigator._cerebras_chat", side_effect=fake_cerebras):
+        from src.ai.navigator import navigate_cerebras
 
-        reply, tool_results = navigate_openai("How many respondents?", "ctx", executor)
+        reply, tool_results = navigate_cerebras("How many respondents?", "ctx", executor)
 
     assert reply == "40 respondents."
     assert executed == [("query_data", {"sql": "SELECT COUNT(*) FROM data"})]
     assert tool_results[0]["tool"] == "query_data"
 
 
-def test_navigate_openai_requires_api_key(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    from src.ai.navigator import BackendUnavailable, _openai_chat
+def test_navigate_cerebras_requires_api_key(monkeypatch):
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    from src.ai.navigator import BackendUnavailable, _cerebras_chat
 
     with pytest.raises(BackendUnavailable):
-        _openai_chat([{"role": "user", "content": "hi"}], timeout=5)
+        _cerebras_chat([{"role": "user", "content": "hi"}], timeout=5)
 
 
 def test_parse_text_tool_calls_recovers_llama_markup():

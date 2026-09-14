@@ -18,14 +18,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
-from src.ai.router import (
-    USER_AGENT,
-    BackendUnavailable,
-    ModelOutputError,
-    http_json,
-    open_weights_only,
-    run_task,
-)
+from src.ai.router import USER_AGENT, BackendUnavailable, ModelOutputError, http_json, run_task
 from src.ai.specialists import (
     SPECIALISTS,
     is_compound_request,
@@ -33,16 +26,14 @@ from src.ai.specialists import (
     tools_for_specialist,
 )
 
-NAVIGATOR_MODEL = os.environ.get("NAVIGATOR_MODEL", "claude-haiku-4-5-20251001")
 # Groq's Llama-3.3-70B is the default cloud navigator: free tier, tuned for
 # tool use, cloud-fast. Overridable if the account is on a different model.
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-# Fallback cloud navigator when Groq fails (429 daily budget, or a malformed
-# tool call it can't recover from) — gpt-4o-mini's function-calling is far
-# more reliable than Llama-3.3's, at a per-token cost instead of Groq's free
-# daily budget. Only used as a fallback, so cost stays proportional to how
-# often Groq actually fails, not every question.
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+# Fallback navigator when Groq fails (429 daily budget, or a tool call it can't
+# recover from): the same open-weight family on a different provider, so a
+# Groq outage changes WHO answers, not what kind of model does. DVV uses
+# open-source models only — there is no proprietary vendor in this file.
+CEREBRAS_MODEL = os.environ.get("CEREBRAS_MODEL", "gpt-oss-120b")
 # Each turn re-sends context + tools + accumulated tool results, so turns are
 # the dominant cost against Groq's free 12k-tokens/min. 3 is enough for the
 # normal pattern (call a tool, read the result, answer) while capping runaway
@@ -379,40 +370,6 @@ TOOLS = [
 ]
 
 
-def _claude_messages(messages: list[dict], system: str, timeout: int) -> dict:
-    if open_weights_only():
-        # The NDA rule lives HERE, in the one function every proprietary call
-        # goes through, so no caller can route client text past it. Before this
-        # the data chat fell back to this vendor whenever its key was present.
-        raise BackendUnavailable(
-            "Anthropic is proprietary and LLM_OPEN_WEIGHTS_ONLY is on", config_error=True
-        )
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise BackendUnavailable("ANTHROPIC_API_KEY not set")
-    payload = json.dumps(
-        {
-            "model": NAVIGATOR_MODEL,
-            "max_tokens": 1500,
-            "system": system,
-            "messages": messages,
-            "tools": TOOLS,
-        }
-    ).encode()
-    request = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "User-Agent": USER_AGENT,
-        },
-    )
-    try:
-        return http_json(request, timeout)
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise BackendUnavailable(f"claude API unreachable: {exc}") from exc
 
 
 _KNOWN_TOOLS = {t["name"] for t in TOOLS}
@@ -472,7 +429,7 @@ def _repair_malformed_tool_call(fn: dict) -> dict | None:
 
 
 def _groq_tools(tool_names: list[str] | None = None) -> list[dict]:
-    """TOOLS in OpenAI/Groq function-calling shape (Anthropic uses input_schema).
+    """TOOLS in the standard function-calling shape Groq, Cerebras and Ollama accept.
 
     tool_names restricts the schema list to a specialist's owned tools (see
     src/ai/specialists.py) — before this, every call sent all 8 tool schemas
@@ -506,40 +463,41 @@ _RETRY_AFTER_RE = re.compile(r"try again in ([\d.]+)s")
 GROQ_MAX_RETRY_WAIT = 12.0
 
 
-def _groq_chat(
+def _compatible_chat(
+    url: str,
+    key_env: str,
+    model: str,
+    label: str,
     messages: list[dict],
     timeout: int,
     with_tools: bool = True,
     tools_subset: list[str] | None = None,
 ) -> dict:
-    """One Groq chat-completions call, with a single rate-limit retry.
+    """One chat-completions call to an open-model provider, with one 429 retry.
 
-    with_tools=False forces a plain text answer (no function calling) — used for
-    the final "now summarize what you found" turn so the loop always yields text.
-    tools_subset restricts the schemas sent to one specialist's tools (see
-    src/ai/specialists.py); None sends the full registry.
+    Groq and Cerebras both speak this request shape (the de-facto standard wire
+    format — it is a protocol, not a vendor). with_tools=False forces a plain
+    text answer, used for the final "now summarize" turn. tools_subset limits
+    the schemas to one specialist's tools; None sends the full registry.
     """
-    api_key = os.environ.get("GROQ_API_KEY")
+    api_key = os.environ.get(key_env)
     if not api_key:
-        raise BackendUnavailable("GROQ_API_KEY not set")
-    body_obj = {
-        "model": GROQ_MODEL,
-        "max_tokens": 1500,
-        "temperature": 0,
-        "messages": messages,
-    }
+        raise BackendUnavailable(f"{key_env} not set")
+    body_obj = {"model": model, "max_tokens": 1500, "temperature": 0, "messages": messages}
     if with_tools:
         body_obj["tools"] = _groq_tools(tools_subset)
-    payload = json.dumps(body_obj).encode()
     request = urllib.request.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
-        data=payload,
+        url,
+        data=json.dumps(body_obj).encode(),
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
             "User-Agent": USER_AGENT,
         },
     )
+    # A burst of questions can exhaust a free per-minute budget; the 429 says
+    # how long to wait. One short retry keeps the good model; a long backoff
+    # still falls through rather than hanging the request.
     for attempt in (1, 2):
         try:
             return http_json(request, timeout)
@@ -548,52 +506,21 @@ def _groq_chat(
             if attempt == 1 and wait and float(wait.group(1)) <= GROQ_MAX_RETRY_WAIT:
                 time.sleep(float(wait.group(1)) + 0.5)
                 continue
-            raise BackendUnavailable(f"Groq API unreachable: {exc}") from exc
+            raise BackendUnavailable(f"{label} API unreachable: {exc}") from exc
 
 
-def _openai_chat(
-    messages: list[dict],
-    timeout: int,
-    with_tools: bool = True,
-    tools_subset: list[str] | None = None,
-) -> dict:
-    """One OpenAI chat-completions call. Same request/response shape as
-    _groq_chat (Groq's API mimics OpenAI's), reused as the fallback backend
-    when Groq fails — no separate rate-limit retry logic here since this
-    path is only hit when Groq has already failed, not on every question.
-    """
-    if open_weights_only():
-        # The NDA rule lives HERE, in the one function every proprietary call
-        # goes through, so no caller can route client text past it. Before this
-        # the data chat fell back to this vendor whenever its key was present.
-        raise BackendUnavailable(
-            "OpenAI is proprietary and LLM_OPEN_WEIGHTS_ONLY is on", config_error=True
-        )
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise BackendUnavailable("OPENAI_API_KEY not set")
-    body_obj = {
-        "model": OPENAI_MODEL,
-        "max_tokens": 1500,
-        "temperature": 0,
-        "messages": messages,
-    }
-    if with_tools:
-        body_obj["tools"] = _groq_tools(tools_subset)
-    payload = json.dumps(body_obj).encode()
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "User-Agent": USER_AGENT,
-        },
+def _groq_chat(messages, timeout, with_tools=True, tools_subset=None) -> dict:
+    return _compatible_chat(
+        "https://api.groq.com/openai/v1/chat/completions", "GROQ_API_KEY", GROQ_MODEL,
+        "Groq", messages, timeout, with_tools, tools_subset,
     )
-    try:
-        return http_json(request, timeout)
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise BackendUnavailable(f"OpenAI API unreachable: {exc}") from exc
+
+
+def _cerebras_chat(messages, timeout, with_tools=True, tools_subset=None) -> dict:
+    return _compatible_chat(
+        "https://api.cerebras.ai/v1/chat/completions", "CEREBRAS_API_KEY", CEREBRAS_MODEL,
+        "Cerebras", messages, timeout, with_tools, tools_subset,
+    )
 
 
 def navigate_groq(
@@ -605,7 +532,7 @@ def navigate_groq(
     intent: str | None = None,
     specialist: str | None = None,
 ) -> tuple[str, list[dict]]:
-    """Full multi-tool agent loop on Groq (OpenAI-compatible message format).
+    """Full multi-tool agent loop on Groq (the standard chat-completions format).
 
     Args:
         intent: Optional intent classification (e.g., 'crosstab_analysis').
@@ -622,7 +549,9 @@ def navigate_groq(
     )
 
 
-def navigate_openai(
+
+
+def navigate_cerebras(
     question: str,
     context: str,
     execute_tool: Callable[[str, dict], dict],
@@ -631,21 +560,10 @@ def navigate_openai(
     intent: str | None = None,
     specialist: str | None = None,
 ) -> tuple[str, list[dict]]:
-    """Full multi-tool agent loop on OpenAI — same agent loop as navigate_groq
-    (OpenAI's chat completions API is what Groq's mimics), used as a fallback
-    when Groq fails: more reliable tool-calling than Llama-3.3 on Groq, at a
-    per-token cost instead of Groq's free daily budget.
-    """
+    """The same agent loop on Cerebras — the open-weight fallback when Groq fails."""
     return _run_agent_loop(
-        _openai_chat,
-        "OpenAI",
-        question,
-        context,
-        execute_tool,
-        history,
-        timeout,
-        intent,
-        specialist,
+        _cerebras_chat, "Cerebras", question, context, execute_tool, history, timeout,
+        intent, specialist,
     )
 
 
@@ -660,10 +578,9 @@ def _run_agent_loop(
     intent: str | None,
     specialist: str | None,
 ) -> tuple[str, list[dict]]:
-    """Shared multi-tool agent loop for any OpenAI-compatible chat backend
-    (Groq, OpenAI). chat_fn must accept (messages, timeout, with_tools=,
-    tools_subset=) and return an OpenAI-shaped {"choices": [...]} dict —
-    true for both today, since Groq's API mimics OpenAI's.
+    """Shared multi-tool agent loop for any chat-completions backend (Groq,
+    Cerebras). chat_fn must accept (messages, timeout, with_tools=,
+    tools_subset=) and return a {"choices": [...]} dict.
     """
     if specialist is None and intent is not None:
         specialist = specialist_for_intent(intent)
@@ -776,57 +693,6 @@ def _compact(result: dict, limit: int = 1500) -> str:
     return text[:limit] + ("…(truncated)" if len(text) > limit else "")
 
 
-def navigate(
-    question: str,
-    context: str,
-    execute_tool: Callable[[str, dict], dict],
-    history: list[dict] | None = None,
-    timeout: int = 90,
-) -> tuple[str, list[dict]]:
-    """Run the agent loop: question in, (reply text, executed tool results) out.
-
-    execute_tool(name, input) -> result dict; must set "success" and, on
-    failure, "error". Tool results are returned so the UI can render tables
-    inline exactly as the deterministic engines produced them.
-    """
-    system = SYSTEM_PROMPT.format(context=context)
-    messages = list(history or []) + [{"role": "user", "content": question}]
-    tool_results: list[dict] = []
-    reply_parts: list[str] = []
-
-    for _ in range(MAX_AGENT_TURNS):
-        body = _claude_messages(messages, system, timeout)
-        content = body.get("content", [])
-        tool_uses = [b for b in content if b.get("type") == "tool_use"]
-        # Each turn's text replaces the previous — intermediate turns are
-        # narration ("let me run that…"); the final no-tool turn is the answer.
-        turn_text = [b["text"] for b in content if b.get("type") == "text" and b["text"]]
-        if turn_text:
-            reply_parts = turn_text
-
-        if not tool_uses:
-            break
-
-        messages.append({"role": "assistant", "content": content})
-        result_blocks = []
-        for use in tool_uses:
-            result = execute_tool(use["name"], use.get("input", {}))
-            result["tool"] = use["name"]
-            result.setdefault("success", True)
-            tool_results.append(result)
-            result_blocks.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": use["id"],
-                    "content": _compact(result),
-                }
-            )
-        messages.append({"role": "user", "content": result_blocks})
-
-    reply = "\n\n".join(reply_parts).strip()
-    if not reply:
-        raise ModelOutputError("navigator returned no reply text")
-    return reply, tool_results
 
 
 # --- Basic mode: local model, single shot, one tool max ---

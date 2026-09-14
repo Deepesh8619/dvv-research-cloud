@@ -222,7 +222,7 @@ class QuestionnaireStatusResponse(BaseModel):
     validation_errors: list[str] = []
     extraction_summary: dict = {}
     # Set only when status == "error": the human-readable failure reason (e.g. a
-    # missing ANTHROPIC_API_KEY surfaced by the extractor circuit breaker). None
+    # missing GROQ_API_KEY surfaced by the extractor circuit breaker). None
     # otherwise, so a healthy questionnaire carries no stale error text.
     error_detail: str | None = None
     # Respondent theme slug from metadata (T24); None when unset. Lets the builder

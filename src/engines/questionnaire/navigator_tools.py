@@ -100,7 +100,7 @@ def get_question_details(
     }
     # Surface the T16 extraction/verification failure diagnostic at the top level
     # so an analyst asking the navigator "why did this question fail?" gets the
-    # real root cause (e.g. "ANTHROPIC_API_KEY not set"), not just a flag. Each is
+    # real root cause (e.g. "GROQ_API_KEY not set"), not just a flag. Each is
     # {"error_type", "error_detail"} stashed on Question.validation, or None.
     validation = question.validation or {}
     extraction_error = validation.get("extraction_error")

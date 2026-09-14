@@ -461,7 +461,7 @@ def _run_extraction(
             exc_info=True,
         )
         # Preserve the exception detail (e.g. the extractor circuit-breaker's
-        # message naming a missing ANTHROPIC_API_KEY) on the row so the status
+        # message naming a missing GROQ_API_KEY) on the row so the status
         # endpoint reports the real root cause instead of an opaque 'error' (T16).
         update_questionnaire_status(
             job_db,

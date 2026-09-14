@@ -26,7 +26,7 @@ from api.db import (
 )
 from api.intent_router import build_routed_context
 from api.models import ChatMessage, ChatRequest, ChatResponse, ChatToolCall
-from src.ai.navigator import navigate_basic, navigate_groq, navigate_openai
+from src.ai.navigator import navigate_basic, navigate_cerebras, navigate_groq
 from src.ai.router import BackendUnavailable, ModelOutputError
 from src.ai.specialists import specialist_for_intent
 from src.core.models import DataMap
@@ -570,23 +570,21 @@ def chat_with_study(
             request.message, context, executor, history=history, intent=intent
         )
     except (BackendUnavailable, ModelOutputError) as groq_exc:
-        # Fall back to OpenAI before dropping all the way to the weak local
-        # model — gpt-4o-mini's tool-calling is far more reliable than
-        # Llama-3.3's on Groq (this is the actual fix for malformed tool
-        # calls slipping through, not just a safety net), at a per-token
-        # cost that's only incurred when Groq has already failed.
-        logger.warning(f"[{study_id}] Groq unavailable ({groq_exc}); trying OpenAI")
+        # Same open-weight model family on a second provider before dropping to
+        # the weak local model: a Groq quota or outage changes who answers, not
+        # the quality of the answer. Open-source models only, by DVV policy.
+        logger.warning(f"[{study_id}] Groq unavailable ({groq_exc}); trying Cerebras")
         try:
-            reply, tool_results = navigate_openai(
+            reply, tool_results = navigate_cerebras(
                 request.message, context, executor, history=history, intent=intent
             )
-        except (BackendUnavailable, ModelOutputError) as openai_exc:
-            # Degrade to the local single-shot model: slower and simpler, but
-            # the demo keeps answering with zero API credits and data never
-            # leaves the machine. (Only reachable in local dev — Ollama
-            # can't run on Render, so this branch is a graceful no-op there.)
+        except (BackendUnavailable, ModelOutputError) as cerebras_exc:
+            # Degrade to the local single-shot model: slower and simpler, but it
+            # keeps answering with zero API credits and data never leaves the
+            # server. Live when the client's bundle runs the local-ai profile;
+            # otherwise it fails instantly and the message below explains why.
             logger.warning(
-                f"[{study_id}] OpenAI also unavailable ({openai_exc}); trying basic mode"
+                f"[{study_id}] Cerebras also unavailable ({cerebras_exc}); trying basic mode"
             )
             try:
                 reply, tool_results = navigate_basic(
@@ -600,7 +598,7 @@ def chat_with_study(
                 logger.warning(f"[{study_id}] Basic navigator also unavailable: {basic_exc}")
                 fallback = (
                     "The navigator can't reach any AI backend right now "
-                    f"(Groq: {groq_exc} · OpenAI: {openai_exc} · local: {basic_exc}). "
+                    f"(Groq: {groq_exc} · Cerebras: {cerebras_exc} · local: {basic_exc}). "
                     "The Tables tab still has every computed table."
                 )
                 assistant_msg = create_chat_message(db, study_id, "assistant", fallback)
