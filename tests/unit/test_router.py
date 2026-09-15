@@ -478,3 +478,13 @@ def test_no_proprietary_ai_vendor_is_reachable_from_the_code():
     assert offenders == []
     backends = {route["backend"] for route in router.DEFAULT_ROUTES.values()}
     assert backends <= {"auto", "ollama", "groq", "cerebras", "huggingface"}
+
+
+def test_the_network_guard_covers_every_by_name_import():
+    """conftest must refuse the network in the navigator too, not only the router."""
+    import urllib.error
+
+    from src.ai import navigator
+
+    with pytest.raises(urllib.error.URLError, match="network disabled in tests"):
+        navigator.http_json(object(), 1)

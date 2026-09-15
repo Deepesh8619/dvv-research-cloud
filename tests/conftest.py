@@ -16,11 +16,19 @@ fictional one. A test that genuinely needs a canned response patches
 
 from __future__ import annotations
 
+import sys
 import urllib.error
 
 import pytest
 
+import src.ai.navigator  # noqa: F401 - loaded now so its by-name copy is covered below
 import src.ai.router
+
+# The real transport, captured before any test patches it. Modules that did
+# `from src.ai.router import http_json` hold their OWN reference to this
+# function; patching only `src.ai.router.http_json` left the navigator (the
+# data chat, the copilot) free to reach the real network.
+_REAL_HTTP_JSON = src.ai.router.http_json
 
 
 @pytest.fixture(autouse=True)
@@ -33,4 +41,8 @@ def _no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch)
     def _refuse(req, timeout):  # noqa: ARG001 - signature must match
         raise urllib.error.URLError("network disabled in tests")
 
-    monkeypatch.setattr(src.ai.router, "http_json", _refuse)
+    for name, module in list(sys.modules.items()):
+        if name.startswith(("src.", "api.")) and (
+            getattr(module, "http_json", None) is _REAL_HTTP_JSON
+        ):
+            monkeypatch.setattr(module, "http_json", _refuse)
