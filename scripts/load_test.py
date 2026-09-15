@@ -150,10 +150,12 @@ def main() -> None:
                "ADMIN_PASSWORD": os.environ.get("ADMIN_PASSWORD", "load-admin"),
                "DATABASE_URL": os.environ.get("DATABASE_URL", f"sqlite:///{tmp}/load.db")}
         subprocess.run([sys.executable, "-c", SEED], env=env, cwd=ROOT, check=True)
+        log_path = Path(tmp) / "server.log"
         server = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "api.main:app", "--port", str(port),
              "--log-level", "warning"], env=env, cwd=ROOT,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            stdout=log_path.open("w"), stderr=subprocess.STDOUT)
+        print(f"server log: {log_path}")
         a.base_url, a.email, a.password, a.study = (
             f"http://127.0.0.1:{port}", "load@local.test", "load-pw", "load")
         print(f"local server, database: {env['DATABASE_URL'].split('@')[-1]}")
