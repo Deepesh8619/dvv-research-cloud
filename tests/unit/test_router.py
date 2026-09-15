@@ -477,7 +477,7 @@ def test_no_proprietary_ai_vendor_is_reachable_from_the_code():
     ]
     assert offenders == []
     backends = {route["backend"] for route in router.DEFAULT_ROUTES.values()}
-    assert backends <= {"auto", "ollama", "groq", "cerebras", "huggingface"}
+    assert backends <= {"auto", "ollama", "bedrock", "groq", "cerebras", "huggingface"}
 
 
 def test_the_network_guard_covers_every_by_name_import():
@@ -488,3 +488,58 @@ def test_the_network_guard_covers_every_by_name_import():
 
     with pytest.raises(urllib.error.URLError, match="network disabled in tests"):
         navigator.http_json(object(), 1)
+
+
+
+# --- Amazon Bedrock: the in-region provider on AWS ---------------------------
+
+
+def test_bedrock_leads_the_cloud_providers_when_its_key_is_set(monkeypatch):
+    monkeypatch.setenv("BEDROCK_API_KEY", "bk")
+    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    order = list(dict.fromkeys(c["backend"] for c in _extraction_chain()))
+    assert order == ["ollama", "bedrock", "groq"]
+
+
+def test_bedrock_is_called_in_the_configured_region_with_its_key(monkeypatch):
+    monkeypatch.setenv("BEDROCK_API_KEY", "bk-secret")
+    monkeypatch.setenv("BEDROCK_REGION", "eu-central-1")
+    for var in ("GROQ_API_KEY", "CEREBRAS_API_KEY", "HF_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    seen = {}
+
+    def fake(request, timeout):
+        if "11434" in request.full_url:
+            raise urllib.error.URLError("no local model")
+        seen["url"] = request.full_url
+        seen["auth"] = request.get_header("Authorization")
+        seen["model"] = json.loads(request.data)["model"]
+        return _tool_call_body(json.dumps({"answer": "ok"}))
+
+    monkeypatch.setattr(router, "http_json", fake)
+    resp = run_task("questionnaire.extract", "prompt", _SCHEMA)
+    assert resp.backend == "bedrock"
+    assert seen["url"] == (
+        "https://bedrock-runtime.eu-central-1.amazonaws.com/openai/v1/chat/completions"
+    )
+    assert seen["auth"] == "Bearer bk-secret"
+    assert seen["model"] == "openai.gpt-oss-120b"
+
+
+def test_the_bedrock_endpoint_can_be_switched_without_code(monkeypatch):
+    monkeypatch.setenv("BEDROCK_BASE_URL", "https://bedrock-mantle.ap-south-1.api.aws/v1/")
+    assert router.bedrock_chat_url() == (
+        "https://bedrock-mantle.ap-south-1.api.aws/v1/chat/completions"
+    )
+
+
+def test_the_copilot_tries_bedrock_first(monkeypatch):
+    from src.ai import copilot
+
+    monkeypatch.setenv("BEDROCK_API_KEY", "bk")
+    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    labels = [p[0] for p in copilot._providers()]
+    assert labels[:2] == ["Bedrock", "Groq"]
+    assert labels[-1] == "local model"

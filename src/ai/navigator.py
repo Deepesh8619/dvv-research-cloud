@@ -515,6 +515,16 @@ def _groq_chat(messages, timeout, with_tools=True, tools_subset=None) -> dict:
     )
 
 
+def _bedrock_chat(messages, timeout, with_tools=True, tools_subset=None) -> dict:
+    from src.ai.router import bedrock_chat_url
+
+    return _compatible_chat(
+        bedrock_chat_url(), "BEDROCK_API_KEY",
+        os.environ.get("BEDROCK_MODEL", "openai.gpt-oss-120b"),
+        "Bedrock", messages, timeout, with_tools, tools_subset,
+    )
+
+
 def _cerebras_chat(messages, timeout, with_tools=True, tools_subset=None) -> dict:
     return _compatible_chat(
         "https://api.cerebras.ai/v1/chat/completions", "CEREBRAS_API_KEY", CEREBRAS_MODEL,
@@ -548,6 +558,22 @@ def navigate_groq(
     )
 
 
+
+
+def navigate_bedrock(
+    question: str,
+    context: str,
+    execute_tool: Callable[[str, dict], dict],
+    history: list[dict] | None = None,
+    timeout: int = 60,
+    intent: str | None = None,
+    specialist: str | None = None,
+) -> tuple[str, list[dict]]:
+    """The same agent loop on Amazon Bedrock, in the client's own AWS region."""
+    return _run_agent_loop(
+        _bedrock_chat, "Bedrock", question, context, execute_tool, history, timeout,
+        intent, specialist,
+    )
 
 
 def navigate_cerebras(

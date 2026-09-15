@@ -26,7 +26,12 @@ from api.db import (
 )
 from api.intent_router import build_routed_context
 from api.models import ChatMessage, ChatRequest, ChatResponse, ChatToolCall
-from src.ai.navigator import navigate_basic, navigate_cerebras, navigate_groq
+from src.ai.navigator import (
+    navigate_basic,
+    navigate_bedrock,
+    navigate_cerebras,
+    navigate_groq,
+)
 from src.ai.router import BackendUnavailable, ModelOutputError
 from src.ai.specialists import specialist_for_intent
 from src.core.models import DataMap
@@ -561,53 +566,51 @@ def chat_with_study(
         if m.id != user_msg.id and m.content
     ]
 
-    try:
-        reply, tool_results = navigate_groq(
-            request.message, context, executor, history=history, intent=intent
-        )
-    except (BackendUnavailable, ModelOutputError) as groq_exc:
-        # Same open-weight model family on a second provider before dropping to
-        # the weak local model: a Groq quota or outage changes who answers, not
-        # the quality of the answer. Open-source models only, by DVV policy.
-        logger.warning(f"[{study_id}] Groq unavailable ({groq_exc}); trying Cerebras")
+    # Open-source models only, in order: Bedrock (in-region), Groq, Cerebras —
+    # the same model family everywhere, so a quota or outage changes who
+    # answers, not the quality — then the local single-shot model, which keeps
+    # answering with no API at all when the bundle runs the local-ai profile.
+    reply, tool_results, failures = None, [], []
+    for label, navigate in (
+        ("Bedrock", navigate_bedrock),
+        ("Groq", navigate_groq),
+        ("Cerebras", navigate_cerebras),
+    ):
         try:
-            reply, tool_results = navigate_cerebras(
+            reply, tool_results = navigate(
                 request.message, context, executor, history=history, intent=intent
             )
-        except (BackendUnavailable, ModelOutputError) as cerebras_exc:
-            # Degrade to the local single-shot model: slower and simpler, but it
-            # keeps answering with zero API credits and data never leaves the
-            # server. Live when the client's bundle runs the local-ai profile;
-            # otherwise it fails instantly and the message below explains why.
-            logger.warning(
-                f"[{study_id}] Cerebras also unavailable ({cerebras_exc}); trying basic mode"
+            break
+        except (BackendUnavailable, ModelOutputError) as exc:
+            failures.append(f"{label}: {exc}")
+    if reply is None:
+        logger.warning(f"[{study_id}] Cloud models unavailable ({failures}); trying basic mode")
+        try:
+            reply, tool_results = navigate_basic(
+                request.message,
+                _basic_context(study, datamap, deck, request.message),
+                executor,
+                intent=intent,
             )
-            try:
-                reply, tool_results = navigate_basic(
-                    request.message,
-                    _basic_context(study, datamap, deck, request.message),
-                    executor,
-                    intent=intent,
-                )
-                reply += "\n\n_(basic local mode)_"
-            except (BackendUnavailable, ModelOutputError) as basic_exc:
-                logger.warning(f"[{study_id}] Basic navigator also unavailable: {basic_exc}")
-                fallback = (
-                    "The navigator can't reach any AI backend right now "
-                    f"(Groq: {groq_exc} · Cerebras: {cerebras_exc} · local: {basic_exc}). "
-                    "The Tables tab still has every computed table."
-                )
-                assistant_msg = create_chat_message(db, study_id, "assistant", fallback)
-                return ChatResponse(
-                    message=ChatMessage(
-                        id=assistant_msg.id,
-                        role="assistant",
-                        content=fallback,
-                        created_at=assistant_msg.created_at,
-                    ),
-                    tool_results=[],
-                    conversation_id=study_id,
-                )
+            reply += "\n\n_(basic local mode)_"
+        except (BackendUnavailable, ModelOutputError) as basic_exc:
+            logger.warning(f"[{study_id}] Basic navigator also unavailable: {basic_exc}")
+            fallback = (
+                "The navigator can't reach any AI backend right now "
+                f"({' · '.join(failures)} · local: {basic_exc}). "
+                "The Tables tab still has every computed table."
+            )
+            assistant_msg = create_chat_message(db, study_id, "assistant", fallback)
+            return ChatResponse(
+                message=ChatMessage(
+                    id=assistant_msg.id,
+                    role="assistant",
+                    content=fallback,
+                    created_at=assistant_msg.created_at,
+                ),
+                tool_results=[],
+                conversation_id=study_id,
+            )
 
     executed = [
         ChatToolCall(tool=r.get("tool", "unknown"), params={}) for r in tool_results

@@ -424,6 +424,33 @@ def _groq_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
     )
 
 
+def bedrock_chat_url() -> str:
+    """Bedrock's chat-completions URL for the configured region.
+
+    Defaults to the bedrock-runtime endpoint AWS recommends; BEDROCK_BASE_URL
+    overrides it (e.g. the bedrock-mantle endpoint) without a code change.
+    """
+    region = os.environ.get("BEDROCK_REGION", "ap-south-1")
+    base = os.environ.get(
+        "BEDROCK_BASE_URL", f"https://bedrock-runtime.{region}.amazonaws.com/openai/v1"
+    )
+    return base.rstrip("/") + "/chat/completions"
+
+
+def _bedrock_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
+    """Structured extraction via Amazon Bedrock, in the client's own AWS region.
+
+    Authenticated with a Bedrock API key belonging to that client's app
+    identity, which may invoke this one model and nothing else.
+    """
+    api_key = os.environ.get("BEDROCK_API_KEY")
+    if not api_key:
+        raise BackendUnavailable("BEDROCK_API_KEY not set", config_error=True)
+    return _openai_compatible_generate(
+        bedrock_chat_url(), api_key, model, prompt, schema, timeout, "bedrock"
+    )
+
+
 def _cerebras_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
     """Structured extraction via Cerebras' OpenAI-compatible API.
 
@@ -493,6 +520,7 @@ def _huggingface_generate(model: str, prompt: str, schema: dict, timeout: int) -
 # health/startup preflight so a missing key is caught at deploy — not at the
 # first client upload (the production incident this preflight exists to prevent).
 _LLM_KEY_ENV_VARS = (
+    "BEDROCK_API_KEY",
     "GROQ_API_KEY",
     "CEREBRAS_API_KEY",
     "HF_TOKEN",
@@ -516,6 +544,8 @@ def llm_key_presence() -> dict[str, bool]:
 # open-source models only; there is no proprietary vendor in this module.
 _EXTRACTION_MODELS = {
     "ollama": os.environ.get("OLLAMA_EXTRACT_MODEL", "llama3.2:3b"),
+    # The same open-weight model, served inside the client's AWS region.
+    "bedrock": os.environ.get("BEDROCK_MODEL", "openai.gpt-oss-120b"),
     # Groq's catalog is entirely open-weight. gpt-oss-120b (Apache 2.0) is the
     # default because it is both cheaper and stronger on schema-constrained
     # extraction than the llama-3.3-70b it replaces; override per-deployment
@@ -568,7 +598,7 @@ GROQ_FALLBACK_MODELS = [
 def _extraction_chain() -> list[dict[str, str]]:
     """Ordered backend fallback for judgment-heavy extraction: local first.
 
-    The chain is **Ollama → Groq → Cerebras → Hugging Face**, open-weight models
+    The chain is **Ollama → Bedrock → Groq → Cerebras → Hugging Face**, open-weight models
     only: the private local model first, then each cloud provider whose key is
     set (Ollama is always attempted — it fails fast when nothing listens).
     `run_task` walks this list, escalating on any BackendUnavailable or
@@ -579,6 +609,10 @@ def _extraction_chain() -> list[dict[str, str]]:
     chain: list[dict[str, str]] = [
         {"backend": "ollama", "model": _EXTRACTION_MODELS["ollama"]}
     ]
+    # Bedrock first among the clouds: in-region (the NDA story), paid, no free-tier
+    # rate limits. Groq and Cerebras remain as fallbacks when their keys are set.
+    if keys.get("BEDROCK_API_KEY"):
+        chain.append({"backend": "bedrock", "model": _EXTRACTION_MODELS["bedrock"]})
     if keys.get("GROQ_API_KEY"):
         primary = _EXTRACTION_MODELS["groq"]
         chain.append({"backend": "groq", "model": primary})
@@ -606,7 +640,7 @@ def run_task(
     route = (routes or DEFAULT_ROUTES).get(task)
     if route is None:
         raise KeyError(f"no route configured for task: {task}")
-    # "auto" defers to the Ollama → Groq → Cerebras → Hugging Face chain,
+    # "auto" defers to the Ollama → Bedrock → Groq → Cerebras → Hugging Face chain,
     # trying each configured backend until one succeeds.
     if route["backend"] == "auto":
         return _run_chain(_extraction_chain(), prompt, schema, timeout)
@@ -623,6 +657,8 @@ def _run_one(
         content = _groq_generate(model, prompt, schema, timeout)
     elif backend == "cerebras":
         content = _cerebras_generate(model, prompt, schema, timeout)
+    elif backend == "bedrock":
+        content = _bedrock_generate(model, prompt, schema, timeout)
     elif backend == "huggingface":
         content = _huggingface_generate(model, prompt, schema, timeout)
     else:
@@ -652,7 +688,7 @@ def _run_chain(
     if not chain:
         raise BackendUnavailable(
             "no AI backend available: run the local-ai profile (Ollama) or set "
-            "GROQ_API_KEY / CEREBRAS_API_KEY",
+            "BEDROCK_API_KEY / GROQ_API_KEY / CEREBRAS_API_KEY",
             config_error=True,
         )
     last_exc: Exception | None = None

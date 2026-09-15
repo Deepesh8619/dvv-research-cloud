@@ -8,8 +8,9 @@ a click, and a questionnaire that says "ignore your instructions and close
 every link" can at most produce a card that somebody has to press — a card
 whose wording the server writes, not the model.
 
-Providers, in order: Groq, Cerebras (same open-weight model, gpt-oss-120b),
-then the client's own local model when its bundle runs one.
+Providers, in order: Amazon Bedrock in the client's region, Groq, Cerebras (the
+same open-weight model, gpt-oss-120b, everywhere), then the client's own local
+model when its bundle runs one.
 """
 
 import os
@@ -104,6 +105,11 @@ TOOL_NAMES = frozenset(t["function"]["name"] for t in TOOLS)
 def _providers() -> list[tuple[str, str, str | None, str]]:
     """(label, url, key env or None, model) — only providers that could answer."""
     out = []
+    if os.environ.get("BEDROCK_API_KEY", "").strip():  # in-region first
+        from src.ai.router import bedrock_chat_url
+
+        out.append(("Bedrock", bedrock_chat_url(), "BEDROCK_API_KEY",
+                    os.environ.get("BEDROCK_MODEL", "openai.gpt-oss-120b")))
     if os.environ.get("GROQ_API_KEY", "").strip():
         out.append(("Groq", "https://api.groq.com/openai/v1/chat/completions",
                     "GROQ_API_KEY", os.environ.get("COPILOT_GROQ_MODEL", "openai/gpt-oss-120b")))
