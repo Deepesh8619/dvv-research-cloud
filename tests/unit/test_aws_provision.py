@@ -27,7 +27,7 @@ case "$1 $2" in
   "lightsail get-bundles") echo "medium_3_0 24.0 2" ;;
   "lightsail get-instance-state") echo running ;;
   "lightsail get-static-ip") echo 13.1.2.3 ;;
-  "iam create-service-specific-credential") echo BEDROCK-KEY-XYZ ;;
+  "iam create-service-specific-credential") echo "${BEDROCK_KEY_OUT:-BEDROCK-KEY-XYZ}" ;;
   "iam create-access-key") printf 'AKIAFAKE\tSECRETFAKE\n' ;;
 esac
 exit 0
@@ -43,10 +43,12 @@ def run(tmp_path):
     calls = tmp_path / "calls.txt"
     out_dir = ROOT / "deploy" / "aws" / "out"
 
-    def _run(*args, exists=False):
+    def _run(*args, exists=False, key_out=None):
         calls.write_text("")
         env = {**os.environ, "PATH": f"{fake.parent}:{os.environ['PATH']}",
                "CALLS": str(calls), "EXISTS": "1" if exists else "0"}
+        if key_out is not None:
+            env["BEDROCK_KEY_OUT"] = key_out
         proc = subprocess.run(["bash", str(SCRIPT), *args], env=env, capture_output=True,
                               text=True, timeout=60)
         return proc, calls.read_text().splitlines()
@@ -89,7 +91,17 @@ def test_a_first_run_creates_everything_with_least_privilege(run):
     text = secrets.read_text()
     assert "BEDROCK_API_KEY=BEDROCK-KEY-XYZ" in text
     assert "AWS_SECRET_ACCESS_KEY=SECRETFAKE" in text
-    assert "--credential-age-days 90" in _made(calls, "iam create-service-specific-credential")[0]
+    key_call = _made(calls, "iam create-service-specific-credential")[0]
+    assert "--credential-age-days 90" in key_call
+    assert "ServiceCredentialSecret" in key_call  # the field AWS actually returns it in
+
+
+def test_an_empty_bedrock_key_stops_the_run_instead_of_saving_none(run):
+    """Happened for real: the wrong response field gave 'None', written as the key."""
+    proc, _ = run("acme", "--alert-email", "ops@dvv.test", key_out="None")
+    assert proc.returncode != 0
+    assert "came back empty" in proc.stdout
+    assert not (ROOT / "deploy" / "aws" / "out" / "acme.env").exists()
 
 
 def test_dry_run_changes_nothing(run):

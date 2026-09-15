@@ -126,9 +126,14 @@ change lightsail put-instance-public-ports --region "$region" --instance-name "$
 if [ $dry = 0 ] && [ "$new_keys" = 1 ]; then
   say "Keys (shown nowhere else — written to deploy/aws/out/${client}.env)"
   mkdir -p out && umask 077
+  # The key is returned ONCE, in ServiceCredentialSecret (verified live; the
+  # docs' "ServiceApiKeyValue" came back empty and the text output said "None").
   bedrock_key=$(aws iam create-service-specific-credential --user-name "$user" \
     --service-name bedrock.amazonaws.com --credential-age-days 90 \
-    --query 'ServiceSpecificCredential.ServiceApiKeyValue' --output text)
+    --query 'ServiceSpecificCredential.ServiceCredentialSecret' --output text)
+  case "$bedrock_key" in
+    ""|None) echo "  Bedrock key came back empty — nothing written. Delete it in IAM and re-run."; exit 1 ;;
+  esac
   read -r key_id secret <<<"$(aws iam create-access-key --user-name "$user" \
     --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text)"
   cat > "out/${client}.env" <<ENV
