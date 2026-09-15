@@ -1,6 +1,7 @@
 """Database setup and models."""
 
 import logging
+import os
 import secrets
 from datetime import UTC, datetime
 
@@ -32,9 +33,18 @@ _is_sqlite = DATABASE_URL.startswith("sqlite")
 # transparently replaces a dead one. pool_recycle retires connections before
 # the provider does, so the pre_ping rarely has to fire at all. Neither applies
 # to SQLite, which has no server to disconnect from.
+# Pool size must match how many requests run at once, or requests queue for a
+# connection and fail after pool_timeout. Each web process runs up to 40 sync
+# handlers (the thread pool), and SQLAlchemy's default pool is only 5 + 10
+# overflow = 15 — under load, 25 requests would stand waiting on a connection
+# the database could easily have given them. Postgres' own ceiling
+# (max_connections, set in deploy/docker-compose.yml) must stay above the sum.
 _pool_kwargs: dict = {} if _is_sqlite else {
     "pool_pre_ping": True,
     "pool_recycle": 280,  # under Neon's ~5-minute idle suspend
+    "pool_size": int(os.getenv("DB_POOL_SIZE", "20")),
+    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "20")),
+    "pool_timeout": 10,  # fail in 10 s with a clear error, not a 30 s hang
 }
 engine = create_engine(DATABASE_URL, connect_args=_connect_args, **_pool_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
