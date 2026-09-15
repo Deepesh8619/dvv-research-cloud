@@ -77,6 +77,25 @@ services:
       db:
         condition: service_healthy
 
+  # Off-server copies of the nightly backups, in the client's S3 folder.
+  # Enabled with COMPOSE_PROFILES=offsite (or local-ai,offsite) in deploy/.env.
+  # Gets only the variables it needs — not the app's whole environment.
+  offsite:
+    image: amazon/aws-cli
+    restart: unless-stopped
+    profiles: [offsite]
+    entrypoint: ["bash", "/offsite.sh"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-ap-south-1}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      CLIENT_SLUG: ${CLIENT_SLUG}
+      BACKUP_HOUR: ${BACKUP_HOUR:-2}
+    volumes:
+      - ./offsite.sh:/offsite.sh:ro
+      - ./backups:/backups
+
   # Enabled per client with COMPOSE_PROFILES=local-ai in deploy/.env.
   ollama:
     image: ollama/ollama

@@ -24,3 +24,4 @@ docs/
 # Per-client deployment state: secrets and the client's own data. Never in an image.
 **/.env
 deploy/backups/
+deploy/aws/out/

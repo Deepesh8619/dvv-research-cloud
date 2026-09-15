@@ -5,6 +5,9 @@ Postgres, HTTPS, nightly backups, and optionally a local AI model — all define
 in `deploy/docker-compose.yml`, all operated with `deploy/dvv`. Nothing runs on
 any outside platform; the server is plain rented compute.
 
+**On AWS:** follow [deploy/aws/README.md](deploy/aws/README.md) — one script sets up the
+account's budget, backup bucket, per-client identity and server.
+
 ## Server size
 
 | Client's AI mode | Server |

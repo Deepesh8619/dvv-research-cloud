@@ -117,7 +117,7 @@ sv = SurveyDefinition(study_id="load", title="Load", source="authored", status="
                       questions=qs)
 if not s.query(UserDB).filter(UserDB.email == "load@local.test").first():
     s.add(UserDB(id="u_load", email="load@local.test", name="Load", role="owner",
-                 is_active=True, created_at=now, password_hash=hash_password("load-pw")))
+                 is_active=True, created_at=now, password_hash=hash_password("LOAD_PASSWORD")))
 if not s.query(StudyDB).filter(StudyDB.id == "load").first():
     s.add(StudyDB(id="load", client_name="Load test", status="classifying", created_at=now,
                   updated_at=now, study_metadata={}, approval_chain={}))
@@ -129,6 +129,25 @@ s.commit()
 '''.replace("N_QUESTIONS", str(N_QUESTIONS))
 
 
+CLEANUP = r'''
+from api.db import (SessionLocal, StudyDB, QuestionnaireDB, UserDB, FieldingLinkDB,
+                    RespondentSessionDB, RespondentAnswerDB)
+s = SessionLocal()
+links = s.query(FieldingLinkDB).filter(FieldingLinkDB.study_id == "load").all()
+n = 0
+for ln in links:
+    for rs in s.query(RespondentSessionDB).filter(RespondentSessionDB.fielding_link_id == ln.id):
+        s.query(RespondentAnswerDB).filter(RespondentAnswerDB.session_id == rs.id).delete()
+        s.delete(rs); n += 1
+    s.delete(ln)
+s.query(QuestionnaireDB).filter(QuestionnaireDB.study_id == "load").delete()
+s.query(StudyDB).filter(StudyDB.id == "load").delete()
+s.query(UserDB).filter(UserDB.email == "load@local.test").delete()
+s.commit()
+print(f"removed the load-test project, {len(links)} links, {n} test responses and its owner")
+'''
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url")
@@ -136,11 +155,28 @@ def main() -> None:
     ap.add_argument("--password")
     ap.add_argument("--study")
     ap.add_argument("--local", action="store_true")
+    ap.add_argument("--seed-only", action="store_true",
+                    help="on a server: create the load-test project and a one-off owner")
+    ap.add_argument("--cleanup", action="store_true",
+                    help="on a server: delete the load-test project, its responses and that owner")
     ap.add_argument("--users", type=int, default=200)
     ap.add_argument("--analysts", type=int, default=20)
     ap.add_argument("--seconds", type=int, default=120)
     ap.add_argument("--think", type=float, default=3.0, help="avg seconds between pages")
     a = ap.parse_args()
+
+    if a.seed_only:  # run inside the app container: ./dvv load-seed
+        import secrets
+
+        password = secrets.token_urlsafe(16)
+        exec(SEED.replace("LOAD_PASSWORD", password))  # noqa: S102 - our own fixed code
+        print("load-test owner: load@local.test")
+        print(f"password (shown once): {password}")
+        print("study: load   ->  delete it all afterwards with ./dvv load-cleanup")
+        return
+    if a.cleanup:
+        exec(CLEANUP)  # noqa: S102 - our own fixed code
+        return
 
     server = None
     if a.local:
@@ -149,7 +185,8 @@ def main() -> None:
         env = {**os.environ, "PYTHONPATH": str(ROOT), "STUDIES_DIR": tmp,
                "ADMIN_PASSWORD": os.environ.get("ADMIN_PASSWORD", "load-admin"),
                "DATABASE_URL": os.environ.get("DATABASE_URL", f"sqlite:///{tmp}/load.db")}
-        subprocess.run([sys.executable, "-c", SEED], env=env, cwd=ROOT, check=True)
+        subprocess.run([sys.executable, "-c", SEED.replace("LOAD_PASSWORD", "load-pw")],
+                       env=env, cwd=ROOT, check=True)
         log_path = Path(tmp) / "server.log"
         server = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "api.main:app", "--port", str(port),

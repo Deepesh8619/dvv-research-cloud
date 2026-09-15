@@ -1,0 +1,30 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "UseItsBedrockApiKey",
+      "Effect": "Allow",
+      "Action": "bedrock:CallWithBearerToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "InvokeTheOpenModelOnly",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+      "Resource": "arn:aws:bedrock:__REGION__::foundation-model/openai.gpt-oss-*"
+    },
+    {
+      "Sid": "ListOnlyItsOwnBackupFolder",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::__BUCKET__",
+      "Condition": {"StringLike": {"s3:prefix": ["__CLIENT__/*"]}}
+    },
+    {
+      "Sid": "ReadWriteOnlyItsOwnBackups",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject"],
+      "Resource": "arn:aws:s3:::__BUCKET__/__CLIENT__/*"
+    }
+  ]
+}

@@ -8,6 +8,10 @@
 #   ./dvv backup                                      back up now
 #   ./dvv restore <db-*.dump> [files-*.tgz]           restore (takes a backup first)
 #   ./dvv upgrade                                     backup, update, roll back if unhealthy
+#   ./dvv offsite                                     copy backups to S3 now (offsite profile)
+#   ./dvv fetch                                       download this client's backups from S3
+#   ./dvv check-ai                                    which AI model answers, and can it use tools
+#   ./dvv load-seed | load-cleanup                    set up / remove the go-live load test
 set -euo pipefail
 cd "$(dirname "$0")"
 dc() { docker compose "$@"; }
@@ -97,7 +101,28 @@ case "${1:-}" in
       exit 1
     fi
     ;;
+  load-seed)
+    dc exec -T app python scripts/load_test.py --seed-only
+    ;;
+  load-cleanup)
+    dc exec -T app python scripts/load_test.py --cleanup
+    ;;
+  check-ai)
+    dc exec -T app python scripts/check_ai.py
+    ;;
+  offsite)
+    dc exec -T offsite bash /offsite.sh once
+    ;;
+  fetch)
+    # The way back after losing the server: pull every copy S3 holds into
+    # backups/, then ./dvv restore the newest pair.
+    bucket=$(grep '^BACKUP_S3_BUCKET=' .env | cut -d= -f2)
+    slug=$(grep '^CLIENT_SLUG=' .env | cut -d= -f2)
+    dc run --rm --no-deps -T --entrypoint aws offsite \
+      s3 sync "s3://${bucket}/${slug}/" /backups --only-show-errors
+    ls -1t backups/db-*.dump | head -3
+    ;;
   *)
-    sed -n '2,11p' "$0"; exit 1
+    sed -n '2,15p' "$0"; exit 1
     ;;
 esac
