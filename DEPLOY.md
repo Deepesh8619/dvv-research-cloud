@@ -72,6 +72,15 @@ paste it into `.env`, `./dvv up`.
 
 ## Local development
 
+AI on a laptop uses a 12-hour Bedrock key from your own AWS sign-in — no
+long-lived key ever sits on a laptop:
+
+```bash
+aws sso login --profile dvv
+export AWS_PROFILE=dvv
+export BEDROCK_API_KEY=$(python scripts/bedrock_dev_token.py)   # pip install aws-bedrock-token-generator
+```
+
 ```bash
 python -m uvicorn api.main:app --reload --port 8000   # SQLite, dev password, no licence needed
 npm run dev --prefix web                               # web on :3000, proxies /api
