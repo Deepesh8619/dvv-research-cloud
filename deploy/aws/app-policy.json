@@ -8,10 +8,10 @@
       "Resource": "*"
     },
     {
-      "Sid": "InvokeTheOpenModelOnly",
+      "Sid": "InvokeQwenOpenModelsOnly",
       "Effect": "Allow",
       "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-      "Resource": "arn:aws:bedrock:__REGION__::foundation-model/openai.gpt-oss-*"
+      "Resource": "arn:aws:bedrock:__REGION__::foundation-model/qwen.qwen3-*"
     },
     {
       "Sid": "ListOnlyItsOwnBackupFolder",

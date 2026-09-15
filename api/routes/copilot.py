@@ -314,6 +314,14 @@ def copilot(
     page = ""
     if body.study_id and (current := get_study(db, body.study_id)):
         page = f"The user is looking at project {current.id} ({current.client_name})."
+        links = list_fielding_links_for_study(db, current.id)
+        if links:  # the real IDs, so a model never has to guess one
+            page += " Its fielding links: " + "; ".join(
+                f"{ln.id} ({ln.status}"
+                + (f", held at {ln.soft_launch_limit}" if ln.soft_launch_limit else "")
+                + f", {fielding_link_counts(db, ln.id)['completes']} completes)"
+                for ln in links
+            ) + "."
     try:
         reply, results, answered_by = run_copilot(
             body.message, [t.model_dump() for t in body.history], execute,

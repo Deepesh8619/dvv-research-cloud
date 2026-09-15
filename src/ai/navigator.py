@@ -18,7 +18,15 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
-from src.ai.router import USER_AGENT, BackendUnavailable, ModelOutputError, http_json, run_task
+from src.ai.router import (
+    CEREBRAS_DEFAULT_MODEL,
+    GROQ_DEFAULT_MODEL,
+    USER_AGENT,
+    BackendUnavailable,
+    ModelOutputError,
+    http_json,
+    run_task,
+)
 from src.ai.specialists import (
     SPECIALISTS,
     is_compound_request,
@@ -28,12 +36,14 @@ from src.ai.specialists import (
 
 # Groq's Llama-3.3-70B is the default cloud navigator: free tier, tuned for
 # tool use, cloud-fast. Overridable if the account is on a different model.
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+# Groq no longer serves llama-3.3-70b-versatile (the old default here): the
+# data chat's primary path had been failing over on every question.
+GROQ_MODEL = os.environ.get("GROQ_MODEL", GROQ_DEFAULT_MODEL)
 # Fallback navigator when Groq fails (429 daily budget, or a tool call it can't
 # recover from): the same open-weight family on a different provider, so a
 # Groq outage changes WHO answers, not what kind of model does. DVV uses
 # open-source models only — there is no proprietary vendor in this file.
-CEREBRAS_MODEL = os.environ.get("CEREBRAS_MODEL", "gpt-oss-120b")
+CEREBRAS_MODEL = os.environ.get("CEREBRAS_MODEL", CEREBRAS_DEFAULT_MODEL)
 # Each turn re-sends context + tools + accumulated tool results, so turns are
 # the dominant cost against Groq's free 12k-tokens/min. 3 is enough for the
 # normal pattern (call a tool, read the result, answer) while capping runaway

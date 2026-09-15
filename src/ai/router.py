@@ -95,8 +95,8 @@ _backend_cooldown: dict[str, float] = {}
 def backend_available_in(backend: str, model: str = "") -> float:
     """Seconds until this backend+model is worth trying again. 0 means now.
 
-    Keyed on the MODEL too: providers meter per model, so gpt-oss-120b running
-    out says nothing about gpt-oss-20b's budget.
+    Keyed on the MODEL too: providers meter per model, so one model running
+    out says nothing about another's budget.
     """
     return max(0.0, _backend_cooldown.get(f"{backend}:{model}", 0.0) - time.time())
 
@@ -234,7 +234,7 @@ DEFAULT_ROUTES: dict[str, dict[str, str]] = {
     # Groq, then Cerebras) rather than run_task — kept here so the task
     # inventory in one place stays truthful. study.chat.basic is its local
     # fallback: single shot, one tool max, free.
-    "study.chat": {"backend": "groq", "model": "llama-3.3-70b-versatile"},
+    "study.chat": {"backend": "groq", "model": "qwen/qwen3.8-27b"},
     "study.chat.basic": {"backend": "ollama", "model": "llama3.2:3b"},
 }
 
@@ -445,15 +445,11 @@ def bedrock_model() -> str:
     """The Bedrock model ID for the configured endpoint (BEDROCK_MODEL overrides).
 
     The same model has a different ID on each endpoint — verified live: the
-    bedrock-runtime endpoint rejects `openai.gpt-oss-120b` ("The provided model
-    identifier is invalid") and wants `openai.gpt-oss-120b-1:0`, while
-    bedrock-mantle takes the short form.
+    bedrock-runtime endpoint wants the versioned ID (`...-v1:0`) and rejects the
+    short form as "an invalid model identifier". If BEDROCK_BASE_URL points at
+    another endpoint, set BEDROCK_MODEL to that endpoint's ID as well.
     """
-    if os.environ.get("BEDROCK_MODEL"):
-        return os.environ["BEDROCK_MODEL"]
-    if "bedrock-mantle" in bedrock_chat_url():
-        return "openai.gpt-oss-120b"
-    return "openai.gpt-oss-120b-1:0"
+    return os.environ.get("BEDROCK_MODEL") or BEDROCK_DEFAULT_MODEL
 
 
 def _bedrock_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
@@ -559,23 +555,29 @@ def llm_key_presence() -> dict[str, bool]:
     }
 
 
+# Default models: open-weight, and none made by OpenAI (DVV policy). Chosen on
+# evidence, 2026-09-16: the same copilot conversation run on five open models on
+# Bedrock (Mumbai) — only Qwen3-32B and DeepSeek V3.2 looked every fact up and
+# used the real link ID; Qwen3-32B was also the fastest and the cheapest
+# ($0.18 / $0.71 per 1M tokens). Qwen3-235B and GLM-4.7 answered a question
+# about the questionnaire without looking it up. Groq/Cerebras serve one Qwen
+# each. Every value can be overridden per server (BEDROCK_MODEL etc.).
+BEDROCK_DEFAULT_MODEL = "qwen.qwen3-32b-v1:0"
+GROQ_DEFAULT_MODEL = "qwen/qwen3.8-27b"
+CEREBRAS_DEFAULT_MODEL = "qwen-3.8-27b"
+HF_DEFAULT_MODEL = "Qwen/Qwen3-235B-A22B-Instruct-2507"
+
 # Model per provider for judgment-heavy structured extraction. DVV runs
 # open-source models only; there is no proprietary vendor in this module.
 _EXTRACTION_MODELS = {
     "ollama": os.environ.get("OLLAMA_EXTRACT_MODEL", "llama3.2:3b"),
-    # Groq's catalog is entirely open-weight. gpt-oss-120b (Apache 2.0) is the
-    # default because it is both cheaper and stronger on schema-constrained
-    # extraction than the llama-3.3-70b it replaces; override per-deployment
-    # with GROQ_MODEL after benchmarking against a real client document.
-    "groq": os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
-    # SAME MODEL as Groq and Cerebras, deliberately. gpt-oss-120b is
-    # open-weight, so every provider serves identical weights — which is what
-    # makes the fallback chain safe: exhausting one provider's quota changes
-    # WHO serves the request, never WHAT the model does. Previously this
-    # defaulted to Qwen3-32B, so a Groq outage silently swapped the model
-    # mid-document and extraction behaviour changed with it.
-    "huggingface": os.environ.get("HF_MODEL", "openai/gpt-oss-120b"),
-    "cerebras": os.environ.get("CEREBRAS_MODEL", "gpt-oss-120b"),
+    # Qwen (Alibaba; Apache-2.0; published on Hugging Face) on every provider —
+    # no OpenAI-made model, by DVV policy. One family everywhere, so a fallback
+    # changes WHO answers, not how the model behaves. These are the only
+    # non-OpenAI chat models Groq and Cerebras serve (checked 2026-09-16).
+    "groq": os.environ.get("GROQ_MODEL", GROQ_DEFAULT_MODEL),
+    "huggingface": os.environ.get("HF_MODEL", HF_DEFAULT_MODEL),
+    "cerebras": os.environ.get("CEREBRAS_MODEL", CEREBRAS_DEFAULT_MODEL),
 }
 
 # Open-weight-only mode. When on, the proprietary steps (OpenAI, Anthropic) are
@@ -606,7 +608,7 @@ _OLLAMA_CHAIN_TIMEOUT = 30
 GROQ_FALLBACK_MODELS = [
     m.strip()
     for m in os.environ.get(
-        "GROQ_FALLBACK_MODELS", "openai/gpt-oss-20b,qwen/qwen3.6-27b"
+        "GROQ_FALLBACK_MODELS", ""
     ).split(",")
     if m.strip()
 ]

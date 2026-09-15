@@ -72,7 +72,8 @@ def test_a_first_run_creates_everything_with_least_privilege(run):
     (policy_call,) = _made(calls, "iam put-user-policy")
     policy = json.loads(policy_call.split("--policy-document ", 1)[1])
     resources = [s["Resource"] for s in policy["Statement"]]
-    assert "arn:aws:bedrock:ap-south-1::foundation-model/openai.gpt-oss-*" in resources
+    assert "arn:aws:bedrock:ap-south-1::foundation-model/qwen.qwen3-*" in resources
+    assert not any("openai" in str(r) for r in resources)  # no OpenAI-made model, ever
     assert "arn:aws:s3:::dvv-backups-123456789012-ap-south-1/acme/*" in resources
     assert not any(r == "*" and s["Action"] != "bedrock:CallWithBearerToken"
                    for s in policy["Statement"] for r in [s["Resource"]])

@@ -106,7 +106,7 @@ def test_run_task_auto_falls_through_ollama_to_cerebras(monkeypatch):
 
     resp = run_task("questionnaire.extract", "prompt", _SCHEMA)
     assert resp.backend == "cerebras"
-    assert resp.model == "gpt-oss-120b"
+    assert resp.model == "qwen-3.8-27b"
     assert resp.content == {"answer": "ok"}
 
 
@@ -347,7 +347,7 @@ def test_max_tokens_is_not_over_reserved(monkeypatch):
         return _tool_call_body(json.dumps({"answer": "ok"}))
 
     monkeypatch.setattr(router, "http_json", capture)
-    router._cerebras_generate("gpt-oss-120b", "p", _SCHEMA, timeout=30)
+    router._cerebras_generate("qwen-3.8-27b", "p", _SCHEMA, timeout=30)
 
     assert seen["body"]["max_tokens"] == router.MAX_OUTPUT_TOKENS
     # Comfortably above the largest observed question (493) and far below the
@@ -390,20 +390,23 @@ def test_groq_fallback_models_are_added_to_the_chain(monkeypatch):
     monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
     router._backend_cooldown.clear()
+    # The default list is empty (Groq serves one Qwen today); the mechanism is
+    # for when a server configures extra models with GROQ_FALLBACK_MODELS.
+    monkeypatch.setattr(router, "GROQ_FALLBACK_MODELS", ["qwen/extra-model"])
 
     models = [c["model"] for c in _extraction_chain() if c["backend"] == "groq"]
     assert models[0] == router._EXTRACTION_MODELS["groq"]   # primary first
-    assert len(models) > 1
+    assert models[1:] == ["qwen/extra-model"]
     assert len(models) == len(set(models))                  # no duplicates
 
 
 def test_cooldown_is_per_model_not_per_backend():
-    """gpt-oss-120b running out says nothing about gpt-oss-20b's budget."""
+    """One model running out says nothing about another model's budget."""
     router._backend_cooldown.clear()
-    router.note_backend_exhausted("groq", 600, "openai/gpt-oss-120b")
+    router.note_backend_exhausted("groq", 600, "qwen/qwen3.8-27b")
 
-    assert router.backend_available_in("groq", "openai/gpt-oss-120b") > 0
-    assert router.backend_available_in("groq", "openai/gpt-oss-20b") == 0
+    assert router.backend_available_in("groq", "qwen/qwen3.8-27b") > 0
+    assert router.backend_available_in("groq", "qwen/some-other-model") == 0
     router._backend_cooldown.clear()
 
 
@@ -525,7 +528,7 @@ def test_bedrock_is_called_in_the_configured_region_with_its_key(monkeypatch):
         "https://bedrock-runtime.eu-central-1.amazonaws.com/openai/v1/chat/completions"
     )
     assert seen["auth"] == "Bearer bk-secret"
-    assert seen["model"] == "openai.gpt-oss-120b-1:0"  # the runtime endpoint's ID
+    assert seen["model"] == "qwen.qwen3-32b-v1:0"  # the runtime endpoint's ID
 
 
 def test_the_bedrock_endpoint_can_be_switched_without_code(monkeypatch):
@@ -533,7 +536,8 @@ def test_the_bedrock_endpoint_can_be_switched_without_code(monkeypatch):
     assert router.bedrock_chat_url() == (
         "https://bedrock-mantle.ap-south-1.api.aws/v1/chat/completions"
     )
-    assert router.bedrock_model() == "openai.gpt-oss-120b"  # mantle's form of the ID
+    monkeypatch.setenv("BEDROCK_MODEL", "some.other-endpoint-id")
+    assert router.bedrock_model() == "some.other-endpoint-id"  # an override always wins
 
 
 def test_the_copilot_tries_bedrock_first(monkeypatch):
@@ -544,3 +548,25 @@ def test_the_copilot_tries_bedrock_first(monkeypatch):
     labels = [p[0] for p in copilot._providers()]
     assert labels[:2] == ["Bedrock", "Groq"]
     assert labels[-1] == "local model"
+
+
+
+def test_no_default_model_is_made_by_openai(monkeypatch):
+    """DVV policy: open-source models only, and none of them OpenAI's."""
+    import pathlib
+
+    from src.ai import copilot, navigator
+
+    for var in ("BEDROCK_MODEL", "GROQ_MODEL", "CEREBRAS_MODEL", "HF_MODEL", "COPILOT_GROQ_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    defaults = [router.bedrock_model(), router.GROQ_DEFAULT_MODEL, router.CEREBRAS_DEFAULT_MODEL,
+                router.HF_DEFAULT_MODEL, navigator.GROQ_MODEL, navigator.CEREBRAS_MODEL,
+                *router.GROQ_FALLBACK_MODELS, *(r["model"] for r in router.DEFAULT_ROUTES.values())]
+    monkeypatch.setenv("BEDROCK_API_KEY", "bk")
+    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "ck")
+    defaults += [p[3] for p in copilot._providers()]
+    assert not [m for m in defaults if "gpt" in m.lower() or m.lower().startswith("openai")]
+    root = pathlib.Path(__file__).resolve().parents[2]
+    policy = (root / "deploy" / "aws" / "app-policy.json").read_text()
+    assert "openai" not in policy

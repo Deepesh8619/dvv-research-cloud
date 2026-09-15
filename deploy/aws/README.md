@@ -7,7 +7,7 @@ users: 2 vCPU / 4 GB (peak 287 MB RAM and 74% of one core for the app itself).
 | Per client, per month | Cost |
 |---|---|
 | Lightsail 2 vCPU / 4 GB / 80 GB SSD | $24 |
-| Bedrock gpt-oss-120b (~20 questionnaires + 1,000 copilot/chat answers) | ~$5–15 |
+| Bedrock Qwen3-32B (~20 questionnaires + 1,000 copilot/chat answers) | ~$5–10 |
 | S3 backups | ~$1 |
 | Route 53 zone + domain | ~$1.50 |
 | **Total** | **≈ $30–40** |
@@ -21,7 +21,7 @@ users: 2 vCPU / 4 GB (peak 287 MB RAM and 74% of one core for the app itself).
    `aws configure sso` then `aws sso login`.
 4. Apply for **AWS Activate Founders** ($1,000 credits).
 5. Open the Bedrock console in **Mumbai (ap-south-1)**. If it asks you to enable
-   access to OpenAI **gpt-oss-120b**, enable it.
+   access to **Qwen3 32B** (Alibaba, open-source), enable it.
 
 ## 2. Set up a client — from DVV's Mac
 
@@ -110,7 +110,7 @@ On the server — prove a backup survives the server:
 |---|---|---|
 | Root user | Nothing day to day | MFA, locked away |
 | You (admin) | Everything | Identity Center login with MFA |
-| `dvv-<client>-app` | Invoke gpt-oss on Bedrock; read/write its own backup folder | `app-policy.json` — nothing else |
+| `dvv-<client>-app` | Invoke Qwen3 open models on Bedrock; read/write its own backup folder | `app-policy.json` — nothing else |
 | Server's deploy key | Pull this repo | GitHub read-only deploy key, per server |
 | People inside the app | Owner / founder / analyst / reviewer | App roles; sign-in lockout after 5 failures |
 
