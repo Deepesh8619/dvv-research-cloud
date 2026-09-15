@@ -698,6 +698,13 @@ export default function FieldingPage() {
     loadQuestionnaire()
   }, [load, loadQuestionnaire])
 
+  // The copilot changed something (held, released, opened a link): refresh now
+  // rather than show numbers from before the action until the next poll.
+  useEffect(() => {
+    window.addEventListener('dvv:changed', load)
+    return () => window.removeEventListener('dvv:changed', load)
+  }, [load])
+
   // Poll while any link is open (mirrors QuestionnairePage's interval pattern).
   useEffect(() => {
     if (!links || !links.some((l) => l.status === 'open')) return

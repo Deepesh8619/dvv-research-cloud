@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, NavLink, useNavigate, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import CopilotDrawer from './CopilotDrawer'
 import { FOUNDER_ROLES, WRITE_ROLES } from '../auth/roles'
 import { ChatIcon, DocChartIcon, FolderIcon, GridIcon, LogOutIcon, PlusIcon, SearchIcon, ShieldIcon } from './Icons'
 
@@ -58,6 +59,7 @@ export default function Shell() {
   const { user, logout } = useAuth()
   const [query, setQuery] = useState('')
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showCopilot, setShowCopilot] = useState(false)
 
   const onSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -100,6 +102,14 @@ export default function Shell() {
         </form>
 
         <div className="flex items-center gap-4 ml-auto shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowCopilot((v) => !v)}
+            aria-pressed={showCopilot}
+            className="h-8 px-3 rounded-md text-sm font-medium text-white border border-white/25 hover:bg-white/10 transition-colors"
+          >
+            Copilot
+          </button>
           <span className="text-[11px] font-medium text-white/70 border border-white/20 rounded px-2 py-0.5 uppercase tracking-wider">
             MVP
           </span>
@@ -169,6 +179,8 @@ export default function Shell() {
           <p className="text-[11px] text-slate-400">Data resident: local</p>
         </div>
       </aside>
+
+      <CopilotDrawer open={showCopilot} onClose={() => setShowCopilot(false)} />
 
       {/* Content */}
       <main className="pl-56 pt-14">

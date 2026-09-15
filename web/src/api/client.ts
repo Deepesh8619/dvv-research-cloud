@@ -1089,3 +1089,53 @@ export const activityApi = {
       params: studyId ? { study_id: studyId } : undefined,
     }),
 }
+
+// --- Copilot ---
+
+/** Best human-readable message from an API error (the server's `detail` first). */
+export function errorMessage(err: unknown): string | null {
+  if (axios.isAxiosError(err)) {
+    const detail = err.response?.data?.detail
+    if (typeof detail === 'string') return detail
+    if (detail?.error) return detail.error
+    return err.message
+  }
+  return err instanceof Error ? err.message : null
+}
+
+/** An action the copilot prepared. Nothing has happened until the user confirms;
+ *  confirming sends exactly this request, as the signed-in user. The server wrote
+ *  `title` and `detail` from validated data — not the model. */
+export interface CopilotProposal {
+  id: string
+  kind: string
+  title: string
+  detail: string
+  method: 'POST' | 'PATCH'
+  path: string
+  body: Record<string, unknown>
+}
+
+export interface CopilotReply {
+  reply: string
+  proposals: CopilotProposal[]
+  tools_used: string[]
+  answered_by: string
+}
+
+export const copilotApi = {
+  ask: async (
+    message: string,
+    history: Array<{ role: 'user' | 'assistant'; content: string }>,
+    studyId?: string | null,
+  ) =>
+    api.post<CopilotReply>('/copilot', {
+      message,
+      history: history.slice(-12),
+      ...(studyId ? { study_id: studyId } : {}),
+    }),
+
+  // Only the server-built request is sent; the path is relative to the API base.
+  confirm: async (card: CopilotProposal) =>
+    api.request({ method: card.method, url: card.path, data: card.body }),
+}
