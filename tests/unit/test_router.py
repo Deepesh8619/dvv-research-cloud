@@ -525,7 +525,7 @@ def test_bedrock_is_called_in_the_configured_region_with_its_key(monkeypatch):
         "https://bedrock-runtime.eu-central-1.amazonaws.com/openai/v1/chat/completions"
     )
     assert seen["auth"] == "Bearer bk-secret"
-    assert seen["model"] == "openai.gpt-oss-120b"
+    assert seen["model"] == "openai.gpt-oss-120b-1:0"  # the runtime endpoint's ID
 
 
 def test_the_bedrock_endpoint_can_be_switched_without_code(monkeypatch):
@@ -533,6 +533,7 @@ def test_the_bedrock_endpoint_can_be_switched_without_code(monkeypatch):
     assert router.bedrock_chat_url() == (
         "https://bedrock-mantle.ap-south-1.api.aws/v1/chat/completions"
     )
+    assert router.bedrock_model() == "openai.gpt-oss-120b"  # mantle's form of the ID
 
 
 def test_the_copilot_tries_bedrock_first(monkeypatch):

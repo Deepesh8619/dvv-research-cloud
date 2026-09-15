@@ -116,7 +116,10 @@ else
     --instance-name "$instance"
 fi
 ssh_rule="fromPort=22,toPort=22,protocol=TCP"
-[ -n "$admin_cidr" ] && ssh_rule+=",cidrs=${admin_cidr}"
+# Limiting SSH to one address must not block Lightsail's own browser SSH (the
+# console "Connect" button) — home addresses change, and that button is the
+# way back in when they do.
+[ -n "$admin_cidr" ] && ssh_rule+=",cidrs=${admin_cidr},cidrListAliases=lightsail-connect"
 change lightsail put-instance-public-ports --region "$region" --instance-name "$instance" \
   --port-infos "$ssh_rule" fromPort=80,toPort=80,protocol=TCP fromPort=443,toPort=443,protocol=TCP
 

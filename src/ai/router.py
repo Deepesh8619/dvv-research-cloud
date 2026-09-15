@@ -382,7 +382,11 @@ def _openai_compatible_generate(
                     },
                 }
             ],
-            "tool_choice": {"type": "function", "function": {"name": "emit"}},
+            # "required", not the named {"function": {"name": "emit"}} form: with
+            # one tool they mean the same, but most open models on Bedrock
+            # (Qwen3-235B, DeepSeek V3.2, GLM, Gemma) ignore the named form and
+            # answer in plain text — verified live. "required" works everywhere.
+            "tool_choice": "required",
         }
     ).encode()
     request = urllib.request.Request(
@@ -435,6 +439,21 @@ def bedrock_chat_url() -> str:
         "BEDROCK_BASE_URL", f"https://bedrock-runtime.{region}.amazonaws.com/openai/v1"
     )
     return base.rstrip("/") + "/chat/completions"
+
+
+def bedrock_model() -> str:
+    """The Bedrock model ID for the configured endpoint (BEDROCK_MODEL overrides).
+
+    The same model has a different ID on each endpoint — verified live: the
+    bedrock-runtime endpoint rejects `openai.gpt-oss-120b` ("The provided model
+    identifier is invalid") and wants `openai.gpt-oss-120b-1:0`, while
+    bedrock-mantle takes the short form.
+    """
+    if os.environ.get("BEDROCK_MODEL"):
+        return os.environ["BEDROCK_MODEL"]
+    if "bedrock-mantle" in bedrock_chat_url():
+        return "openai.gpt-oss-120b"
+    return "openai.gpt-oss-120b-1:0"
 
 
 def _bedrock_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
@@ -544,8 +563,6 @@ def llm_key_presence() -> dict[str, bool]:
 # open-source models only; there is no proprietary vendor in this module.
 _EXTRACTION_MODELS = {
     "ollama": os.environ.get("OLLAMA_EXTRACT_MODEL", "llama3.2:3b"),
-    # The same open-weight model, served inside the client's AWS region.
-    "bedrock": os.environ.get("BEDROCK_MODEL", "openai.gpt-oss-120b"),
     # Groq's catalog is entirely open-weight. gpt-oss-120b (Apache 2.0) is the
     # default because it is both cheaper and stronger on schema-constrained
     # extraction than the llama-3.3-70b it replaces; override per-deployment
@@ -612,7 +629,7 @@ def _extraction_chain() -> list[dict[str, str]]:
     # Bedrock first among the clouds: in-region (the NDA story), paid, no free-tier
     # rate limits. Groq and Cerebras remain as fallbacks when their keys are set.
     if keys.get("BEDROCK_API_KEY"):
-        chain.append({"backend": "bedrock", "model": _EXTRACTION_MODELS["bedrock"]})
+        chain.append({"backend": "bedrock", "model": bedrock_model()})
     if keys.get("GROQ_API_KEY"):
         primary = _EXTRACTION_MODELS["groq"]
         chain.append({"backend": "groq", "model": primary})

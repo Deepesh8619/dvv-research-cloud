@@ -516,11 +516,10 @@ def _groq_chat(messages, timeout, with_tools=True, tools_subset=None) -> dict:
 
 
 def _bedrock_chat(messages, timeout, with_tools=True, tools_subset=None) -> dict:
-    from src.ai.router import bedrock_chat_url
+    from src.ai.router import bedrock_chat_url, bedrock_model
 
     return _compatible_chat(
-        bedrock_chat_url(), "BEDROCK_API_KEY",
-        os.environ.get("BEDROCK_MODEL", "openai.gpt-oss-120b"),
+        bedrock_chat_url(), "BEDROCK_API_KEY", bedrock_model(),
         "Bedrock", messages, timeout, with_tools, tools_subset,
     )
 

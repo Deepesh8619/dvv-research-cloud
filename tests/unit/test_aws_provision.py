@@ -80,7 +80,8 @@ def test_a_first_run_creates_everything_with_least_privilege(run):
     (server,) = _made(calls, "lightsail create-instances")
     assert "--bundle-id medium_3_0" in server and "--blueprint-id ubuntu_24_04" in server
     (ports,) = _made(calls, "lightsail put-instance-public-ports")
-    assert "cidrs=1.2.3.4/32" in ports  # SSH only from the admin's address
+    assert "cidrs=1.2.3.4/32" in ports  # SSH only from the admin's address...
+    assert "cidrListAliases=lightsail-connect" in ports  # ...and the console's browser SSH
 
     secrets = ROOT / "deploy" / "aws" / "out" / "acme.env"
     assert stat.S_IMODE(secrets.stat().st_mode) == 0o600

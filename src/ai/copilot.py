@@ -106,10 +106,9 @@ def _providers() -> list[tuple[str, str, str | None, str]]:
     """(label, url, key env or None, model) — only providers that could answer."""
     out = []
     if os.environ.get("BEDROCK_API_KEY", "").strip():  # in-region first
-        from src.ai.router import bedrock_chat_url
+        from src.ai.router import bedrock_chat_url, bedrock_model
 
-        out.append(("Bedrock", bedrock_chat_url(), "BEDROCK_API_KEY",
-                    os.environ.get("BEDROCK_MODEL", "openai.gpt-oss-120b")))
+        out.append(("Bedrock", bedrock_chat_url(), "BEDROCK_API_KEY", bedrock_model()))
     if os.environ.get("GROQ_API_KEY", "").strip():
         out.append(("Groq", "https://api.groq.com/openai/v1/chat/completions",
                     "GROQ_API_KEY", os.environ.get("COPILOT_GROQ_MODEL", "openai/gpt-oss-120b")))
