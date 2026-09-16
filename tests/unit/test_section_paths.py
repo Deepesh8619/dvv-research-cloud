@@ -180,3 +180,51 @@ def test_long_option_labels_are_still_options():
         "Q9",
     )
     assert len(fields.options) == 2
+
+
+def test_inserted_questions_are_addressable():
+    """A question inserted after assembly must join the survey's qid index —
+    otherwise the compiler and the datamap both look straight past it, and the
+    intro screen never reaches the respondent."""
+    survey = _full()
+    assert "INTRO_P1" in survey
+    assert survey["INTRO_P1"].type is QuestionType.INFO
+    hidden = next(q for q in survey.questions if q.qid.startswith("HID_"))
+    assert hidden.qid in survey
+
+
+def test_exclusive_tag_implies_a_multi_punch():
+    """EXCLUSIVE is meaningless in a radio list — it says the question is multi.
+    Typed single, S6's list answer landed in one column as NULL and every punch
+    was lost."""
+    fields = parse_prose_question(S6_TEXT, "S6")
+    assert fields.qtype is QuestionType.MULTI
+
+
+def test_variables_exist_at_approval_and_hidden_ones_carry_data():
+    from src.engines.fielding.materialize import materialize_fielding, plan_datamap
+
+    survey = _full()
+    names = [v.name for v in plan_datamap(survey).variables]
+    hidden = next(q.qid for q in survey.questions if q.qid.startswith("HID_"))
+    assert names[0] == "respondent_id"
+    assert {"S6r1", "S6r2", "S6r3", "S6r4", hidden, "P1"} <= set(names)
+    assert "INTRO_P1" not in names  # a display screen is not a variable
+
+    class _Session:
+        def __init__(self, sid, code):
+            self.id, self.status_code = sid, code
+            self.started_at, self.completed_at = "2026-09-16T09:00:00", "2026-09-16T09:05:00"
+
+    _, frame = materialize_fielding(
+        survey,
+        [_Session("a", 10), _Session("b", 10)],
+        {
+            "a": {"S0": 1, "S1": 41, "S6": [1, 3], "P1": 1},
+            "b": {"S0": 1, "S1": 24, "S6": [4]},
+        },
+    )
+    rows = frame.set_index("respondent_id")
+    assert list(rows[hidden]) == [1, 0]  # in path / outside the age band
+    assert list(rows["S6r1"]) == [1, 0]
+    assert list(rows["S6r4"]) == [0, 1]

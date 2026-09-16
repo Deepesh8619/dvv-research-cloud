@@ -62,6 +62,7 @@ from src.core.survey_definition import (
     QuestionType,
     SurveyDefinition,
 )
+from src.engines.fielding.materialize import plan_datamap
 from src.engines.questionnaire.extractor import extract_survey_definition
 from src.intake.questionnaire_loader import (
     load_docx,
@@ -1149,6 +1150,35 @@ def approve_clean(
     }
 
 
+@router.get("/studies/{study_id}/questionnaire/datamap")
+def questionnaire_datamap(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST, UserRole.REVIEWER)),
+):
+    """The data layout this instrument will produce — every variable, before
+    fielding. Computed from the current definition, so it never drifts."""
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    datamap = plan_datamap(survey)
+    return {
+        "questionnaire_id": questionnaire.id,
+        "status": questionnaire.status,
+        "n_variables": len(datamap.variables),
+        "variables": [
+            {
+                "name": v.name,
+                "label": v.label,
+                "type": v.type.value if hasattr(v.type, "value") else str(v.type),
+                "values": v.values or None,
+                "question_ref": v.question_ref,
+                "derived": v.provenance == "fielding_derived",
+            }
+            for v in datamap.variables
+        ],
+    }
+
+
 @router.post("/studies/{study_id}/questionnaire/approve-all")
 def approve_all(
     study_id: str,
@@ -1201,10 +1231,16 @@ def approve_all(
     # Best-effort: a merge failure must never un-approve the questionnaire.
     relabel = _start_label_merge(db, study_id, survey)
 
+    # The data layout is fixed the moment the instrument is: a client asking
+    # "what columns will I get?" gets the answer at approval, not after the
+    # first respondent.
+    datamap = plan_datamap(survey)
     return {
         "questionnaire_id": questionnaire.id,
         "status": "approved",
         "label_merge_started": relabel,
+        "n_variables": len(datamap.variables),
+        "variables": [v.name for v in datamap.variables],
     }
 
 

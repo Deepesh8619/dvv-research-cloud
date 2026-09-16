@@ -220,6 +220,7 @@ def _already_present(survey: SurveyDefinition, body: str) -> bool:
 def _insert_after(survey: SurveyDefinition, question: Question, qid: str) -> None:
     index = next((i for i, q in enumerate(survey.questions) if q.qid == qid), -1)
     survey.questions.insert(index + 1 if index >= 0 else len(survey.questions), question)
+    survey._rebuild_index()
     for block in survey.blocks:
         if qid in block.question_ids:
             block.question_ids.insert(block.question_ids.index(qid) + 1, question.qid)
@@ -269,6 +270,7 @@ def _insert_before(survey: SurveyDefinition, question: Question, qid: str) -> No
         (i for i, q in enumerate(survey.questions) if q.qid == qid), len(survey.questions)
     )
     survey.questions.insert(index, question)
+    survey._rebuild_index()
     for block in survey.blocks:
         if qid in block.question_ids:
             block.question_ids.insert(block.question_ids.index(qid), question.qid)

@@ -35,6 +35,7 @@ out of stub/banner candidacy.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -43,7 +44,14 @@ from typing import Any
 import pandas as pd
 
 from src.core.models import DataMap, Variable, VarType
-from src.core.survey_definition import Question, QuestionType, SurveyDefinition
+from src.core.survey_definition import (
+    Question,
+    QuestionType,
+    SurveyDefinition,
+    evaluate,
+)
+
+logger = logging.getLogger(__name__)
 
 STATUS_COMPLETE = 10  # Lucid/Cint convention (fielding key decision #7)
 STATUS_TERMINATE = 20
@@ -77,6 +85,20 @@ class _ColumnSpec:
 
 
 def _to_int(value: Any) -> int | None:
+    if isinstance(value, list):
+        # A single-coded column holding a list: one punch is the same answer
+        # written as a list, so keep it. Several punches means the instrument
+        # says single and the link collected multi — say so instead of writing a
+        # silent NULL, which is how a whole question's data disappears.
+        if len(value) == 1:
+            return _to_int(value[0])
+        if value:
+            logger.warning(f"single-coded column received {len(value)} punches: {value!r}")
+        return None
+    return _to_int_scalar(value)
+
+
+def _to_int_scalar(value: Any) -> int | None:
     """Coerce a stored answer to an int code, or None when it can't be one.
 
     SurveyJS may serialize a choice value as "1" or 1; both map to 1. Anything
@@ -208,6 +230,29 @@ def _specs_for_question(question: Question) -> list[_ColumnSpec]:
             )
         return specs
 
+    if qtype == QuestionType.INFO and qid.upper().startswith("HID_") and question.show_if:
+        # A hidden variable IS a column — it is what banners are cut by. It has
+        # no respondent-facing answer, so it is computed from the condition the
+        # extractor already read ("(IF S0=1 AND S1=26-60) ASK P1-P3"), per
+        # respondent, against the answers we hold. Only conditions WE parsed are
+        # computed; nothing is guessed.
+        var = Variable(
+            name=qid,
+            label=text,
+            type=VarType.SINGLE,
+            values={0: "Not in path", 1: "In path"},
+            question_ref=qid,
+            question_text=text,
+            provenance="fielding_derived",
+        )
+
+        def in_path(a, expression=question.show_if):
+            if not expression.referenced_qids().issubset(a.keys()):
+                return None  # not yet decidable for this respondent
+            return 1 if evaluate(expression, a) else 0
+
+        return [_ColumnSpec(var, in_path)]
+
     # info (display-only) and any unknown/unsupported type -> no column.
     return []
 
@@ -252,6 +297,30 @@ def _pandas_series(spec_type: VarType, data: list[Any]) -> pd.Series:
         return pd.Series(data, dtype="Float64")
     # TEXT and DATE (ISO strings) both ride as nullable strings.
     return pd.Series([None if v is None else str(v) for v in data], dtype="string")
+
+
+def plan_datamap(survey: SurveyDefinition) -> DataMap:
+    """The data layout an approved instrument will produce — before any respondent.
+
+    Same spec builder the real export uses, so what a client is shown at approval
+    is what lands in the file: one column per single/numeric/text question, one
+    per multi punch and grid row, and one per hidden variable. Computed on demand
+    rather than stored, so it cannot drift from the definition it describes.
+    """
+    datamap = DataMap()
+    datamap.add(
+        Variable(
+            name="respondent_id", label="Respondent ID", type=VarType.NUMERIC,
+            provenance="fielding",
+        )
+    )
+    for qid in survey.question_order():
+        if qid in survey:
+            for spec in _specs_for_question(survey[qid]):
+                datamap.add(spec.variable)
+    for var in _paradata_variables():
+        datamap.add(var)
+    return datamap
 
 
 def materialize_fielding(

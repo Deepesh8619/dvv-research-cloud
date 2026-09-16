@@ -368,6 +368,13 @@ def _infer_type(
         if match and not _blocked(qtype):
             return qtype, match.group(0)
 
+    if any(o.exclusive for o in options) and not _blocked(QuestionType.MULTI):
+        # An option tagged EXCLUSIVE only means something in a multi-punch: in a
+        # single-select every option is already exclusive, so nobody writes it.
+        # Without this S6 was typed single and its list answer went into one
+        # column as NULL — the punches silently vanished from the data file.
+        return QuestionType.MULTI, "an option tagged EXCLUSIVE"
+
     if _is_binary_choice(options):
         return QuestionType.SINGLE, "a Yes/No option pair"
     if options and is_single_select_wording(text):
