@@ -318,3 +318,38 @@ def _survey_of(*questions) -> SurveyDefinition:
         blocks=[Block(block_id="B1", question_ids=[q.qid for q in questions])],
         questions=list(questions),
     )
+
+
+def test_an_exact_condition_wrapped_in_prose_is_read():
+    """"[ASK IF AWARE OF CVS (Q3=2)]" — the scripter explains the base in words
+    and writes the exact one in brackets. The parenthetical IS the condition."""
+    condition = parse_routing("ASK IF AWARE OF CVS (Q3=2)")
+    assert condition is not None
+    assert evaluate(condition, {"Q3": 2}) is True
+    assert evaluate(condition, {"Q3": 1}) is False
+
+
+def test_prose_conditions_are_still_refused():
+    """No exact condition is stated, so none may be invented. Applying a guess
+    here sends a question to the wrong people and nothing downstream can tell."""
+    assert parse_routing("ASK IF MULTIPLE AT S6 SELECTED") is None
+    assert parse_routing("SHOW IF FILLED AT LEAST ONE PRESCRIPTION TYPE AT Q14") is None
+
+
+def test_a_condition_on_an_option_is_reported_as_its_own_thing():
+    """A missed question base is a parser bug worth re-extracting for; a base on
+    one ANSWER OPTION is a feature the platform lacks. Same symptom, different
+    fix — reporting them alike sends people looking for the wrong one."""
+    from src.engines.questionnaire.definition_audit import audit_definition
+
+    q = Question(
+        qid="S12",
+        text="Do you have children?",
+        options=[Option(code=1, label="Yes - for a child under 18")],
+        source_text=(
+            "S12. Do you have children?\n"
+            "1. Yes - for a child under 18 [ONLY SHOW IF S11=1]\n2. No"
+        ),
+    )
+    checks = {f.check for f in audit_definition(_survey_of(q))}
+    assert checks == {"option_base_unsupported"}
