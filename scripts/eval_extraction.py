@@ -18,6 +18,7 @@ configured; it is not part of the test suite for that reason.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections import Counter
 from pathlib import Path
@@ -50,6 +51,20 @@ def measure(survey: SurveyDefinition) -> dict[str, int]:
     }
 
 
+def content(survey: SurveyDefinition) -> dict[str, str]:
+    """Each question as canonical JSON, so a difference in WORDING is visible.
+
+    The counted metrics are counts: three questions here still reach a model,
+    and a model can reword a question, drop an option's trailing clause or
+    re-split a grid row without moving any total. "Stable" has to mean the
+    definition is the same, not that it is the same size.
+    """
+    return {
+        q.qid: json.dumps(q.to_dict(), sort_keys=True, ensure_ascii=False)
+        for q in survey.questions
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("document", type=Path)
@@ -62,11 +77,11 @@ def main() -> int:
     print(f"{args.document.name}: {len(blocks)} blocks -> {len(chunks)} chunks")
 
     runs: list[dict[str, int]] = []
-    qid_sets: list[frozenset[str]] = []
+    contents: list[dict[str, str]] = []
     for i in range(args.runs):
         survey = extract_survey_definition(chunks, "eval", blocks=blocks)
         runs.append(measure(survey))
-        qid_sets.append(frozenset(q.qid for q in survey.questions))
+        contents.append(content(survey))
         print(f"  run {i + 1}: {runs[-1]}")
 
     print(f"\n{'metric':<28}{'min':>6}{'max':>6}{'spread':>8}  values")
@@ -82,22 +97,37 @@ def main() -> int:
             f"{dict(sorted(counts.items()))}"
         )
 
-    # Which questions appeared in some runs and not others — the thing a reader
-    # of a summary table cannot see, and the thing that matters most.
+    # Which questions appeared in some runs and not others, and which came back
+    # WORDED differently — neither is visible in a table of totals, and the
+    # second is the one a count can never catch.
+    qid_sets = [frozenset(c) for c in contents]
     everywhere = frozenset.intersection(*qid_sets)
-    anywhere = frozenset.union(*qid_sets)
-    sometimes = sorted(anywhere - everywhere)
+    sometimes = sorted(frozenset.union(*qid_sets) - everywhere)
     if sometimes:
         print(f"\nquestions present in SOME runs only ({len(sometimes)}): {sometimes}")
 
-    if unstable or sometimes:
-        print(f"\nUNSTABLE: {', '.join(unstable) or 'question set'} moved between runs.")
+    reworded = sorted(
+        qid for qid in everywhere if len({c[qid] for c in contents}) > 1
+    )
+    if reworded:
+        print(f"\nquestions whose CONTENT differed between runs ({len(reworded)}): {reworded}")
+        first = contents[0][reworded[0]]
+        other = next(c[reworded[0]] for c in contents if c[reworded[0]] != first)
+        print(f"  e.g. {reworded[0]}:\n    run 1: {first[:180]}\n    later: {other[:180]}")
+
+    if unstable or sometimes or reworded:
+        moved = ", ".join(unstable) or ("wording" if reworded else "question set")
+        print(f"\nUNSTABLE: {moved} moved between runs.")
         print("Same document, same code. A client re-extracting gets a different")
         print("instrument, so any comparison against a baseline is unreliable here.")
         return 1
 
-    spread_note = "identical across every run" if args.runs > 1 else "one run only"
-    print(f"\nSTABLE: {spread_note}.")
+    note = (
+        f"every question byte-identical across {args.runs} runs"
+        if args.runs > 1
+        else "one run only — run with --runs 3 or more to say anything about stability"
+    )
+    print(f"\nSTABLE: {note}.")
     if runs:
         share = runs[0]["read_without_a_model"] / max(runs[0]["questions"], 1)
         print(f"Read without a model: {share:.0%} of questions.")
