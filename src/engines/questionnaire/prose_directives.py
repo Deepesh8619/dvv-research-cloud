@@ -279,6 +279,32 @@ class ProseFields:
 _PROSE_MIN_WORDS = 18
 
 
+# "Note:", "PN:", "Programmer note —", "Interviewer note:". Addressed to the
+# scripter or the reader, never an answer, however short it is.
+_NOTE_PREFIX = re.compile(
+    r"^\s*\[?\s*(?:PN|P\.N\.|Programmer\s+Note|Interviewer\s+Note|Note|NB)\s*[:\-\u2013\u2014]",
+    re.I,
+)
+# "e.g.", "i.e.", "etc." and friends end in a period WITHOUT ending a sentence.
+# Counting them as sentence breaks made a long, ordinary answer option look like
+# prose — which flagged it in the audit and, worse, would have dropped it from
+# the option list entirely if it were not the first option.
+_ABBREVIATIONS = re.compile(
+    r"\b(?:e\.g|i\.e|etc|vs|approx|incl|no|Mr|Mrs|Ms|Dr|St|U\.S|U\.K)\.", re.I
+)
+
+
+def is_note_line(line: str) -> bool:
+    """A line addressed to the scripter or the reader, not an answer."""
+    return bool(_NOTE_PREFIX.match(line.strip()))
+
+
+def has_sentence_break(text: str) -> bool:
+    """True when the text really ends or joins sentences, abbreviations aside."""
+    without = _ABBREVIATIONS.sub(" ", text)
+    return bool(re.search(r"[.!?](?:\s+[\"\'(\[]?[A-Z0-9]|\s*$)", without))
+
+
 def _is_prose_paragraph(line: str) -> bool:
     text = strip_brackets(line).strip()
     if _OPTION_CODE_RE.match(text) or _OPTION_LETTER_RE.match(text):
@@ -288,7 +314,7 @@ def _is_prose_paragraph(line: str) -> bool:
     words = text.split()
     if len(words) < _PROSE_MIN_WORDS:
         return False
-    return bool(re.search(r"[.!?](?:\s|$)", text))
+    return has_sentence_break(text)
 
 
 def _strip_label(line: str) -> str:
@@ -525,6 +551,12 @@ def parse_prose_question(
         if intro_follows and not (
             _OPTION_CODE_RE.match(line) or _OPTION_LETTER_RE.match(line)
         ):
+            directives.append(line.strip())
+            continue
+
+        if is_note_line(line):
+            # "Note: Healthcare decisions include researching where to seek
+            # care..." sat under S5's options and became answer code 1.
             directives.append(line.strip())
             continue
 
