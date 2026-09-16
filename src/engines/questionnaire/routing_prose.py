@@ -41,12 +41,17 @@ _PREAMBLE_RE = re.compile(
 # PPT612) so a condition can only ever reference something that could be a
 # question.
 _ATOM_RE = re.compile(
-    r"^\s*\(?\s*([A-Za-z]{1,4}\d+[A-Za-z]?)\s*(=|==|<>|!=|>=|<=|>|<)\s*([^)]*?)\s*\)?\s*$"
+    r"^\s*\(?\s*([A-Za-z]{1,4}\d+[A-Za-z]?)\s*(=|==|<>|!=|>=|<=|>|<)\s*(.*?)\s*\)?\s*$"
 )
 _VALUES_RE = re.compile(r"\d+")
 # "S1 = 26-60", "AGE = 26 to 60" — a band, not a punch list. Written constantly
 # in recruitment paths, where the ranges are the sample definition itself.
 _RANGE_RE = re.compile(r"^(\d+)\s*(?:-|–|—|\bto\b|\bthrough\b)\s*(\d+)$", re.I)
+# "C1=18+", "AGE = 18 OR OLDER" — a floor with no ceiling.
+_OPEN_RANGE_RE = re.compile(r"^(\d+)\s*(?:\+|\bor older\b|\band older\b|\bplus\b)$", re.I)
+# "1 (ANUA) OR 11 (MEDICUBE) OR 98" — the punch list is the data; the labels in
+# brackets are there to help a human read it.
+_PARENTHETICAL_RE = re.compile(r"\([^()]*\)")
 # A value list is only a list of numbers and the words joining them.
 _VALUE_LIST_RE = re.compile(r"^[\d\s,]*(?:(?:,|\bor\b|\band\b)\s*\d+\s*)*$", re.I)
 
@@ -86,6 +91,16 @@ def _atom(text: str) -> Expression | None:
     if not m:
         return None
     qid, op, raw_values = m.groups()
+    raw_values = _PARENTHETICAL_RE.sub(" ", raw_values).strip()
+
+    floor = _OPEN_RANGE_RE.match(raw_values.strip())
+    if floor and op in ("=", "=="):
+        # ">= n" is "not (x < n)" — the same ops the rest of the system reads.
+        return Expression(
+            op="not",
+            children=[Expression(op="lt", qid=qid, value=int(floor.group(1)))],
+            verbatim_text=text.strip(),
+        )
 
     band = _RANGE_RE.match(raw_values.strip())
     if band and op in ("=", "=="):

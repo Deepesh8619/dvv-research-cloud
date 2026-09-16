@@ -27,6 +27,18 @@ _SECTION_PATH = re.compile(r"\(\s*[^)]*\bIF\b[^)]*\)\s*[,:]?\s*ASK\s+[A-Za-z]{0,
 _LEFTOVER_TAG = re.compile(r"\[\s*(ANCHOR|EXCLUSIVE|TERMINATE|PN\b)[^\]]*\]", re.I)
 # Prose, not an answer: long and sentence-shaped (mirrors the parser's own rule).
 _PROSE_WORDS = 18
+# "[ASK IF Q3=1]", "[SHOW IF S11=1]", "[PN: ONLY ASK IF ...]" — a base stated in
+# the source. Deliberately narrow: an exact qid comparison, not prose about one.
+# Keyed on the COMPARISON, not on the qid's shape: a real questionnaire names
+# questions "QP" and "C1" alike, and requiring letters-then-digits missed
+# "[SHOW IF QP=1]" entirely. An exact comparison is what makes a base readable;
+# prose about one ("[ASK IF MULTIPLE AT S6 SELECTED]") is not, and must not be
+# reported as something the parser should have applied.
+_BASE_STATED = re.compile(
+    r"\[[^\]]*\b(?:ASK|SHOW|DISPLAY)\s+(?:ONLY\s+)?IF\b[^\]]*"
+    r"[A-Za-z][A-Za-z0-9]{0,5}\s*=\s*\d[^\]]*\]",
+    re.I,
+)
 
 
 @dataclass
@@ -134,6 +146,24 @@ def audit_definition(survey: SurveyDefinition) -> list[Finding]:
                 sorted(set(exclusive_single)),
                 "EXCLUSIVE is meaningless in a single-select: the question is a "
                 "multi-punch typed wrongly, and its answers land in one column as null.",
+            )
+        )
+
+    stated_not_applied = [
+        q.qid
+        for q in survey.questions
+        if q.show_if is None
+        and q.type is not QuestionType.INFO
+        and _BASE_STATED.search(q.source_text or "")
+    ]
+    if stated_not_applied:
+        findings.append(
+            Finding(
+                "base_stated_but_not_applied",
+                sorted(set(stated_not_applied)),
+                "The source text states a base for this question and none was applied, "
+                "so it goes to everyone. The strongest check available: the document "
+                "says who should see it, and the definition disagrees.",
             )
         )
 

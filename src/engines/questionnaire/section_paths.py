@@ -38,6 +38,13 @@ _SECTION_PATH_RE = re.compile(
     re.I,
 )
 _SPLIT_QID = re.compile(r"^([A-Z]{0,4})(\d+)([A-Z]?)$")
+# "[PN: ASK Q15 IF Q14 = 1 OR 2]" — the same statement as a section path with
+# the clauses the other way round, and written against a single question.
+_FORWARD_ASK_RE = re.compile(
+    rf"\bASK\s+(?P<targets>{_QID}(?:\s*(?:-|–|—|,|\bto\b|\bthrough\b|\band\b)\s*{_QID})*)"
+    rf"\s+(?P<cond>\bIF\b[^\]\n.]+)",
+    re.I,
+)
 _RANGE_SEP_RE = re.compile(r"\s*(?:-|–|—|\bto\b|\bthrough\b)\s*", re.I)
 
 # "[PN: SHOW IF P1=1]" followed by the paragraph it governs — an intro screen
@@ -121,6 +128,23 @@ def apply_section_paths(survey: SurveyDefinition) -> list[dict]:
     seen_lines: set[str] = set()
 
     for question in list(survey.questions):
+        for match in _FORWARD_ASK_RE.finditer(question.source_text or ""):
+            condition = parse_routing(match.group("cond"))
+            targets = [
+                qid
+                for qid in _targets(match.group("targets"), order)
+                if qid != question.qid and by_qid.get(qid) and by_qid[qid].show_if is None
+            ]
+            if condition is None or not targets:
+                continue
+            line = match.group(0).strip()
+            for qid in targets:
+                by_qid[qid].show_if = _both(by_qid[qid].show_if, condition)
+                by_qid[qid].extraction_evidence.setdefault("base", f"[{line}]")
+            applied.append(
+                {"path": "", "hidden_qid": "", "questions": targets, "source": line}
+            )
+
         for match in _SECTION_PATH_RE.finditer(question.source_text or ""):
             line = match.group(0).strip()
             if line in seen_lines:
