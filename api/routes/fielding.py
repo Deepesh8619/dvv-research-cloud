@@ -38,10 +38,12 @@ from api.auth import UserRole, get_current_user, require_role
 from api.db import (
     UserDB,
     close_fielding_link,
+    count_completes,
     create_fielding_link,
     create_quota_cell,
     create_respondent_session,
     decrement_quota_cell,
+    delete_respondent_answers,
     fielding_link_counts,
     get_db,
     get_fielding_link,
@@ -55,12 +57,15 @@ from api.db import (
     list_questionnaires_for_study,
     list_quota_cells,
     list_respondent_sessions,
+    pid_already_finished,
+    set_fielding_link_soft_launch,
     set_quota_cell_condition,
     set_respondent_session_status,
     touch_respondent_session,
     update_quota_cell_limit,
     upsert_respondent_answer,
 )
+from api.heavy import run_heavy_detached
 from api.models import (
     DryRunRequest,
     FieldingLinkCreateRequest,
@@ -73,6 +78,7 @@ from api.models import (
     RespondentAnswersRequest,
     RespondentEntryResponse,
     RespondentSessionResponse,
+    SoftLaunchRequest,
 )
 from api.routes.questionnaire import _read_definition_json
 from src.core.survey_definition import (
@@ -197,6 +203,11 @@ def _link_response(link, counts: dict | None = None) -> FieldingLinkResponse:
         redirect_terminate=link.redirect_terminate,
         redirect_overquota=link.redirect_overquota,
         redirect_security=link.redirect_security,
+        soft_launch_limit=link.soft_launch_limit,
+        soft_launch_reached=(
+            link.soft_launch_limit is not None
+            and (counts or {}).get("completes", 0) >= link.soft_launch_limit
+        ),
     )
 
 
@@ -227,7 +238,7 @@ def _approved_questionnaire(db: Session, study_id: str):
     "/studies/{study_id}/fielding/links",
     response_model=FieldingLinkResponse,
 )
-async def create_link(
+def create_link(
     study_id: str,
     body: FieldingLinkCreateRequest | None = None,
     db: Session = Depends(get_db),
@@ -266,6 +277,7 @@ async def create_link(
         survey_json=payload,
         created_by=user.email,
         redirects=redirects,
+        soft_launch_limit=body.soft_launch_limit if body else None,
     )
     # A condition that can never be true is not a warning: the survey does not
     # do what the document says it does, and every downstream number will be
@@ -316,7 +328,7 @@ async def create_link(
 
 
 @router.post("/studies/{study_id}/fielding/dry-run")
-async def dry_run(
+def dry_run(
     study_id: str,
     body: DryRunRequest | None = None,
     db: Session = Depends(get_db),
@@ -358,7 +370,7 @@ async def dry_run(
         survey = SurveyDefinition.from_json(payload)
         cells = []
 
-    report = simulate(survey, cells, n=request.n, seed=request.seed)
+    report = run_heavy_detached(db, simulate, survey, cells, n=request.n, seed=request.seed)
     logger.info(
         f"[{study_id}] Dry run by {user.name}: {report.n_respondents} respondents, "
         f"{report.dispositions}, {len(report.never_fired)} condition(s) never fired"
@@ -375,7 +387,7 @@ async def dry_run(
     "/studies/{study_id}/fielding/links",
     response_model=FieldingLinkListResponse,
 )
-async def list_links(
+def list_links(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -395,7 +407,7 @@ async def list_links(
     "/studies/{study_id}/fielding/links/{link_id}/close",
     response_model=FieldingLinkResponse,
 )
-async def close_link(
+def close_link(
     study_id: str,
     link_id: str,
     db: Session = Depends(get_db),
@@ -416,6 +428,34 @@ async def close_link(
         raise HTTPException(status_code=404, detail="Fielding link not found")
     link = close_fielding_link(db, link_id)
     logger.info(f"[{study_id}] Fielding link {link_id} closed by {user.name}")
+    return _link_response(link, fielding_link_counts(db, link.id))
+
+
+@router.patch(
+    "/studies/{study_id}/fielding/links/{link_id}/soft-launch",
+    response_model=FieldingLinkResponse,
+)
+def set_soft_launch(
+    study_id: str,
+    link_id: str,
+    body: SoftLaunchRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Hold a link at N completes, or release it to full sample. (Owner/Analyst)
+
+    One endpoint for both halves of the launch: `limit=50` holds, `limit=null`
+    releases. Release is the moment a human takes responsibility for the data —
+    run the soft-launch check first, because after this the money is spent.
+    """
+    _owner_link(db, study_id, link_id)
+    if body.limit is not None and body.limit < 1:
+        raise HTTPException(status_code=422, detail="Soft-launch limit must be at least 1")
+    link = set_fielding_link_soft_launch(db, link_id, body.limit)
+    logger.info(
+        f"[{study_id}] Fielding link {link_id} soft launch "
+        f"{'released' if body.limit is None else f'held at {body.limit}'} by {user.name}"
+    )
     return _link_response(link, fielding_link_counts(db, link.id))
 
 
@@ -455,7 +495,7 @@ def _quotas_response(db: Session, link_id: str) -> QuotaCellsResponse:
     "/studies/{study_id}/fielding/links/{link_id}/quotas",
     response_model=QuotaCellsResponse,
 )
-async def create_quotas(
+def create_quotas(
     study_id: str,
     link_id: str,
     body: QuotaCellsCreateRequest,
@@ -478,7 +518,7 @@ async def create_quotas(
     "/studies/{study_id}/fielding/links/{link_id}/quotas",
     response_model=QuotaCellsResponse,
 )
-async def list_quotas(
+def list_quotas(
     study_id: str,
     link_id: str,
     db: Session = Depends(get_db),
@@ -493,7 +533,7 @@ async def list_quotas(
     "/studies/{study_id}/fielding/links/{link_id}/quotas/{quota_id}",
     response_model=QuotaCellResponse,
 )
-async def update_quota(
+def update_quota(
     study_id: str,
     link_id: str,
     quota_id: str,
@@ -548,7 +588,7 @@ def _resolve_session(db: Session, link, session_id: str):
 
 
 @router.get("/r/{token}", response_model=RespondentEntryResponse)
-async def enter_survey(token: str, request: Request, db: Session = Depends(get_db)):
+def enter_survey(token: str, request: Request, db: Session = Depends(get_db)):
     """Respondent entry: create a session and return the compiled SurveyJS JSON.
 
     A closed link returns a clean `status="closed"` payload (no session, empty
@@ -562,15 +602,30 @@ async def enter_survey(token: str, request: Request, db: Session = Depends(get_d
 
     entry_params = dict(request.query_params)
 
+    # Soft-launch hold: once the launch batch is complete, stop admitting NEW
+    # respondents so a scripting error surfaces at n=50 instead of n=800 — the
+    # whole point of a soft launch. Sessions already IN PROGRESS are deliberately
+    # not killed (those are real people mid-interview), so completes can overshoot
+    # the limit by the number in flight; that is correct, not a rounding bug.
+    # A held link is `paused`, never `closed`: releasing it resumes the same link.
+    # Arrivals are bounced on the over-quota redirect when one is set, which is
+    # what a panel expects for "we can't use you right now" — and no session row
+    # is written, so a hold never invents dispositions the field never had.
+    limit = link.soft_launch_limit
+    if limit is not None and count_completes(db, link.id) >= limit:
+        return RespondentEntryResponse(
+            session_id="",
+            status="paused",
+            surveyjs_json={},
+            redirect_url=_apply_redirect_template(link.redirect_overquota, entry_params),
+        )
+
     # Security screen-out (status 30): a panel `pid` that already has a terminal
     # session on this link is a duplicate/fraud signal — don't re-serve the
     # survey. Record the attempt with status 30 and hand back the terminal
     # payload (redirect_security substituted) instead of the questionnaire.
     pid = (entry_params.get("pid") or "").strip()
-    if pid and any(
-        s.status_code is not None and (s.entry_params or {}).get("pid") == pid
-        for s in list_respondent_sessions(db, link.id)
-    ):
+    if pid and pid_already_finished(db, link.id, pid):
         session = create_respondent_session(db, link.id, entry_params=entry_params)
         set_respondent_session_status(db, session.id, STATUS_SECURITY)
         session = get_respondent_session(db, session.id)
@@ -608,8 +663,26 @@ def _terminal_payload(session) -> dict:
     }
 
 
+def _exclusive_only(survey: SurveyDefinition, qid: str, value):
+    """Drop co-selections when an EXCLUSIVE option ("None of the above") is ticked.
+
+    Enforced here, not in the browser, for the same reason terminates are: the
+    client is the respondent's, and SurveyJS has no per-choice exclusivity to
+    configure anyway. A multi-punch carrying both "Ulta" and "None of the above"
+    is contradictory data that would otherwise land in the tabs.
+    """
+    if not isinstance(value, list) or len(value) < 2:
+        return value
+    question = next((q for q in survey.questions if q.qid == qid), None)
+    if question is None:
+        return value
+    exclusive = [o.code for o in question.options if o.exclusive]
+    picked = [code for code in exclusive if code in value]
+    return [picked[-1]] if picked else value
+
+
 @router.post("/r/{token}/sessions/{session_id}/answers")
-async def submit_answers(
+def submit_answers(
     token: str,
     session_id: str,
     body: RespondentAnswersRequest,
@@ -628,12 +701,13 @@ async def submit_answers(
     if session.status_code is not None:
         return _terminal_payload(session)
 
+    # Server-authoritative view of what the respondent was actually asked.
+    survey = SurveyDefinition.from_json(link.survey_json)
+
     for qid, value in (body.answers or {}).items():
-        upsert_respondent_answer(db, session_id, qid, value)
+        upsert_respondent_answer(db, session_id, qid, _exclusive_only(survey, qid, value))
     touch_respondent_session(db, session_id, current_page=body.current_page)
 
-    # Server-authoritative terminate check against the PINNED survey copy.
-    survey = SurveyDefinition.from_json(link.survey_json)
     answers = get_session_answers_map(db, session_id)
     for question in survey.questions:
         if question.terminate_if is None:
@@ -648,11 +722,21 @@ async def submit_answers(
         if not question.terminate_if.referenced_qids().issubset(answers.keys()):
             continue
         if evaluate(question.terminate_if, answers):
+            # A page can carry answers to questions AFTER the one that screens
+            # the respondent out — they were all submitted together, before the
+            # server got to judge any of them. Those answers are not data this
+            # study is entitled to: the interview stopped at `question`. Keeping
+            # them would put screened-out people into every downstream base and
+            # would make our own screen-out check flag our own data forever.
+            order = survey.question_order()
+            after = set(order[order.index(question.qid) + 1 :]) if question.qid in order else set()
+            dropped = delete_respondent_answers(db, session_id, sorted(after & answers.keys()))
             set_respondent_session_status(db, session_id, STATUS_TERMINATE)
             session = get_respondent_session(db, session_id)
             logger.info(
                 f"[{link.study_id}] Session {session_id} terminated by "
                 f"{question.qid}.terminate_if"
+                + (f" (dropped {dropped} post-screen-out answer(s))" if dropped else "")
             )
             return _with_redirect(
                 {"terminated": True, "status_code": STATUS_TERMINATE}, link, session
@@ -679,7 +763,7 @@ async def submit_answers(
 
 
 @router.post("/r/{token}/sessions/{session_id}/complete")
-async def complete_survey(
+def complete_survey(
     token: str,
     session_id: str,
     db: Session = Depends(get_db),
@@ -740,7 +824,7 @@ async def complete_survey(
     "/r/{token}/sessions/{session_id}",
     response_model=RespondentSessionResponse,
 )
-async def resume_session(
+def resume_session(
     token: str,
     session_id: str,
     db: Session = Depends(get_db),

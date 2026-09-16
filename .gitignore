@@ -21,3 +21,10 @@ test_output/
 demo/
 /package-lock.json
 /package.json
+
+# Per-client deployment state (deploy/): secrets and client data
+deploy/.env
+deploy/backups/
+
+# AWS provisioning output: per-client secrets
+deploy/aws/out/

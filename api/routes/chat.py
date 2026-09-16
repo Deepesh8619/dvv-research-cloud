@@ -26,7 +26,12 @@ from api.db import (
 )
 from api.intent_router import build_routed_context
 from api.models import ChatMessage, ChatRequest, ChatResponse, ChatToolCall
-from src.ai.navigator import navigate_basic, navigate_groq, navigate_openai
+from src.ai.navigator import (
+    navigate_basic,
+    navigate_bedrock,
+    navigate_cerebras,
+    navigate_groq,
+)
 from src.ai.router import BackendUnavailable, ModelOutputError
 from src.ai.specialists import specialist_for_intent
 from src.core.models import DataMap
@@ -137,41 +142,37 @@ def _load_deck(study_dir: Path) -> dict:
         return {}
 
 
-def _load_approved_survey(study_id: str | None) -> SurveyDefinition | None:
-    """Load a study's approved questionnaire SurveyDefinition, or None.
+def _load_approved_survey(study_id: str | None, db=None) -> SurveyDefinition | None:
+    """A study's approved questionnaire, or None — never raises.
 
-    Reuses the questionnaire route's storage convention: the QuestionnaireDB row
-    carries the on-disk path to the SurveyDefinition JSON (via
-    list_questionnaires_for_study). We only surface an APPROVED questionnaire to
-    the navigator — a draft/in-review instrument is still being corrected, so the
-    Steward should treat it as "not available yet" rather than quote unreviewed
-    extractions. Returns None (never raises) for every degraded case — no
-    study_id, no questionnaire, none approved, missing/corrupt file — so the
-    Steward tools can report a clean "not available" instead of a stack trace.
+    Only an APPROVED instrument is surfaced: a draft is still being corrected,
+    so the tools treat it as "not available yet" rather than quote unreviewed
+    extractions. Reads the durable database copy through the questionnaire
+    route's own reader. It used to read only the on-disk file, which a
+    free-tier restart wipes — every questionnaire tool then answered "no
+    approved questionnaire" for projects that had one. Uses the caller's
+    session when given one, so it reads the same database as the request.
     """
     if not study_id:
         return None
     from api.db import SessionLocal, list_questionnaires_for_study
+    from api.routes.questionnaire import _read_definition_json
 
-    db = SessionLocal()
+    session = db or SessionLocal()
     try:
-        questionnaires = list_questionnaires_for_study(db, study_id)
-    except Exception:
+        for questionnaire in list_questionnaires_for_study(session, study_id):  # newest first
+            if questionnaire.status != "approved":
+                continue
+            payload = _read_definition_json(session, questionnaire)
+            if payload:
+                return SurveyDefinition.from_json(payload)
+        return None
+    except Exception:  # noqa: BLE001 - degraded read = "not available", not a 500
+        logger.exception(f"[{study_id}] approved questionnaire unreadable")
         return None
     finally:
-        db.close()
-
-    for questionnaire in questionnaires:  # most-recent first
-        if questionnaire.status != "approved" or not questionnaire.definition_path:
-            continue
-        path = Path(questionnaire.definition_path)
-        if not path.exists():
-            continue
-        try:
-            return SurveyDefinition.from_json(path.read_text())
-        except Exception:
-            return None
-    return None
+        if db is None:
+            session.close()
 
 
 MAX_CONTEXT_VARS = 150
@@ -537,7 +538,7 @@ def _make_executor(
 
 
 @router.post("/studies/{study_id}/chat", response_model=ChatResponse)
-async def chat_with_study(
+def chat_with_study(
     study_id: str,
     request: ChatRequest,
     db: Session = Depends(get_db),
@@ -565,55 +566,51 @@ async def chat_with_study(
         if m.id != user_msg.id and m.content
     ]
 
-    try:
-        reply, tool_results = navigate_groq(
-            request.message, context, executor, history=history, intent=intent
-        )
-    except (BackendUnavailable, ModelOutputError) as groq_exc:
-        # Fall back to OpenAI before dropping all the way to the weak local
-        # model — gpt-4o-mini's tool-calling is far more reliable than
-        # Llama-3.3's on Groq (this is the actual fix for malformed tool
-        # calls slipping through, not just a safety net), at a per-token
-        # cost that's only incurred when Groq has already failed.
-        logger.warning(f"[{study_id}] Groq unavailable ({groq_exc}); trying OpenAI")
+    # Open-source models only, in order: Bedrock (in-region), Groq, Cerebras —
+    # the same model family everywhere, so a quota or outage changes who
+    # answers, not the quality — then the local single-shot model, which keeps
+    # answering with no API at all when the bundle runs the local-ai profile.
+    reply, tool_results, failures = None, [], []
+    for label, navigate in (
+        ("Bedrock", navigate_bedrock),
+        ("Groq", navigate_groq),
+        ("Cerebras", navigate_cerebras),
+    ):
         try:
-            reply, tool_results = navigate_openai(
+            reply, tool_results = navigate(
                 request.message, context, executor, history=history, intent=intent
             )
-        except (BackendUnavailable, ModelOutputError) as openai_exc:
-            # Degrade to the local single-shot model: slower and simpler, but
-            # the demo keeps answering with zero API credits and data never
-            # leaves the machine. (Only reachable in local dev — Ollama
-            # can't run on Render, so this branch is a graceful no-op there.)
-            logger.warning(
-                f"[{study_id}] OpenAI also unavailable ({openai_exc}); trying basic mode"
+            break
+        except (BackendUnavailable, ModelOutputError) as exc:
+            failures.append(f"{label}: {exc}")
+    if reply is None:
+        logger.warning(f"[{study_id}] Cloud models unavailable ({failures}); trying basic mode")
+        try:
+            reply, tool_results = navigate_basic(
+                request.message,
+                _basic_context(study, datamap, deck, request.message),
+                executor,
+                intent=intent,
             )
-            try:
-                reply, tool_results = navigate_basic(
-                    request.message,
-                    _basic_context(study, datamap, deck, request.message),
-                    executor,
-                    intent=intent,
-                )
-                reply += "\n\n_(basic local mode)_"
-            except (BackendUnavailable, ModelOutputError) as basic_exc:
-                logger.warning(f"[{study_id}] Basic navigator also unavailable: {basic_exc}")
-                fallback = (
-                    "The navigator can't reach any AI backend right now "
-                    f"(Groq: {groq_exc} · OpenAI: {openai_exc} · local: {basic_exc}). "
-                    "The Tables tab still has every computed table."
-                )
-                assistant_msg = create_chat_message(db, study_id, "assistant", fallback)
-                return ChatResponse(
-                    message=ChatMessage(
-                        id=assistant_msg.id,
-                        role="assistant",
-                        content=fallback,
-                        created_at=assistant_msg.created_at,
-                    ),
-                    tool_results=[],
-                    conversation_id=study_id,
-                )
+            reply += "\n\n_(basic local mode)_"
+        except (BackendUnavailable, ModelOutputError) as basic_exc:
+            logger.warning(f"[{study_id}] Basic navigator also unavailable: {basic_exc}")
+            fallback = (
+                "The navigator can't reach any AI backend right now "
+                f"({' · '.join(failures)} · local: {basic_exc}). "
+                "The Tables tab still has every computed table."
+            )
+            assistant_msg = create_chat_message(db, study_id, "assistant", fallback)
+            return ChatResponse(
+                message=ChatMessage(
+                    id=assistant_msg.id,
+                    role="assistant",
+                    content=fallback,
+                    created_at=assistant_msg.created_at,
+                ),
+                tool_results=[],
+                conversation_id=study_id,
+            )
 
     executed = [
         ChatToolCall(tool=r.get("tool", "unknown"), params={}) for r in tool_results
@@ -640,7 +637,7 @@ async def chat_with_study(
 
 
 @router.get("/studies/{study_id}/chat/history")
-async def get_chat_history(
+def get_chat_history(
     study_id: str,
     limit: int = 50,
     db: Session = Depends(get_db),

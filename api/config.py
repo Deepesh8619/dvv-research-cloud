@@ -70,7 +70,17 @@ else:
 
 # Admin bootstrap (every startup — see api/db.py:seed_admin_user)
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "deepsharma616@gmail.com")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "changeme123")
+# A default password is only tolerable on a local SQLite file. On a real
+# database it would be a public owner login — and seed_admin_user() re-applies
+# it on EVERY cold start, so it can't even be changed away. Refuse to boot.
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+if not ADMIN_PASSWORD:
+    if not DATABASE_URL.startswith("sqlite"):
+        raise RuntimeError(
+            "ADMIN_PASSWORD is not set. Set it in the host's environment variables — "
+            "without it the owner account would get a known default password."
+        )
+    ADMIN_PASSWORD = "changeme123"  # local development only
 ADMIN_NAME = os.getenv("ADMIN_NAME", "Deepesh Sharma")
 
 # Emergency admin password reset (api/routes/auth.py: POST /auth/emergency-reset).

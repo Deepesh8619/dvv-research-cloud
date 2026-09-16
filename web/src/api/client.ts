@@ -551,7 +551,8 @@ export const questionnaireApi = {
 
 export interface RespondentEntry {
   session_id: string
-  status: 'open' | 'closed'
+  /** `paused` is a soft-launch hold: live, but not admitting anyone right now. */
+  status: 'open' | 'closed' | 'paused'
   surveyjs_json: Record<string, unknown>
   current_page: number
   // Optional segment theme slug (e.g. "fmcg") from the pinned survey metadata,
@@ -648,6 +649,35 @@ export interface FieldingLink extends FieldingRedirects {
     security?: number
     overquota?: number
   }
+  /** Hold the link at this many completes (the soft launch); null = no hold. */
+  soft_launch_limit: number | null
+  /** Whether the hold is engaged RIGHT NOW — computed server-side from counts. */
+  soft_launch_reached: boolean
+}
+
+/** What the soft-launch pause is for: the QC cross-check + field report run on
+ *  the launch batch, before the rest of the sample is paid for. */
+export interface SoftLaunchCheck {
+  link_id: string
+  soft_launch_limit: number | null
+  held: boolean
+  n_completes: number
+  n_checked_rows: number
+  crosscheck: {
+    passed: boolean
+    n_rows: number
+    checked: Record<string, number>
+    skipped: string[]
+    findings: Array<{
+      qid: string
+      kind: string
+      severity: 'error' | 'warning' | 'info'
+      detail: string
+      n_rows: number
+      variables: string[]
+    }>
+  }
+  field_report: FieldReport
 }
 
 export interface QuotaCell {
@@ -703,10 +733,12 @@ export const fieldingApi = {
     redirects?: FieldingRedirects,
     theme?: string | null,
     force = false,
+    softLaunchLimit?: number | null,
   ) =>
     api.post<FieldingLink>(`/studies/${studyId}/fielding/links`, {
       ...(redirects ?? {}),
       ...(theme ? { theme } : {}),
+      ...(softLaunchLimit ? { soft_launch_limit: softLaunchLimit } : {}),
       // Opening a link is refused while a condition can never be true. This is
       // the deliberate override, and the server logs who chose it.
       ...(force ? { force: true } : {}),
@@ -714,6 +746,18 @@ export const fieldingApi = {
 
   closeLink: async (studyId: string, linkId: string) =>
     api.post<FieldingLink>(`/studies/${studyId}/fielding/links/${linkId}/close`, {}),
+
+  /** Hold at `limit` completes, or release to full sample with `null`. */
+  setSoftLaunch: async (studyId: string, linkId: string, limit: number | null) =>
+    api.patch<FieldingLink>(
+      `/studies/${studyId}/fielding/links/${linkId}/soft-launch`,
+      { limit },
+    ),
+
+  softLaunchCheck: async (studyId: string, linkId: string) =>
+    api.get<SoftLaunchCheck>(
+      `/studies/${studyId}/fielding/links/${linkId}/soft-launch-check`,
+    ),
 
   listQuotas: async (studyId: string, linkId: string) =>
     api.get<{ link_id: string; cells: QuotaCell[] }>(
@@ -1044,4 +1088,54 @@ export const activityApi = {
     api.get<{ entries: AuditEntry[]; count: number }>('/corrections/audit', {
       params: studyId ? { study_id: studyId } : undefined,
     }),
+}
+
+// --- Copilot ---
+
+/** Best human-readable message from an API error (the server's `detail` first). */
+export function errorMessage(err: unknown): string | null {
+  if (axios.isAxiosError(err)) {
+    const detail = err.response?.data?.detail
+    if (typeof detail === 'string') return detail
+    if (detail?.error) return detail.error
+    return err.message
+  }
+  return err instanceof Error ? err.message : null
+}
+
+/** An action the copilot prepared. Nothing has happened until the user confirms;
+ *  confirming sends exactly this request, as the signed-in user. The server wrote
+ *  `title` and `detail` from validated data — not the model. */
+export interface CopilotProposal {
+  id: string
+  kind: string
+  title: string
+  detail: string
+  method: 'POST' | 'PATCH'
+  path: string
+  body: Record<string, unknown>
+}
+
+export interface CopilotReply {
+  reply: string
+  proposals: CopilotProposal[]
+  tools_used: string[]
+  answered_by: string
+}
+
+export const copilotApi = {
+  ask: async (
+    message: string,
+    history: Array<{ role: 'user' | 'assistant'; content: string }>,
+    studyId?: string | null,
+  ) =>
+    api.post<CopilotReply>('/copilot', {
+      message,
+      history: history.slice(-12),
+      ...(studyId ? { study_id: studyId } : {}),
+    }),
+
+  // Only the server-built request is sent; the path is relative to the API base.
+  confirm: async (card: CopilotProposal) =>
+    api.request({ method: card.method, url: card.path, data: card.body }),
 }

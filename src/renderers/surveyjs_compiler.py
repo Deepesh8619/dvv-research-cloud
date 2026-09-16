@@ -15,6 +15,7 @@ dropped here by design, not by omission.
 
 from __future__ import annotations
 
+import random
 import re
 from typing import Any
 
@@ -237,7 +238,12 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
     element["isRequired"] = question.required
 
     if question.randomize_options and "choices" in element:
-        element["choicesOrder"] = "random"
+        # Ordered HERE, once per respondent (the survey is compiled per entry),
+        # rather than with SurveyJS's choicesOrder: an anchored option must keep
+        # its place. "None of the above [ANCHOR]" shuffled into the middle of
+        # the list is a scripting error a client would reject the data for, and
+        # the library has no way to pin one choice.
+        element["choices"] = _shuffled_choices(question, element["choices"])
 
     if question.show_if is not None:
         element["visibleIf"] = _expression_to_visibleif_string(question.show_if)
@@ -300,6 +306,19 @@ def compile_to_surveyjs(survey: SurveyDefinition) -> dict[str, Any]:
     """
     pages = [_compile_block(block, survey) for block in survey.blocks]
     return {"title": survey.title, "pages": pages}
+
+
+def _shuffled_choices(question: Question, choices: list[dict]) -> list[dict]:
+    """Randomise the options that may move; anchored ones stay where they are."""
+    movable = [i for i, opt in enumerate(question.options) if not opt.anchored]
+    if len(movable) < 2 or len(choices) != len(question.options):
+        return choices
+    picked = [choices[i] for i in movable]
+    random.shuffle(picked)
+    out = list(choices)
+    for slot, choice in zip(movable, picked, strict=True):
+        out[slot] = choice
+    return out
 
 
 def display_warnings(survey: SurveyDefinition) -> list[dict[str, str]]:

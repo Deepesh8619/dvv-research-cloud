@@ -658,7 +658,7 @@ def test_extraction_failure_surfaces_error_detail(client, monkeypatch):
     def boom(chunks, study_id, blocks=None, **kwargs):
         raise BackendUnavailable(
             "extraction aborted after 3 consecutive backend failures "
-            "(circuit breaker): ANTHROPIC_API_KEY not set",
+            "(circuit breaker): GROQ_API_KEY not set",
             config_error=True,
         )
 
@@ -674,19 +674,19 @@ def test_extraction_failure_surfaces_error_detail(client, monkeypatch):
     # can act on. The raw cause is still logged server-side.
     detail = status["error_detail"]
     assert "administrator" in detail
-    assert "ANTHROPIC_API_KEY" not in detail
+    assert "GROQ_API_KEY" not in detail
 
 
 def test_health_reports_llm_key_presence_booleans(client, monkeypatch):
     """T16 preflight: /api/health reports each LLM key as a presence boolean —
     never the value, length, or prefix."""
     test_client, _, _ = client
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-super-secret-value-1234567890")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "sk-super-secret-value-1234567890")
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
     body = test_client.get("/api/health").json()
     keys = body["llm_keys"]
-    assert keys["ANTHROPIC_API_KEY"] is True
+    assert keys["CEREBRAS_API_KEY"] is True
     assert keys["GROQ_API_KEY"] is False
     # The actual secret must never leak into the payload (value/length/prefix).
     serialized = str(body)

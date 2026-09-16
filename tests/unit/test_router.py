@@ -17,9 +17,7 @@ import pytest
 from src.ai import router
 from src.ai.router import (
     BackendUnavailable,
-    ModelOutputError,
     _extraction_chain,
-    _openai_generate,
     run_task,
 )
 
@@ -30,8 +28,8 @@ _SCHEMA = {
 }
 
 
-def _openai_body(arguments: str) -> dict:
-    """An OpenAI chat-completions response carrying a forced `emit` tool call."""
+def _tool_call_body(arguments: str) -> dict:
+    """A chat-completions response carrying a forced `emit` tool call (Groq/Cerebras shape)."""
     return {
         "choices": [
             {
@@ -45,153 +43,76 @@ def _openai_body(arguments: str) -> dict:
     }
 
 
-# --- _openai_generate: happy path ------------------------------------------
 
 
-def test_openai_generate_happy_path(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    captured = {}
-
-    def fake_http_json(request, timeout):
-        captured["url"] = request.full_url
-        captured["headers"] = {k.lower(): v for k, v in request.header_items()}
-        captured["body"] = json.loads(request.data)
-        return _openai_body(json.dumps({"answer": "hello"}))
-
-    monkeypatch.setattr(router, "http_json", fake_http_json)
-
-    result = _openai_generate("gpt-4o", "extract this", _SCHEMA, timeout=30)
-
-    assert result == {"answer": "hello"}
-    # Request shape matches navigator.py's OpenAI conventions.
-    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
-    assert captured["headers"]["authorization"] == "Bearer sk-test"
-    body = captured["body"]
-    assert body["model"] == "gpt-4o"
-    assert body["tool_choice"] == {"type": "function", "function": {"name": "emit"}}
-    fn = body["tools"][0]["function"]
-    assert fn["name"] == "emit"
-    assert fn["parameters"] == _SCHEMA
 
 
-# --- _openai_generate: missing key -> config_error --------------------------
 
 
-def test_openai_generate_missing_key_is_config_error(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(BackendUnavailable) as exc:
-        _openai_generate("gpt-4o", "p", _SCHEMA, timeout=30)
-    assert exc.value.config_error is True
 
 
-# --- _openai_generate: network failure -> transient (not config) ------------
 
 
-def test_openai_generate_network_failure_is_transient(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-
-    def boom(request, timeout):
-        raise urllib.error.URLError("connection refused")
-
-    monkeypatch.setattr(router, "http_json", boom)
-
-    with pytest.raises(BackendUnavailable) as exc:
-        _openai_generate("gpt-4o", "p", _SCHEMA, timeout=30)
-    assert exc.value.config_error is False
 
 
-# --- _openai_generate: schema-invalid response -> ModelOutputError ----------
 
 
-def test_openai_generate_missing_required_key_raises_model_error(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-
-    def fake_http_json(request, timeout):
-        # Valid JSON but missing the required "answer" key.
-        return _openai_body(json.dumps({"wrong": "x"}))
-
-    monkeypatch.setattr(router, "http_json", fake_http_json)
-
-    with pytest.raises(ModelOutputError):
-        _openai_generate("gpt-4o", "p", _SCHEMA, timeout=30)
 
 
-def test_openai_generate_no_tool_call_raises_model_error(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-
-    def fake_http_json(request, timeout):
-        return {"choices": [{"message": {"content": "sorry, no tool call"}}]}
-
-    monkeypatch.setattr(router, "http_json", fake_http_json)
-
-    with pytest.raises(ModelOutputError):
-        _openai_generate("gpt-4o", "p", _SCHEMA, timeout=30)
 
 
 # --- _extraction_chain: Ollama-first fallback ordering ----------------------
 
 
 def test_chain_is_ollama_first_then_configured_cloud(monkeypatch):
-    # Opt out of open-weights-only mode (the default) to see the full chain.
-    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
     monkeypatch.setenv("GROQ_API_KEY", "gk")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
     monkeypatch.delenv("HF_TOKEN", raising=False)
-    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
     order = list(dict.fromkeys(c["backend"] for c in _extraction_chain()))
-    assert order == ["ollama", "groq", "openai", "claude"]
+    assert order == ["ollama", "groq", "cerebras"]
 
 
 def test_chain_omits_cloud_backends_without_keys(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     # Ollama is always attempted (may be reachable locally; fails fast if not).
     assert [c["backend"] for c in _extraction_chain()] == ["ollama"]
 
 
 def test_chain_includes_only_configured_cloud(monkeypatch):
-    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
-    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    assert [c["backend"] for c in _extraction_chain()] == ["ollama", "openai"]
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
+    assert [c["backend"] for c in _extraction_chain()] == ["ollama", "cerebras"]
 
 
 # --- run_task: "auto" walks Ollama -> Groq -> OpenAI, escalating on failure --
 
 
-def test_run_task_auto_falls_through_ollama_to_openai(monkeypatch):
-    """Ollama unreachable -> chain escalates to the configured OpenAI backend."""
-    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+def test_run_task_auto_falls_through_ollama_to_cerebras(monkeypatch):
+    """Ollama unreachable -> chain escalates to the configured Cerebras backend."""
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
-    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
 
     def fake_http_json(request, timeout):
         if "11434" in request.full_url:  # Ollama attempt
             raise urllib.error.URLError("connection refused")
-        assert "api.openai.com" in request.full_url
-        return _openai_body(json.dumps({"answer": "ok"}))
+        assert "api.cerebras.ai" in request.full_url
+        return _tool_call_body(json.dumps({"answer": "ok"}))
 
     monkeypatch.setattr(router, "http_json", fake_http_json)
 
     resp = run_task("questionnaire.extract", "prompt", _SCHEMA)
-    assert resp.backend == "openai"
-    assert resp.model == "gpt-4o"
+    assert resp.backend == "cerebras"
+    assert resp.model == "qwen-3.8-27b"
     assert resp.content == {"answer": "ok"}
 
 
 def test_run_task_auto_prefers_ollama_when_it_answers(monkeypatch):
     """A healthy local Ollama serves the request without touching the cloud."""
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
 
     def fake_http_json(request, timeout):
         assert "11434" in request.full_url  # never reaches the cloud
@@ -206,9 +127,8 @@ def test_run_task_auto_prefers_ollama_when_it_answers(monkeypatch):
 
 def test_run_task_auto_all_missing_is_config_error(monkeypatch):
     """No Ollama and no cloud keys -> single actionable config error."""
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    for var in ("GROQ_API_KEY", "CEREBRAS_API_KEY", "HF_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
 
     def boom(request, timeout):
         raise urllib.error.URLError("connection refused")
@@ -228,46 +148,8 @@ def test_run_task_unknown_backend_raises(monkeypatch):
 # --- open-weights-only mode -------------------------------------------------
 
 
-def test_open_weights_only_drops_proprietary_backends(monkeypatch):
-    """A stray proprietary key must not route client questionnaires off-catalog.
-
-    This is a contractual constraint in market research (client NDAs), not a
-    preference, so the guarantee is asserted rather than assumed.
-    """
-    from src.ai.router import _extraction_chain
-
-    # Every key set explicitly — including CEREBRAS_API_KEY, so this asserts the
-    # full open-weight chain rather than passing by accident on a machine that
-    # happens not to have one of them configured.
-    for k in (
-        "GROQ_API_KEY",
-        "CEREBRAS_API_KEY",
-        "HF_TOKEN",
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-    ):
-        monkeypatch.setenv(k, "x")
-    monkeypatch.delenv("LLM_OPEN_WEIGHTS_ONLY", raising=False)  # default is ON
-
-    # De-duplicated: groq contributes several MODELS (separate daily
-    # quotas), which is not what this test is about.
-    backends = list(dict.fromkeys(s["backend"] for s in _extraction_chain()))
-    assert "openai" not in backends
-    assert "claude" not in backends
-    assert backends == ["ollama", "groq", "cerebras", "huggingface"]
 
 
-def test_opting_out_restores_the_proprietary_tail(monkeypatch):
-    from src.ai.router import _extraction_chain
-
-    for k in ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
-        monkeypatch.setenv(k, "x")
-    monkeypatch.delenv("HF_TOKEN", raising=False)
-    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
-    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
-
-    backends = list(dict.fromkeys(s["backend"] for s in _extraction_chain()))
-    assert backends == ["ollama", "groq", "openai", "claude"]
 
 
 def test_huggingface_backend_needs_a_token(monkeypatch):
@@ -457,15 +339,15 @@ def test_cooldown_expires(monkeypatch):
 def test_max_tokens_is_not_over_reserved(monkeypatch):
     """Providers bill prompt + schema + max_tokens. A 4096 reservation was two
     thirds of every bill for questions whose largest real output was 493."""
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
     seen = {}
 
     def capture(request, timeout):
         seen["body"] = json.loads(request.data)
-        return _openai_body(json.dumps({"answer": "ok"}))
+        return _tool_call_body(json.dumps({"answer": "ok"}))
 
     monkeypatch.setattr(router, "http_json", capture)
-    _openai_generate("gpt-4o", "p", _SCHEMA, timeout=30)
+    router._cerebras_generate("qwen-3.8-27b", "p", _SCHEMA, timeout=30)
 
     assert seen["body"]["max_tokens"] == router.MAX_OUTPUT_TOKENS
     # Comfortably above the largest observed question (493) and far below the
@@ -508,20 +390,23 @@ def test_groq_fallback_models_are_added_to_the_chain(monkeypatch):
     monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
     router._backend_cooldown.clear()
+    # The default list is empty (Groq serves one Qwen today); the mechanism is
+    # for when a server configures extra models with GROQ_FALLBACK_MODELS.
+    monkeypatch.setattr(router, "GROQ_FALLBACK_MODELS", ["qwen/extra-model"])
 
     models = [c["model"] for c in _extraction_chain() if c["backend"] == "groq"]
     assert models[0] == router._EXTRACTION_MODELS["groq"]   # primary first
-    assert len(models) > 1
+    assert models[1:] == ["qwen/extra-model"]
     assert len(models) == len(set(models))                  # no duplicates
 
 
 def test_cooldown_is_per_model_not_per_backend():
-    """gpt-oss-120b running out says nothing about gpt-oss-20b's budget."""
+    """One model running out says nothing about another model's budget."""
     router._backend_cooldown.clear()
-    router.note_backend_exhausted("groq", 600, "openai/gpt-oss-120b")
+    router.note_backend_exhausted("groq", 600, "qwen/qwen3.8-27b")
 
-    assert router.backend_available_in("groq", "openai/gpt-oss-120b") > 0
-    assert router.backend_available_in("groq", "openai/gpt-oss-20b") == 0
+    assert router.backend_available_in("groq", "qwen/qwen3.8-27b") > 0
+    assert router.backend_available_in("groq", "qwen/some-other-model") == 0
     router._backend_cooldown.clear()
 
 
@@ -536,3 +421,152 @@ def test_fallback_models_can_be_disabled(monkeypatch):
     finally:
         monkeypatch.delenv("GROQ_FALLBACK_MODELS", raising=False)
         importlib.reload(router)
+
+
+def _timeouts_seen(monkeypatch, cloud_key: bool) -> dict[str, int]:
+    """Run one extraction and record the timeout each backend was given."""
+    for var in ("GROQ_API_KEY", "HF_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    if cloud_key:
+        monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
+    else:
+        monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    seen: dict[str, int] = {}
+
+    def fake_http_json(request, timeout):
+        backend = "ollama" if "11434" in request.full_url else "cloud"
+        seen[backend] = timeout
+        if backend == "ollama":
+            return {"response": json.dumps({"answer": "local"})}
+        raise AssertionError("cloud should not be reached")
+
+    monkeypatch.setattr(router, "http_json", fake_http_json)
+    run_task("questionnaire.extract", "prompt", _SCHEMA, timeout=120)
+    return seen
+
+
+def test_a_local_only_deployment_waits_for_its_model(monkeypatch):
+    """Ollama is the whole chain: cutting it off at 30s leaves nothing to answer."""
+    assert _timeouts_seen(monkeypatch, cloud_key=False)["ollama"] == 120
+
+
+def test_a_local_model_with_a_cloud_fallback_is_still_capped(monkeypatch):
+    """A hung local model must not stall a request a cloud backend could answer."""
+    assert _timeouts_seen(monkeypatch, cloud_key=True)["ollama"] == 30
+
+
+
+
+
+
+
+
+
+
+
+# --- Open-source models only: no proprietary vendor is reachable ------------
+
+
+def test_no_proprietary_ai_vendor_is_reachable_from_the_code():
+    """DVV policy, enforced by absence: nothing in the app can call these vendors."""
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    offenders = [
+        f"{path.relative_to(root)}: {needle}"
+        for path in list((root / "src").rglob("*.py")) + list((root / "api").rglob("*.py"))
+        for needle in ("api.openai.com", "api.anthropic.com", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+        if needle in path.read_text()
+    ]
+    assert offenders == []
+    backends = {route["backend"] for route in router.DEFAULT_ROUTES.values()}
+    assert backends <= {"auto", "ollama", "bedrock", "groq", "cerebras", "huggingface"}
+
+
+def test_the_network_guard_covers_every_by_name_import():
+    """conftest must refuse the network in the navigator too, not only the router."""
+    import urllib.error
+
+    from src.ai import navigator
+
+    with pytest.raises(urllib.error.URLError, match="network disabled in tests"):
+        navigator.http_json(object(), 1)
+
+
+
+# --- Amazon Bedrock: the in-region provider on AWS ---------------------------
+
+
+def test_bedrock_leads_the_cloud_providers_when_its_key_is_set(monkeypatch):
+    monkeypatch.setenv("BEDROCK_API_KEY", "bk")
+    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    order = list(dict.fromkeys(c["backend"] for c in _extraction_chain()))
+    assert order == ["ollama", "bedrock", "groq"]
+
+
+def test_bedrock_is_called_in_the_configured_region_with_its_key(monkeypatch):
+    monkeypatch.setenv("BEDROCK_API_KEY", "bk-secret")
+    monkeypatch.setenv("BEDROCK_REGION", "eu-central-1")
+    for var in ("GROQ_API_KEY", "CEREBRAS_API_KEY", "HF_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    seen = {}
+
+    def fake(request, timeout):
+        if "11434" in request.full_url:
+            raise urllib.error.URLError("no local model")
+        seen["url"] = request.full_url
+        seen["auth"] = request.get_header("Authorization")
+        seen["model"] = json.loads(request.data)["model"]
+        return _tool_call_body(json.dumps({"answer": "ok"}))
+
+    monkeypatch.setattr(router, "http_json", fake)
+    resp = run_task("questionnaire.extract", "prompt", _SCHEMA)
+    assert resp.backend == "bedrock"
+    assert seen["url"] == (
+        "https://bedrock-runtime.eu-central-1.amazonaws.com/openai/v1/chat/completions"
+    )
+    assert seen["auth"] == "Bearer bk-secret"
+    assert seen["model"] == "qwen.qwen3-32b-v1:0"  # the runtime endpoint's ID
+
+
+def test_the_bedrock_endpoint_can_be_switched_without_code(monkeypatch):
+    monkeypatch.setenv("BEDROCK_BASE_URL", "https://bedrock-mantle.ap-south-1.api.aws/v1/")
+    assert router.bedrock_chat_url() == (
+        "https://bedrock-mantle.ap-south-1.api.aws/v1/chat/completions"
+    )
+    monkeypatch.setenv("BEDROCK_MODEL", "some.other-endpoint-id")
+    assert router.bedrock_model() == "some.other-endpoint-id"  # an override always wins
+
+
+def test_the_copilot_tries_bedrock_first(monkeypatch):
+    from src.ai import copilot
+
+    monkeypatch.setenv("BEDROCK_API_KEY", "bk")
+    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    labels = [p[0] for p in copilot._providers()]
+    assert labels[:2] == ["Bedrock", "Groq"]
+    assert labels[-1] == "local model"
+
+
+
+def test_no_default_model_is_made_by_openai(monkeypatch):
+    """DVV policy: open-source models only, and none of them OpenAI's."""
+    import pathlib
+
+    from src.ai import copilot, navigator
+
+    for var in ("BEDROCK_MODEL", "GROQ_MODEL", "CEREBRAS_MODEL", "HF_MODEL", "COPILOT_GROQ_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    defaults = [router.bedrock_model(), router.GROQ_DEFAULT_MODEL, router.CEREBRAS_DEFAULT_MODEL,
+                router.HF_DEFAULT_MODEL, navigator.GROQ_MODEL, navigator.CEREBRAS_MODEL,
+                *router.GROQ_FALLBACK_MODELS, *(r["model"] for r in router.DEFAULT_ROUTES.values())]
+    monkeypatch.setenv("BEDROCK_API_KEY", "bk")
+    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "ck")
+    defaults += [p[3] for p in copilot._providers()]
+    assert not [m for m in defaults if "gpt" in m.lower() or m.lower().startswith("openai")]
+    root = pathlib.Path(__file__).resolve().parents[2]
+    policy = (root / "deploy" / "aws" / "app-policy.json").read_text()
+    assert "openai" not in policy

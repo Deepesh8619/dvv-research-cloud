@@ -62,6 +62,7 @@ from src.core.survey_definition import (
     QuestionType,
     SurveyDefinition,
 )
+from src.engines.fielding.materialize import plan_datamap
 from src.engines.questionnaire.extractor import extract_survey_definition
 from src.intake.questionnaire_loader import (
     load_docx,
@@ -461,7 +462,7 @@ def _run_extraction(
             exc_info=True,
         )
         # Preserve the exception detail (e.g. the extractor circuit-breaker's
-        # message naming a missing ANTHROPIC_API_KEY) on the row so the status
+        # message naming a missing GROQ_API_KEY) on the row so the status
         # endpoint reports the real root cause instead of an opaque 'error' (T16).
         update_questionnaire_status(
             job_db,
@@ -543,7 +544,7 @@ async def upload_questionnaire(
 
 
 @router.get("/studies/{study_id}/questionnaire/source")
-async def download_questionnaire_source(
+def download_questionnaire_source(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -585,7 +586,7 @@ async def download_questionnaire_source(
     "/studies/{study_id}/questionnaire/authored",
     response_model=QuestionnaireStatusResponse,
 )
-async def create_authored_questionnaire(
+def create_authored_questionnaire(
     study_id: str,
     request: QuestionnaireCreateRequest,
     db: Session = Depends(get_db),
@@ -643,7 +644,7 @@ def _latest_questionnaire(db: Session, study_id: str):
     "/studies/{study_id}/questionnaire",
     response_model=QuestionnaireStatusResponse,
 )
-async def get_questionnaire_status(
+def get_questionnaire_status(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -675,7 +676,7 @@ async def get_questionnaire_status(
     "/studies/{study_id}/questionnaire/settings",
     response_model=QuestionnaireStatusResponse,
 )
-async def update_questionnaire_settings(
+def update_questionnaire_settings(
     study_id: str,
     request: QuestionnaireSettingsRequest,
     db: Session = Depends(get_db),
@@ -700,7 +701,7 @@ async def update_questionnaire_settings(
 
 
 @router.get("/studies/{study_id}/questionnaire/questions")
-async def list_questions(
+def list_questions(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
@@ -718,7 +719,7 @@ async def list_questions(
 
 
 @router.get("/studies/{study_id}/questionnaire/questions/{qid}")
-async def get_question(
+def get_question(
     study_id: str,
     qid: str,
     db: Session = Depends(get_db),
@@ -822,7 +823,7 @@ def _apply_update(question, request: QuestionUpdateRequest) -> None:
 
 
 @router.patch("/studies/{study_id}/questionnaire/questions/{qid}")
-async def update_question(
+def update_question(
     study_id: str,
     qid: str,
     request: QuestionUpdateRequest,
@@ -894,7 +895,7 @@ async def update_question(
 
 
 @router.post("/studies/{study_id}/questionnaire/questions")
-async def add_question(
+def add_question(
     study_id: str,
     request: QuestionCreateRequest,
     db: Session = Depends(get_db),
@@ -956,7 +957,7 @@ async def add_question(
 
 
 @router.delete("/studies/{study_id}/questionnaire/questions/{qid}")
-async def delete_question(
+def delete_question(
     study_id: str,
     qid: str,
     db: Session = Depends(get_db),
@@ -1003,7 +1004,7 @@ async def delete_question(
 
 
 @router.put("/studies/{study_id}/questionnaire/questions/order")
-async def reorder_questions(
+def reorder_questions(
     study_id: str,
     request: QuestionOrderRequest,
     db: Session = Depends(get_db),
@@ -1054,7 +1055,7 @@ async def reorder_questions(
 
 
 @router.post("/studies/{study_id}/questionnaire/questions/{qid}/approve")
-async def approve_question(
+def approve_question(
     study_id: str,
     qid: str,
     db: Session = Depends(get_db),
@@ -1101,7 +1102,7 @@ async def approve_question(
 
 
 @router.post("/studies/{study_id}/questionnaire/questions/approve-clean")
-async def approve_clean(
+def approve_clean(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
@@ -1149,8 +1150,37 @@ async def approve_clean(
     }
 
 
+@router.get("/studies/{study_id}/questionnaire/datamap")
+def questionnaire_datamap(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST, UserRole.REVIEWER)),
+):
+    """The data layout this instrument will produce — every variable, before
+    fielding. Computed from the current definition, so it never drifts."""
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    datamap = plan_datamap(survey)
+    return {
+        "questionnaire_id": questionnaire.id,
+        "status": questionnaire.status,
+        "n_variables": len(datamap.variables),
+        "variables": [
+            {
+                "name": v.name,
+                "label": v.label,
+                "type": v.type.value if hasattr(v.type, "value") else str(v.type),
+                "values": v.values or None,
+                "question_ref": v.question_ref,
+                "derived": v.provenance == "fielding_derived",
+            }
+            for v in datamap.variables
+        ],
+    }
+
+
 @router.post("/studies/{study_id}/questionnaire/approve-all")
-async def approve_all(
+def approve_all(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
@@ -1201,10 +1231,16 @@ async def approve_all(
     # Best-effort: a merge failure must never un-approve the questionnaire.
     relabel = _start_label_merge(db, study_id, survey)
 
+    # The data layout is fixed the moment the instrument is: a client asking
+    # "what columns will I get?" gets the answer at approval, not after the
+    # first respondent.
+    datamap = plan_datamap(survey)
     return {
         "questionnaire_id": questionnaire.id,
         "status": "approved",
         "label_merge_started": relabel,
+        "n_variables": len(datamap.variables),
+        "variables": [v.name for v in datamap.variables],
     }
 
 

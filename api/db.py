@@ -1,6 +1,7 @@
 """Database setup and models."""
 
 import logging
+import os
 import secrets
 from datetime import UTC, datetime
 
@@ -32,9 +33,18 @@ _is_sqlite = DATABASE_URL.startswith("sqlite")
 # transparently replaces a dead one. pool_recycle retires connections before
 # the provider does, so the pre_ping rarely has to fire at all. Neither applies
 # to SQLite, which has no server to disconnect from.
+# Pool size must match how many requests run at once, or requests queue for a
+# connection and fail after pool_timeout. Each web process runs up to 40 sync
+# handlers (the thread pool), and SQLAlchemy's default pool is only 5 + 10
+# overflow = 15 — under load, 25 requests would stand waiting on a connection
+# the database could easily have given them. Postgres' own ceiling
+# (max_connections, set in deploy/docker-compose.yml) must stay above the sum.
 _pool_kwargs: dict = {} if _is_sqlite else {
     "pool_pre_ping": True,
     "pool_recycle": 280,  # under Neon's ~5-minute idle suspend
+    "pool_size": int(os.getenv("DB_POOL_SIZE", "20")),
+    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "20")),
+    "pool_timeout": 10,  # fail in 10 s with a clear error, not a 30 s hang
 }
 engine = create_engine(DATABASE_URL, connect_args=_connect_args, **_pool_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -160,7 +170,7 @@ class QuestionnaireDB(Base):
     definition_json = Column(Text, nullable=True)  # authoritative SurveyDefinition JSON string
     definition_path = Column(String, nullable=True)  # vestigial: ephemeral on-disk copy
     # Human-readable reason set when status flips to 'error' (e.g. the extractor's
-    # circuit-breaker message naming a missing ANTHROPIC_API_KEY). Surfaced by the
+    # circuit-breaker message naming a missing GROQ_API_KEY). Surfaced by the
     # status endpoint so a reviewer sees the root cause, not a bare 'error' (T16).
     error_detail = Column(String, nullable=True)
     # Per-question approval is tracked here (API-layer review state) rather than
@@ -223,6 +233,9 @@ class FieldingLinkDB(Base):
     redirect_terminate = Column(String, nullable=True)
     redirect_overquota = Column(String, nullable=True)
     redirect_security = Column(String, nullable=True)
+    # Soft launch (T25): while set, the link stops admitting NEW respondents
+    # once this many completes exist. NULL = no hold, field to the full sample.
+    soft_launch_limit = Column(Integer, nullable=True)
 
 
 class RespondentSessionDB(Base):
@@ -247,6 +260,10 @@ class RespondentSessionDB(Base):
     fielding_link_id = Column(String, index=True)
     status_code = Column(Integer, nullable=True)  # None|10|20|30|40
     entry_params = Column(JSON, default=dict)
+    # The panel's respondent id, copied out of entry_params so the duplicate
+    # check at entry is one indexed lookup instead of a scan of every session.
+    # '' = entered without one. Added after the table shipped (_ensure_new_columns).
+    pid = Column(String, nullable=True)  # indexed with fielding_link_id in init_db
     current_page = Column(Integer, default=0)
     started_at = Column(String)
     last_seen_at = Column(String)
@@ -610,6 +627,15 @@ def init_db():
     """Initialize database tables."""
     Base.metadata.create_all(bind=engine)
     _ensure_new_columns()
+    # create_all only indexes NEW tables; an ALTERed-in column needs its own.
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_respondent_sessions_link_pid "
+            "ON respondent_sessions (fielding_link_id, pid)"
+        ))
+    backfill_session_pids()
     seed_admin_user()
 
 
@@ -689,6 +715,11 @@ def _ensure_new_columns():
             "redirect_terminate": "VARCHAR",
             "redirect_overquota": "VARCHAR",
             "redirect_security": "VARCHAR",
+            # Soft launch hold (T25).
+            "soft_launch_limit": "INTEGER",
+        },
+        "respondent_sessions": {
+            "pid": "VARCHAR",
         },
     }
     inspector = inspect(engine)
@@ -1143,6 +1174,7 @@ def create_fielding_link(
     survey_json: str,
     created_by: str,
     redirects: dict | None = None,
+    soft_launch_limit: int | None = None,
 ) -> "FieldingLinkDB":
     """Open a fielding link, pinning the approved SurveyDefinition JSON snapshot.
 
@@ -1167,6 +1199,7 @@ def create_fielding_link(
         redirect_terminate=redirects.get("redirect_terminate"),
         redirect_overquota=redirects.get("redirect_overquota"),
         redirect_security=redirects.get("redirect_security"),
+        soft_launch_limit=soft_launch_limit,
     )
     db.add(link)
     db.commit()
@@ -1219,6 +1252,7 @@ def create_respondent_session(
         fielding_link_id=fielding_link_id,
         status_code=None,
         entry_params=entry_params or {},
+        pid=str((entry_params or {}).get("pid") or "").strip(),
         current_page=0,
         started_at=now,
         last_seen_at=now,
@@ -1303,6 +1337,27 @@ def upsert_respondent_answer(
     return answer
 
 
+def delete_respondent_answers(db: Session, session_id: str, qids: list[str]) -> int:
+    """Drop a session's answers to `qids`. Returns how many rows went.
+
+    Used when a screen-out fires: answers the respondent gave on the SAME page,
+    to questions that come after the terminating one, are not data the study is
+    allowed to have — the interview stopped there.
+    """
+    if not qids:
+        return 0
+    n = (
+        db.query(RespondentAnswerDB)
+        .filter(
+            RespondentAnswerDB.session_id == session_id,
+            RespondentAnswerDB.qid.in_(qids),
+        )
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return n
+
+
 def list_respondent_answers(db: Session, session_id: str) -> list["RespondentAnswerDB"]:
     """All answer rows for a session (order stable by qid)."""
     return (
@@ -1320,19 +1375,85 @@ def get_session_answers_map(db: Session, session_id: str) -> dict:
 
 def fielding_link_counts(db: Session, link_id: str) -> dict:
     """Per-link session tallies by Lucid/Cint status code: starts, completes (10),
-    terminates (20), security (30), overquota (40) — the field-monitor buckets."""
-    sessions = (
-        db.query(RespondentSessionDB)
+    terminates (20), security (30), overquota (40) — the field-monitor buckets.
+
+    One GROUP BY, not every session row pulled into Python: the field monitor
+    polls this for every link on the page."""
+    from sqlalchemy import func
+
+    by_status = dict(
+        db.query(RespondentSessionDB.status_code, func.count())
         .filter(RespondentSessionDB.fielding_link_id == link_id)
+        .group_by(RespondentSessionDB.status_code)
         .all()
     )
     return {
-        "starts": len(sessions),
-        "completes": sum(1 for s in sessions if s.status_code == 10),
-        "terminates": sum(1 for s in sessions if s.status_code == 20),
-        "security": sum(1 for s in sessions if s.status_code == 30),
-        "overquota": sum(1 for s in sessions if s.status_code == 40),
+        "starts": sum(by_status.values()),
+        "completes": by_status.get(10, 0),
+        "terminates": by_status.get(20, 0),
+        "security": by_status.get(30, 0),
+        "overquota": by_status.get(40, 0),
     }
+
+
+def count_completes(db: Session, link_id: str) -> int:
+    """Completes on a link, counted in SQL (the soft-launch gate runs per entry)."""
+    return (
+        db.query(RespondentSessionDB)
+        .filter(
+            RespondentSessionDB.fielding_link_id == link_id,
+            RespondentSessionDB.status_code == 10,
+        )
+        .count()
+    )
+
+
+def pid_already_finished(db: Session, link_id: str, pid: str) -> bool:
+    """Has this panel respondent already reached a terminal status on this link?"""
+    return (
+        db.query(RespondentSessionDB.id)
+        .filter(
+            RespondentSessionDB.fielding_link_id == link_id,
+            RespondentSessionDB.pid == pid,
+            RespondentSessionDB.status_code.isnot(None),
+        )
+        .first()
+        is not None
+    )
+
+
+def answers_by_session(db: Session, link_id: str) -> dict[str, dict]:
+    """Every session's answers on a link as {session_id: {qid: value}}, in ONE query.
+
+    Replaces one query per respondent: 2,001 queries for a 2,000-respondent
+    field report before this.
+    """
+    rows = (
+        db.query(RespondentAnswerDB.session_id, RespondentAnswerDB.qid, RespondentAnswerDB.value)
+        .join(RespondentSessionDB, RespondentSessionDB.id == RespondentAnswerDB.session_id)
+        .filter(RespondentSessionDB.fielding_link_id == link_id)
+        .all()
+    )
+    out: dict[str, dict] = {}
+    for session_id, qid, value in rows:
+        out.setdefault(session_id, {})[qid] = value
+    return out
+
+
+def backfill_session_pids() -> int:
+    """Fill `pid` on sessions created before the column existed. Idempotent.
+
+    Rows without a pid get '' so they are not re-examined on every boot.
+    """
+    db = SessionLocal()
+    try:
+        rows = db.query(RespondentSessionDB).filter(RespondentSessionDB.pid.is_(None)).all()
+        for row in rows:
+            row.pid = str((row.entry_params or {}).get("pid") or "").strip()
+        db.commit()
+        return len(rows)
+    finally:
+        db.close()
 
 
 def list_respondent_sessions(db: Session, fielding_link_id: str) -> list["RespondentSessionDB"]:
@@ -1342,6 +1463,22 @@ def list_respondent_sessions(db: Session, fielding_link_id: str) -> list["Respon
         .filter(RespondentSessionDB.fielding_link_id == fielding_link_id)
         .all()
     )
+
+
+def set_fielding_link_soft_launch(
+    db: Session, link_id: str, limit: int | None
+) -> "FieldingLinkDB":
+    """Set or clear a link's soft-launch hold.
+
+    `limit=None` releases the hold (field to the full sample); an int re-holds
+    at that many completes, so the same call both pauses and releases.
+    """
+    link = get_fielding_link(db, link_id)
+    if link:
+        link.soft_launch_limit = limit
+        db.commit()
+        db.refresh(link)
+    return link
 
 
 def set_fielding_link_redirects(db: Session, link_id: str, redirects: dict) -> "FieldingLinkDB":

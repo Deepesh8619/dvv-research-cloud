@@ -2,8 +2,10 @@
 
 import hmac
 import logging
+import threading
+import time
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -34,19 +36,70 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# --- Sign-in throttling --------------------------------------------------------
+# An internet-facing login with no limit lets anyone try passwords forever. Two
+# keys: the ACCOUNT (guessing one person's password) and the ADDRESS (spraying
+# many accounts from one machine). Past the threshold the key is locked for 1
+# minute, doubling per further failure up to 15; a success clears the account.
+# The lock is checked BEFORE the password, so a locked account can't be probed.
+# ponytail: in-memory, one web process per client server (api/heavy.py); move
+# to a DB table if several web processes ever serve one database.
+_WINDOW = 15 * 60
+_MAX_LOCK = 15 * 60
+_THRESHOLDS = {"account": 5, "address": 30}
+_failures: dict[str, list[float]] = {}
+_throttle_lock = threading.Lock()
+
+
+def _locked_for(key: str, kind: str, now: float) -> int:
+    """Seconds this key must still wait (0 = allowed)."""
+    with _throttle_lock:
+        recent = [t for t in _failures.get(key, []) if now - t < _WINDOW]
+        _failures[key] = recent
+        over = len(recent) - _THRESHOLDS[kind]
+        if over < 0:
+            return 0
+        wait = min(60 * 2**over, _MAX_LOCK) - (now - recent[-1])
+        return max(0, int(wait) + 1)
+
+
+def _record_failure(*keys: str) -> None:
+    now = time.monotonic()
+    with _throttle_lock:
+        for key in keys:
+            _failures.setdefault(key, []).append(now)
+
+
 @router.post("/auth/login", response_model=LoginResponse)
-async def login(
+def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
     """Log in with email and password, return JWT token."""
+    account = f"account:{form_data.username.strip().lower()}"
+    address = f"address:{request.client.host if request.client else 'unknown'}"
+    now = time.monotonic()
+    wait = max(_locked_for(account, "account", now), _locked_for(address, "address", now))
+    if wait:
+        minutes = max(1, round(wait / 60))
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many failed sign-ins. Try again in {minutes} minute"
+            f"{'s' if minutes != 1 else ''}.",
+            headers={"Retry-After": str(wait)},
+        )
+
     user = get_user_by_email(db, form_data.username)
     if not user or not verify_password(form_data.password, user.password_hash):
+        _record_failure(account, address)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    with _throttle_lock:
+        _failures.pop(account, None)  # a correct password clears the account's count
 
     if not user.is_active:
         raise HTTPException(
@@ -75,7 +128,7 @@ async def login(
 
 
 @router.post("/auth/emergency-reset")
-async def emergency_reset(
+def emergency_reset(
     request: EmergencyResetRequest,
     db: Session = Depends(get_db),
 ):
@@ -129,7 +182,7 @@ async def emergency_reset(
 
 
 @router.get("/auth/me", response_model=UserResponse)
-async def get_me(user: UserDB = Depends(get_current_user)):
+def get_me(user: UserDB = Depends(get_current_user)):
     """Get current authenticated user."""
     return UserResponse(
         id=user.id,
@@ -142,7 +195,7 @@ async def get_me(user: UserDB = Depends(get_current_user)):
 
 
 @router.get("/auth/users", response_model=list[UserResponse])
-async def list_all_users(
+def list_all_users(
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER)),
 ):
@@ -162,7 +215,7 @@ async def list_all_users(
 
 
 @router.post("/auth/users", response_model=UserResponse)
-async def create_new_user(
+def create_new_user(
     request: CreateUserRequest,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER)),

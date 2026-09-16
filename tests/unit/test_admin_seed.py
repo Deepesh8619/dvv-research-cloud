@@ -183,3 +183,23 @@ def test_seed_admin_user_creates_alongside_existing_users_if_email_changed(
     assert new_owner is not None
     assert verify_password("new-owner-pw", new_owner.password_hash)
     db.close()
+
+
+def test_a_real_database_without_admin_password_refuses_to_boot(monkeypatch):
+    """A default owner password on a real DB would be a public login, re-applied
+    on every cold start. Refusing to boot is the only safe answer."""
+    import importlib
+
+    import pytest
+
+    import api.config
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db.example/dvv")
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    with pytest.raises(RuntimeError, match="ADMIN_PASSWORD is not set"):
+        importlib.reload(api.config)
+
+    # Local SQLite keeps the dev default so a fresh checkout still runs.
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./dvv_research.db")
+    importlib.reload(api.config)
+    assert api.config.ADMIN_PASSWORD == "changeme123"

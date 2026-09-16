@@ -1,8 +1,9 @@
 """Model router — every engine calls AI through here, never a backend directly.
 
-Backends (architecture §5): Ollama (local, free, private) and Claude (cloud,
-judgment-heavy). Routes are config, not code: each task name maps to a backend
-and model, with confidence-gated escalation handled by callers.
+Backends: Ollama (local, private) and open-weight models on Groq, Cerebras and
+Hugging Face. DVV uses open-source models only — no proprietary vendor is
+reachable from this module. Routes are config, not code: each task name maps to
+a backend and model, with confidence-gated escalation handled by callers.
 
 Local models run in plain JSON mode with the schema described in the prompt —
 full grammar-constrained decoding proved pathologically slow on low-RAM
@@ -57,7 +58,7 @@ def _ssl_context() -> ssl.SSLContext | None:
     """SSL context with certifi's CA bundle when available.
 
     macOS system Python ships without CA certificates wired up, so plain
-    urlopen to https://api.anthropic.com fails with CERTIFICATE_VERIFY_FAILED.
+    urlopen to any https API fails with CERTIFICATE_VERIFY_FAILED.
     certifi is installed as a transitive dep almost everywhere; fall back to
     default verification if it isn't.
     """
@@ -94,8 +95,8 @@ _backend_cooldown: dict[str, float] = {}
 def backend_available_in(backend: str, model: str = "") -> float:
     """Seconds until this backend+model is worth trying again. 0 means now.
 
-    Keyed on the MODEL too: providers meter per model, so gpt-oss-120b running
-    out says nothing about gpt-oss-20b's budget.
+    Keyed on the MODEL too: providers meter per model, so one model running
+    out says nothing about another's budget.
     """
     return max(0.0, _backend_cooldown.get(f"{backend}:{model}", 0.0) - time.time())
 
@@ -210,17 +211,16 @@ DEFAULT_ROUTES: dict[str, dict[str, str]] = {
     # model, and those came back "unknown" at 0.0 confidence — silently,
     # because classify_file degrades rather than raising.
     "intake.classify": {"backend": "auto", "model": ""},
-    # Verbatim coding rides the same Ollama → Groq → OpenAI → Claude chain as
+    # Verbatim coding rides the same open-model chain (Ollama → Groq → Cerebras) as
     # questionnaire extraction: the previous hardcoded backends meant coding
     # silently failed anywhere the one named backend was missing (Render has
-    # no Ollama and no Anthropic key — production never coded a verbatim).
+    # no Ollama — production never coded a verbatim).
     "coding.apply": {"backend": "auto", "model": ""},
     "coding.codeframe": {"backend": "auto", "model": ""},
-    "extract.questionnaire": {"backend": "claude", "model": "claude-fable-5"},
     # Two-pass questionnaire extraction (src/engines/questionnaire/extractor.py).
     # Judgment-heavy, hallucination-sensitive structured extraction. Unlike the
     # sibling tasks above these are NOT hardcoded to a provider: the sentinel
-    # backend "auto" makes run_task walk the Ollama → Groq → OpenAI → Claude
+    # backend "auto" makes run_task walk the Ollama → Groq → Cerebras
     # fallback chain (_extraction_chain()) — local first (free/private), then
     # whichever cloud backends have a key — trying each until one succeeds.
     "questionnaire.extract": {"backend": "auto", "model": ""},
@@ -229,12 +229,12 @@ DEFAULT_ROUTES: dict[str, dict[str, str]] = {
     # segmenter, src/engines/questionnaire/reconciler.py). Same "auto" chain as
     # extract/verify — local first, then whichever cloud key is present.
     "questionnaire.reconcile_segmentation": {"backend": "auto", "model": ""},
-    "report.narrative": {"backend": "claude", "model": "claude-fable-5"},
+    "report.narrative": {"backend": "auto", "model": ""},
     # study.chat routes through src/ai/navigator.py (multi-tool agent loop on
-    # Claude Haiku) rather than run_task — kept here so the task inventory in
-    # one place stays truthful. study.chat.basic is its local fallback:
-    # single shot, one tool max, free.
-    "study.chat": {"backend": "claude", "model": "claude-haiku-4-5-20251001"},
+    # Groq, then Cerebras) rather than run_task — kept here so the task
+    # inventory in one place stays truthful. study.chat.basic is its local
+    # fallback: single shot, one tool max, free.
+    "study.chat": {"backend": "groq", "model": "qwen/qwen3.8-27b"},
     "study.chat.basic": {"backend": "ollama", "model": "llama3.2:3b"},
 }
 
@@ -354,43 +354,6 @@ def _ollama_generate(model: str, prompt: str, schema: dict, timeout: int) -> dic
     return _validate(_parse_json_output(body["response"]), schema)
 
 
-def _claude_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise BackendUnavailable("ANTHROPIC_API_KEY not set", config_error=True)
-    payload = json.dumps(
-        {
-            "model": model,
-            "max_tokens": MAX_OUTPUT_TOKENS,
-            "messages": [{"role": "user", "content": prompt}],
-            "tools": [
-                {
-                    "name": "emit",
-                    "description": "Emit the structured result",
-                    "input_schema": schema,
-                }
-            ],
-            "tool_choice": {"type": "tool", "name": "emit"},
-        }
-    ).encode()
-    request = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "User-Agent": USER_AGENT,
-        },
-    )
-    try:
-        body = http_json(request, timeout)
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise BackendUnavailable(f"claude API unreachable: {exc}") from exc
-    for block in body.get("content", []):
-        if block.get("type") == "tool_use":
-            return _validate(block["input"], schema)
-    raise ModelOutputError("claude returned no structured output")
 
 
 def _openai_compatible_generate(
@@ -419,7 +382,11 @@ def _openai_compatible_generate(
                     },
                 }
             ],
-            "tool_choice": {"type": "function", "function": {"name": "emit"}},
+            # "required", not the named {"function": {"name": "emit"}} form: with
+            # one tool they mean the same, but most open models on Bedrock
+            # (Qwen3-235B, DeepSeek V3.2, GLM, Gemma) ignore the named form and
+            # answer in plain text — verified live. "required" works everywhere.
+            "tool_choice": "required",
         }
     ).encode()
     request = urllib.request.Request(
@@ -458,6 +425,44 @@ def _groq_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
         schema,
         timeout,
         "Groq",
+    )
+
+
+def bedrock_chat_url() -> str:
+    """Bedrock's chat-completions URL for the configured region.
+
+    Defaults to the bedrock-runtime endpoint AWS recommends; BEDROCK_BASE_URL
+    overrides it (e.g. the bedrock-mantle endpoint) without a code change.
+    """
+    region = os.environ.get("BEDROCK_REGION", "ap-south-1")
+    base = os.environ.get(
+        "BEDROCK_BASE_URL", f"https://bedrock-runtime.{region}.amazonaws.com/openai/v1"
+    )
+    return base.rstrip("/") + "/chat/completions"
+
+
+def bedrock_model() -> str:
+    """The Bedrock model ID for the configured endpoint (BEDROCK_MODEL overrides).
+
+    The same model has a different ID on each endpoint — verified live: the
+    bedrock-runtime endpoint wants the versioned ID (`...-v1:0`) and rejects the
+    short form as "an invalid model identifier". If BEDROCK_BASE_URL points at
+    another endpoint, set BEDROCK_MODEL to that endpoint's ID as well.
+    """
+    return os.environ.get("BEDROCK_MODEL") or BEDROCK_DEFAULT_MODEL
+
+
+def _bedrock_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
+    """Structured extraction via Amazon Bedrock, in the client's own AWS region.
+
+    Authenticated with a Bedrock API key belonging to that client's app
+    identity, which may invoke this one model and nothing else.
+    """
+    api_key = os.environ.get("BEDROCK_API_KEY")
+    if not api_key:
+        raise BackendUnavailable("BEDROCK_API_KEY not set", config_error=True)
+    return _openai_compatible_generate(
+        bedrock_chat_url(), api_key, model, prompt, schema, timeout, "bedrock"
     )
 
 
@@ -524,72 +529,16 @@ def _huggingface_generate(model: str, prompt: str, schema: dict, timeout: int) -
     )
 
 
-def _openai_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
-    """Structured extraction via OpenAI chat-completions function calling.
-
-    Mirrors _claude_generate's contract (forced schema-valid tool call, same
-    error taxonomy) but in OpenAI's request/response shape — the same shape
-    navigator.py already uses (chat/completions, Bearer auth, function tools
-    with a `parameters` JSON Schema). The one wrapper difference from Claude:
-    OpenAI wants `tools=[{"type":"function","function":{name, parameters}}]`
-    with `tool_choice` naming the function, and returns the arguments as a JSON
-    *string* under choices[0].message.tool_calls, versus Claude's `input_schema`
-    + parsed `tool_use` block.
-    """
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise BackendUnavailable("OPENAI_API_KEY not set", config_error=True)
-    payload = json.dumps(
-        {
-            "model": model,
-            "max_tokens": MAX_OUTPUT_TOKENS,
-            "temperature": 0,
-            "messages": [{"role": "user", "content": prompt}],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "emit",
-                        "description": "Emit the structured result",
-                        "parameters": schema,
-                    },
-                }
-            ],
-            "tool_choice": {"type": "function", "function": {"name": "emit"}},
-        }
-    ).encode()
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "User-Agent": USER_AGENT,
-        },
-    )
-    try:
-        body = http_json(request, timeout)
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise BackendUnavailable(f"OpenAI API unreachable: {exc}") from exc
-    choices = body.get("choices", [])
-    if not choices:
-        raise ModelOutputError("openai returned no choices")
-    tool_calls = choices[0].get("message", {}).get("tool_calls") or []
-    if not tool_calls:
-        raise ModelOutputError("openai returned no structured output")
-    arguments = tool_calls[0].get("function", {}).get("arguments", "")
-    return _validate(_parse_json_output(arguments), schema)
 
 
 # Env vars that gate the cloud AI backends. Reported as presence booleans by the
 # health/startup preflight so a missing key is caught at deploy — not at the
 # first client upload (the production incident this preflight exists to prevent).
 _LLM_KEY_ENV_VARS = (
+    "BEDROCK_API_KEY",
     "GROQ_API_KEY",
     "CEREBRAS_API_KEY",
     "HF_TOKEN",
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
 )
 
 
@@ -606,29 +555,29 @@ def llm_key_presence() -> dict[str, bool]:
     }
 
 
-# Cloud model per provider for judgment-heavy structured extraction. Claude
-# (Fable) stays the preferred choice when an Anthropic key is present; OpenAI's
-# gpt-4o is the fallback when only OPENAI_API_KEY is configured — the codebase's
-# actual production state. gpt-4o (not the navigator's cheap gpt-4o-mini
-# fallback) because questionnaire extraction is hallucination-sensitive and
-# warrants the stronger model.
+# Default models: open-weight, and none made by OpenAI (DVV policy). Chosen on
+# evidence, 2026-09-16: the same copilot conversation run on five open models on
+# Bedrock (Mumbai) — only Qwen3-32B and DeepSeek V3.2 looked every fact up and
+# used the real link ID; Qwen3-32B was also the fastest and the cheapest
+# ($0.18 / $0.71 per 1M tokens). Qwen3-235B and GLM-4.7 answered a question
+# about the questionnaire without looking it up. Groq/Cerebras serve one Qwen
+# each. Every value can be overridden per server (BEDROCK_MODEL etc.).
+BEDROCK_DEFAULT_MODEL = "qwen.qwen3-32b-v1:0"
+GROQ_DEFAULT_MODEL = "qwen/qwen3.8-27b"
+CEREBRAS_DEFAULT_MODEL = "qwen-3.8-27b"
+HF_DEFAULT_MODEL = "Qwen/Qwen3-235B-A22B-Instruct-2507"
+
+# Model per provider for judgment-heavy structured extraction. DVV runs
+# open-source models only; there is no proprietary vendor in this module.
 _EXTRACTION_MODELS = {
     "ollama": os.environ.get("OLLAMA_EXTRACT_MODEL", "llama3.2:3b"),
-    # Groq's catalog is entirely open-weight. gpt-oss-120b (Apache 2.0) is the
-    # default because it is both cheaper and stronger on schema-constrained
-    # extraction than the llama-3.3-70b it replaces; override per-deployment
-    # with GROQ_MODEL after benchmarking against a real client document.
-    "groq": os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
-    # SAME MODEL as Groq and Cerebras, deliberately. gpt-oss-120b is
-    # open-weight, so every provider serves identical weights — which is what
-    # makes the fallback chain safe: exhausting one provider's quota changes
-    # WHO serves the request, never WHAT the model does. Previously this
-    # defaulted to Qwen3-32B, so a Groq outage silently swapped the model
-    # mid-document and extraction behaviour changed with it.
-    "huggingface": os.environ.get("HF_MODEL", "openai/gpt-oss-120b"),
-    "cerebras": os.environ.get("CEREBRAS_MODEL", "gpt-oss-120b"),
-    "openai": "gpt-4o",
-    "claude": "claude-fable-5",
+    # Qwen (Alibaba; Apache-2.0; published on Hugging Face) on every provider —
+    # no OpenAI-made model, by DVV policy. One family everywhere, so a fallback
+    # changes WHO answers, not how the model behaves. These are the only
+    # non-OpenAI chat models Groq and Cerebras serve (checked 2026-09-16).
+    "groq": os.environ.get("GROQ_MODEL", GROQ_DEFAULT_MODEL),
+    "huggingface": os.environ.get("HF_MODEL", HF_DEFAULT_MODEL),
+    "cerebras": os.environ.get("CEREBRAS_MODEL", CEREBRAS_DEFAULT_MODEL),
 }
 
 # Open-weight-only mode. When on, the proprietary steps (OpenAI, Anthropic) are
@@ -637,13 +586,6 @@ _EXTRACTION_MODELS = {
 # questionnaires to a proprietary vendor. Defaults ON: for market research the
 # constraint is contractual (client NDAs), not a preference, and a default that
 # has to be remembered is a default that gets forgotten.
-def open_weights_only() -> bool:
-    """True when only open-weight backends may serve LLM tasks."""
-    return os.environ.get("LLM_OPEN_WEIGHTS_ONLY", "1").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-    )
 
 # Ollama gets a short per-attempt timeout inside the fallback chain: a local
 # model that hangs must not stall the whole request when a cloud backend could
@@ -666,7 +608,7 @@ _OLLAMA_CHAIN_TIMEOUT = 30
 GROQ_FALLBACK_MODELS = [
     m.strip()
     for m in os.environ.get(
-        "GROQ_FALLBACK_MODELS", "openai/gpt-oss-20b,qwen/qwen3.6-27b"
+        "GROQ_FALLBACK_MODELS", ""
     ).split(",")
     if m.strip()
 ]
@@ -675,18 +617,21 @@ GROQ_FALLBACK_MODELS = [
 def _extraction_chain() -> list[dict[str, str]]:
     """Ordered backend fallback for judgment-heavy extraction: local first.
 
-    The chain is **Ollama → Groq → OpenAI → Claude**: try the free/private local
-    model first, fall through to Groq's free cloud tier, then paid OpenAI, then
-    Claude — each step included only if it's actually usable (a cloud step needs
-    its key; Ollama is always attempted since it may be reachable locally and
-    fails fast when it isn't). `run_task` walks this list, escalating on any
-    BackendUnavailable/ModelOutputError and only raising once every candidate has
-    failed. Resolved per call so tests and runtime see the current environment.
+    The chain is **Ollama → Bedrock → Groq → Cerebras → Hugging Face**, open-weight models
+    only: the private local model first, then each cloud provider whose key is
+    set (Ollama is always attempted — it fails fast when nothing listens).
+    `run_task` walks this list, escalating on any BackendUnavailable or
+    ModelOutputError and only raising once every candidate has failed. Resolved
+    per call so tests and runtime see the current environment.
     """
     keys = llm_key_presence()
     chain: list[dict[str, str]] = [
         {"backend": "ollama", "model": _EXTRACTION_MODELS["ollama"]}
     ]
+    # Bedrock first among the clouds: in-region (the NDA story), paid, no free-tier
+    # rate limits. Groq and Cerebras remain as fallbacks when their keys are set.
+    if keys.get("BEDROCK_API_KEY"):
+        chain.append({"backend": "bedrock", "model": bedrock_model()})
     if keys.get("GROQ_API_KEY"):
         primary = _EXTRACTION_MODELS["groq"]
         chain.append({"backend": "groq", "model": primary})
@@ -700,12 +645,6 @@ def _extraction_chain() -> list[dict[str, str]]:
         chain.append(
             {"backend": "huggingface", "model": _EXTRACTION_MODELS["huggingface"]}
         )
-    # Proprietary tail — skipped entirely in open-weights-only mode (the default).
-    if not open_weights_only():
-        if keys.get("OPENAI_API_KEY"):
-            chain.append({"backend": "openai", "model": _EXTRACTION_MODELS["openai"]})
-        if keys.get("ANTHROPIC_API_KEY"):
-            chain.append({"backend": "claude", "model": _EXTRACTION_MODELS["claude"]})
     return chain
 
 
@@ -720,7 +659,7 @@ def run_task(
     route = (routes or DEFAULT_ROUTES).get(task)
     if route is None:
         raise KeyError(f"no route configured for task: {task}")
-    # "auto" defers to the Ollama → Groq → OpenAI → Claude fallback chain,
+    # "auto" defers to the Ollama → Bedrock → Groq → Cerebras → Hugging Face chain,
     # trying each configured backend until one succeeds.
     if route["backend"] == "auto":
         return _run_chain(_extraction_chain(), prompt, schema, timeout)
@@ -737,12 +676,10 @@ def _run_one(
         content = _groq_generate(model, prompt, schema, timeout)
     elif backend == "cerebras":
         content = _cerebras_generate(model, prompt, schema, timeout)
+    elif backend == "bedrock":
+        content = _bedrock_generate(model, prompt, schema, timeout)
     elif backend == "huggingface":
         content = _huggingface_generate(model, prompt, schema, timeout)
-    elif backend == "openai":
-        content = _openai_generate(model, prompt, schema, timeout)
-    elif backend == "claude":
-        content = _claude_generate(model, prompt, schema, timeout)
     else:
         raise ValueError(f"unknown backend: {backend}")
     return AIResponse(content=content, backend=backend, model=model)
@@ -769,8 +706,8 @@ def _run_chain(
     """
     if not chain:
         raise BackendUnavailable(
-            "no extraction backend available: start Ollama or set GROQ_API_KEY / "
-            "OPENAI_API_KEY / ANTHROPIC_API_KEY",
+            "no AI backend available: run the local-ai profile (Ollama) or set "
+            "BEDROCK_API_KEY / GROQ_API_KEY / CEREBRAS_API_KEY",
             config_error=True,
         )
     last_exc: Exception | None = None
@@ -790,10 +727,13 @@ def _run_chain(
             all_config_errors = False
             last_exc = BackendUnavailable(failures[-1])
             continue
-        # Cap Ollama's attempt so a hung local model can't stall the chain.
+        # Cap Ollama's attempt so a hung local model can't stall the chain —
+        # but only when something comes after it. For a local-only deployment
+        # Ollama IS the chain, and a CPU-served answer that takes 40s must be
+        # waited for, not cut off with nothing left to fall back to.
         attempt_timeout = (
             min(timeout, _OLLAMA_CHAIN_TIMEOUT)
-            if candidate["backend"] == "ollama"
+            if candidate["backend"] == "ollama" and candidate is not chain[-1]
             else timeout
         )
         try:

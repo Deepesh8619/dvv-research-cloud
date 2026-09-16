@@ -136,7 +136,7 @@ def _now() -> str:
 
 
 @router.get("/ui/overrides")
-async def get_overrides(
+def get_overrides(
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
 ):
@@ -151,7 +151,7 @@ async def get_overrides(
 
 
 @router.get("/ui/keys")
-async def list_keys(
+def list_keys(
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_correction_access),
 ):
@@ -176,7 +176,7 @@ async def list_keys(
 
 
 @router.post("/ui/overrides")
-async def set_override(
+def set_override(
     request: UIOverrideRequest,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_correction_access),
@@ -241,7 +241,7 @@ async def set_override(
 
 
 @router.post("/ui/overrides/{key:path}/revert")
-async def revert_override(
+def revert_override(
     key: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_correction_access),
@@ -288,7 +288,7 @@ MIN_SEARCH_CHARS = 3
 
 
 @router.post("/ui/activity")
-async def record_activity(
+def record_activity(
     request: ActivityRequest,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_correction_access),
@@ -321,7 +321,7 @@ async def record_activity(
 
 
 @router.get("/ui/activity")
-async def read_activity(
+def read_activity(
     surface: str | None = None,
     limit: int = 200,
     db: Session = Depends(get_db),

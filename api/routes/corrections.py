@@ -162,7 +162,7 @@ def _flagged_suggestions(question: dict) -> list[dict]:
 @router.get(
     "/studies/{study_id}/corrections/suggestions", response_model=SuggestionResponse
 )
-async def get_suggestions(
+def get_suggestions(
     study_id: str,
     question_id: str | None = None,
     db: Session = Depends(get_db),
@@ -362,7 +362,7 @@ def _classify(
 
 
 @router.post("/studies/{study_id}/corrections", response_model=CorrectionResponse)
-async def create_correction(
+def create_correction(
     study_id: str,
     request: CorrectionRequest,
     db: Session = Depends(get_db),
@@ -443,7 +443,7 @@ def _correction_response(correction: CorrectionDB, verdict: dict) -> CorrectionR
 
 
 @router.get("/studies/{study_id}/corrections")
-async def list_corrections(
+def list_corrections(
     study_id: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_correction_access),
@@ -479,7 +479,7 @@ async def list_corrections(
 
 
 @router.post("/profiles/{profile_slug}/rules", response_model=ProfileRuleResponse)
-async def apply_rule(
+def apply_rule(
     profile_slug: str,
     request: ApplyRuleRequest,
     db: Session = Depends(get_db),
@@ -566,7 +566,7 @@ async def apply_rule(
 
 
 @router.get("/profiles/pattern-kinds")
-async def pattern_kinds(user: UserDB = Depends(require_correction_access)):
+def pattern_kinds(user: UserDB = Depends(require_correction_access)):
     """The vocabulary a taught pattern may use.
 
     Served rather than hardcoded in the UI so the form and the validator can
@@ -606,7 +606,7 @@ async def pattern_kinds(user: UserDB = Depends(require_correction_access)):
 
 
 @router.get("/profiles/{profile_slug}/rules")
-async def list_rules(
+def list_rules(
     profile_slug: str,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_correction_access),
@@ -625,7 +625,7 @@ async def list_rules(
 
 
 @router.post("/profiles/{profile_slug}/rules/{rule_id}/toggle")
-async def toggle_rule(
+def toggle_rule(
     profile_slug: str,
     rule_id: str,
     db: Session = Depends(get_db),
@@ -791,7 +791,7 @@ def _run_preview(preview_id: str, study_id: str, questionnaire_id: str,
 
 
 @router.post("/studies/{study_id}/corrections/{correction_id}/preview")
-async def start_preview(
+def start_preview(
     study_id: str,
     correction_id: str,
     db: Session = Depends(get_db),
@@ -857,7 +857,7 @@ async def start_preview(
 
 
 @router.get("/studies/{study_id}/corrections/{correction_id}/preview")
-async def get_preview(
+def get_preview(
     study_id: str,
     correction_id: str,
     db: Session = Depends(get_db),
@@ -882,7 +882,7 @@ async def get_preview(
 
 
 @router.post("/studies/{study_id}/corrections/{correction_id}/preview/approve")
-async def approve_preview(
+def approve_preview(
     study_id: str,
     correction_id: str,
     db: Session = Depends(get_db),
@@ -971,7 +971,7 @@ async def approve_preview(
 
 
 @router.post("/studies/{study_id}/corrections/{correction_id}/revise")
-async def revise_correction(
+def revise_correction(
     study_id: str,
     correction_id: str,
     request: ReviseRequest,
@@ -1030,7 +1030,7 @@ async def revise_correction(
 
 
 @router.post("/profiles/{profile_slug}/rules/reorder")
-async def reorder_rules(
+def reorder_rules(
     profile_slug: str,
     request: ReorderRulesRequest,
     db: Session = Depends(get_db),
@@ -1071,7 +1071,7 @@ async def reorder_rules(
 
 
 @router.get("/corrections/proposals")
-async def list_proposals(
+def list_proposals(
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_correction_access),
 ):
@@ -1116,7 +1116,7 @@ async def list_proposals(
 
 
 @router.get("/corrections/audit")
-async def read_audit(
+def read_audit(
     study_id: str | None = None,
     entity_id: str | None = None,
     limit: int = 100,

@@ -3,7 +3,7 @@
 Two LLM shapes live here, both consumed through `src.ai.router.run_task`:
 
 1. EXTRACTION_SCHEMA / build_extraction_prompt — "one text chunk in, one
-   structured Question out". Sent to Claude with `tool_choice` forcing a
+   structured Question out". Sent to cloud models with `tool_choice` forcing a
    schema-valid `emit` call (router `_claude_generate`), and degradable to a
    local model that imitates the schema-derived instruction+example
    (router `_schema_to_instruction`).
@@ -64,7 +64,7 @@ FLAG_DERIVED_VARIABLE = "DERIVED_VARIABLE"
 # --- Extraction schema ------------------------------------------------------
 
 # Note on shape: `run_task`'s `_validate` only checks top-level required keys;
-# Claude's tool_choice enforces the full nested schema; the local path only
+# Cloud tool_choice enforces the full nested schema; the local path only
 # sees top-level field descriptions (`_schema_to_instruction` doesn't recurse).
 # So we keep the invariants the model MUST get right at the top level and
 # describe nested structure in prose in the prompt as well.

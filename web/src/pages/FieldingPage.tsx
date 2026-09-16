@@ -12,6 +12,7 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import DryRunPanel from '../components/DryRunPanel'
 import FieldReportPanel from '../components/FieldReportPanel'
+import SoftLaunchPanel from '../components/SoftLaunchPanel'
 import { CardListSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import ThemeSelect from '../components/ThemeSelect'
@@ -274,6 +275,7 @@ function LinkCard({
   const [materializeMsg, setMaterializeMsg] = useState<string | null>(null)
   const [showQuotas, setShowQuotas] = useState(false)
   const [showReport, setShowReport] = useState(false)
+  const [showSoftLaunch, setShowSoftLaunch] = useState(link.soft_launch_reached)
   const [delivery, setDelivery] = useState<string[]>([])
 
   const publicUrl = `${window.location.origin}${link.respondent_path}`
@@ -327,6 +329,21 @@ function LinkCard({
             >
               {link.status}
             </span>
+            {/* A hold is not a closure — the same link resumes on release, so it
+                gets its own badge rather than overwriting the status. */}
+            {link.soft_launch_limit !== null && link.status === 'open' && (
+              <span
+                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                  link.soft_launch_reached
+                    ? 'bg-amber-50 text-amber-700'
+                    : 'bg-sky-50 text-sky-700'
+                }`}
+              >
+                {link.soft_launch_reached
+                  ? `held at ${link.soft_launch_limit}`
+                  : `soft launch ${link.counts.completes ?? 0}/${link.soft_launch_limit}`}
+              </span>
+            )}
             <span className="text-xs text-slate-400">v{link.survey_version}</span>
             <span className="text-xs text-slate-400">
               created {new Date(link.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
@@ -401,6 +418,26 @@ function LinkCard({
       )}
       {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
 
+      {link.soft_launch_limit !== null && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowSoftLaunch((v) => !v)}
+            className="mt-3 mr-4 text-xs text-slate-500 hover:text-slate-700"
+          >
+            {showSoftLaunch ? '▾ Hide soft-launch check' : '▸ Soft-launch check'}
+          </button>
+          {showSoftLaunch && (
+            <SoftLaunchPanel
+              studyId={studyId}
+              linkId={link.id}
+              canWrite={canWrite}
+              onChanged={onChanged}
+            />
+          )}
+        </>
+      )}
+
       <button
         type="button"
         onClick={() => setShowReport((r) => !r)}
@@ -444,6 +481,11 @@ function CreatePanel({
   const [redirects, setRedirects] = useState<FieldingRedirects>({})
   // '' = inherit the survey's default theme (don't stamp an override on the link).
   const [theme, setTheme] = useState<string>('')
+  // On by default at 50: the expensive mistake is fielding 800 completes of a
+  // script nobody checked, and opting IN to a safeguard is what nobody does at
+  // 9pm on launch night.
+  const [softLaunch, setSoftLaunch] = useState(true)
+  const [softLaunchLimit, setSoftLaunchLimit] = useState(50)
 
   const handleCreate = async (force = false) => {
     setCreating(true)
@@ -458,6 +500,7 @@ function CreatePanel({
         Object.keys(payload).length ? payload : undefined,
         theme || undefined,
         force,
+        softLaunch ? softLaunchLimit : null,
       )
       setRedirects({})
       setTheme('')
@@ -549,6 +592,29 @@ function CreatePanel({
         <span className="text-xs text-slate-400">Overrides the survey default for this link only.</span>
       </div>
 
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-2 text-xs text-slate-600">
+          <input
+            type="checkbox"
+            checked={softLaunch}
+            onChange={(e) => setSoftLaunch(e.target.checked)}
+            className="h-3.5 w-3.5"
+          />
+          Soft launch: hold at
+        </label>
+        <input
+          type="number"
+          min={1}
+          value={softLaunchLimit}
+          disabled={!softLaunch}
+          onChange={(e) => setSoftLaunchLimit(Math.max(1, Number(e.target.value) || 1))}
+          className="h-8 w-20 px-2 rounded border border-slate-300 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+        />
+        <span className="text-xs text-slate-400">
+          completes, then check the data before the rest of the sample is fielded.
+        </span>
+      </div>
+
       <button
         type="button"
         onClick={() => setShowRedirects((s) => !s)}
@@ -631,6 +697,13 @@ export default function FieldingPage() {
     load()
     loadQuestionnaire()
   }, [load, loadQuestionnaire])
+
+  // The copilot changed something (held, released, opened a link): refresh now
+  // rather than show numbers from before the action until the next poll.
+  useEffect(() => {
+    window.addEventListener('dvv:changed', load)
+    return () => window.removeEventListener('dvv:changed', load)
+  }, [load])
 
   // Poll while any link is open (mirrors QuestionnairePage's interval pattern).
   useEffect(() => {

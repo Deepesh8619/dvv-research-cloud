@@ -1,108 +1,87 @@
-# Deploying DVV Research Cloud
+# Deploying DVV Research Cloud to a client
 
-Two pieces, deployed separately:
+Each client gets **its own complete copy** on its own server: web app + API,
+Postgres, HTTPS, nightly backups, and optionally a local AI model — all defined
+in `deploy/docker-compose.yml`, all operated with `deploy/dvv`. Nothing runs on
+any outside platform; the server is plain rented compute.
 
-- **Backend** (FastAPI + Postgres + DuckDB) → Render, via Docker
-- **Frontend** (Vite static build) → Vercel
+**On AWS:** follow [deploy/aws/README.md](deploy/aws/README.md) — one script sets up the
+account's budget, backup bucket, per-client identity and server.
 
-Splitting them means the frontend redeploys in ~30 seconds on every push
-instead of waiting on the Python image to rebuild, and either side can be
-redeployed independently.
+## Server size
 
-## 0. Test the Docker build locally first
-
-Before touching Render, confirm the image actually builds and runs:
-
-```bash
-cd /Users/deepeshsharma/dev/dvv-research-cloud
-docker build -t dvv-backend .
-docker run -p 8000:8000 -e DATABASE_URL=sqlite:////app/dvv_research.db \
-  -e GROQ_API_KEY=$GROQ_API_KEY -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-  dvv-backend
-curl http://localhost:8000/docs   # should return 200
-```
-
-If this doesn't work locally, it won't work on Render either — fix it here
-first, where the feedback loop is seconds instead of a full platform deploy.
-
-## 1. Push to GitHub
-
-Render and Vercel both deploy by connecting to a GitHub repo. This repo has
-no remote yet — create one (public or private, your call) and push:
-
-```bash
-git remote add origin <your-github-repo-url>
-git push -u origin main
-```
-
-## 2. Backend → Render
-
-**Option A — Blueprint (faster):** Render dashboard → "New +" → "Blueprint" →
-point at the repo → it reads `render.yaml` and provisions the web service +
-Postgres database together.
-
-**Option B — Manual (if the Blueprint UI doesn't match `render.yaml`'s
-schema by the time you're reading this):**
-1. "New +" → "PostgreSQL" → create a free database, name it `dvv-postgres`
-2. "New +" → "Web Service" → connect the repo → Runtime: **Docker** →
-   Dockerfile path: `./Dockerfile`
-3. Copy the Postgres "Internal Connection String" into the web service's
-   `DATABASE_URL` env var
-
-### Required env vars (set in the Render dashboard, Web Service → Environment)
-
-| Variable | Value | Why |
-|---|---|---|
-| `DATABASE_URL` | (auto-filled if using Blueprint/internal connection string) | Postgres connection |
-| `GROQ_API_KEY` | your key | Primary navigator LLM |
-| `OPENAI_API_KEY` | your key (optional but recommended) | Fallback navigator when Groq fails (429 budget, or a malformed tool call) — without it, any Groq failure drops straight to the weak local model instead |
-| `ANTHROPIC_API_KEY` | your key | Narrative generation, Claude fallback |
-| `JWT_SECRET` | a long random string (Blueprint auto-generates this) | **Must** be set explicitly — the code's fallback persists a generated secret to a local file, which is wiped on every container restart on Render, silently logging everyone out each time otherwise |
-| `ADMIN_EMAIL` | your email | First login |
-| `ADMIN_PASSWORD` | a real password, not the code's `changeme123` default | **Do not skip this** — the default is a real password disclosed in this public-facing doc the moment this is deployed anywhere reachable |
-| `CORS_ORIGINS` | your Vercel URL, e.g. `https://dvv-research.vercel.app` (comma-separate if more than one) | Browser will silently block the frontend's API calls otherwise |
-| `PUBLIC_BASE_URL` | your Vercel URL | Used to build share links |
-
-## 3. Frontend → Vercel
-
-```bash
-cd web
-npx vercel
-```
-
-Follow the prompts (link to a new project, root directory `web/`). In the
-Vercel dashboard, set one env var before the final deploy:
-
-| Variable | Value |
+| Client's AI mode | Server |
 |---|---|
-| `VITE_API_URL` | your Render backend's URL, e.g. `https://dvv-backend.onrender.com` |
+| External open-weights API (Groq/Cerebras) | 2 vCPU, **2 GB RAM**, 40 GB disk |
+| Local model, CPU only (works, slower) | 4 vCPU, **8 GB RAM**, 80 GB disk |
+| Local model, fast | a GPU server |
 
-Vite bakes env vars into the build at build time, not runtime — if you change
-`VITE_API_URL` later, trigger a new deploy for it to take effect.
+Ubuntu 24.04. Any provider — only compute is used. Pick the region the client's
+data should live in.
 
-## 4. Wire them together
+## New client (about 15 minutes)
 
-Once both are deployed:
-1. Set the backend's `CORS_ORIGINS` to the Vercel URL from step 3
-2. Redeploy the backend (env var changes require a restart on Render)
-3. Open the Vercel URL, log in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`
+On **DVV's machine**, issue the licence:
 
-## Known limitations of this first deploy
+```bash
+python scripts/issue_licence.py issue --client "Acme Research" --expires 2027-09-30
+```
 
-- **Free-tier storage is ephemeral.** Without the paid Disk (`render.yaml`'s
-  `disk:` block, commented as optional), every uploaded study — data,
-  computed crosstabs, rendered decks, chart PNGs — is lost on the next
-  deploy or container restart. Fine for "upload a file, show the co-founders,
-  done"; not fine for anything meant to persist across sessions.
-- **No local Ollama in the cloud.** The basic-mode fallback
-  (`navigate_basic`) calls `OLLAMA_HOST`, which only exists on your laptop.
-  In production, if Groq fails (rate limit, outage), the navigator falls
-  straight to the graceful error message instead of the weak local model —
-  slightly worse degradation than local dev, but not a new failure mode.
-- **Groq's free-tier daily budget (100k tokens) is shared across every user
-  hitting this deployment**, same as it is locally. If co-founders and you
-  are both testing the same day, you'll hit the same 429 you've hit locally.
-  Consider Groq's pay-as-you-go Dev Tier before a demo that matters.
-- **Render's free web service spins down after 15 minutes idle** and takes
-  ~30-50s to wake on the next request — the first load after a gap will feel
-  slow. Not a bug, just the free tier's tradeoff.
+On the **client's server**:
+
+```bash
+curl -fsSL https://get.docker.com | sh                      # Docker, official installer
+git clone https://github.com/Deepesh8619/dvv-research-cloud /opt/dvv
+cd /opt/dvv/deploy
+./dvv init acme research.acme.com owner@acme.com            # prints the owner password once
+nano .env                                                    # paste DVV_LICENCE; choose the AI mode
+./dvv up
+```
+
+Before `up`, point the domain's DNS **A record** at the server — Caddy then
+fetches and renews the HTTPS certificate on its own.
+
+## Running it
+
+| Command | Does |
+|---|---|
+| `./dvv status` | containers, health (running commit + licence state), latest backup |
+| `./dvv logs [app\|db\|caddy\|backup]` | follow logs |
+| `./dvv backup` | back up now (it also runs nightly at `BACKUP_HOUR`) |
+| `./dvv restore backups/db-<stamp>.dump [backups/files-<stamp>.tgz]` | restore; takes a safety backup first |
+| `./dvv upgrade` | backup → pull → rebuild → **rolls back automatically** if the new version isn't healthy |
+| `./dvv up` | apply `.env` changes (new licence, AI mode, keys) |
+
+## Backups must leave the server
+
+Nightly backups land in `deploy/backups/` — **on the same disk**, so they die
+with the server. From DVV's machine, pull them off regularly:
+
+```bash
+rsync -a root@<server>:/opt/dvv/deploy/backups/ ~/dvv-backups/acme/
+```
+
+## Licences
+
+`DVV_LICENCE` is signed with DVV's private key (`~/.dvv-keys/licence_signing_key`
+on DVV's machine — **back it up**; it never goes in the repo or an image).
+A copy refuses to start without a valid licence. When one lapses, everything
+keeps working for 14 days; after that the management app stops (402) but
+**live survey links and share links keep working**. Renew: issue a new one,
+paste it into `.env`, `./dvv up`.
+
+## Local development
+
+AI on a laptop uses a 12-hour Bedrock key from your own AWS sign-in — no
+long-lived key ever sits on a laptop:
+
+```bash
+aws sso login --profile dvv
+export AWS_PROFILE=dvv
+export BEDROCK_API_KEY=$(python scripts/bedrock_dev_token.py)   # pip install aws-bedrock-token-generator
+```
+
+```bash
+python -m uvicorn api.main:app --reload --port 8000   # SQLite, dev password, no licence needed
+npm run dev --prefix web                               # web on :3000, proxies /api
+```

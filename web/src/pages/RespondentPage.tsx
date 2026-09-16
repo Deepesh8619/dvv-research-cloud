@@ -31,7 +31,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 // Every fetch failure lands in a visible state (never a blank screen): each of
 // welcome / loading / error / closed / terminated / complete is an explicit render.
 
-type Phase = 'loading' | 'welcome' | 'error' | 'closed' | 'running' | 'terminated' | 'complete'
+type Phase = 'loading' | 'welcome' | 'error' | 'closed' | 'paused' | 'running' | 'terminated' | 'complete'
 
 // Per-segment theme keyed by the survey's optional metadata.theme slug (T24).
 // Absent/unknown -> the DVV Indigo default. Presentation only; no logic depends
@@ -117,6 +117,14 @@ export default function RespondentPage() {
         if (cancelled) return
         if (res.data.status === 'closed') {
           setPhase('closed')
+          return
+        }
+        // Soft-launch hold: the link is live but not admitting anyone right now.
+        // A respondent must never be dropped into an empty survey model, and a
+        // panel expects its redirect, so bounce when one is configured.
+        if (res.data.status === 'paused') {
+          setPhase('paused')
+          goRedirect(res.data.redirect_url)
           return
         }
         // Terminal-at-entry (duplicate-pid security = 30): don't serve the survey.
@@ -227,6 +235,17 @@ export default function RespondentPage() {
         <h1 className="text-lg font-semibold text-slate-900 mb-2">Survey closed</h1>
         <p className="text-slate-600">
           This survey is no longer accepting responses. Thank you for your interest.
+        </p>
+      </Centered>
+    )
+  }
+
+  if (phase === 'paused') {
+    return (
+      <Centered theme={theme}>
+        <h1 className="text-lg font-semibold text-slate-900 mb-2">Not accepting responses right now</h1>
+        <p className="text-slate-600">
+          This survey has paused while responses are reviewed. Please try your link again later.
         </p>
       </Centered>
     )

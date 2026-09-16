@@ -1,6 +1,8 @@
 """Pydantic models for API requests/responses."""
 
-from pydantic import BaseModel, EmailStr
+from typing import Literal
+
+from pydantic import BaseModel, EmailStr, Field
 
 
 class StudyMetadata(BaseModel):
@@ -222,7 +224,7 @@ class QuestionnaireStatusResponse(BaseModel):
     validation_errors: list[str] = []
     extraction_summary: dict = {}
     # Set only when status == "error": the human-readable failure reason (e.g. a
-    # missing ANTHROPIC_API_KEY surfaced by the extractor circuit breaker). None
+    # missing GROQ_API_KEY surfaced by the extractor circuit breaker). None
     # otherwise, so a healthy questionnaire carries no stale error text.
     error_detail: str | None = None
     # Respondent theme slug from metadata (T24); None when unset. Lets the builder
@@ -334,6 +336,11 @@ class FieldingLinkResponse(BaseModel):
     redirect_terminate: str | None = None
     redirect_overquota: str | None = None
     redirect_security: str | None = None
+    # Soft launch: hold the link at this many completes (None = no hold).
+    # `soft_launch_reached` is the live answer to "is it holding right now?",
+    # computed from counts so the UI never has to do the comparison itself.
+    soft_launch_limit: int | None = None
+    soft_launch_reached: bool = False
 
 
 class FieldingLinkListResponse(BaseModel):
@@ -349,7 +356,10 @@ class RespondentEntryResponse(BaseModel):
     the server enforces `terminate_if`)."""
 
     session_id: str
-    status: str = "open"  # open | closed
+    # open | closed | paused. `paused` is a soft-launch hold: the link is still
+    # live and will admit respondents again once it is released, which is why it
+    # is NOT reported as closed.
+    status: str = "open"
     surveyjs_json: dict = {}
     current_page: int = 0
     # Optional segment theme slug from the pinned survey's metadata (e.g. "fmcg"),
@@ -441,11 +451,20 @@ class FieldingLinkCreateRequest(FieldingRedirectsRequest):
     presentation choice, not an instrument edit)."""
 
     theme: str | None = None
+    # Open the link already held at this many completes (the soft launch). The
+    # normal launch order is: open held at ~50, check the data, then release.
+    soft_launch_limit: int | None = None
     # A condition that is provably unsatisfiable — a screen-out testing a code
     # its question never offers — means the survey does not do what the document
     # says. Opening a link is refused in that state; this is the deliberate
     # override, recorded in the log so the decision is somebody's.
     force: bool = False
+
+
+class SoftLaunchRequest(BaseModel):
+    """Set or release a link's soft-launch hold. `limit=None` releases it."""
+
+    limit: int | None = None
 
 
 class DryRunRequest(BaseModel):
@@ -571,3 +590,40 @@ class SaveCodeframeRequest(BaseModel):
     codeframe: dict
     study_id: str | None = None
     client_name: str | None = None
+
+
+# --- Copilot ---
+
+
+class CopilotTurn(BaseModel):
+    """One earlier turn, sent back by the browser (the copilot keeps no state)."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=4000)
+
+
+class CopilotRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    history: list[CopilotTurn] = Field(default_factory=list, max_length=12)
+    #: The project the user is looking at, if any — context, not a permission.
+    study_id: str | None = None
+
+
+class CopilotProposal(BaseModel):
+    """An action the copilot prepared. Nothing has happened until the user
+    confirms, when the browser sends `method path body` as that user."""
+
+    id: str
+    kind: str
+    title: str
+    detail: str
+    method: Literal["POST", "PATCH"]
+    path: str
+    body: dict = Field(default_factory=dict)
+
+
+class CopilotResponse(BaseModel):
+    reply: str
+    proposals: list[CopilotProposal] = Field(default_factory=list)
+    tools_used: list[str] = Field(default_factory=list)
+    answered_by: str

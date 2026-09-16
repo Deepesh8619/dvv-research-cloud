@@ -320,3 +320,86 @@ def test_the_field_report_answers_the_morning_after_questions(client):
     # And WHICH screen-out removed them — recomputed, because the live route
     # logs the decision and does not store it.
     assert body["terminates_by_question"] == [{"qid": "Q1", "n": 1}]
+
+
+def test_the_soft_launch_check_runs_qc_on_the_launch_batch(client):
+    """The pause is only worth taking if something is actually inspected in it."""
+    test_client, sf, _ = client
+    _seed(sf)
+    link = test_client.post(
+        "/api/studies/study_m1/fielding/links", json={"soft_launch_limit": 2}
+    ).json()
+    token, link_id = link["token"], link["id"]
+
+    # Screened-out respondents don't count toward the batch, so this one arrives
+    # inside the launch window; the hold engages on the SECOND complete.
+    _run_respondent(test_client, token, age=15, coffee=1, brands=None)  # screened out
+    _run_respondent(test_client, token, age=30, coffee=1, brands=[1], follow_up="ok")
+    _run_respondent(test_client, token, age=40, coffee=2, brands=[1, 2])
+    assert test_client.get(f"/api/r/{token}").json()["status"] == "paused"
+
+    body = test_client.get(
+        f"/api/studies/study_m1/fielding/links/{link_id}/soft-launch-check"
+    ).json()
+
+    assert body["held"] is True
+    assert body["n_completes"] == 2
+    # Terminates are checked too — they are the only evidence a screen-out fired.
+    assert body["n_checked_rows"] == 3
+    assert body["field_report"]["dispositions"]["terminate"] == 1
+
+    crosscheck = body["crosscheck"]
+    assert crosscheck["n_rows"] == 3
+    # A clean launch batch: checks RAN (not silently skipped) and found nothing.
+    assert crosscheck["checked"], "no check ran — 'nothing found' would be a lie"
+    assert crosscheck["passed"] is True
+    assert [f["severity"] for f in crosscheck["findings"]] == ["info"]
+    # The one finding is positive evidence: the screen-out actually held, which
+    # is only provable because terminates are in the checked rows.
+    assert crosscheck["findings"][0]["kind"] == "terminate_recorded"
+
+
+def test_the_soft_launch_check_does_not_disturb_the_study(client, tmp_path):
+    """Read-only: running the check never overwrites materialized artifacts."""
+    test_client, sf, _ = client
+    _seed(sf)
+    link = test_client.post("/api/studies/study_m1/fielding/links").json()
+    token, link_id = link["token"], link["id"]
+    _run_respondent(test_client, token, age=30, coffee=1, brands=[1], follow_up="ok")
+
+    test_client.post(f"/api/studies/study_m1/fielding/links/{link_id}/materialize")
+    db = sf()
+    before = db.query(StudyDB).filter(StudyDB.id == "study_m1").first().excel_path
+    db.close()
+
+    assert (
+        test_client.get(
+            f"/api/studies/study_m1/fielding/links/{link_id}/soft-launch-check"
+        ).status_code
+        == 200
+    )
+
+    db = sf()
+    assert db.query(StudyDB).filter(StudyDB.id == "study_m1").first().excel_path == before
+    db.close()
+
+
+def test_the_soft_launch_check_says_so_when_nobody_has_answered_yet(client):
+    """Zero respondents must read as 'could not look', never as 'looks fine'."""
+    test_client, sf, _ = client
+    _seed(sf)
+    link_id = test_client.post("/api/studies/study_m1/fielding/links").json()["id"]
+
+    body = test_client.get(
+        f"/api/studies/study_m1/fielding/links/{link_id}/soft-launch-check"
+    ).json()
+    assert body["n_checked_rows"] == 0
+    assert body["crosscheck"]["skipped"]
+    assert body["crosscheck"]["findings"] == []
+
+
+def test_the_soft_launch_check_unknown_link_404(client):
+    test_client, sf, _ = client
+    _seed(sf)
+    resp = test_client.get("/api/studies/study_m1/fielding/links/nope/soft-launch-check")
+    assert resp.status_code == 404

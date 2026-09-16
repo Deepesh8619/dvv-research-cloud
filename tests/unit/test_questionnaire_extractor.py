@@ -39,7 +39,7 @@ def _chunk(qid: str = "Q1", text: str = "Q1. Are you aware of Brand X?") -> Ques
 
 
 def _response(content: dict) -> AIResponse:
-    return AIResponse(content=content, backend="claude", model="test")
+    return AIResponse(content=content, backend="groq", model="test")
 
 
 def _extraction_content(
@@ -349,7 +349,7 @@ def test_unresolved_routing_qid_flagged_and_nulled():
 def test_config_error_flag_and_detail_preserved():
     """A missing-key BackendUnavailable (config_error=True) -> CONFIG_ERROR flag,
     NOT the transient UNAVAILABLE flag, with type + detail preserved verbatim."""
-    exc = BackendUnavailable("ANTHROPIC_API_KEY not set", config_error=True)
+    exc = BackendUnavailable("GROQ_API_KEY not set", config_error=True)
     with patch(_EXTRACT, side_effect=exc):
         result = extract_question(_chunk("Q9"))
 
@@ -357,7 +357,7 @@ def test_config_error_flag_and_detail_preserved():
     assert schema.FLAG_EXTRACTION_UNAVAILABLE not in result.flags
     err = result.question.validation["extraction_error"]
     assert err["error_type"] == "BackendUnavailable"
-    assert err["error_detail"] == "ANTHROPIC_API_KEY not set"
+    assert err["error_detail"] == "GROQ_API_KEY not set"
 
 
 def test_transient_backend_error_uses_unavailable_flag():
@@ -388,14 +388,14 @@ def test_model_output_error_flagged_distinctly():
 def test_verification_error_preserved_on_question():
     """A failed verify pass stashes verification_error (distinct key) + flags."""
     result = _clean_result()
-    exc = BackendUnavailable("ANTHROPIC_API_KEY not set", config_error=True)
+    exc = BackendUnavailable("GROQ_API_KEY not set", config_error=True)
     with patch(_EXTRACT, side_effect=exc):
         result = verify_question(_chunk(), result)
 
     assert schema.FLAG_VERIFICATION_UNAVAILABLE in result.flags
     err = result.question.validation["verification_error"]
     assert err["error_type"] == "BackendUnavailable"
-    assert err["error_detail"] == "ANTHROPIC_API_KEY not set"
+    assert err["error_detail"] == "GROQ_API_KEY not set"
 
 
 # --- T16: document-level circuit breaker -----------------------------------
@@ -409,7 +409,7 @@ def test_circuit_break_after_three_backend_failures():
 
     with patch(
         _EXTRACT,
-        side_effect=BackendUnavailable("ANTHROPIC_API_KEY not set", config_error=True),
+        side_effect=BackendUnavailable("GROQ_API_KEY not set", config_error=True),
     ) as mock_run:
         with pytest.raises(BackendUnavailable) as excinfo:
             extract_survey_definition(chunks, study_id="study-down")
@@ -418,7 +418,7 @@ def test_circuit_break_after_three_backend_failures():
     # chunks 4-8 never touched.
     assert mock_run.call_count == 3
     # The raised error names the root cause (propagates to the route's error flip).
-    assert "ANTHROPIC_API_KEY not set" in str(excinfo.value)
+    assert "GROQ_API_KEY not set" in str(excinfo.value)
     assert excinfo.value.config_error is True
 
 
@@ -456,7 +456,7 @@ def test_no_circuit_break_when_one_chunk_succeeds_first():
             return _response({"faithful": True, "discrepancies": []})
         if "Q1" in prompt:  # first chunk succeeds
             return _response(_extraction_content(qid="Q1"))
-        raise BackendUnavailable("ANTHROPIC_API_KEY not set", config_error=True)
+        raise BackendUnavailable("GROQ_API_KEY not set", config_error=True)
 
     with patch(_EXTRACT, side_effect=fake_run):
         survey = extract_survey_definition(chunks, study_id="study-mixed")
@@ -632,35 +632,27 @@ def test_extraction_prompt_teaches_field_spec_when_convention_present():
 # --- end-to-end route resolution (unpatched run_task) -----------------------
 
 
-def test_extract_question_resolves_to_openai_with_only_openai_key(monkeypatch):
+def test_extract_question_resolves_to_cerebras_with_only_cerebras_key(monkeypatch):
     """Smoke test the real routing path: run_task is NOT patched here. With only
-    OPENAI_API_KEY set, `questionnaire.extract`'s "auto" chain must try local
-    Ollama first (unreachable here), fall through to OpenAI, and drive
+    CEREBRAS_API_KEY set, `questionnaire.extract`'s "auto" chain must try local
+    Ollama first (unreachable here), fall through to Cerebras, and drive
     extraction end-to-end. Only the network boundary (router.http_json) is
     stubbed, so this proves the chain wiring, backend dispatch, and result
-    assembly all agree.
-
-    Requires opting OUT of open-weights-only mode: that mode is the default and
-    deliberately refuses the proprietary tail, so reaching OpenAI at all is now
-    an explicit choice. The open-weights production path is covered by
-    `test_extract_question_resolves_to_groq_under_open_weights_default`."""
+    assembly all agree."""
     import urllib.error
 
     from src.ai import router as _router
 
-    monkeypatch.setenv("LLM_OPEN_WEIGHTS_ONLY", "0")
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
-    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
 
     content = _extraction_content(qid="Q1")
 
     def fake_http_json(request, timeout):
         if "11434" in request.full_url:  # the Ollama-first attempt
             raise urllib.error.URLError("connection refused")
-        assert "api.openai.com" in request.full_url  # then falls through to OpenAI
+        assert "api.cerebras.ai" in request.full_url  # then falls through to Cerebras
         arguments = __import__("json").dumps(content)
         call = {"function": {"name": "emit", "arguments": arguments}}
         return {"choices": [{"message": {"tool_calls": [call]}}]}
@@ -674,23 +666,17 @@ def test_extract_question_resolves_to_openai_with_only_openai_key(monkeypatch):
 
 
 def test_extract_question_resolves_to_groq_under_open_weights_default(monkeypatch):
-    """The open-weights production path, end to end, with run_task NOT patched.
-
-    Sibling of the OpenAI smoke test above, for what actually runs now: with
-    open-weights-only mode at its default (ON) and a proprietary key present,
-    the chain must fall through Ollama to GROQ and never touch OpenAI. Proves
-    both the chain wiring and that the guarantee holds through the real
-    dispatch path, not just in `_extraction_chain`.
-    """
+    """The production path, end to end, with run_task NOT patched: Ollama
+    unreachable -> Groq. A stray proprietary key in the environment is set on
+    purpose — no code path exists that could use it, and this proves it."""
     import urllib.error
 
     from src.ai import router as _router
 
-    monkeypatch.delenv("LLM_OPEN_WEIGHTS_ONLY", raising=False)  # default: ON
     monkeypatch.setenv("GROQ_API_KEY", "gk")
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
-    # Present but must be ignored — the whole point of the guarantee.
+    # Present, and must be irrelevant: no code path can reach that vendor.
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
 
     content = _extraction_content(qid="Q1")
@@ -711,7 +697,7 @@ def test_extract_question_resolves_to_groq_under_open_weights_default(monkeypatc
 
     assert result.question.qid == "Q1"
     assert not any("api.openai.com" in u for u in seen), (
-        "a confidential questionnaire reached OpenAI despite open-weights-only mode"
+        "a confidential questionnaire reached a proprietary vendor"
     )
 
 

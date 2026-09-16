@@ -1,28 +1,37 @@
-# DVV Research Cloud — backend API.
+# DVV Research Cloud — one image, one service: the API AND the web app.
 #
-# The frontend (web/) is deployed separately as a static site (Vercel/Render
-# Static Site) — it doesn't need Python or this image. See DEPLOY.md.
+# Stage 1 builds the React app; stage 2 is the Python API, which serves that
+# build from the same origin (api/main.py). One origin means no CORS config,
+# no API URL baked into the bundle at build time, and one deploy.
+
+FROM node:22-slim AS web
+WORKDIR /web
+# Lockfile first so `npm ci` is cached unless dependencies actually change.
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
 
 FROM python:3.12-slim
-
 WORKDIR /app
 
-# Copy requirements first so `pip install` is cached unless deps actually
-# change — avoids reinstalling numpy/pandas/duckdb on every code edit.
+# Requirements first so pip is cached unless deps change — numpy/pandas/duckdb
+# are not reinstalled on every code edit.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+COPY --from=web /web/dist ./web/dist
 
-# Studies (uploaded files, computed decks, charts) persist here. On Render
-# this must be mounted as a persistent Disk — see DEPLOY.md; without one,
-# uploads are lost on every redeploy/restart (fine for a first demo, not for
-# real use).
+# Uploaded files, computed decks, charts. Mount a persistent volume HERE on the
+# host; without one, everything under it is lost on every redeploy.
 RUN mkdir -p /app/studies
 
-# Render (and most PaaS hosts) inject $PORT at runtime and route traffic to
-# it — the container must bind to whatever value that is, not a fixed port.
-# Shell form (not exec-form CMD) so $PORT actually expands; a plain
-# `uvicorn ... --port $PORT` in exec form would pass the literal string
-# "$PORT" to uvicorn and fail to parse as an int.
-CMD uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# The host injects $PORT. Shell form so it actually expands.
+# `python -m uvicorn`: the exact start path the process pool (api/heavy.py) was
+# benchmarked under; spawned workers re-import __main__ safely this way.
+# --proxy-headers: behind Caddy every request would otherwise come from Caddy's
+# own address, and the per-address sign-in limit (api/routes/auth.py) would lock
+# out everyone at once. Trusting the forwarded address is safe here because the
+# app container publishes no port — only Caddy can reach it.
+CMD python -m uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips="*"

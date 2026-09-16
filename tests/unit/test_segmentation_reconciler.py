@@ -26,7 +26,7 @@ def _block(text: str, i: int, btype: str = "paragraph") -> DocumentBlock:
 
 def _response(missed: list[dict]) -> AIResponse:
     return AIResponse(
-        content={"missed_questions": missed}, backend="claude", model="test"
+        content={"missed_questions": missed}, backend="groq", model="test"
     )
 
 
@@ -202,7 +202,7 @@ def test_extract_survey_definition_recovers_a_missed_question_end_to_end():
         if task == "questionnaire.verify":
             return AIResponse(
                 content={"faithful": True, "discrepancies": []},
-                backend="claude",
+                backend="groq",
                 model="test",
             )
         if "How old" in prompt:
@@ -225,7 +225,7 @@ def test_extract_survey_definition_recovers_a_missed_question_end_to_end():
                 },
                 "confidence": {"text": 0.9, "type": 0.9, "options": 0.9, "routing": 0.9},
             },
-            backend="claude",
+            backend="groq",
             model="test",
         )
 

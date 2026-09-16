@@ -19,7 +19,7 @@ router = APIRouter()
 
 
 @router.get("/public/studies/{token}", response_model=PublicStudyResponse)
-async def get_public_study(token: str, db: Session = Depends(get_db)):
+def get_public_study(token: str, db: Session = Depends(get_db)):
     """Get study metadata via public share link (thin payload)."""
     # Verify share link exists and is not revoked
     link = get_share_link(db, token)
@@ -55,7 +55,7 @@ async def get_public_study(token: str, db: Session = Depends(get_db)):
 
 
 @router.get("/public/studies/{token}/download/{fmt}")
-async def download_public_study(token: str, fmt: str, db: Session = Depends(get_db)):
+def download_public_study(token: str, fmt: str, db: Session = Depends(get_db)):
     """Download study reports via public share link (no auth required)."""
     # Verify share link exists and is not revoked
     link = get_share_link(db, token)

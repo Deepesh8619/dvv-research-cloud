@@ -107,11 +107,14 @@ def test_single_and_multi_choices():
     pages = compile_to_surveyjs(make_survey())["pages"]
     s2 = _element(pages[0], "S2")
     assert s2["type"] == "radiogroup"
-    assert s2["choices"] == [
+    # S2 randomizes, so the ORDER is per-compile (one shuffle per respondent) —
+    # the content is not. `choicesOrder` is gone deliberately: SurveyJS cannot
+    # pin an anchored option, so the server orders the list itself.
+    assert sorted(s2["choices"], key=lambda c: c["value"]) == [
         {"value": 1, "text": "North"},
         {"value": 2, "text": "South"},
     ]
-    assert s2["choicesOrder"] == "random"  # randomize_options
+    assert "choicesOrder" not in s2
     q1 = _element(pages[1], "Q1")
     assert q1["type"] == "checkbox"
     assert {"value": 99, "text": "None"} in q1["choices"]
