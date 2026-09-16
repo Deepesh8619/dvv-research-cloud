@@ -445,6 +445,12 @@ def parse_prose_question(
         directives.extend(bracket_bodies(inline_directive.group("tags")))
         question_text = _OPTION_TAG_RE.sub("", question_text).strip()
 
+    # A base written INSIDE the question-text line — "D3. [ASK IF C1=18+] What
+    # is your marital status?" — reached nothing: only directive-ONLY lines were
+    # read for routing, so the bracket was dropped entirely, not even kept as a
+    # note. On two real studies that silently lost most of the routing: one had
+    # twelve questions stating a base and none applied.
+    inline_bases = bracket_bodies(question_text)
     instruction_text = question_text
     options: list[Option] = []
     terminate_codes: list[int] = []
@@ -458,6 +464,16 @@ def parse_prose_question(
     intro_follows = False
     randomize_evidence = ""
     scale_row: str | None = None
+
+    for body in inline_bases:
+        directives.append(body.strip())
+        if show_if is None and not _TERMINATE_TAG.search(body):
+            routing = parse_routing(body)
+            if routing is not None and qid.upper() not in {
+                r.upper() for r in routing.referenced_qids()
+            }:
+                show_if = routing
+                show_if_verbatim = body.strip()
 
     for line in body_lines:
         if is_directive_only(line):

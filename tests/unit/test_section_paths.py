@@ -7,6 +7,8 @@ path), each of which used to be read as something else entirely.
 from api.routes.fielding import _exclusive_only
 from src.core.survey_definition import (
     Block,
+    Expression,
+    Option,
     Question,
     QuestionType,
     SurveyDefinition,
@@ -256,3 +258,63 @@ def test_a_long_option_with_an_abbreviation_survives():
     )
     assert len(fields.options) == 2
     assert "Northwell" in fields.options[1].label
+
+
+def test_a_base_written_inside_the_question_line_is_read():
+    """"D3. [ASK IF C1=18+] What is your marital status?" — only directive-ONLY
+    lines were read for routing, so this was dropped entirely. On one live study
+    twelve questions stated a base and not one was applied."""
+    fields = parse_prose_question(
+        "D3. [ASK IF C1=18+] What is your marital status?\n1. Married\n2. Single", "D3"
+    )
+    assert fields.show_if is not None
+    assert evaluate(fields.show_if, {"C1": 18}) is True
+    assert evaluate(fields.show_if, {"C1": 17}) is False
+
+
+def test_punch_lists_keep_their_reading_aids_out_of_the_data():
+    """"Q15=1 (ANUA) OR 11 (MEDICUBE) OR 98" — the codes are the condition; the
+    brand names in brackets are there to help a human read it."""
+    condition = parse_routing("ASK IF Q15=1 (ANUA) OR 11 (MEDICUBE) OR 98")
+    assert condition is not None
+    assert condition.values == [1, 11, 98]
+
+
+def test_a_forward_ask_states_another_questions_base():
+    """"[PN: ASK Q15 IF Q14 = 1 OR 2]" sits on Q14 and governs Q15."""
+    survey = _survey(
+        ("Q14", "Q14. Did you switch brands?\n[PN: ASK Q15 IF Q14 = 1 OR 2]\n1. Yes\n2. No"),
+        ("Q15", "Q15. Which brand did you switch to?\n1. Anua\n2. Medicube"),
+    )
+    apply_section_paths(survey)
+    q15 = next(q for q in survey.questions if q.qid == "Q15")
+    assert q15.show_if is not None
+    assert evaluate(q15.show_if, {"Q14": 1}) is True
+    assert evaluate(q15.show_if, {"Q14": 3}) is False
+
+
+def test_the_audit_catches_a_base_the_document_states_but_nothing_applied():
+    from src.engines.questionnaire.definition_audit import audit_definition
+
+    unrouted = Question(
+        qid="Q17",
+        text="What challenges have you had?",
+        options=[Option(code=1, label="Cost")],
+        source_text="Q17.\t[SHOW IF QP=1] When managing prescriptions...",
+    )
+    checks = {f.check for f in audit_definition(_survey_of(unrouted))}
+    assert "base_stated_but_not_applied" in checks
+
+    unrouted.show_if = Expression(op="in", qid="QP", values=[1])
+    checks = {f.check for f in audit_definition(_survey_of(unrouted))}
+    assert "base_stated_but_not_applied" not in checks
+
+
+def _survey_of(*questions) -> SurveyDefinition:
+    return SurveyDefinition(
+        study_id="T",
+        source="extracted",
+        status="draft",
+        blocks=[Block(block_id="B1", question_ids=[q.qid for q in questions])],
+        questions=list(questions),
+    )
