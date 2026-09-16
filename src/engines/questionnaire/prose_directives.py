@@ -243,7 +243,13 @@ _INSTRUCTION_RE = re.compile(
 
 # Routing prose that belongs to the NEXT section, not this question's options
 # ("Adult Consumer Path Ages 18-25 (IF S0=1 AND S1=18-25) ASK S3-S6").
-_SECTION_ROUTING_RE = re.compile(r"\bASK\s+[A-Z]{0,3}\d|\bIF\s+[A-Z]{1,3}\d+\s*=", re.I)
+# A SECTION routing line names the questions it governs: "Parent Path (IF S0=1)
+# ASK P1-P3". The old second alternative matched a bare "IF S11=1" anywhere in a
+# line, so an ANSWER OPTION carrying a display condition — "Yes - for a child
+# under 18 [ONLY SHOW IF S11=1]" — was read as a section header and thrown away,
+# taking a punch code with it. One live study was missing that answer entirely:
+# five options in the document, four in the definition, no flag.
+_SECTION_ROUTING_RE = re.compile(r"\bASK\s+[A-Z]{0,3}\d", re.I)
 
 
 @dataclass

@@ -353,3 +353,33 @@ def test_a_condition_on_an_option_is_reported_as_its_own_thing():
     )
     checks = {f.check for f in audit_definition(_survey_of(q))}
     assert checks == {"option_base_unsupported"}
+
+
+def test_an_option_carrying_a_display_condition_is_not_thrown_away():
+    """"Yes - for a child under 18 [ONLY SHOW IF S11=1]" matched the section
+    routing rule on its bare "IF S11=1" and was discarded as a header — so a
+    live study's instrument was missing that answer entirely: five options in
+    the document, four in the definition, and no flag to say so."""
+    fields = parse_prose_question(
+        "S12. Do you handle prescriptions for someone else? Select all that apply.\n"
+        "[PN: RANDOMIZE]\n"
+        "Yes - for a child under 18 [ONLY SHOW IF S11=1]\n"
+        "Yes - for a parent/elderly relative\n"
+        "No, I do not [ANCHOR, EXCLUSIVE]",
+        "S12",
+    )
+    assert [o.label for o in fields.options] == [
+        "Yes - for a child under 18",
+        "Yes - for a parent/elderly relative",
+        "No, I do not",
+    ]
+    assert fields.options[-1].anchored and fields.options[-1].exclusive
+
+
+def test_a_section_header_is_still_not_an_option():
+    fields = parse_prose_question(
+        "S6. Which retailers?\n1. Ulta\n2. Sephora\n\n"
+        "Parent Recruitment Path Ages 26-60 (IF S0=1 AND S1=26-60) ASK P1-P3",
+        "S6",
+    )
+    assert [o.label for o in fields.options] == ["Ulta", "Sephora"]
