@@ -35,4 +35,12 @@ Host github.com
 CFG
   chown ubuntu:ubuntu /home/ubuntu/.ssh/config && chmod 600 /home/ubuntu/.ssh/config
 fi
+# GitHub's host key, or the very first clone stops on an unknown host and
+# reports it as a permissions problem (seen on dvv-demo).
+if ! grep -q github.com /home/ubuntu/.ssh/known_hosts 2>/dev/null; then
+  sudo -u ubuntu sh -c 'ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null'
+fi
+
+# /opt is root-owned, so the clone target must exist and belong to ubuntu:
+# `git clone` into this empty directory works, deleting it would not.
 mkdir -p /opt/dvv && chown ubuntu:ubuntu /opt/dvv
