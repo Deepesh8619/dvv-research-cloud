@@ -39,3 +39,22 @@ def test_a_field_report_computed_across_processes_matches_inline():
     inline = build_field_report(survey, sessions, answers, []).to_dict()
     remote = heavy.run_heavy(build_field_report, survey, sessions, answers, []).to_dict()
     assert remote == inline
+
+
+def _order_marker() -> str:
+    return "heavy ran"
+
+
+def test_the_database_connection_is_released_before_the_heavy_wait():
+    """Holding a connection while queueing for a heavy worker starved the pool:
+    at 200 users on a 2-core server, 12% of requests failed with
+    'QueuePool limit ... reached'."""
+    order: list[str] = []
+
+    class FakeSession:
+        def close(self):
+            order.append("connection released")
+
+    result = heavy.run_heavy_detached(FakeSession(), _order_marker)
+    order.append(result)
+    assert order == ["connection released", "heavy ran"]

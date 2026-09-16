@@ -65,7 +65,7 @@ from api.db import (
     update_quota_cell_limit,
     upsert_respondent_answer,
 )
-from api.heavy import run_heavy
+from api.heavy import run_heavy_detached
 from api.models import (
     DryRunRequest,
     FieldingLinkCreateRequest,
@@ -370,7 +370,7 @@ def dry_run(
         survey = SurveyDefinition.from_json(payload)
         cells = []
 
-    report = run_heavy(simulate, survey, cells, n=request.n, seed=request.seed)
+    report = run_heavy_detached(db, simulate, survey, cells, n=request.n, seed=request.seed)
     logger.info(
         f"[{study_id}] Dry run by {user.name}: {report.n_respondents} respondents, "
         f"{report.dispositions}, {len(report.never_fired)} condition(s) never fired"

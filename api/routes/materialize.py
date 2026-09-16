@@ -203,7 +203,7 @@ def field_report(
         raise HTTPException(status_code=404, detail="Fielding link not found")
 
     from api.db import answers_by_session, list_quota_cells
-    from api.heavy import plain_sessions, run_heavy
+    from api.heavy import plain_sessions, run_heavy_detached
 
     survey = SurveyDefinition.from_json(link.survey_json)
     sessions = list_respondent_sessions(db, link_id)
@@ -217,7 +217,9 @@ def field_report(
         )
         for cell in list_quota_cells(db, link_id)
     ]
-    report = run_heavy(build_field_report, survey, plain_sessions(sessions), answers, cells)
+    report = run_heavy_detached(
+        db, build_field_report, survey, plain_sessions(sessions), answers, cells
+    )
     return {**report.to_dict(), "link_id": link_id, "run_by": user.name}
 
 
@@ -245,7 +247,7 @@ def soft_launch_check(
     import json as _json
 
     from api.db import answers_by_session, list_quota_cells
-    from api.heavy import plain_sessions, run_heavy
+    from api.heavy import plain_sessions, run_heavy_detached
     from src.core.survey_definition import Expression
     from src.engines.fielding.decisions import QuotaCell
     from src.engines.fielding.launch_check import launch_check
@@ -266,8 +268,9 @@ def soft_launch_check(
         )
         for cell in list_quota_cells(db, link_id)
     ]
-    result = run_heavy(
-        launch_check, survey, plain_sessions(sessions), answers_by_session(db, link_id), cells
+    answers = answers_by_session(db, link_id)
+    result = run_heavy_detached(
+        db, launch_check, survey, plain_sessions(sessions), answers, cells
     )
     return {
         "link_id": link_id,

@@ -62,6 +62,21 @@ def run_heavy(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         raise
 
 
+def run_heavy_detached(db: Any, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    """Give the database connection back, THEN wait for the heavy work.
+
+    A request that waits on the pool while still holding its connection starves
+    everyone else: on a 2-core server one heavy worker serves ~20 queued field
+    reports, each holding a connection for tens of seconds, and the next request
+    dies with "QueuePool limit ... reached" (seen live at 200 users — 12% of
+    requests failed). By this point the data is already loaded, so the
+    connection has nothing left to do. The session reopens by itself if the
+    caller queries again afterwards.
+    """
+    db.close()
+    return run_heavy(fn, *args, **kwargs)
+
+
 def plain_sessions(sessions: Any) -> list[Any]:
     """Respondent sessions as plain picklable objects for run_heavy.
 

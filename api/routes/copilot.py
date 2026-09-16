@@ -28,7 +28,7 @@ from api.db import (
     list_respondent_sessions,
     list_studies,
 )
-from api.heavy import plain_sessions, run_heavy
+from api.heavy import plain_sessions, run_heavy_detached
 from api.models import ChatRequest, CopilotProposal, CopilotRequest, CopilotResponse
 from src.ai.copilot import run_copilot
 from src.ai.router import BackendUnavailable
@@ -176,8 +176,9 @@ def make_executor(db: Session, user: UserDB):
         sessions = list_respondent_sessions(db, ln.id)
         from src.core.survey_definition import SurveyDefinition
         pinned = SurveyDefinition.from_json(ln.survey_json)
-        report = run_heavy(build_field_report, pinned, plain_sessions(sessions),
-                           answers_by_session(db, ln.id), _cells(db, ln.id)).to_dict()
+        answers, cells = answers_by_session(db, ln.id), _cells(db, ln.id)
+        report = run_heavy_detached(db, build_field_report, pinned, plain_sessions(sessions),
+                                    answers, cells).to_dict()
         report["terminates_by_question"] = _screen_outs(pinned, report["terminates_by_question"])
         return report
 
@@ -185,9 +186,9 @@ def make_executor(db: Session, user: UserDB):
         _s, ln = link(args)
         from src.core.survey_definition import SurveyDefinition
         pinned = SurveyDefinition.from_json(ln.survey_json)
-        result = run_heavy(launch_check, pinned,
-                           plain_sessions(list_respondent_sessions(db, ln.id)),
-                           answers_by_session(db, ln.id), _cells(db, ln.id))
+        sessions = plain_sessions(list_respondent_sessions(db, ln.id))
+        answers, cells = answers_by_session(db, ln.id), _cells(db, ln.id)
+        result = run_heavy_detached(db, launch_check, pinned, sessions, answers, cells)
         checked_links.add(ln.id)
         cc = result["crosscheck"]
         cc["findings"] = cc["findings"][:_MAX_FINDINGS]
@@ -198,7 +199,7 @@ def make_executor(db: Session, user: UserDB):
 
     def dry_run(args):
         n = max(50, min(int(args.get("n") or 500), 5000))
-        report = run_heavy(simulate, survey(args), [], n=n, seed=20260915).to_dict()
+        report = run_heavy_detached(db, simulate, survey(args), [], n=n, seed=20260915).to_dict()
         return {k: report[k] for k in ("n_respondents", "passed", "dispositions",
                                        "never_fired", "impossible", "questions_never_shown")}
 
