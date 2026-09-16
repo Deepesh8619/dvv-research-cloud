@@ -21,6 +21,14 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+# The commit this image was built from, so /api/health can answer "which
+# version is this client running?" from the outside. Baked in rather than
+# passed at run time: the image IS the build, and an image started later still
+# reports the code it actually contains. Last, so it never busts the cache of
+# the layers above it.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=$GIT_COMMIT
 COPY --from=web /web/dist ./web/dist
 
 # Uploaded files, computed decks, charts. Mount a persistent volume HERE on the
