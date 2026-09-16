@@ -188,6 +188,11 @@ def _condition(text: str) -> Expression | None:
     return _atom(text)
 
 
+# "[ASK IF AWARE OF CVS (Q3=2)]" — a scripter explains the base in words and
+# then writes the exact one in brackets. The parenthetical IS the condition.
+_CONDITION_IN_PROSE = re.compile(r"\(([^()]*[A-Za-z][A-Za-z0-9]{0,5}\s*=\s*\d[^()]*)\)")
+
+
 def parse_routing(directive: str) -> Expression | None:
     """The `show_if` a routing directive states, or None if it is not exact.
 
@@ -198,7 +203,14 @@ def parse_routing(directive: str) -> Expression | None:
     m = _PREAMBLE_RE.match(directive)
     if not m:
         return None
-    condition = _condition(directive[m.end() :])
+    body = directive[m.end() :]
+    condition = _condition(body)
+    if condition is None:
+        # The exact condition may be parenthesised inside an explanation:
+        # "AWARE OF CVS (Q3=2)". Only when the whole line does not parse, so a
+        # condition that already reads correctly is never second-guessed.
+        inner = _CONDITION_IN_PROSE.search(body)
+        condition = _condition(inner.group(1)) if inner else None
     if condition is None:
         return None
     condition.verbatim_text = directive.strip()

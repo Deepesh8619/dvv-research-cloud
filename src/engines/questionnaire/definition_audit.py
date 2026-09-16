@@ -61,6 +61,25 @@ class StudyAudit:
         return not self.findings
 
 
+def _on_an_option_line(question, match) -> bool:
+    """True when the condition sits on an option's line, not the question's.
+
+    The distinction matters for what a reviewer does next: a question base that
+    was missed is a parser bug worth re-extracting for, while a base written on
+    one answer option is a feature the platform does not have. Reporting them as
+    the same thing sends people looking for the wrong fix.
+    """
+    source = question.source_text or ""
+    line_start = source.rfind("\n", 0, match.start()) + 1
+    line_end = source.find("\n", match.end())
+    line = source[line_start : line_end if line_end != -1 else len(source)]
+    stripped = line[: match.start() - line_start].strip(" \t.-")
+    return any(
+        (o.label or "").strip() and (o.label.strip()[:30] in stripped)
+        for o in question.options or []
+    )
+
+
 def _is_prose(text: str) -> bool:
     """Same rule the parser uses — one definition, so the audit cannot disagree
     with the parser about what an answer option is."""
@@ -149,13 +168,30 @@ def audit_definition(survey: SurveyDefinition) -> list[Finding]:
             )
         )
 
-    stated_not_applied = [
-        q.qid
-        for q in survey.questions
-        if q.show_if is None
-        and q.type is not QuestionType.INFO
-        and _BASE_STATED.search(q.source_text or "")
-    ]
+    stated_not_applied: list[str] = []
+    option_level: list[str] = []
+    for q in survey.questions:
+        if q.show_if is not None or q.type is QuestionType.INFO:
+            continue
+        match = _BASE_STATED.search(q.source_text or "")
+        if not match:
+            continue
+        if _on_an_option_line(q, match):
+            option_level.append(q.qid)
+        else:
+            stated_not_applied.append(q.qid)
+
+    if option_level:
+        findings.append(
+            Finding(
+                "option_base_unsupported",
+                sorted(set(option_level)),
+                "A condition is stated on an ANSWER OPTION ('Yes - for a child under 18 "
+                "[ONLY SHOW IF S11=1]'), not on the question. Per-option display is not "
+                "something the platform models — this needs a scripting decision, not a "
+                "re-extraction.",
+            )
+        )
     if stated_not_applied:
         findings.append(
             Finding(
