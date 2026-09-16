@@ -68,6 +68,7 @@ from src.engines.questionnaire.section_paths import (
     apply_section_paths,
 )
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
+from src.engines.questionnaire.table_questions import question_from_tables
 from src.intake.questionnaire_loader import DocumentBlock, QuestionChunk
 
 # Question types whose whole point is a fixed answer list; an empty option list
@@ -314,10 +315,15 @@ def _validate_question(result: ExtractionResult, routing: dict) -> None:
             codes.add(opt.code)
 
     # Empty options on a type that requires an answer list.
-    if q.type in _OPTION_BEARING_TYPES:
-        has_choices = bool(q.options) or bool(q.rows)
-        if not has_choices:
+    if q.type is QuestionType.GRID_SINGLE:
+        # A grid is judged on rows AND columns, never on `options`. It emits one
+        # data column per ROW with the COLUMNS as that column's value labels, so
+        # a grid holding a dozen options but no rows delivers nothing at all —
+        # and used to pass this check on the strength of options it cannot use.
+        if not (q.rows and q.cols):
             result.add_flag(schema.FLAG_EMPTY_OPTIONS)
+    elif q.type in _OPTION_BEARING_TYPES and not q.options:
+        result.add_flag(schema.FLAG_EMPTY_OPTIONS)
 
     # Self-referential show_if/terminate_if. A question cannot gate its own
     # display on its own (not-yet-given) answer, so a show_if/terminate_if that
@@ -530,6 +536,30 @@ def _extract_via_spec_table(
 
 
 
+def _apply_table_shape(question: Question, chunk: QuestionChunk) -> None:
+    """Take a grid's rows and columns from the table's real cells.
+
+    The loader keeps a table's cells on the block; the prose parser only ever
+    saw the serialized "a | b | c" text, so a grid arrived with its header as
+    "option 1", its punch codes as "option 2", and rows=cols=[] — and a grid
+    with no rows emits NO columns in the data file. Eighteen questions of one
+    real 91-question instrument were in that state: typed correctly, and
+    delivering nothing.
+    """
+    tables = [b.rows for b in chunk.source_blocks if b.rows]
+    if not tables:
+        return
+    shape = question_from_tables(tables, list(question.options))
+    if shape is None:
+        return
+    question.type = QuestionType.GRID_SINGLE
+    question.rows = shape.rows
+    question.cols = shape.cols
+    question.options = []  # a grid answers per row, not from one option list
+    question.randomize_options = question.randomize_options or shape.randomize_rows
+    question.extraction_evidence["options"] = shape.evidence
+
+
 def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     """Build a Question from what a prose question's own directives state."""
     validation: dict[str, Any] = {}
@@ -547,7 +577,7 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     techniques = detect_techniques(fields.text or "", *fields.directives)
     if techniques:
         validation["techniques"] = techniques.to_dict()
-    return Question(
+    question = Question(
         qid=fields.qid,
         text=fields.text or "",
         type=fields.qtype or QuestionType.SINGLE,
@@ -570,6 +600,8 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
         extraction_method="prose_directives",
         extraction_evidence=dict(fields.evidence),
     )
+    _apply_table_shape(question, chunk)
+    return question
 
 
 def _extract_via_prose(

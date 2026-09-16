@@ -138,3 +138,27 @@ def test_a_self_referential_base_is_caught():
         )
     )
     assert "self_referential_base" in _checks(survey)
+
+
+def test_a_grid_with_no_rows_is_caught():
+    """It emits NO data columns — and used to pass validation on the strength of
+    `options`, which a grid cannot use. One real question was in exactly this
+    state: typed correctly, 12 options, delivering nothing."""
+    from src.engines.questionnaire import schema
+    from src.engines.questionnaire.extractor import ExtractionResult, _validate_question
+
+    q = Question(
+        qid="Q6",
+        text="How often do you buy each category?",
+        type=QuestionType.GRID_SINGLE,
+        options=[Option(code=i, label=f"Category {i}") for i in range(1, 13)],
+    )
+    result = ExtractionResult(question=q, confidence={})
+    _validate_question(result, {})
+    assert schema.FLAG_EMPTY_OPTIONS in result.flags
+
+    q.rows = [Option(code=1, label="Cleansers")]
+    q.cols = [Option(code=1, label="Often"), Option(code=2, label="Never")]
+    ok = ExtractionResult(question=q, confidence={})
+    _validate_question(ok, {})
+    assert schema.FLAG_EMPTY_OPTIONS not in ok.flags
