@@ -28,7 +28,10 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-import requests
+try:
+    import requests
+except ModuleNotFoundError:  # only the load GENERATOR needs it, not --seed-only/--cleanup
+    requests = None
 
 ROOT = Path(__file__).resolve().parent.parent
 N_QUESTIONS = 10
@@ -177,6 +180,9 @@ def main() -> None:
     if a.cleanup:
         exec(CLEANUP)  # noqa: S102 - our own fixed code
         return
+
+    if requests is None:
+        sys.exit("this needs the requests package: pip install requests")
 
     server = None
     if a.local:
