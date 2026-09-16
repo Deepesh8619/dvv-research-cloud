@@ -68,3 +68,21 @@ def test_the_guard_lets_a_normal_user_through():
     )
     assert "not root" not in result.stdout
     assert re.search(r"usage|\./dvv", result.stdout + result.stderr, re.I)
+
+
+def test_the_commit_actually_reaches_the_child_process():
+    """Run the real helper with `dc` stubbed, and read the child's environment.
+
+    Asserting the text is present proves nothing about whether docker compose
+    can see the variable — one misplaced quote or a missing export and every
+    image is stamped "unknown" while the test still passes. This runs the
+    helper for real and looks at what the child process inherits.
+    """
+    body = DVV.read_text()
+    helper = body[body.index("build_app() {") : body.index("health() {")]
+    script = f'dc() {{ env | grep "^GIT_COMMIT=" || echo MISSING; }}\n{helper}\nbuild_app app\n'
+    result = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, cwd=ROOT
+    )
+    assert "MISSING" not in result.stdout, "docker compose would not see GIT_COMMIT"
+    assert re.match(r"GIT_COMMIT=[0-9a-f]{7,}", result.stdout.strip()), result.stdout

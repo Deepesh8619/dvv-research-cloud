@@ -100,6 +100,11 @@ case "${1:-}" in
     wait_healthy && echo "Restored and healthy." || { echo "Restored, but the app is not healthy:"; dc logs --tail 60 app; exit 1; }
     ;;
   upgrade)
+    # NOTE: bash already read this file, so the code running here is the
+    # PRE-pull version. A change to the upgrade path itself (including what
+    # build_app stamps into the image) takes effect on the NEXT upgrade, not
+    # this one. Re-execing after the pull would fix that and is not worth the
+    # loop-guard it needs.
     echo "Backing up before upgrading..."; dc exec -T backup bash /backup.sh once
     previous=$(git rev-parse HEAD)
     git pull --ff-only
