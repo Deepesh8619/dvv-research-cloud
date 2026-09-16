@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass, field
 
 from src.core.survey_definition import QuestionType, SurveyDefinition
+from src.engines.questionnaire.prose_directives import has_sentence_break, is_note_line
 
 # A recruitment path header: "... (IF S0=1 AND S1=26-60) ASK P1-P3".
 _SECTION_PATH = re.compile(r"\(\s*[^)]*\bIF\b[^)]*\)\s*[,:]?\s*ASK\s+[A-Za-z]{0,4}\d", re.I)
@@ -49,7 +50,11 @@ class StudyAudit:
 
 
 def _is_prose(text: str) -> bool:
-    return len(text.split()) >= _PROSE_WORDS and bool(re.search(r"[.!?](?:\s|$)", text))
+    """Same rule the parser uses — one definition, so the audit cannot disagree
+    with the parser about what an answer option is."""
+    if is_note_line(text):
+        return True
+    return len(text.split()) >= _PROSE_WORDS and has_sentence_break(text)
 
 
 def audit_definition(survey: SurveyDefinition) -> list[Finding]:

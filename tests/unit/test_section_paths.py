@@ -228,3 +228,31 @@ def test_variables_exist_at_approval_and_hidden_ones_carry_data():
     assert list(rows[hidden]) == [1, 0]  # in path / outside the age band
     assert list(rows["S6r1"]) == [1, 0]
     assert list(rows["S6r4"]) == [0, 1]
+
+
+def test_a_note_line_is_never_an_answer():
+    """"Note: ..." under an option list became answer code 1 on a live study."""
+    fields = parse_prose_question(
+        "S5. Who makes healthcare decisions in your household?\n"
+        "1. Me\n"
+        "2. My partner\n"
+        "Note: Healthcare decisions include researching where to seek care and "
+        "determining if care is needed.\n",
+        "S5",
+    )
+    assert [o.label for o in fields.options] == ["Me", "My partner"]
+
+
+def test_a_long_option_with_an_abbreviation_survives():
+    """"e.g." ends in a period without ending a sentence. Counting it as one
+    made an ordinary long answer look like prose — which, for any option after
+    the first, would have dropped it from the list entirely."""
+    fields = parse_prose_question(
+        "Q17c. Where do you fill prescriptions?\n"
+        "1. A national chain pharmacy such as CVS or Walgreens\n"
+        "2. Pharmacy associated with a healthcare system that I use (e.g. Northwell, "
+        "New York-Presbyterian, NYU Langone, Mount Sinai or another local system)\n",
+        "Q17c",
+    )
+    assert len(fields.options) == 2
+    assert "Northwell" in fields.options[1].label
