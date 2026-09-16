@@ -7,7 +7,10 @@ name: dvv-${CLIENT_SLUG:?set CLIENT_SLUG in deploy/.env}
 
 services:
   app:
-    build: ..
+    build:
+      context: ..
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     restart: unless-stopped
     env_file: .env
     environment:

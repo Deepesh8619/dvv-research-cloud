@@ -14,7 +14,24 @@
 #   ./dvv load-seed | load-cleanup                    set up / remove the go-live load test
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# Run as the user that owns the checkout. Under sudo, git reaches GitHub as
+# root — which has neither the deploy key nor GitHub's host key — so `upgrade`
+# takes a backup and THEN dies on "Host key verification failed", which reads
+# like a broken deploy key rather than the wrong user. Fail before the backup,
+# and say what to type instead.
+owner=$(stat -c '%U' . 2>/dev/null || stat -f '%Su' . 2>/dev/null || echo "")
+if [ "$(id -u)" = "0" ] && [ -n "$owner" ] && [ "$owner" != "root" ]; then
+  echo "Run this as $owner, not root: sudo -u $owner ./dvv ${*:-status}"
+  exit 1
+fi
+
 dc() { docker compose "$@"; }
+
+build_app() {  # always stamps the image with the commit it was built from
+  GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) \
+    dc up -d --build "$@"
+}
 
 health() {  # 0 when the app answers /api/health from inside its container
   dc exec -T app python -c "import urllib.request,sys; sys.stdout.write(urllib.request.urlopen('http://localhost:8000/api/health', timeout=5).read().decode())" 2>/dev/null
@@ -51,7 +68,7 @@ case "${1:-}" in
     echo "Next: paste DVV_LICENCE into .env, choose the AI mode, then ./dvv up"
     ;;
   up)
-    dc up -d --build
+    build_app
     if ! wait_healthy; then echo "App did not become healthy:"; dc logs --tail 60 app; exit 1; fi
     pull_model
     echo "Up. $(health)"
@@ -87,7 +104,7 @@ case "${1:-}" in
     previous=$(git rev-parse HEAD)
     git pull --ff-only
     [ "$(git rev-parse HEAD)" = "$previous" ] && { echo "Already on the latest version."; exit 0; }
-    dc up -d --build app
+    build_app app
     if wait_healthy; then
       echo "Upgraded $(git rev-parse --short "$previous") -> $(git rev-parse --short HEAD). $(health)"
     else
@@ -95,7 +112,7 @@ case "${1:-}" in
       # the previous code runs fine against the upgraded database.
       echo "New version is NOT healthy — rolling back to $(git rev-parse --short "$previous")."
       dc logs --tail 60 app
-      git reset -q --hard "$previous" && dc up -d --build app && wait_healthy \
+      git reset -q --hard "$previous" && build_app app && wait_healthy \
         && echo "Rolled back; still on $(git rev-parse --short "$previous")." \
         || echo "ROLLBACK ALSO UNHEALTHY — restore from backups/ with ./dvv restore"
       exit 1
