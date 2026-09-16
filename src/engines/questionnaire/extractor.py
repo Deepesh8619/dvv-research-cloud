@@ -618,6 +618,13 @@ def _extract_via_prose(
         fill_from_datamap(fields, datamap_question) if datamap_question else []
     )
     question = _question_from_prose(fields, chunk)
+    if fields.missing == ["type"] and question.rows and question.cols:
+        # The table said what the prose could not. A grid written as a table has
+        # no type in its wording — the shape IS the type — so every one of them
+        # escalated to a model call for something already known from the cells.
+        # Costly, and a needless source of run-to-run variance.
+        fields.missing = []
+        question.extraction_evidence.setdefault("type", "a grid table")
     confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
     if filled_from_datamap:
         question.extraction_evidence.update(
