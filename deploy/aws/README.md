@@ -44,7 +44,15 @@ SSH in from the Lightsail console (or `ssh ubuntu@<ip>`), then:
 cat ~/.ssh/dvv_deploy.pub
 ```
 
-Add that key on GitHub: repo → Settings → Deploy keys → Add, **read-only**. Then:
+Add that key on GitHub — repo → Settings → Deploy keys → Add, **read-only** — or
+from DVV's Mac with the GitHub CLI:
+
+```bash
+gh repo deploy-key add key.pub --title "acme server (read-only)" --repo Deepesh8619/dvv-research-cloud
+```
+
+Then, on the server (`/opt/dvv` already exists and belongs to `ubuntu`; clone
+into it rather than replacing it, since `/opt` is root-owned):
 
 ```bash
 git clone git@github.com:Deepesh8619/dvv-research-cloud.git /opt/dvv

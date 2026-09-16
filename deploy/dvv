@@ -102,13 +102,15 @@ case "${1:-}" in
     fi
     ;;
   load-seed)
-    dc exec -T app python scripts/load_test.py --seed-only
+    dc exec -T -e PYTHONPATH=/app app python scripts/load_test.py --seed-only
     ;;
   load-cleanup)
-    dc exec -T app python scripts/load_test.py --cleanup
+    dc exec -T -e PYTHONPATH=/app app python scripts/load_test.py --cleanup
     ;;
   check-ai)
-    dc exec -T app python scripts/check_ai.py
+    # PYTHONPATH: the script sits in scripts/, so without it the app package
+    # under /app is not importable and the check dies before it starts.
+    dc exec -T -e PYTHONPATH=/app app python scripts/check_ai.py
     ;;
   offsite)
     dc exec -T offsite bash /offsite.sh once
