@@ -63,6 +63,10 @@ from src.engines.questionnaire.prose_directives import (
     parse_prose_question,
 )
 from src.engines.questionnaire.reconciler import reconcile_segmentation
+from src.engines.questionnaire.section_paths import (
+    apply_intro_screens,
+    apply_section_paths,
+)
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
 from src.intake.questionnaire_loader import DocumentBlock, QuestionChunk
 
@@ -1085,6 +1089,12 @@ def extract_survey_definition(
         )
 
     survey = _assemble_survey(results, study_id, detection, reconcile_meta)
+
+    # A recruitment path's header ("... (IF S0=1 AND S1=26-60) ASK P1-P3") states
+    # the base for questions in OTHER chunks, so it can only be applied now that
+    # the whole survey exists. Also emits the path as a HID_ variable.
+    apply_section_paths(survey)
+    apply_intro_screens(survey)
 
     # Whatever the document reader never found at all. The data map lists every
     # question that was actually fielded, so a question it names and no chunk

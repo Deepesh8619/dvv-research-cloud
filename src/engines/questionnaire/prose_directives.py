@@ -111,7 +111,11 @@ _OPTION_CODE_RE = re.compile(r"^\s*(\d{1,3})\s*[.):]\s+(?=\S)")
 _OPTION_LETTER_RE = re.compile(r"^\s*([A-Za-z])\s*[.):]\s+(?=\S)")
 
 # A trailing tag on an option: "Healthcare [TERMINATE]", "None [ANCHOR, EXCLUSIVE]".
-_OPTION_TAG_RE = re.compile(r"\s*\[(?P<tags>[^\]]*)\]\s*$")
+# EVERY trailing bracket group, not just the last: "None of the above [ANCHOR]
+# [EXCLUSIVE] [TERMINATE]" is three separate tags on one option, and reading
+# only [TERMINATE] left the anchor and the exclusivity in the label text where
+# nothing acts on them (and put the brackets in front of the respondent).
+_OPTION_TAG_RE = re.compile(r"\s*(?P<tags>\[[^\]]*\](?:\s*\[[^\]]*\])*)\s*$")
 
 # Type instructions, most specific first — "select all that apply" must beat a
 # bare "select".
@@ -269,6 +273,24 @@ class ProseFields:
         return not self.missing
 
 
+# A sentence-shaped paragraph: long, punctuated, addressed to the respondent.
+# An answer option is a phrase — even a wordy one ("I prefer to buy directly
+# from a brand's website") has no sentence break and rarely runs this long.
+_PROSE_MIN_WORDS = 18
+
+
+def _is_prose_paragraph(line: str) -> bool:
+    text = strip_brackets(line).strip()
+    if _OPTION_CODE_RE.match(text) or _OPTION_LETTER_RE.match(text):
+        return False
+    if not any(c.islower() for c in text):
+        return False  # all-caps is a scripter instruction, handled elsewhere
+    words = text.split()
+    if len(words) < _PROSE_MIN_WORDS:
+        return False
+    return bool(re.search(r"[.!?](?:\s|$)", text))
+
+
 def _strip_label(line: str) -> str:
     return _LABEL_RE.sub("", line, count=1).strip()
 
@@ -387,7 +409,7 @@ def parse_prose_question(
     inline_directive = _OPTION_TAG_RE.search(question_text)
     directives: list[str] = []
     if inline_directive:
-        directives.append(inline_directive.group("tags").strip())
+        directives.extend(bracket_bodies(inline_directive.group("tags")))
         question_text = _OPTION_TAG_RE.sub("", question_text).strip()
 
     instruction_text = question_text
@@ -400,6 +422,7 @@ def parse_prose_question(
     stem_wraps_used = False
     last_option_marked = False
     randomize = False
+    intro_follows = False
     randomize_evidence = ""
     scale_row: str | None = None
 
@@ -426,6 +449,20 @@ def parse_prose_question(
                     # "[IF S2 = 2 or S2=3]" states this question's base. First
                     # readable one wins; an unreadable one stays a directive.
                     routing = parse_routing(body)
+                    if routing is not None and options:
+                        # A base stated UNDER the option list governs what comes
+                        # next, not this question — "[PN: SHOW IF P1=1]" then an
+                        # intro paragraph. Everything below it is that screen's
+                        # text; read as options it gave P1 punches nobody could
+                        # ever code (and a wrapped paragraph gave it two).
+                        intro_follows = True
+                    if routing is not None and qid.upper() in {
+                        r.upper() for r in routing.referenced_qids()
+                    }:
+                        # "[PN: SHOW IF P1=1]" under P1's own option list is the
+                        # base of what comes NEXT — a question cannot be its own
+                        # condition. section_paths turns it into that screen.
+                        routing = None
                     if routing is not None:
                         show_if = routing
                         show_if_verbatim = body
@@ -478,6 +515,23 @@ def parse_prose_question(
             instruction_text = f"{instruction_text} {line}".strip()
             continue
 
+        if intro_follows and not (
+            _OPTION_CODE_RE.match(line) or _OPTION_LETTER_RE.match(line)
+        ):
+            directives.append(line.strip())
+            continue
+
+        if options and _is_prose_paragraph(line):
+            # A paragraph is not an answer. The intro to the NEXT screen sits
+            # directly under the previous question's option list ("[PN: SHOW IF
+            # P1=1]" then "In this survey, we're looking to interview young
+            # women ages 13 to 17..."), and reading it as a third option gave P1
+            # a code nobody could ever punch and broke the Yes/No pair that
+            # decides its type. Kept as a directive so the text is not lost —
+            # `section_paths.apply_intro_screens` turns it into its own screen.
+            directives.append(line.strip())
+            continue
+
         # Otherwise: an answer option. Codes are positional (1-based), which is
         # how prose lists are scripted.
         tags = _OPTION_TAG_RE.search(line)
@@ -508,7 +562,7 @@ def parse_prose_question(
             last_option_marked = marker is not None
 
         if tags:
-            tag_text = tags.group("tags")
+            tag_text = " ".join(bracket_bodies(tags.group("tags")))
             taught_meanings = learned_option_tags(patterns, tag_text)
             if _EXCLUSIVE_TAG.search(tag_text) or "exclusive" in taught_meanings:
                 option.exclusive = True

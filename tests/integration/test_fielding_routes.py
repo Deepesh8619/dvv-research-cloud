@@ -762,3 +762,69 @@ def test_a_screen_out_discards_answers_given_after_it_on_the_same_page(client):
 
     # Q1 — the screening answer itself — is kept: it is the evidence.
     assert test_client.get(f"/api/r/{token}/sessions/{sid}").json()["answers"] == {"Q1": 16}
+
+
+def _exclusive_survey(study_id: str) -> SurveyDefinition:
+    """One multi-punch whose last option is "None of the above" — anchored and
+    exclusive, the shape every screener ends on."""
+    q = Question(
+        qid="Q5",
+        text="Which have you bought from in the past 6 months?",
+        type=QuestionType.MULTI,
+        randomize_options=True,
+        options=[
+            Option(code=1, label="Ulta"),
+            Option(code=2, label="Sephora"),
+            Option(code=3, label="Target"),
+            Option(code=4, label="None of the above", anchored=True, exclusive=True),
+        ],
+    )
+    return SurveyDefinition(
+        study_id=study_id,
+        title="Skincare",
+        source="authored",
+        status="approved",
+        version=1,
+        blocks=[Block(block_id="B1", question_ids=["Q5"])],
+        questions=[q],
+    )
+
+
+def test_exclusive_option_wins_over_co_selections_through_the_api(client):
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf, survey=_exclusive_survey("study_f1"))
+    token = _create_link(test_client).json()["token"]
+    entry = test_client.get(f"/api/r/{token}").json()
+    sid = entry["session_id"]
+
+    # The respondent ticks two retailers AND "None of the above".
+    posted = test_client.post(
+        f"/api/r/{token}/sessions/{sid}/answers",
+        json={"answers": {"Q5": [1, 2, 4]}, "current_page": 1},
+    )
+    assert posted.status_code == 200
+
+    # What is STORED is only the exclusive punch — the contradiction never
+    # reaches the tabs, whatever the browser sent.
+    assert test_client.get(f"/api/r/{token}/sessions/{sid}").json()["answers"] == {"Q5": [4]}
+
+
+def test_anchored_option_is_last_in_the_link_the_respondent_gets(client):
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf, survey=_exclusive_survey("study_f1"))
+    token = _create_link(test_client).json()["token"]
+
+    firsts = set()
+    for _ in range(25):
+        entry = test_client.get(f"/api/r/{token}").json()
+        element = next(
+            e
+            for page in entry["surveyjs_json"]["pages"]
+            for e in page["elements"]
+            if e.get("name") == "Q5"
+        )
+        assert element["choices"][-1]["text"] == "None of the above"
+        firsts.add(element["choices"][0]["text"])
+    assert len(firsts) > 1  # a real shuffle, per respondent

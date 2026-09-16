@@ -28,7 +28,13 @@ from src.core.survey_definition import Expression
 
 # "IF", "ONLY ASK <anything> IF", "ASK IF", "ASK ONLY IF" — everything up to and
 # including the last IF is preamble; the condition is what follows.
-_PREAMBLE_RE = re.compile(r"^\s*(?:ONLY\s+ASK\b.*?|ASK\s+(?:ONLY\s+)?)?\bIF\b\s*", re.I)
+# Also "SHOW IF", "DISPLAY IF", "PN: SHOW IF" — the programmer-note spelling is
+# how a screen or an intro block states its base, and it routes exactly like a
+# question's own "ASK IF".
+_PREAMBLE_RE = re.compile(
+    r"^\s*(?:PN\s*:\s*)?(?:ONLY\s+ASK\b.*?|ASK\s+(?:ONLY\s+)?|SHOW\s+|DISPLAY\s+)?\bIF\b\s*",
+    re.I,
+)
 
 # One comparison: a question id, an operator, then one or more numbers.
 # The id is the same shape the segmenter recognises as a label (D2, S2, ED11A,
@@ -38,6 +44,9 @@ _ATOM_RE = re.compile(
     r"^\s*\(?\s*([A-Za-z]{1,4}\d+[A-Za-z]?)\s*(=|==|<>|!=|>=|<=|>|<)\s*([^)]*?)\s*\)?\s*$"
 )
 _VALUES_RE = re.compile(r"\d+")
+# "S1 = 26-60", "AGE = 26 to 60" — a band, not a punch list. Written constantly
+# in recruitment paths, where the ranges are the sample definition itself.
+_RANGE_RE = re.compile(r"^(\d+)\s*(?:-|–|—|\bto\b|\bthrough\b)\s*(\d+)$", re.I)
 # A value list is only a list of numbers and the words joining them.
 _VALUE_LIST_RE = re.compile(r"^[\d\s,]*(?:(?:,|\bor\b|\band\b)\s*\d+\s*)*$", re.I)
 
@@ -77,6 +86,23 @@ def _atom(text: str) -> Expression | None:
     if not m:
         return None
     qid, op, raw_values = m.groups()
+
+    band = _RANGE_RE.match(raw_values.strip())
+    if band and op in ("=", "=="):
+        low, high = int(band.group(1)), int(band.group(2))
+        if low > high:
+            return None
+        # Inclusive band, spelled with the ops that already exist everywhere
+        # else: not(x < low) and not(x > high).
+        return Expression(
+            op="and",
+            children=[
+                Expression(op="not", children=[Expression(op="lt", qid=qid, value=low)]),
+                Expression(op="not", children=[Expression(op="gt", qid=qid, value=high)]),
+            ],
+            verbatim_text=text.strip(),
+        )
+
     if not _VALUE_LIST_RE.match(raw_values.strip()):
         return None
     values = [int(v) for v in _VALUES_RE.findall(raw_values)]

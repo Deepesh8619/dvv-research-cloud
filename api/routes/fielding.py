@@ -663,6 +663,24 @@ def _terminal_payload(session) -> dict:
     }
 
 
+def _exclusive_only(survey: SurveyDefinition, qid: str, value):
+    """Drop co-selections when an EXCLUSIVE option ("None of the above") is ticked.
+
+    Enforced here, not in the browser, for the same reason terminates are: the
+    client is the respondent's, and SurveyJS has no per-choice exclusivity to
+    configure anyway. A multi-punch carrying both "Ulta" and "None of the above"
+    is contradictory data that would otherwise land in the tabs.
+    """
+    if not isinstance(value, list) or len(value) < 2:
+        return value
+    question = next((q for q in survey.questions if q.qid == qid), None)
+    if question is None:
+        return value
+    exclusive = [o.code for o in question.options if o.exclusive]
+    picked = [code for code in exclusive if code in value]
+    return [picked[-1]] if picked else value
+
+
 @router.post("/r/{token}/sessions/{session_id}/answers")
 def submit_answers(
     token: str,
@@ -683,12 +701,13 @@ def submit_answers(
     if session.status_code is not None:
         return _terminal_payload(session)
 
+    # Server-authoritative view of what the respondent was actually asked.
+    survey = SurveyDefinition.from_json(link.survey_json)
+
     for qid, value in (body.answers or {}).items():
-        upsert_respondent_answer(db, session_id, qid, value)
+        upsert_respondent_answer(db, session_id, qid, _exclusive_only(survey, qid, value))
     touch_respondent_session(db, session_id, current_page=body.current_page)
 
-    # Server-authoritative terminate check against the PINNED survey copy.
-    survey = SurveyDefinition.from_json(link.survey_json)
     answers = get_session_answers_map(db, session_id)
     for question in survey.questions:
         if question.terminate_if is None:
