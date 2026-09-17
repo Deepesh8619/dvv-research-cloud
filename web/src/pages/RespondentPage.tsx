@@ -86,6 +86,17 @@ function PoweredBy() {
   return <p className="mt-8 text-xs font-medium tracking-wide text-slate-400">Powered by DVV Research Cloud</p>
 }
 
+// Where the respondent is, from the survey's OWN counters. `currentPageNo` does
+// not move in questionPerPage mode — SurveyJS swaps the content of one page — so
+// reading it left the header frozen at "1 / 20" for the whole interview. And its
+// question count is the real one: getAllQuestions() included an element nobody
+// answers, which is how the total read 20 against the survey's own 19.
+function positionOf(survey: Model): { at: number; of: number } {
+  const info = survey.getProgressInfo()
+  const of = info.questionCount || 1
+  return { at: Math.min(info.answeredQuestionCount + 1, of), of }
+}
+
 export default function RespondentPage() {
   const { token } = useParams<{ token: string }>()
   const [phase, setPhase] = useState<Phase>('loading')
@@ -93,6 +104,10 @@ export default function RespondentPage() {
   const [model, setModel] = useState<Model | null>(null)
   const [title, setTitle] = useState('')
   const [theme, setTheme] = useState<Theme>(DEFAULT_THEME)
+  // Where the respondent is, kept in state because SurveyJS mutates its model
+  // in place: reading currentPageNo during render shows the page they were on
+  // last time React happened to draw.
+  const [position, setPosition] = useState({ at: 1, of: 1 })
   // Live refs the async event handlers read (state would be stale in closures).
   const sessionIdRef = useRef<string>('')
   const terminatedRef = useRef(false)
@@ -149,12 +164,17 @@ export default function RespondentPage() {
         // We swap to our own warm thank-you view on complete, so suppress SurveyJS's.
         survey.showCompletedPage = false
         applySurveyTheme(survey, surveyTheme)
+        setPosition(positionOf(survey))
 
         // Per-page incremental capture: POST accumulated answers on every advance.
         // Multi/checkbox/text don't auto-advance — their Next click fires this too.
         survey.onCurrentPageChanged.add(async (sender) => {
+          setPosition(positionOf(sender))
           await submitPage(sender, sender.currentPageNo)
         })
+
+        // A multi-punch or text answer changes the count without changing page.
+        survey.onValueChanged.add((sender) => setPosition(positionOf(sender)))
 
         // Final page + finish: POST the last page's answers, then mark complete.
         survey.onComplete.add(async (sender) => {
@@ -321,34 +341,127 @@ export default function RespondentPage() {
     )
   }
 
-  // running — one question per page, centered card
+  // running — one question per page on ONE surface.
+  //
+  // SurveyJS's default chrome nests a page panel inside a question panel inside
+  // the card: three borders around a single question, with the BLOCK's internal
+  // name ("Main") printed above it as a heading. On a phone that pushed the
+  // first option below the fold and showed a respondent a word from the
+  // scripter's vocabulary. Everything below flattens that to one surface and
+  // spends the height it frees on the answers.
+  const progress = Math.min(100, Math.round((position.at / Math.max(position.of, 1)) * 100))
+
   return (
-    <div className="min-h-screen py-8" style={{ background: theme.wash }}>
-      {/* Scoped polish: larger question type + touch-friendly, full-width options.
-          The selected option row is tinted with the theme accent (~10% alpha bg +
-          accent border) — the accent CSS var comes from applySurveyTheme. */}
+    <div className="min-h-screen pb-24 sm:pb-8" style={{ background: theme.wash }}>
       <style>{`
-        .dvv-survey .sd-question__title { font-size: 1.25rem; line-height: 1.75rem; }
-        .dvv-survey .sd-item {
-          padding: 0.75rem 1rem; min-height: 44px; border-radius: 0.5rem; border: 1px solid transparent;
-          transition: background 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out;
+        /* One surface: no panel inside a panel inside a card. */
+        .dvv-survey .sd-root-modern, .dvv-survey .sd-container-modern,
+        .dvv-survey .sd-page, .dvv-survey .sd-body { background: transparent; }
+        .dvv-survey .sd-page { padding: 0; }
+        .dvv-survey .sd-question { box-shadow: none; background: transparent; padding: 0; }
+        /* "Main" is a block name from the script, never respondent-facing, and
+           the study title already sits in the header above where it costs no
+           height on a phone. The survey HEADER only: sd-title is also the class
+           on every question title, so hiding that took the question with it and
+           left a page of unlabelled options. */
+        .dvv-survey .sd-page__title, .dvv-survey .sd-page__description,
+        .dvv-survey .sd-container-modern__title, .dvv-survey .sd-header { display: none; }
+        /* Our own progress lives in the header; SurveyJS's duplicates it. */
+        .dvv-survey .sd-progress, .dvv-survey .sd-body__progress { display: none; }
+
+        .dvv-survey .sd-question__title {
+          font-size: 1.375rem; line-height: 1.85rem; font-weight: 600;
+          color: #0f172a; letter-spacing: -0.01em; margin-bottom: 1.25rem;
         }
-        .dvv-survey .sd-item:hover { background: rgba(0,0,0,0.03); }
-        .dvv-survey .sd-item--checked { background: ${theme.accent}1A; border-color: ${theme.accent}; box-shadow: inset 0 0 0 1px ${theme.accent}; }
-        .dvv-survey .sd-selectbase__label { width: 100%; }
-        /* Slim, rounded progress bar; tabular figures on its label. */
-        .dvv-survey .sd-progress { height: 6px; border-radius: 9999px; }
-        .dvv-survey .sd-progress__bar { border-radius: 9999px; transition: width 250ms ease-out; }
-        .dvv-survey .sd-progress__text { font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+        .dvv-survey .sd-question__required-text { color: ${theme.accent}; }
+
+        /* Every option is its own row you can hit with a thumb: a bordered card,
+           48px minimum, the whole row clickable — not a 20px circle with a label
+           sitting somewhere to its right. */
+        .dvv-survey .sd-item {
+          width: 100%;
+          min-height: 52px; padding: 0.875rem 1rem; margin-bottom: 0.625rem;
+          border: 1.5px solid #e2e8f0; border-radius: 0.75rem; background: #fff;
+          cursor: pointer;
+          transition: border-color 160ms ease-out, background 160ms ease-out,
+                      box-shadow 160ms ease-out, transform 120ms ease-out;
+        }
+        .dvv-survey .sd-item:hover { border-color: ${theme.accent}80; background: ${theme.accent}08; }
+        .dvv-survey .sd-item:active { transform: scale(0.995); }
+        .dvv-survey .sd-item--checked {
+          border-color: ${theme.accent}; background: ${theme.accent}12;
+          box-shadow: 0 0 0 1px ${theme.accent};
+        }
+        .dvv-survey .sd-item__control-label { font-size: 1rem; color: #1e293b; }
+        /* The whole row is the target; the control keeps its own size. */
+        .dvv-survey .sd-selectbase__label { display: flex; align-items: center; width: 100%; gap: 0.75rem; }
+        .dvv-survey .sd-item__decorator { flex: 0 0 auto; }
+        .dvv-survey .sd-item__control-label { flex: 1 1 auto; }
+
+        /* Text and numeric answers get the same card treatment. */
+        .dvv-survey .sd-input {
+          min-height: 52px; font-size: 1rem; border-radius: 0.75rem;
+          border: 1.5px solid #e2e8f0; padding: 0.875rem 1rem; background: #fff;
+        }
+        .dvv-survey .sd-input:focus { border-color: ${theme.accent}; box-shadow: 0 0 0 3px ${theme.accent}26; outline: none; }
+
+        /* One solid action, full width on a phone where the thumb is. */
+        .dvv-survey .sd-btn, .dvv-survey .sd-navigation__next-btn,
+        .dvv-survey .sd-navigation__complete-btn {
+          background: ${theme.accent}; color: #fff; border: none;
+          min-height: 52px; border-radius: 0.75rem; font-size: 1rem; font-weight: 600;
+          box-shadow: 0 1px 2px rgba(15,23,42,0.08);
+          transition: filter 160ms ease-out, transform 120ms ease-out;
+        }
+        .dvv-survey .sd-btn:hover { filter: brightness(0.94); }
+        .dvv-survey .sd-btn:active { transform: translateY(1px); }
+        .dvv-survey .sd-navigation__prev-btn {
+          background: #fff; color: #475569; border: 1.5px solid #e2e8f0; box-shadow: none;
+        }
+        .dvv-survey .sd-action-bar { padding: 0; gap: 0.75rem; }
+
+        /* The question arrives rather than appearing. Short enough that a fast
+           respondent never waits on it. */
+        .dvv-survey .sd-question { animation: dvv-rise 220ms ease-out both; }
+        @keyframes dvv-rise {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: none; }
+        }
         @media (prefers-reduced-motion: reduce) {
-          .dvv-survey .sd-item, .dvv-survey .sd-progress__bar { transition: none; }
+          .dvv-survey .sd-question { animation: none; }
+          .dvv-survey .sd-item, .dvv-survey .sd-btn { transition: none; }
+          .dvv-progress__fill { transition: none; }
         }
       `}</style>
-      <div className="dvv-survey max-w-[640px] mx-auto px-4">
-        <div className="bg-white rounded-2xl shadow-md border border-slate-200/80 overflow-hidden">
-          <div style={{ height: 4, background: gradientBar(theme) }} />
-          <div className="p-6 sm:p-8">{model && <Survey model={model} />}</div>
+
+      {/* Progress first: how much is left is the single thing a respondent most
+          wants to know, and the commonest reason they abandon. */}
+      <div className="sticky top-0 z-20" style={{ background: theme.wash }}>
+        <div className="h-1 w-full bg-slate-200/70">
+          <div
+            className="dvv-progress__fill h-full rounded-r-full"
+            style={{
+              width: `${progress}%`,
+              background: gradientBar(theme),
+              transition: 'width 280ms cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          />
         </div>
+        <div className="max-w-[640px] mx-auto px-4 sm:px-0 flex items-center justify-between py-3">
+          <span className="text-sm font-medium text-slate-500 truncate pr-3">{title}</span>
+          <span className="text-sm font-semibold text-slate-400 tabular-nums shrink-0">
+            {position.at} / {position.of}
+          </span>
+        </div>
+      </div>
+
+      <div className="dvv-survey max-w-[640px] mx-auto px-4 sm:px-0 pt-2">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/70 p-5 sm:p-8">
+          {model && <Survey model={model} />}
+        </div>
+        <p className="mt-6 text-center text-xs font-medium tracking-wide text-slate-400">
+          Powered by DVV Research Cloud
+        </p>
       </div>
     </div>
   )
