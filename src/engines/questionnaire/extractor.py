@@ -441,6 +441,11 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
         text=fields.text or "",
         type=fields.qtype or QuestionType.SINGLE,
         options=list(fields.options),
+        # A grid's two lists, kept apart: the variable list is what is rated,
+        # the response list is the scale. Flattened into `options` they collided
+        # on code, and the grid emitted no data columns at all.
+        rows=list(fields.rows) or None,
+        cols=list(fields.cols) or None,
         required=False,
         randomize_options=_randomize_from_cell(fields.randomize),
         terminate_if=fields.terminate_if,
