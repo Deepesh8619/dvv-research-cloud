@@ -316,3 +316,61 @@ def test_a_string_where_the_residue_expects_an_object_does_not_crash():
     assert result.question.type is QuestionType.MULTI
     # The sentence survived rather than being lost to a crash.
     assert "aware" in result.question.validation.get("routing_verbatim", "")
+
+
+def test_a_screen_out_written_as_a_code_range():
+    """"TERMINATE if 3-99 selected" is how a scripter writes "everything from 3
+    up". It parsed as nothing, so the screen-out never fired — and a missing
+    terminate looks exactly like a question that screens nobody out, which is
+    why it survived into a live study."""
+    from src.core.survey_definition import Option, evaluate
+    from src.engines.questionnaire.spec_table import _parse_terminate
+
+    options = [Option(code=i, label=f"band {i}") for i in range(1, 10)]
+    condition = _parse_terminate("TERMINATE if 3-99 selected", options, "SS_EMP")
+    assert condition is not None
+    # Only codes the question actually offers — never the whole span.
+    assert condition.values == [3, 4, 5, 6, 7, 8, 9]
+    assert evaluate(condition, {"SS_EMP": 5}) is True
+    assert evaluate(condition, {"SS_EMP": 2}) is False
+
+
+def test_a_screen_out_on_another_questions_answer():
+    """"TERMINATE if 13-99 selected at SS_REVENUE" screens on SS_REVENUE, not on
+    the question whose notes it is written in."""
+    from src.core.survey_definition import Option
+    from src.engines.questionnaire.spec_table import _parse_terminate
+
+    options = [Option(code=i, label=f"rev {i}") for i in range(1, 20)]
+    condition = _parse_terminate(
+        "TERMINATE if 13-99 selected at SS_REVENUE", options, "SS_AD_SPEND"
+    )
+    assert condition is not None
+    assert condition.qid == "SS_REVENUE"
+
+
+def test_an_unfinished_screen_out_is_still_refused():
+    """"TERMINATE if age<25 or age>??" has a placeholder where a number belongs.
+    Reading half of it would screen out fewer people than the document asks
+    for — quieter than refusing, and worse."""
+    from src.engines.questionnaire.spec_table import _parse_terminate
+
+    assert _parse_terminate("TERMINATE if age<25 or age>??", [], "RESP_AGE") is None
+
+
+def test_a_cross_question_range_is_read_against_the_right_question():
+    """"TERMINATE if 13-99 selected at SS_REVENUE" is written in the notes of a
+    LATER question. Narrowing the range against the options in hand — the wrong
+    question's — turned an 87-code screen-out into a single code, a rule that
+    fires for almost nobody. The quietest way to get a screen-out wrong."""
+    from src.core.survey_definition import Option, evaluate
+    from src.engines.questionnaire.spec_table import _parse_terminate
+
+    spend_options = [Option(code=i, label=f"spend {i}") for i in (1, 2, 3, 99)]
+    condition = _parse_terminate(
+        "TERMINATE if 13-99 selected at SS_REVENUE", spend_options, "SS_AD_SPEND"
+    )
+    assert condition.qid == "SS_REVENUE"
+    assert (min(condition.values), max(condition.values)) == (13, 99)
+    assert evaluate(condition, {"SS_REVENUE": 13}) is True
+    assert evaluate(condition, {"SS_REVENUE": 12}) is False

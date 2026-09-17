@@ -35,6 +35,8 @@ from src.core.survey_definition import Question, QuestionType
 # A line that offers an answer: "1. Yes", "98: Other (specify)", "- Retailer A".
 _OPTION_LINE = re.compile(r"^\s*(?:(?P<code>\d{1,3})\s*[.):]|[-•*])\s+(?P<label>\S.*)$")
 _TAG = re.compile(r"\[[^\]]*\]")
+# Two or more cells: what the loader writes when it serializes a table.
+_TABLE_ROW = re.compile(r"\S\s*\|\s*\S.*\|")
 _MULTI_WORDING = re.compile(r"select\s+all\s+that\s+apply|choose\s+all|multiple\s+answers", re.I)
 _SINGLE_WORDING = re.compile(r"select\s+one|choose\s+one|select\s+a\s+single", re.I)
 _SCRIPTER_TAG = re.compile(r"\[\s*(?:PN|ANCHOR|EXCLUSIVE|TERMINATE|SHOW\s+IF|ASK\s+IF)", re.I)
@@ -57,6 +59,16 @@ def _normalise(text: str) -> str:
 
 
 def _source_option_lines(chunk_text: str) -> list[tuple[int | None, str]]:
+    # A chunk holding a serialized table cannot be read line by line for
+    # answers: "1. Pacific (WA, OR, CA, AK, HI)" is a row of a region reference
+    # table, and its leading number is a row index, not a punch code. Read as
+    # answers, that table reported a code mismatch on every row — the loudest
+    # possible finding about a question nobody is asked. Judging the rows of a
+    # table is the grid reader's job, and it has the real cells to do it with;
+    # this checklist has a flattened string and should not guess from it.
+    if any(_TABLE_ROW.search(line) for line in (chunk_text or "").splitlines()):
+        return []
+
     out: list[tuple[int | None, str]] = []
     for line in (chunk_text or "").splitlines():
         match = _OPTION_LINE.match(line)

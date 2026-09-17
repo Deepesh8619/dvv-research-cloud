@@ -135,10 +135,20 @@ _CODE_RE = re.compile(r"^\d{1,3}$")
 # Screen-out wording varies by client: TERMINATE / TERM / SCREEN OUT / SCREENOUT.
 _TERMINATE_RE = re.compile(
     r"(?:terminate|term|screen\s*-?\s*out|screenout)\s*"
-    r"(?:if|when)?\s*(?:code[s]?\s*)?([\d,\s&and]+?)\s*"
+    # Hyphen included: "TERMINATE if 3-99 selected" is a RANGE of punch codes,
+    # written constantly, and it parsed as nothing at all — so a screen-out the
+    # document states plainly never fired. The instrument passed every other
+    # check because a missing terminate looks exactly like a question that
+    # screens nobody out.
+    r"(?:if|when)?\s*(?:code[s]?\s*)?([\d,\-\u2013\s&and]+?)\s*"
     r"(not\s+selected|is\s+not|selected|chosen|$)",
     re.IGNORECASE,
 )
+# "TERMINATE if 13-99 selected at SS_REVENUE" — the screen-out is on ANOTHER
+# question's answer. Naming this question instead would screen on the wrong one.
+_TERMINATE_AT_RE = re.compile(r"\bat\s+([A-Za-z][A-Za-z0-9_]{1,30})\b", re.I)
+# "3-99", "13 - 99": every punch from one bound to the other.
+_CODE_RANGE_RE = re.compile(r"^\s*(\d{1,3})\s*[-\u2013]\s*(\d{1,3})\s*$")
 
 _TYPE_WORDS = [
     ("multi", QuestionType.MULTI),
@@ -197,14 +207,45 @@ def _parse_terminate(
     match = _TERMINATE_RE.search(notes or "")
     if not match:
         return None
-    codes = [int(c) for c in re.findall(r"\d+", match.group(1) or "")]
+    raw = match.group(1) or ""
+    known = {o.code for o in options}
+
+    # A screen-out can sit on another question's answer: "TERMINATE if 13-99
+    # selected at SS_REVENUE", written in the notes of the question that comes
+    # after it. Resolve the target FIRST, because it decides whose punch codes a
+    # range should be read against.
+    named = _TERMINATE_AT_RE.search(notes or "")
+    other_question = bool(named and named.group(1).upper() != qid.upper())
+
+    band = _CODE_RANGE_RE.match(raw)
+    if band:
+        low, high = int(band.group(1)), int(band.group(2))
+        if low > high:
+            return None
+        if other_question:
+            # The options in hand belong to the WRONG question. Narrowing "13-99"
+            # against them produced a screen-out on a single code — a rule that
+            # fires for almost nobody, which is the quietest way to get this
+            # wrong. Keep the span the document wrote; codes the target question
+            # does not have simply never match.
+            codes = list(range(low, high + 1))
+        else:
+            # Only codes this question actually offers. "3-99" is the scripter's
+            # shorthand for "everything from 3 up".
+            codes = sorted(c for c in known if low <= c <= high)
+        if not codes:
+            return None
+    else:
+        codes = [int(c) for c in re.findall(r"\d+", raw)]
     if not codes:
         return None
     negated = "not" in (match.group(2) or "").lower()
 
-    known = {o.code for o in options}
-    if known and not set(codes).issubset(known):
+    if known and not other_question and not set(codes).issubset(known):
         return None  # refers to codes this question does not have — do not guess
+
+    if other_question:
+        qid = named.group(1)
 
     # The condition is on THIS question's own answer ("TERMINATE if 5,6
     # selected" means codes of this question), so it must name this qid. A

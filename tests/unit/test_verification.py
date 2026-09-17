@@ -111,3 +111,39 @@ def test_the_checklist_admits_what_it_cannot_cover():
 
     written = Question(qid="Q2", text="Why?", type=QuestionType.OPEN_TEXT)
     assert covers_the_question(written, verify_against_source(written, "Q2. Why?")) is True
+
+
+def test_a_table_chunk_is_not_read_as_an_answer_list():
+    """A region reference table serialises to lines that look exactly like
+    numbered answers — "1. Pacific (WA, OR, CA)" — and its leading number is a
+    row index, not a punch code. Read as answers it reported a code mismatch on
+    every row: the loudest possible finding about a question nobody is asked.
+
+    Judging a table's rows is the grid reader's job; it has the real cells. This
+    checklist has a flattened string and must not guess from it.
+    """
+    table_chunk = """C7a. Region definitions for quota purposes
+1. Pacific (WA, OR, CA, AK, HI)
+2. Mountain (MT, ID, WY, NV) | West | 23%
+3. West North Central (ND, SD, NE) | Midwest | 22%"""
+    question = Question(
+        qid="C7a",
+        text="Region definitions for quota purposes",
+        options=[
+            Option(code=3, label="Pacific (WA, OR, CA, AK, HI)"),
+            Option(code=4, label="Mountain (MT, ID, WY, NV)"),
+        ],
+    )
+    names = {c.name for c in failed(verify_against_source(question, table_chunk))}
+    assert "codes_match_the_document" not in names
+    assert "source_options_all_captured" not in names
+
+
+def test_a_plain_answer_list_is_still_judged():
+    """The table rule must not switch the checks off for ordinary questions."""
+    shifted = _question(options=[
+        Option(code=7, label="Yes - for a child under 18"),
+        Option(code=2, label="Yes - for another adult"),
+        Option(code=3, label="No, only myself"),
+    ])
+    assert "codes_match_the_document" in _names(shifted)
