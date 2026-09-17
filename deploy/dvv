@@ -8,6 +8,7 @@
 #   ./dvv backup                                      back up now
 #   ./dvv restore <db-*.dump> [files-*.tgz]           restore (takes a backup first)
 #   ./dvv upgrade                                     backup, update, roll back if unhealthy
+#   ./dvv audit                                       which studies a parser fix did not reach
 #   ./dvv offsite                                     copy backups to S3 now (offsite profile)
 #   ./dvv fetch                                       download this client's backups from S3
 #   ./dvv check-ai                                    which AI model answers, and can it use tools
@@ -99,6 +100,11 @@ case "${1:-}" in
     trap - EXIT; dc start app
     wait_healthy && echo "Restored and healthy." || { echo "Restored, but the app is not healthy:"; dc logs --tail 60 app; exit 1; }
     ;;
+  audit)
+    # Which studies a parser fix did not reach. Runs against this client's live
+    # database; exits 1 when something is affected, so it can gate a script.
+    dc exec -T app python3 /app/scripts/audit_definitions.py
+    ;;
   upgrade)
     # NOTE: bash already read this file, so the code running here is the
     # PRE-pull version. A change to the upgrade path itself (including what
@@ -112,6 +118,19 @@ case "${1:-}" in
     build_app app
     if wait_healthy; then
       echo "Upgraded $(git rev-parse --short "$previous") -> $(git rev-parse --short HEAD). $(health)"
+      # A parser fix only changes the NEXT extraction. Studies already in this
+      # database keep whatever the old parser wrote, and nothing announces it —
+      # a questionnaire missing its screen-outs looks exactly like one that
+      # screens nobody out, and it will field and pay for every respondent who
+      # should have been turned away. So the upgrade says which studies are
+      # affected, instead of waiting to be asked.
+      echo
+      # Exit 1 means it FOUND something, which is the normal case after a parser
+      # fix and is not an upgrade failure. Anything higher means the audit could
+      # not run, which is worth saying out loud rather than passing over.
+      audit_status=0
+      dc exec -T app python3 /app/scripts/audit_definitions.py || audit_status=$?
+      [ "$audit_status" -gt 1 ] && echo "(Could not run the audit — try ./dvv audit.)"
     else
       # Schema changes are additive only (api/db.py:_ensure_new_columns), so
       # the previous code runs fine against the upgraded database.
