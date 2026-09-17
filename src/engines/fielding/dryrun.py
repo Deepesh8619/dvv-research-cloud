@@ -72,6 +72,11 @@ class DryRunReport:
     never_fired: list[str] = field(default_factory=list)
     impossible: list[dict[str, str]] = field(default_factory=list)
     questions_never_shown: list[str] = field(default_factory=list)
+    # (answers, disposition) per respondent, only when `collect` is set. The dry
+    # run walks the survey's real conditions — bases, masks, screen-outs,
+    # quotas — so this is the one place a test dataset can come from without a
+    # second implementation of the same rules drifting away from it.
+    respondents: list[tuple[dict[str, Any], int]] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -158,8 +163,16 @@ def simulate(
     quota_cells: list[QuotaCell] | None = None,
     n: int = DEFAULT_RESPONDENTS,
     seed: int = 20260903,
+    collect: bool = False,
 ) -> DryRunReport:
-    """Run `n` synthetic respondents through the survey's own conditions."""
+    """Run `n` synthetic respondents through the survey's own conditions.
+
+    `collect` keeps each respondent's answers and disposition on the report, so
+    a test dataset can be built from the same walk that produces the dry run.
+    Generating it anywhere else would mean a second implementation of bases,
+    masks, screen-outs and quotas — and the moment those two disagree, QA is
+    testing something the respondent will never see.
+    """
     n = max(1, min(int(n), MAX_RESPONDENTS))
     rng = random.Random(seed)
     by_qid = {q.qid: q for q in survey.questions}
@@ -248,6 +261,8 @@ def simulate(
                 if counts[cell.id] >= cell.limit and quotas[cell.id].filled_at is None:
                     quotas[cell.id].filled_at = respondent
         dispositions[status] += 1
+        if collect:
+            report.respondents.append((dict(answers), status))
     report.conditions = [
         *sorted(screen_outs.values(), key=lambda c: c.qid),
         *sorted(bases.values(), key=lambda c: c.qid),

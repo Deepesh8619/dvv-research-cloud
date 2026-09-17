@@ -374,3 +374,85 @@ def test_a_cross_question_range_is_read_against_the_right_question():
     assert (min(condition.values), max(condition.values)) == (13, 99)
     assert evaluate(condition, {"SS_REVENUE": 13}) is True
     assert evaluate(condition, {"SS_REVENUE": 12}) is False
+
+
+def _grid_table():
+    from src.intake.questionnaire_loader import DocumentBlock
+
+    return DocumentBlock(
+        block_type="table",
+        text="",
+        paragraph_index=1,
+        rows=[
+            ["PLATFORM ATTITUDES", "PLATFORM ATTITUDES", "PLATFORM ATTITUDES"],
+            ["Q Name", "DA_ATTITUDES", "DA_ATTITUDES"],
+            ["Indicate your agreement", "Indicate your agreement", "Indicate your agreement"],
+            ["", "Variable list:", "Variable list:"],
+            ["1", "Is a leader in AI tools", "Is a leader in AI tools"],
+            ["2", "Has an easy-to-navigate interface", "Has an easy-to-navigate interface"],
+            ["", "Response list:", "Response list:"],
+            ["5", "Strongly Agree", "Strongly Agree"],
+            ["4", "", ""],
+            ["3", "", ""],
+            ["2", "", ""],
+            ["1", "Strongly Disagree", "Strongly Disagree"],
+        ],
+    )
+
+
+def test_a_grids_two_lists_are_not_one_list():
+    """A GBK table states a grid as "Variable list" (what is rated) and
+    "Response list" (the scale). Read into one bucket, an 8-statement grid on a
+    10-point scale arrived as 18 answers with the codes colliding — which is
+    what "duplicate option code" and "empty options" were reporting."""
+    from src.core.survey_definition import QuestionType
+    from src.engines.questionnaire.spec_table import parse_spec_table
+
+    fields = parse_spec_table(_grid_table())
+    assert fields is not None
+    assert fields.qtype is QuestionType.GRID_SINGLE
+    assert [o.label for o in fields.rows] == [
+        "Is a leader in AI tools",
+        "Has an easy-to-navigate interface",
+    ]
+    assert len(fields.cols) == 5
+    assert fields.options == []  # not both at once
+    codes = [o.code for o in fields.rows] + [o.code for o in fields.cols]
+    assert len(fields.rows) + len(fields.cols) == len(codes)
+
+
+def test_an_unlabelled_scale_point_is_still_a_point():
+    """A ten-point scale is labelled at its ends and blank between. Dropping the
+    blanks turned it into a two-point scale, and a respondent who picked 7 had
+    nowhere to land."""
+    from src.engines.questionnaire.spec_table import parse_spec_table
+
+    cols = parse_spec_table(_grid_table()).cols
+    assert [o.code for o in cols] == [5, 4, 3, 2, 1]
+    assert cols[0].label == "Strongly Agree"
+    assert cols[1].label == "4"  # the number is what the respondent sees
+    assert cols[-1].label == "Strongly Disagree"
+
+
+def test_a_question_with_one_list_is_unchanged():
+    """Only a response list means an ordinary answer list, exactly as before —
+    the grid rule must not turn every question into a grid."""
+    from src.engines.questionnaire.spec_table import parse_spec_table
+    from src.intake.questionnaire_loader import DocumentBlock
+
+    block = DocumentBlock(
+        block_type="table",
+        text="",
+        paragraph_index=1,
+        rows=[
+            ["AGE", "AGE"],
+            ["Q Name", "RESP_AGE"],
+            ["What is your age?", "What is your age?"],
+            ["", "Response list:"],
+            ["1", "Under 25"],
+            ["2", "25 or over"],
+        ],
+    )
+    fields = parse_spec_table(block)
+    assert [o.label for o in fields.options] == ["Under 25", "25 or over"]
+    assert fields.rows == [] and fields.cols == []

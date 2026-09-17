@@ -72,7 +72,14 @@ FIELD_ALIASES: dict[str, set[str]] = {
 
 # Markers that introduce the answer list rather than being content.
 _LIST_MARKERS = ("response list", "answer list", "options", "response options",
-                 "code frame", "codes", "scale")
+                 "code frame", "codes", "scale", "variable list", "statement list",
+                 "item list", "row list")
+# What is being rated, versus the scale it is rated on.
+_ROW_LIST_MARKERS = ("variable list", "statement list", "item list", "row list")
+# A scale labelled only at its ends: "10: Strongly Agree / 9: (blank) / ... /
+# 1: Strongly Disagree". The blanks are real scale points — dropping them turned
+# a ten-point scale into a two-point one.
+_BLANK_CELL = re.compile(r"^\(\s*blank\s*\)$", re.I)
 
 
 def _norm_label(value: str) -> str:
@@ -175,6 +182,13 @@ class SpecTableFields:
     text: str | None = None
     qtype: QuestionType | None = None
     options: list[Option] = field(default_factory=list)
+    # A GBK table states a grid as TWO lists: "Variable list" is what is being
+    # rated, "Response list" is the scale it is rated on. Both were read into
+    # `options`, so an 8-statement grid on a 10-point scale arrived as one flat
+    # list of 18 answers with the codes colliding — which is what "duplicate
+    # option code" and "empty options" have been reporting all along.
+    rows: list[Option] = field(default_factory=list)
+    cols: list[Option] = field(default_factory=list)
     terminate_if: Expression | None = None
     terminate_verbatim: str | None = None
     base: str | None = None
@@ -340,18 +354,40 @@ def parse_spec_table(
     found: dict[str, str] = {}
     extras: dict[str, str] = {}
     options: list[Option] = []
+    row_items: list[Option] = []
     unlabelled: list[str] = []
     seen_qid_row = False
+    in_row_list = False
+    in_list = False
 
     for row in rows:
         cells = _cells(row)
+
+        # A marker line switches which list the codes below it belong to, and it
+        # is written with an EMPTY first cell — the label sits in the merged
+        # columns beside it — so it has to be read BEFORE the blank-code skip
+        # below, or the switch never happens and both lists pour into one.
+        marker = next((c.strip().lower() for c in cells if c.strip()), "")
+        if any(marker.startswith(m) for m in _LIST_MARKERS):
+            in_row_list = any(marker.startswith(m) for m in _ROW_LIST_MARKERS)
+            in_list = True
+
         if not cells or not cells[0]:
             continue
 
         if _CODE_RE.match(cells[0]):
             value = _value_of(row)
+            if in_list and (not value or _BLANK_CELL.match(value)):
+                # A ten-point scale is labelled at its ends and left blank
+                # between: "10: Strongly Agree / 9: / ... / 1: Strongly
+                # Disagree". Those middle points are real answers — dropping
+                # them turned a ten-point scale into a two-point one, and every
+                # respondent who picked a 7 had nowhere to land. The number is
+                # what they see, so the number is the label.
+                value = cells[0].strip()
             if value:
-                options.append(Option(code=int(cells[0]), label=value))
+                target = row_items if in_row_list else options
+                target.append(Option(code=int(cells[0]), label=value))
             continue
 
         name = _field_for(cells[0], patterns)
@@ -380,10 +416,16 @@ def parse_spec_table(
     text = (found.get("text") or "").strip() or (unlabelled[0] if unlabelled else None)
     notes = found.get("notes", "")
 
+    # Two lists means a grid: the variable list is rated ON the response list.
+    # One list is an ordinary answer list, exactly as before.
+    grid_rows, grid_cols = (row_items, options) if row_items and options else ([], [])
+
     fields = SpecTableFields(
         qid=qid,
         text=text or None,
-        options=options,
+        options=[] if grid_rows else options,
+        rows=grid_rows,
+        cols=grid_cols,
         base=found.get("base") or None,
         show=found.get("show") or None,
         randomize=found.get("randomize") or None,
@@ -395,6 +437,14 @@ def parse_spec_table(
     )
     if type_evidence:
         fields.evidence["type"] = type_evidence
+    if grid_rows:
+        # The shape settles the type: each variable is answered on the response
+        # scale, which is a grid however the "Q type" cell was filled in.
+        fields.qtype = QuestionType.GRID_SINGLE
+        fields.evidence["type"] = (
+            f"a variable list of {len(grid_rows)} rated on a "
+            f"{len(grid_cols)}-point response list"
+        )
     fields.terminate_if = _parse_terminate(notes, options, qid)
     if fields.terminate_if is not None:
         fields.terminate_verbatim = notes.strip()

@@ -47,6 +47,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _approved_survey(db: Session, study_id: str) -> SurveyDefinition:
+    """The study's approved questionnaire, or a 409 saying why there is none."""
+    from api.db import list_questionnaires_for_study
+
+    questionnaires = list_questionnaires_for_study(db, study_id)
+    approved = next((q for q in questionnaires if q.status == "approved"), None)
+    if approved is None or not approved.definition_json:
+        raise HTTPException(
+            status_code=409,
+            detail="This study has no approved questionnaire, so its data layout is "
+                   "not final yet.",
+        )
+    return SurveyDefinition.from_json(approved.definition_json)
+
+
 @router.post("/studies/{study_id}/fielding/links/{link_id}/materialize")
 def materialize_link(
     study_id: str,
@@ -176,6 +191,49 @@ def _write_labelled_xlsx(df, datamap, path) -> None:
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="Data", index=False)
         pd.DataFrame(rows).to_excel(writer, sheet_name="Datamap", index=False)
+
+
+@router.get("/studies/{study_id}/test-data")
+def test_data(
+    study_id: str,
+    n: int = 200,
+    seed: int = 20260917,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.FOUNDER, UserRole.ANALYST)),
+):
+    """A dataset for an approved questionnaire, before any respondent exists.
+
+    Everything downstream of the instrument — the tab plan, the banner, the QC
+    rules, the deck — can be built and tested against this on the day the
+    questionnaire is signed off, instead of waiting for field, which is the most
+    expensive place to discover a column is missing.
+
+    The respondents come from the dry-run walk, so they obey the survey's own
+    bases, masks, screen-outs and quotas: the dummy data has the same holes in
+    the same places as the real thing. Every row is synthetic and marked as
+    such — no respondent said any of it. (Owner/Founder/Analyst)
+    """
+    from api.heavy import run_heavy_detached
+    from src.engines.fielding.testdata import synthesise
+
+    survey = _approved_survey(db, study_id)
+    datamap, frame = run_heavy_detached(db, synthesise, survey, None, n, seed)
+    return {
+        "study_id": study_id,
+        "synthetic": True,
+        "note": "Generated from the questionnaire's own conditions. No respondent "
+                "answered any of this; it is for building and testing what comes "
+                "after the instrument.",
+        "seed": seed,
+        "n_rows": len(frame),
+        "n_variables": len(datamap.variables),
+        "datamap": [
+            {"name": v.name, "label": v.label,
+             "type": v.type.value if hasattr(v.type, "value") else str(v.type)}
+            for v in datamap.variables
+        ],
+        "rows": frame.head(min(n, 500)).where(frame.notna(), None).to_dict("records"),
+    }
 
 
 @router.get("/studies/{study_id}/fielding/links/{link_id}/field-report")
