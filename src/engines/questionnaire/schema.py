@@ -59,6 +59,11 @@ FLAG_RECONCILIATION_UNAVAILABLE = "RECONCILIATION_UNAVAILABLE"
 # type=info + this flag) so a reviewer knows it needs manual setup — never a
 # mis-extracted, unanswerable "question".
 FLAG_DERIVED_VARIABLE = "DERIVED_VARIABLE"
+# Read as a hidden variable on WORDING alone — an all-caps "CODE AGE" with no
+# HID_ prefix and no named source. The reading is usually right and occasionally
+# it is a real question a scripter shouted, and the difference decides whether
+# anybody is asked it. So the reviewer is asked to confirm rather than told.
+FLAG_DERIVED_VARIABLE_UNCONFIRMED = "DERIVED_VARIABLE_UNCONFIRMED"
 
 
 # --- Extraction schema ------------------------------------------------------

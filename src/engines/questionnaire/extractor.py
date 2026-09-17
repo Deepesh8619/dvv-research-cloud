@@ -297,9 +297,22 @@ def _flag_derived_variable(result: ExtractionResult, chunk: QuestionChunk) -> No
     second lives in prose_directives so both parsers apply the same rule.
     """
     qid = chunk.candidate_qid or result.question.qid or ""
-    if qid.upper().startswith("HID_") or is_derived_wording(result.question.text or ""):
+    text = result.question.text or ""
+    named_source = re.search(r"\bBASED\s+ON\b|\bFROM\b\s+[A-Z]{1,4}\d", text, re.I)
+    by_prefix = qid.upper().startswith("HID_")
+    if by_prefix or is_derived_wording(text):
         result.question.type = QuestionType.INFO
         result.add_flag(schema.FLAG_DERIVED_VARIABLE)
+        result.question.extraction_evidence.setdefault(
+            "derived",
+            "the HID_ prefix" if by_prefix
+            else (f"{text[:40]} — it names its source" if named_source
+                  else f"{text[:40]} — an all-caps instruction to the scripter"),
+        )
+        if not by_prefix and not named_source:
+            # Wording alone. Usually right, occasionally a real question somebody
+            # shouted, and the difference decides whether anybody is asked it.
+            result.add_flag(schema.FLAG_DERIVED_VARIABLE_UNCONFIRMED)
 
 
 def _validate_question(result: ExtractionResult, routing: dict) -> None:

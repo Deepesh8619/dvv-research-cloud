@@ -230,6 +230,23 @@ def _specs_for_question(question: Question) -> list[_ColumnSpec]:
             )
         return specs
 
+    if qtype == QuestionType.INFO and question.options and _is_derived(question):
+        # A coded hidden variable: "CODE AGE" with its bands under it. Nobody is
+        # asked it — the script computes it from an earlier answer — but it is a
+        # COLUMN, and every banner cut by age band reads it. Typed info it
+        # emitted nothing at all, so the variable the tables are built on was
+        # simply absent from the file.
+        var = Variable(
+            name=qid,
+            label=text,
+            type=VarType.SINGLE,
+            values={o.code: o.label for o in question.options},
+            question_ref=qid,
+            question_text=text,
+            provenance="derived",
+        )
+        return [_ColumnSpec(var, lambda a, q=qid: _to_int(a.get(q)))]
+
     if qtype == QuestionType.INFO and qid.upper().startswith("HID_") and question.show_if:
         # A hidden variable IS a column — it is what banners are cut by. It has
         # no respondent-facing answer, so it is computed from the condition the
@@ -255,6 +272,13 @@ def _specs_for_question(question: Question) -> list[_ColumnSpec]:
 
     # info (display-only) and any unknown/unsupported type -> no column.
     return []
+
+
+def _is_derived(question: Question) -> bool:
+    """A variable the script computes rather than asks."""
+    return question.qid.upper().startswith("HID_") or "DERIVED_VARIABLE" in (
+        question.flags or []
+    )
 
 
 def _parse_iso(value: Any) -> datetime | None:
