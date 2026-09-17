@@ -383,3 +383,59 @@ def test_a_section_header_is_still_not_an_option():
         "S6",
     )
     assert [o.label for o in fields.options] == ["Ulta", "Sephora"]
+
+
+def test_a_rank_pipe_reaches_the_respondent():
+    """"[#1 RANK FROM Q8]" is a pipe written without the word INSERT, which both
+    other forms require — so it was not read as one, the compiler stripped it as
+    an unknown tag, and the respondent was asked "Why do you rank as your most
+    preferred pharmacy?": the subject deleted, answered as an open end."""
+    from src.engines.questionnaire.mr_techniques import detect_techniques
+    from src.renderers.surveyjs_compiler import compile_to_surveyjs
+
+    wording = "Why do you rank [#1 RANK FROM Q8] as your most preferred pharmacy?"
+    pipes = detect_techniques(wording).pipes
+    assert [p.source_qid for p in pipes] == ["Q8"]
+
+    survey = _survey_of(
+        Question(qid="Q8", text="Rank these", type=QuestionType.RANK,
+                 options=[Option(code=1, label="Pharmacy A")]),
+        Question(qid="Q9", text=wording, type=QuestionType.OPEN_TEXT,
+                 validation={"techniques": detect_techniques(wording).to_dict()}),
+    )
+    element = next(
+        e
+        for page in compile_to_surveyjs(survey)["pages"]
+        for e in page["elements"]
+        if e.get("name") == "Q9"
+    )
+    assert element["title"] == "Why do you rank {Q8} as your most preferred pharmacy?"
+
+
+def test_a_base_leaves_the_wording_once_it_is_a_condition():
+    """It is in the base field now. Left in the wording it is duplicated, and it
+    is what a reviewer approves as if it were part of the sentence."""
+    fields = parse_prose_question(
+        "D3. [ASK IF C1=18+] What is your marital status?\n1. Single\n2. Married", "D3"
+    )
+    assert fields.text == "What is your marital status?"
+    assert fields.show_if is not None
+    assert "ASK IF C1=18+" in fields.directives  # kept as evidence, not lost
+
+
+def test_what_we_could_not_read_stays_in_plain_sight():
+    """A directive nobody noticed is worse than an untidy one. QP exists nowhere
+    in that instrument, so the base cannot be applied — and it must stay visible
+    rather than be quietly tidied out of the wording."""
+    fields = parse_prose_question(
+        "Q17. [SHOW IF QP=1] What challenges have you faced? Select all that apply.\n"
+        "1. Cost\n2. Wait times",
+        "Q17",
+    )
+    assert "[SHOW IF QP=1]" in fields.text
+    assert fields.show_if is None
+
+    pack = parse_prose_question(
+        "Q5. [PN: SHOW IMAGE OF PACK] What do you think?\n1. Good\n2. Bad", "Q5"
+    )
+    assert "[PN: SHOW IMAGE OF PACK]" in pack.text

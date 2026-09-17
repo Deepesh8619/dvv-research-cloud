@@ -91,6 +91,16 @@ _MASK_PATTERNS: list[tuple[re.Pattern, str]] = [
 # to a scripter-side variable and is recorded, never guessed at.
 _PIPE_QID_RE = re.compile(rf"INSERT\s+(?:RESPONSE\s+(?:FROM|FOR)\s+)?(?P<source>{_QID})\b", re.I)
 _PIPE_NAMED_RE = re.compile(r"INSERT\s+(?P<name>[A-Z][A-Z ]{2,30}?)\s*\]", re.I)
+# "[#1 RANK FROM Q8]" — a pipe written without the word INSERT. Both other
+# forms require it, so this one was not read as a pipe at all: the compiler
+# then stripped it as an unknown scripter tag and the respondent was asked
+# "Why do you rank as your most preferred pharmacy?" — a sentence with the
+# subject deleted, answered as an open end.
+_PIPE_RANK_RE = re.compile(
+    rf"#?\s*(?P<rank>\d+)\s*(?:ST|ND|RD|TH)?\s+RANK(?:ED|ING)?\s+(?:FROM|AT|IN)\s+"
+    rf"(?P<source>{_QID})\b",
+    re.I,
+)
 
 # --- Least fill ------------------------------------------------------------
 _LEAST_FILL_RE = re.compile(r"least[\s-]?fill(?:ed)?", re.I)
@@ -193,6 +203,13 @@ def detect_techniques(*fragments: str) -> Techniques:
             if (source, None) not in seen_pipes:
                 seen_pipes.add((source, None))
                 pipes.append(Pipe(source_qid=source, name=None, verbatim=match.group(0).strip()))
+        for match in _PIPE_RANK_RE.finditer(fragment):
+            source = match.group("source").upper()
+            if (source, None) not in seen_pipes:
+                seen_pipes.add((source, None))
+                pipes.append(
+                    Pipe(source_qid=source, name=None, verbatim=match.group(0).strip())
+                )
         for match in _PIPE_NAMED_RE.finditer(fragment):
             name = match.group("name").strip().upper()
             # "INSERT Q7 #1 RANK" already matched the qid form.

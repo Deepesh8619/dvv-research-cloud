@@ -311,6 +311,12 @@ def has_sentence_break(text: str) -> bool:
     return bool(re.search(r"[.!?](?:\s+[\"\'(\[]?[A-Z0-9]|\s*$)", without))
 
 
+def _strip_bracket(text: str, body: str) -> str:
+    """Remove the one bracket holding `body`, and tidy the space it leaves."""
+    out = text.replace(f"[{body}]", " ", 1)
+    return " ".join(out.split()).strip()
+
+
 def _is_prose_paragraph(line: str) -> bool:
     text = strip_brackets(line).strip()
     if _OPTION_CODE_RE.match(text) or _OPTION_LETTER_RE.match(text):
@@ -480,6 +486,15 @@ def parse_prose_question(
             }:
                 show_if = routing
                 show_if_verbatim = body.strip()
+                # Out of the WORDING once it is a condition. The field is what a
+                # reviewer reads and approves as the question, and a base left
+                # sitting in it is both duplicated — it is in the base field now
+                # — and the sort of thing that gets approved as if it were part
+                # of the sentence. Only this bracket, only because it parsed;
+                # anything we did not understand stays visible, because a
+                # directive nobody noticed is worse than an untidy one.
+                question_text = _strip_bracket(question_text, body)
+                instruction_text = _strip_bracket(instruction_text, body)
 
     for line in body_lines:
         if is_directive_only(line):
