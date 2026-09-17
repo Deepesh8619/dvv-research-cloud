@@ -168,9 +168,19 @@ def _expression_to_visibleif_string(expr: Expression) -> str:
 def _choices(options: list, by_qid: dict[str, Question]) -> list[dict[str, Any]]:
     # An option's label carries scripter tags too — "Other (Please specify):
     # [ TXT ] ____" — so it goes through the same public-facing filter.
-    return [
-        {"value": o.code, "text": _for_respondent(o.label, [], by_qid)} for o in options
-    ]
+    compiled: list[dict[str, Any]] = []
+    for o in options:
+        item: dict[str, Any] = {
+            "value": o.code,
+            "text": _for_respondent(o.label, [], by_qid),
+        }
+        if o.show_if is not None:
+            # Per-item visibility: SurveyJS honours `visibleIf` on a choice and
+            # on a matrix row, so a condition written against one answer is
+            # enforced where the respondent actually is, not left as a note.
+            item["visibleIf"] = _expression_to_visibleif_string(o.show_if)
+        compiled.append(item)
+    return compiled
 
 
 def _numeric_validators(validation: dict[str, Any] | None) -> list[dict[str, Any]]:

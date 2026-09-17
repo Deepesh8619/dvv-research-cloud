@@ -128,3 +128,20 @@ def test_half_a_grid_is_refused():
     assert question_from_tables([SCALE_STRIP], prose_options=[]) is None
     assert question_from_tables([QUOTA_TABLE], prose_options=[]) is None
     assert question_from_tables([], prose_options=[]) is None
+
+
+def test_a_grid_row_keeps_the_condition_written_in_it():
+    """A grid whose rows each depend on an earlier answer is ordinary — ask
+    about the medication types this person actually fills. Every row was shown
+    to everybody."""
+    rows = grid(
+        [
+            ["", "", "Filled 1-2 times", "Filled 3-5 times"],
+            ["", "", "1", "2"],
+            ["1", "Short-term medications [SHOW IF Q14=1]", "", ""],
+            ["2", "Ongoing medications", "", ""],
+        ]
+    )
+    assert rows is not None
+    assert rows.rows[0].show_if is not None
+    assert rows.rows[1].show_if is None

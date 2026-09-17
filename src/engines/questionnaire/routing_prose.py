@@ -32,7 +32,8 @@ from src.core.survey_definition import Expression
 # how a screen or an intro block states its base, and it routes exactly like a
 # question's own "ASK IF".
 _PREAMBLE_RE = re.compile(
-    r"^\s*(?:PN\s*:\s*)?(?:ONLY\s+ASK\b.*?|ASK\s+(?:ONLY\s+)?|SHOW\s+|DISPLAY\s+)?\bIF\b\s*",
+    r"^\s*(?:PN\s*:\s*)?(?:ONLY\s+)?"
+    r"(?:ONLY\s+ASK\b.*?|ASK\s+(?:ONLY\s+)?|SHOW\s+|DISPLAY\s+)?\bIF\b\s*",
     re.I,
 )
 

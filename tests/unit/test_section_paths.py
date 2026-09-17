@@ -439,3 +439,57 @@ def test_what_we_could_not_read_stays_in_plain_sight():
         "Q5. [PN: SHOW IMAGE OF PACK] What do you think?\n1. Good\n2. Bad", "Q5"
     )
     assert "[PN: SHOW IMAGE OF PACK]" in pack.text
+
+
+def test_a_condition_on_one_answer_reaches_the_respondent():
+    """"Yes - for a child under 18 [ONLY SHOW IF S11=1]" was modelled nowhere,
+    so the option was offered to everyone the script meant to exclude. SurveyJS
+    honours visibleIf on a single choice, so it is enforced where the
+    respondent actually is rather than left as a note for a scripter."""
+    from src.renderers.surveyjs_compiler import compile_to_surveyjs
+
+    fields = parse_prose_question(
+        "S12. Who do you manage prescriptions for? Select all that apply.\n"
+        "Yes - for a child under 18 [ONLY SHOW IF S11=1]\n"
+        "Yes - for another adult\n"
+        "No, only myself [ANCHOR, EXCLUSIVE]",
+        "S12",
+    )
+    assert fields.options[0].show_if is not None
+    assert fields.options[1].show_if is None
+
+    survey = _survey_of(
+        Question(qid="S12", text=fields.text or "", type=QuestionType.MULTI,
+                 options=fields.options)
+    )
+    element = next(
+        e
+        for page in compile_to_surveyjs(survey)["pages"]
+        for e in page["elements"]
+        if e.get("name") == "S12"
+    )
+    assert element["choices"][0]["visibleIf"] == "{S11} anyof [1]"
+    assert "visibleIf" not in element["choices"][1]
+
+
+def test_only_show_if_is_read_like_every_other_base():
+    for directive in ("ONLY SHOW IF S11=1", "ONLY ASK IF S11=1", "ONLY DISPLAY IF S11=1"):
+        assert parse_routing(directive) is not None, directive
+
+
+def test_a_mask_narrows_the_list_to_what_they_picked():
+    """"[PN: ONLY OF PHARMACIES USED AT Q4A]" — a noun sits between the verb and
+    the word that matters, and USED means SELECTED. Unmatched, the grid showed
+    every pharmacy and the data carried ratings from people who never used one.
+    The exclusion form must stay an exclusion."""
+    from src.engines.questionnaire.mr_techniques import detect_techniques
+
+    for wording, mode in (
+        ("[PN: ONLY OF PHARMACIES USED AT Q4A]", "selected"),
+        ("[PN: SHOW ONLY BRANDS SELECTED AT Q4A]", "selected"),
+        ("[SHOW ONLY THOSE SELECTED IN Q4A]", "selected"),
+        ("[PN: ONLY SHOW PHARMACIES NOT SELECTED AT Q4A]", "not_selected"),
+    ):
+        masks = detect_techniques(wording).masks
+        assert masks, wording
+        assert (masks[0].mode, masks[0].source_qid) == (mode, "Q4A"), wording

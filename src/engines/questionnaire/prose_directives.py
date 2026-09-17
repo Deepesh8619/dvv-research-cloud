@@ -647,6 +647,13 @@ def parse_prose_question(
             if _TERMINATE_TAG.search(tag_text) or "terminate" in taught_meanings:
                 terminate_codes.append(option.code)
                 terminate_lines.append(f"{option.label} [{tag_text.strip()}]")
+            else:
+                # A condition on this ANSWER: "Yes - for a child under 18 [ONLY
+                # SHOW IF S11=1]". Modelled nowhere until now, so the option was
+                # offered to everyone the script meant to exclude.
+                per_option = parse_routing(tag_text)
+                if per_option is not None:
+                    option.show_if = per_option
         if not continuation:
             options.append(option)
 
