@@ -30,11 +30,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from src.core.survey_definition import Option
+from src.core.survey_definition import Expression, Option
+from src.engines.questionnaire.routing_prose import parse_routing
 
 # "0=Not Important At All", "10 = Very Important", or a bare "7".
 _SCALE_POINT = re.compile(r"^\s*(-?\d+)\s*(?:=\s*(.*))?$", re.S)
 _DIRECTIVE = re.compile(r"\[[^\]]*\]")
+_BRACKET_RE = re.compile(r"\[([^\]]*)\]")
 _RANDOMIZE_ROWS = re.compile(r"RANDOMI[SZ]E\s+(ROWS|STATEMENTS|ITEMS)", re.I)
 _MIN_GRID_COLUMNS = 2
 _MIN_GRID_ROWS = 2
@@ -117,13 +119,18 @@ def grid(rows: list[list[str]]) -> TableQuestion | None:
         return None
 
     positions = [i for i, _ in labels]
-    codes = _column_codes(filled, header_index, positions)
+    codes, code_row_used = _column_codes(filled, header_index, positions)
     cols = [
         Option(code=code, label=label)
         for code, (_, label) in zip(codes, labels, strict=True)
     ]
 
-    body = filled[header_index + 1 :]
+    # Past the header AND past the punch-code row when that is where the codes
+    # came from: those digits are the scale's codes, not answers somebody wrote
+    # into the grid. Counted as interior content they made a small grid look
+    # like a filled-in data table, and it was refused. A grid with nine rows
+    # survived on dilution alone.
+    body = filled[header_index + (2 if code_row_used else 1) :]
     statements = _statements(body, positions)
     if len(statements) < _MIN_GRID_ROWS or len(cols) < _MIN_GRID_COLUMNS:
         return None
@@ -170,14 +177,16 @@ def _header(filled: list[list[str]]) -> tuple[int, list[tuple[int, str]] | None]
     return 0, None
 
 
-def _column_codes(filled: list[list[str]], header_index: int, positions: list[int]) -> list[int]:
-    """Punch codes from the row under the header, else 1..n by position."""
+def _column_codes(
+    filled: list[list[str]], header_index: int, positions: list[int]
+) -> tuple[list[int], bool]:
+    """(codes, whether they came from a dedicated row under the header)."""
     if header_index + 1 < len(filled):
         candidate = filled[header_index + 1]
         values = [_clean(candidate[i]) if i < len(candidate) else "" for i in positions]
         if values and all(v.lstrip("-").isdigit() for v in values):
-            return [int(v) for v in values]
-    return list(range(1, len(positions) + 1))
+            return [int(v) for v in values], True
+    return list(range(1, len(positions) + 1)), False
 
 
 def _statements(rows: list[list[str]], column_positions: list[int]) -> list[Option]:
@@ -197,8 +206,23 @@ def _statements(rows: list[list[str]], column_positions: list[int]) -> list[Opti
         if not label:
             continue
         code = int(code_cell) if code_cell.isdigit() else len(out) + 1
-        out.append(Option(code=code, label=label))
+        out.append(Option(code=code, label=label, show_if=_row_condition(row)))
     return out
+
+
+def _row_condition(row: list[str]) -> Expression | None:
+    """A condition written in the row itself: "[SHOW IF Q14.1 SELECTED ANY BRAND]".
+
+    A grid whose rows each depend on an earlier answer is ordinary in a real
+    questionnaire — ask about the medication types this person actually fills —
+    and every row was being shown to everybody.
+    """
+    for cell in row:
+        for body in _BRACKET_RE.findall(cell or ""):
+            condition = parse_routing(body)
+            if condition is not None:
+                return condition
+    return None
 
 
 def question_from_tables(

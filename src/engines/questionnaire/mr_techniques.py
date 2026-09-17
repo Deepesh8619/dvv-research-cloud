@@ -66,6 +66,25 @@ _MASK_PATTERNS: list[tuple[re.Pattern, str]] = [
         "not_selected",
     ),
     (
+        # The forms a real document actually writes: a NOUN sits between the
+        # verb and the word that matters — "SHOW ONLY BRANDS SELECTED AT Q4A",
+        # "ONLY OF PHARMACIES USED AT Q4A", "SHOW ONLY THOSE SELECTED IN Q13" —
+        # and USED / MENTIONED mean SELECTED. None of them matched, so a grid
+        # meant to show the pharmacies someone uses showed every pharmacy, and
+        # the data carried ratings from people who had never used the brand.
+        # Placed after the NOT form, and refusing any phrase containing NOT, so
+        # an exclusion can never be read as an inclusion.
+        re.compile(
+            rf"(?:ONLY\s+)?(?:DISPLAY|SHOW|PIPE|INSERT|ASK)?\s*(?:ONLY\s+)?(?:OF\s+)?"
+            rf"(?!(?:(?!\b(?:SELECTED|USED|MENTIONED|CHOSEN|PICKED)\b).)*\bNOT\b)"
+            rf"(?:[A-Za-z][A-Za-z ]{{0,28}}?\s+)?"
+            rf"\b(?:SELECTED|USED|MENTIONED|CHOSEN|PICKED)\b\s+(?:AT|IN|FROM)\s+"
+            rf"(?P<source>{_QID})",
+            re.I,
+        ),
+        "selected",
+    ),
+    (
         re.compile(rf"SHOW\s+(?P<source>{_QID})\s+LIST", re.I),
         "full_list",
     ),

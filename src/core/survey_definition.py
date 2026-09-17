@@ -201,13 +201,22 @@ class Option:
     exclusive: bool = False  # selecting this deselects all others (e.g. "None of these")
     anchored: bool = False  # pinned in place when options are randomized
     open_other: bool = False  # attaches an open-text "Other, specify" field
+    # A condition on THIS answer alone: "Yes - for a child under 18 [ONLY SHOW
+    # IF S11=1]", or a grid row shown only where that row was answered earlier.
+    # Written constantly in real questionnaires and modelled nowhere, so the
+    # option was shown to everybody — including people the script excluded.
+    show_if: Expression | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        raw = asdict(self)
+        raw["show_if"] = self.show_if.to_dict() if self.show_if else None
+        return raw
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Option:
-        return cls(**raw)
+        data = dict(raw)
+        condition = data.pop("show_if", None)
+        return cls(**data, show_if=Expression.from_dict(condition) if condition else None)
 
 
 @dataclass
