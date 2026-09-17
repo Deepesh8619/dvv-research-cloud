@@ -86,3 +86,24 @@ def test_the_commit_actually_reaches_the_child_process():
     )
     assert "MISSING" not in result.stdout, "docker compose would not see GIT_COMMIT"
     assert re.match(r"GIT_COMMIT=[0-9a-f]{7,}", result.stdout.strip()), result.stdout
+
+
+def test_an_upgrade_reports_which_studies_it_did_not_reach():
+    """A parser fix only changes the NEXT extraction. A client whose stored
+    study is missing its screen-outs has no way to know unless the upgrade says
+    so — and a questionnaire that screens nobody out will field and pay for
+    every respondent who should have been turned away."""
+    body = DVV.read_text()
+    upgrade = body[body.index("  upgrade)") : body.index("  offsite)")]
+    assert "audit_definitions.py" in upgrade
+    # Only after the health check passed: reporting stale studies while rolling
+    # back would bury the thing that actually went wrong.
+    assert upgrade.index("wait_healthy") < upgrade.index("audit_definitions.py")
+    # Findings are exit 1 and are NOT an upgrade failure.
+    assert "audit_status" in upgrade and "-gt 1" in upgrade
+
+
+def test_the_audit_is_also_a_command_of_its_own():
+    body = DVV.read_text()
+    assert "\n  audit)" in body
+    assert "./dvv audit" in body  # and it is in the usage header
