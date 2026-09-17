@@ -20,6 +20,10 @@ from dataclasses import dataclass, field
 
 from src.core.survey_definition import QuestionType, SurveyDefinition
 from src.engines.questionnaire.prose_directives import has_sentence_break, is_note_line
+from src.engines.questionnaire.study_overview import (
+    StudyOverview,
+    unenforced_requirements,
+)
 
 # A recruitment path header: "... (IF S0=1 AND S1=26-60) ASK P1-P3".
 _SECTION_PATH = re.compile(r"\(\s*[^)]*\bIF\b[^)]*\)\s*[,:]?\s*ASK\s+[A-Za-z]{0,4}\d", re.I)
@@ -202,6 +206,24 @@ def audit_definition(survey: SurveyDefinition) -> list[Finding]:
                 "says who should see it, and the definition disagrees.",
             )
         )
+
+    brief = survey.metadata.get("study_overview") or {}
+    if brief.get("screening_requirements"):
+        overview = StudyOverview(
+            screening_requirements=list(brief["screening_requirements"])
+        )
+        unmet = unenforced_requirements(overview, survey)
+        if unmet:
+            findings.append(
+                Finding(
+                    "screening_requirement_not_enforced",
+                    [],
+                    "The study overview states who should qualify and nothing in the "
+                    "instrument screens on it: " + "; ".join(unmet) + ". Either the "
+                    "screen-out is missing, or it is handled by a quota — worth one "
+                    "look before a single respondent is paid for.",
+                )
+            )
 
     self_based = [
         q.qid

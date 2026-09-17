@@ -83,6 +83,10 @@ TOOLS = [
         "pipe.", {**_STUDY, "qid": {"type": "string"}}, ["study_id", "qid"]),
     _fn("who_was_asked", "Plain-English base of one question: who sees it.",
         {**_STUDY, "qid": {"type": "string"}}, ["study_id", "qid"]),
+    _fn("study_brief", "What the document says about the STUDY: sample size, length of "
+        "interview, markets, screening requirements, quota groups with their minimum "
+        "and maximum. Absent in questionnaires that open at the first question.",
+        _STUDY, ["study_id"]),
     _fn("qc_findings", "The latest QC cross-check of the data against the questionnaire.",
         _STUDY, ["study_id"]),
     _fn("field_report", "A fielding link's starts, incidence, screen-outs by question, "
