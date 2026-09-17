@@ -48,6 +48,9 @@ _KEY_VALUE = re.compile(
 )
 _FIRST_NUMBER = re.compile(r"(\d[\d,]*)")
 _QUOTA_HEADER = re.compile(r"quota\s*group|\bdefinition\b", re.I)
+# "Max n=100 brick-and-mortar retail only" caps a cell; it never disqualifies
+# anybody, so it is not something a screen-out should be expected to enforce.
+_QUOTA_REQUIREMENT = re.compile(r"\b(?:max|min)\s*n\s*=|\bquota\b", re.I)
 
 
 @dataclass
@@ -205,18 +208,49 @@ def unenforced_requirements(overview: StudyOverview, survey: SurveyDefinition) -
     question for the person who knows the study.
     """
     screened: set[int] = set()
+    screened_labels: list[str] = []
     for question in survey.questions:
         for expression in (question.terminate_if, question.show_if):
             screened.update(_numbers_in(expression))
         for option in question.options or []:
             screened.update(_numbers_in(option.show_if))
+        # A threshold is usually written as an ANSWER, not as a number in the
+        # condition: the screener terminates on code 7, and code 7 is labelled
+        # "$100 million or more". Matching only the condition's numbers reports
+        # every such requirement as unenforced, and a check that cries wolf is
+        # one a reviewer learns to skip.
+        terminating = _codes_in(question.terminate_if, question.qid)
+        screened_labels.extend(
+            o.label for o in question.options or [] if o.code in terminating
+        )
 
     unmatched: list[str] = []
     for requirement in overview.screening_requirements:
+        if _QUOTA_REQUIREMENT.search(requirement):
+            continue  # "Max n=100 brick-and-mortar retail only" is a quota, by design
         numbers = {int(n.replace(",", "")) for n in _FIRST_NUMBER.findall(requirement)}
-        if numbers and not (numbers & screened):
-            unmatched.append(requirement)
+        if not numbers or (numbers & screened):
+            continue
+        if any(
+            str(n) in re.sub(r"[,\s]", "", label)
+            for n in numbers
+            for label in screened_labels
+        ):
+            continue  # the screen-out names an option whose label carries the number
+        unmatched.append(requirement)
     return unmatched
+
+
+def _codes_in(expression: Expression | None, qid: str) -> set[int]:
+    """Codes a condition tests against its own question."""
+    if expression is None:
+        return set()
+    found: set[int] = set()
+    if getattr(expression, "qid", None) == qid:
+        found |= _numbers_in(expression)
+    for child in expression.children or []:
+        found |= _codes_in(child, qid)
+    return found
 
 
 def _numbers_in(expression: Expression | None) -> set[int]:

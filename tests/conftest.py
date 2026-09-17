@@ -46,3 +46,20 @@ def _no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch)
             getattr(module, "http_json", None) is _REAL_HTTP_JSON
         ):
             monkeypatch.setattr(module, "http_json", _refuse)
+
+
+@pytest.fixture(autouse=True)
+def _clear_backend_cooldowns():
+    """No test inherits another's backend cooldown.
+
+    The router remembers a backend that just failed and skips it for a few
+    minutes — deliberate in a running process, where it saves every chunk of a
+    document from re-paying a dead local model's timeout. Shared module state
+    across tests is a different thing: one test making Ollama fail silently
+    changed what the next test saw, and it failed only in suite order.
+    """
+    from src.ai.router import _backend_cooldown
+
+    _backend_cooldown.clear()
+    yield
+    _backend_cooldown.clear()
