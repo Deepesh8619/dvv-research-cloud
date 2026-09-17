@@ -147,7 +147,10 @@ def _expression_to_visibleif_string(expr: Expression) -> str:
         inner = " and ".join(f"({p})" for p in parts)
         return f"not ({inner})"
 
-    ref = f"{{{expr.qid}}}"
+    # A condition on ONE row of a grid names that row: SurveyJS addresses a
+    # matrix cell as {question.row}, and without it the test runs against the
+    # whole {row: column} answer and matches nobody.
+    ref = f"{{{expr.qid}.{expr.row}}}" if expr.row is not None else f"{{{expr.qid}}}"
 
     if op == "selected":
         # "was option X chosen" — works for both single (=) and multi (contains);

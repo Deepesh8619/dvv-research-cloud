@@ -28,8 +28,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from src.core.survey_definition import Question, SurveyDefinition
+from src.core.survey_definition import Expression, Question, SurveyDefinition
 from src.engines.questionnaire import schema
+from src.engines.questionnaire.loop_bases import base_for, parse_iteration_bases
 
 # "Loop through ... for each of these brands: A, B, C, and D". The verb is
 # required: "ask for each of the following" without it is usually a grid's row
@@ -94,8 +95,11 @@ def expand_loops(survey: SurveyDefinition) -> list[dict]:
         loop = parse_loop(_loop_text(template))
         if loop is None:
             continue
+        # Who sees each turn, from the definitions the document lists beside the
+        # loop. A brand it does not name gets no base and keeps its flag.
+        bases = parse_iteration_bases(_base_text(template))
         expansions = [
-            _iteration(template, loop, index, label)
+            _iteration(template, loop, index, label, base_for(label, bases))
             for index, label in enumerate(loop.labels, start=1)
         ]
         _replace(survey, template, expansions)
@@ -106,6 +110,10 @@ def expand_loops(survey: SurveyDefinition) -> list[dict]:
                 "labels": list(loop.labels),
                 "randomised_order": loop.randomised,
                 "source": loop.verbatim,
+                "bases_found": sorted(bases),
+                "unrouted": [
+                    label for label in loop.labels if base_for(label, bases) is None
+                ],
             }
         )
 
@@ -127,7 +135,25 @@ def _loop_text(question: Question) -> str:
     return "\n".join(parts)
 
 
-def _iteration(template: Question, loop: Loop, index: int, label: str) -> Question:
+def _base_text(question: Question) -> str:
+    """Where the per-iteration definitions are written: the "Among who" cell."""
+    validation = question.validation or {}
+    return "\n".join(
+        str(part)
+        for part in (
+            validation.get("base"),
+            validation.get("among_who"),
+            question.extraction_evidence.get("base"),
+            question.source_text,
+        )
+        if part
+    )
+
+
+def _iteration(
+    template: Question, loop: Loop, index: int, label: str,
+    base: Expression | None = None,
+) -> Question:
     """One turn of the loop, as its own question."""
     text = template.text or ""
     if _PLACEHOLDER_RE.search(text):
@@ -152,9 +178,12 @@ def _iteration(template: Question, loop: Loop, index: int, label: str) -> Questi
         cols=list(template.cols) if template.cols else None,
         required=template.required,
         randomize_options=template.randomize_options,
-        # Deliberately NOT carried: the base. The document states who sees each
-        # iteration in prose naming several user states across two questions,
-        # and copying the template's base would ask every brand of everybody.
+        # The base the document states for THIS brand — never the template's,
+        # which describes the loop as a whole and would ask every brand of
+        # everybody. An iteration the document does not define stays unrouted
+        # and flagged, because a guess here is indistinguishable from a correct
+        # answer once the data is in.
+        show_if=base,
         terminate_if=template.terminate_if,
         piping_refs=list(template.piping_refs or []),
         validation=validation,
@@ -162,7 +191,8 @@ def _iteration(template: Question, loop: Loop, index: int, label: str) -> Questi
         source_location=template.source_location,
         extraction_method="loop_expansion",
         extraction_evidence={**template.extraction_evidence, "loop": loop.verbatim},
-        flags=[*template.flags, schema.FLAG_AMBIGUOUS_ROUTING],
+        flags=list(template.flags) if base is not None
+        else [*template.flags, schema.FLAG_AMBIGUOUS_ROUTING],
     )
     return question
 

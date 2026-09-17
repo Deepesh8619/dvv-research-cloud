@@ -12,6 +12,7 @@ from src.core.survey_definition import (
     Question,
     QuestionType,
     SurveyDefinition,
+    evaluate,
 )
 from src.engines.questionnaire import schema
 from src.engines.questionnaire.loops import expand_loops, parse_loop
@@ -104,10 +105,57 @@ def test_the_template_is_gone():
     assert "DA_ATTITUDES" not in [q.qid for q in survey.questions]
 
 
-def test_the_base_is_not_copied_onto_every_brand():
-    """The document defines who sees each brand in prose naming several user
-    states across two questions. Copying the template's base would ask every
-    brand of everybody, and nothing downstream could tell."""
+BASE_NOTE = (
+    "Provider Current or Lapsed User based on DA_PLATFORM_USAGE "
+    "[Google Ads current user (DA_PLATFORM_USAGE 1,2,3, or 4=5), "
+    "Google ads Lapsed User (NOT Google Ads Current User AND "
+    "DA_PLATFORM_USAGE 1, 2, 3, or 4 = 4), "
+    "Meta Ads Current User (DA_PLATFORM_USAGE 5, 6, 7, or 8 = 5), "
+    "LinkedIn Current Users (DA_PLATFORM_USAGE 10 = 5), "
+    "Amazon Ads Current Users (DA_PLATFORM_USAGE 11 = 5), "
+    "OR  TikTok Current Users (DA_PLATFORM_USAGE 12 = 5)]"
+)
+
+
+def test_each_brand_gets_the_base_the_document_states_for_it():
+    """The template's base describes the loop as a whole. Copied onto every
+    iteration it asks every brand of everybody; the document defines them one
+    brand at a time, against rows of an earlier grid."""
+    survey = _survey()
+    survey.questions[0].validation["base"] = BASE_NOTE
+    expand_loops(survey)
+
+    google = survey["DA_ATTITUDES_1"].show_if
+    assert google is not None
+    # Google Ads spans rows 1-4, current (5) or lapsed (4).
+    assert evaluate(google, {"DA_PLATFORM_USAGE": {3: 5}}) is True
+    assert evaluate(google, {"DA_PLATFORM_USAGE": {2: 4}}) is True
+    # ...and a Meta-only user is not asked about Google Ads.
+    assert evaluate(google, {"DA_PLATFORM_USAGE": {6: 5}}) is False
+
+    linkedin = survey["DA_ATTITUDES_3"].show_if
+    assert evaluate(linkedin, {"DA_PLATFORM_USAGE": {10: 5}}) is True
+    assert evaluate(linkedin, {"DA_PLATFORM_USAGE": {11: 5}}) is False
+
+
+def test_a_brand_the_document_never_defines_stays_unrouted():
+    """Asking every brand of everybody is the failure this exists to prevent,
+    and a guess is indistinguishable from a correct answer once data is in."""
+    survey = _survey()
+    survey.questions[0].validation["base"] = (
+        "Google Ads current user (DA_PLATFORM_USAGE 1 = 5)"
+    )
+    applied = expand_loops(survey)
+
+    assert survey["DA_ATTITUDES_1"].show_if is not None
+    assert applied[0]["unrouted"] == ["Meta Ads", "LinkedIn", "Amazon Ads", "TikTok"]
+    for index in range(2, 6):
+        question = survey[f"DA_ATTITUDES_{index}"]
+        assert question.show_if is None
+        assert schema.FLAG_AMBIGUOUS_ROUTING in question.flags
+
+
+def test_with_no_definitions_at_all_nothing_is_routed():
     survey = _survey()
     expand_loops(survey)
     for index in range(1, 6):
