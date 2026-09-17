@@ -55,6 +55,7 @@ from src.engines.questionnaire.datamap_recovery import (
     recover_missing,
 )
 from src.engines.questionnaire.learned import LearnedPattern
+from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import detect_techniques
 from src.engines.questionnaire.profiles import detect_profile
 from src.engines.questionnaire.prose_directives import (
@@ -1183,6 +1184,9 @@ def extract_survey_definition(
     # the whole survey exists. Also emits the path as a HID_ variable.
     apply_section_paths(survey)
     apply_intro_screens(survey)
+    # A question asked once per brand is not one question: held as one it is
+    # eight columns with no way to tell one brand's answers from another's.
+    expand_loops(survey)
 
     # What the document says about the STUDY, not about one question: sample
     # size, length of interview, the screening requirements, and the quota table
