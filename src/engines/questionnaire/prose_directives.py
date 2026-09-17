@@ -269,6 +269,9 @@ class ProseFields:
     # Directives we recognised but do not model yet — kept visible, never
     # silently dropped, so an unhandled convention is discoverable.
     directives: list[str] = field(default_factory=list)
+    # Sampling targets found in the option list ("TARGET 50/50 GENDER SPLIT").
+    # Not answers, and not noise either: they are the quota this study needs.
+    quota_hints: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
     # field -> the exact fragment that decided it. Shown to the reviewer so
     # approving is checking a citation, not trusting a black box.
@@ -309,6 +312,30 @@ def has_sentence_break(text: str) -> bool:
     """True when the text really ends or joins sentences, abbreviations aside."""
     without = _ABBREVIATIONS.sub(" ", text)
     return bool(re.search(r"[.!?](?:\s+[\"\'(\[]?[A-Z0-9]|\s*$)", without))
+
+
+# "TARGET 50/50 GENDER SPLIT", "N=400 QUOTA", "MIN 75 / MAX 125". A sampling
+# instruction to the field team, written in the option list because that is
+# where it is relevant — and read as an answer, it became a punch a respondent
+# could pick and a code in the data that means nothing.
+_QUOTA_INSTRUCTION = re.compile(
+    r"\b(?:TARGET|QUOTA|SOFT\s+LAUNCH|MIN\s*N|MAX\s*N|N\s*=\s*\d+)\b"
+    r"|\b\d+\s*/\s*\d+\b(?=[^a-z]*$)",
+    re.I,
+)
+
+
+def is_quota_instruction(line: str) -> bool:
+    """A sampling target, not an answer.
+
+    Requires SHOUTING as well as the keyword: a scripter writes an instruction
+    in capitals, and an ordinary answer that happens to contain the word
+    "target" ("I target a budget each month") is not one.
+    """
+    text = strip_brackets(line or "").strip()
+    if not text or any(c.islower() for c in text):
+        return False
+    return bool(_QUOTA_INSTRUCTION.search(text))
 
 
 def _strip_bracket(text: str, body: str) -> str:
@@ -473,6 +500,7 @@ def parse_prose_question(
     stem_wraps_used = False
     last_option_marked = False
     randomize = False
+    quota_hints: list[str] = []
     intro_follows = False
     randomize_evidence = ""
     scale_row: str | None = None
@@ -591,6 +619,13 @@ def parse_prose_question(
             directives.append(line.strip())
             continue
 
+        if options and is_quota_instruction(line):
+            # Kept as a quota hint, not dropped: it is how many of each kind the
+            # study needs, and somebody has to turn it into a real quota cell.
+            quota_hints.append(line.strip())
+            directives.append(line.strip())
+            continue
+
         if is_note_line(line):
             # "Note: Healthcare decisions include researching where to seek
             # care..." sat under S5's options and became answer code 1.
@@ -677,6 +712,7 @@ def parse_prose_question(
         options=options,
         randomize=randomize,
         directives=directives,
+        quota_hints=quota_hints,
     )
     if show_if is not None:
         fields.show_if = show_if
