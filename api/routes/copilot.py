@@ -171,6 +171,34 @@ def make_executor(db: Session, user: UserDB):
                          for f in findings[:_MAX_FINDINGS]],
         }
 
+    def study_brief(args):
+        """The study overview the questionnaire opened with, if it had one.
+
+        Read deterministically at extraction from the document's own wording, so
+        the copilot answers "what is the sample size?" from the brief rather
+        than from anything it composed. Many questionnaires have no overview;
+        that is normal and says nothing about the study.
+        """
+        definition = survey(args)
+        brief = (definition.metadata or {}).get("study_overview")
+        if not brief:
+            return {
+                "has_brief": False,
+                "note": "This questionnaire has no study overview section — it opens "
+                        "at the first question. Nothing is wrong with it.",
+            }
+        return {
+            "has_brief": True,
+            "markets": brief.get("markets"),
+            "sample_size": brief.get("sample_size"),
+            "loi_minutes": brief.get("loi_minutes"),
+            "screening_requirements": brief.get("screening_requirements") or [],
+            "quotas": brief.get("quotas") or [],
+            "note": "Quota groups are as written in the document. They are NOT the "
+                    "quota cells this link enforces — a cell needs a condition "
+                    "against a real question, which a person has to confirm.",
+        }
+
     def field_report(args):
         _s, ln = link(args)
         sessions = list_respondent_sessions(db, ln.id)
@@ -278,6 +306,7 @@ def make_executor(db: Session, user: UserDB):
         "who_was_asked": lambda a: explain_question_base(survey(a), a["study_id"],
                                                          str(a.get("qid", ""))),
         "qc_findings": qc_findings,
+        "study_brief": study_brief,
         "field_report": field_report,
         "soft_launch_check": soft_launch_check,
         "dry_run": dry_run,

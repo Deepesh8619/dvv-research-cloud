@@ -68,7 +68,13 @@ from src.engines.questionnaire.section_paths import (
     apply_section_paths,
 )
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
+from src.engines.questionnaire.study_overview import parse_overview
 from src.engines.questionnaire.table_questions import question_from_tables
+from src.engines.questionnaire.verification import (
+    covers_the_question,
+    failed,
+    verify_against_source,
+)
 from src.intake.questionnaire_loader import DocumentBlock, QuestionChunk
 
 # Question types whose whole point is a fixed answer list; an empty option list
@@ -776,6 +782,37 @@ def extract_question(
     return result
 
 
+def verify_deterministically(
+    chunk: QuestionChunk, result: ExtractionResult
+) -> bool:
+    """Run the checklist first. True when it settled the question on its own.
+
+    A failure here is worth more than a model's opinion: it names the line in
+    the document that disagrees with the definition. A pass, where the checklist
+    genuinely covered the question, means the model pass has nothing left to
+    add — and every model call skipped is a call that cannot answer differently
+    tomorrow.
+    """
+    checks = verify_against_source(result.question, chunk.chunk_text)
+    problems = failed(checks)
+    if problems:
+        result.add_flag(schema.FLAG_VERIFICATION_DISCREPANCY)
+        result.question.validation = result.question.validation or {}
+        result.question.validation["verification_checks"] = [
+            {"check": c.name, "detail": c.detail, "evidence": c.evidence} for c in problems
+        ]
+        for field_name in ("options", "type", "routing"):
+            result.confidence[field_name] = min(result.confidence.get(field_name, 1.0), 0.5)
+        return True  # settled: something concrete is wrong, and we can say what
+    if covers_the_question(result.question, checks):
+        result.verified = True
+        result.question.extraction_evidence.setdefault(
+            "verified", f"{len(checks)} checks against the source text"
+        )
+        return True
+    return False
+
+
 def verify_question(chunk: QuestionChunk, result: ExtractionResult) -> ExtractionResult:
     """Grounded second-pass audit of an extraction against its source text.
 
@@ -1117,7 +1154,14 @@ def extract_survey_definition(
         # Halves LLM calls on clean questions — see SKIP_VERIFY_CONFIDENCE_FLOOR.
         # A skipped question stays `verified=False`, so it is never
         # auto-approved and always reaches a human.
-        if _needs_verification(result):
+        # The checklist runs on EVERY question, not only the ones that failed a
+        # confidence gate. It costs nothing, and confidence says how sure the
+        # reader was — not whether it was right. The option silently dropped
+        # from a live instrument came from the deterministic parser at
+        # confidence 1.0, so it never reached a check of any kind.
+        settled = verify_deterministically(chunk, result)
+        if _needs_verification(result) and not settled:
+            # Only what the checklist could not settle reaches the model.
             result = verify_question(chunk, result)
         results.append(result)
         if on_progress:
@@ -1134,6 +1178,16 @@ def extract_survey_definition(
     # the whole survey exists. Also emits the path as a HID_ variable.
     apply_section_paths(survey)
     apply_intro_screens(survey)
+
+    # What the document says about the STUDY, not about one question: sample
+    # size, length of interview, the screening requirements, and the quota table
+    # with its minimum and maximum per group. Read from the opening chunk, which
+    # carries no question label and was therefore set aside entirely. Documents
+    # that have no overview are the normal other case and cost nothing here.
+    if chunks:
+        overview = parse_overview(chunks[0].source_blocks)
+        if not overview.is_empty():
+            survey.metadata["study_overview"] = overview.to_dict()
 
     # Whatever the document reader never found at all. The data map lists every
     # question that was actually fielded, so a question it names and no chunk

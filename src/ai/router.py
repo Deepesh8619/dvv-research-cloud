@@ -592,6 +592,10 @@ _EXTRACTION_MODELS = {
 # answer in seconds. A connection-refused (Ollama not running — the production
 # state on Render) fails instantly regardless and falls straight through.
 _OLLAMA_CHAIN_TIMEOUT = 30
+# How long to stop trying a local model that just failed to serve. Long enough
+# to carry a whole document without re-paying the timeout on every chunk, short
+# enough that restarting Ollama is picked up within a few minutes.
+_OLLAMA_COOLDOWN = float(os.getenv("OLLAMA_COOLDOWN_SECONDS", "300"))
 
 
 # Additional Groq models to fall back to when the primary model's DAILY quota
@@ -745,6 +749,15 @@ def _run_chain(
             failures.append(f"{backend}: {exc}")
             if not getattr(exc, "config_error", False):
                 all_config_errors = False
+            if backend == "ollama" and isinstance(exc, BackendUnavailable):
+                # A local model that is down or wedged stays that way for the
+                # rest of a document. Without this, EVERY chunk rediscovers it
+                # and pays the attempt timeout again: ninety chunks at twenty
+                # seconds is half an hour of a run spent waiting on a process
+                # that answered nothing — which reads as a hang, not as a
+                # fallback. Only when something follows it in the chain; for a
+                # local-only deployment Ollama is all there is.
+                note_backend_exhausted("ollama", _OLLAMA_COOLDOWN, candidate["model"])
             # A quota exhaustion propagates as BackendUnavailable wrapping a
             # QuotaExhausted; record the cooldown so the rest of the document
             # stops paying for it.
