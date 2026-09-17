@@ -66,6 +66,11 @@ class Expression:
     values: list[Any] | None = None
     children: list[Expression] | None = None
     verbatim_text: str | None = None
+    # One ROW of a grid: "DA_PLATFORM_USAGE 10 = 5" means row 10 answered 5, not
+    # that the whole grid did. A grid's answer is a {row: column} map, so
+    # without this a condition on one row tested the entire map and was never
+    # satisfied — which reads as a base nobody meets rather than as an error.
+    row: int | None = None
 
     def referenced_qids(self) -> set[str]:
         """Every qid mentioned anywhere in this expression tree."""
@@ -88,6 +93,8 @@ class Expression:
             out["children"] = [c.to_dict() for c in self.children]
         if self.verbatim_text is not None:
             out["verbatim_text"] = self.verbatim_text
+        if self.row is not None:
+            out["row"] = self.row
         return out
 
     @classmethod
@@ -100,6 +107,7 @@ class Expression:
             values=raw.get("values"),
             children=[cls.from_dict(c) for c in children] if children is not None else None,
             verbatim_text=raw.get("verbatim_text"),
+            row=raw.get("row"),
         )
 
 
@@ -165,6 +173,13 @@ def evaluate(expression: Expression, answers: dict[str, Any]) -> bool:
     answer = answers[qid]
     if answer is None:
         return False
+    if expression.row is not None:
+        # Narrow a grid's {row: column} answer to the one row this tests.
+        if not isinstance(answer, dict):
+            return False
+        answer = answer.get(expression.row, answer.get(str(expression.row)))
+        if answer is None:
+            return False
 
     if op == "selected":
         return expression.value in _as_selected_set(answer)
