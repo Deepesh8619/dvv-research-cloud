@@ -600,6 +600,20 @@ def pattern_kinds(user: UserDB = Depends(require_correction_access)):
                 "help": "A directive that shuffles the options, e.g. [SCRAMBLE].",
                 "values": [],
             },
+            {
+                "kind": "screen_out_range",
+                "label": "Screens out numbers outside the range after this phrase",
+                "help": "On a number question, e.g. 'CONTINUE IF AGES' before "
+                        "'18-60. TERMINATE ALL OTHERS'.",
+                "values": [],
+            },
+            {
+                "kind": "hidden_variable",
+                "label": "Marks a variable the script computes — never asked",
+                "help": "A phrase in the wording, e.g. 'SAMPLE SOURCE' or "
+                        "'AUDIENCE CODE'.",
+                "values": [],
+            },
         ],
         "all_kinds": sorted(PATTERN_KINDS),
     }
@@ -667,6 +681,10 @@ _PATTERN_PROSE = {
     "field_alias": "Treat a spec-table row labelled {p} as the {v} field.",
     "option_tag": "Treat the option tag {p} as {v}.",
     "randomize_signal": "Treat {p} as an instruction to randomise the options.",
+    "screen_out_range": "On a number question, treat {p} as meaning: keep only "
+    "the range written right after it, screen out everyone else.",
+    "hidden_variable": "Treat any question whose wording contains {p} as computed "
+    "by the script, never asked.",
 }
 
 

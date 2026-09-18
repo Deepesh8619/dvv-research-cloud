@@ -421,6 +421,10 @@ export interface QuestionUpdate {
   randomize_options?: boolean | null
   show_if?: Record<string, unknown> | null
   terminate_if?: Record<string, unknown> | null
+  // Merged into the existing validation dict server-side (never replaces it),
+  // so an edit that only sets e.g. the constant-sum total does not wipe
+  // unrelated technique metadata already stored there.
+  validation?: Record<string, unknown> | null
 }
 
 export interface QuestionCreate {

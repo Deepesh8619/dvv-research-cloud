@@ -106,6 +106,87 @@ def test_taught_randomise_directive():
     assert taught.evidence["randomize"] == "learned: [SCRAMBLE]"
 
 
+# --- screen_out_range --------------------------------------------------------
+
+
+def test_taught_screen_out_range_screens_the_range_it_names():
+    """A taught phrase locates WHERE to look; the range after it is read by a
+    fixed internal regex, never by anything the founder typed."""
+    from src.core.survey_definition import evaluate
+
+    text = (
+        "S1. What is your age? [ENTER NUMBER 1-100]\n"
+        "[PN: CONTINUE IF AGES 18-60. TERMINATE ALL OTHERS]"
+    )
+    taught = parse_prose_question(
+        text, "S1", [LearnedPattern("screen_out_range", "CONTINUE IF AGES")]
+    )
+    rule = taught.terminate_if
+    assert rule is not None and rule.op == "or"
+    assert evaluate(rule, {"S1": 17}) is True
+    assert evaluate(rule, {"S1": 61}) is True
+    assert evaluate(rule, {"S1": 30}) is False
+    assert "terminate" not in taught.missing
+
+
+def test_the_common_continue_if_wording_works_even_untaught():
+    """The one range-screening convention common enough to read by default —
+    no teaching needed, unlike a client's own phrasing."""
+    from src.core.survey_definition import evaluate
+
+    text = (
+        "S1. What is your age? [ENTER NUMBER 1-100]\n"
+        "[PN: CONTINUE IF AGES 18-60. TERMINATE ALL OTHERS]"
+    )
+    untaught = parse_prose_question(text, "S1")
+    rule = untaught.terminate_if
+    assert rule is not None and rule.op == "or"
+    assert evaluate(rule, {"S1": 17}) is True
+    assert evaluate(rule, {"S1": 61}) is True
+    assert evaluate(rule, {"S1": 30}) is False
+
+
+def test_a_custom_range_phrase_needs_teaching_first():
+    """A convention that is not the built-in wording is not guessed — it must
+    be taught, same as every other pattern kind. Still uses "TERMINATE" so the
+    directive is recognised as SOME screen-out and deferred, not silently lost;
+    it just is not "CONTINUE IF", so the range inside it is never guessed."""
+    text = (
+        "S1. What is your age? [ENTER NUMBER 1-100]\n"
+        "[PN: QUALIFY IF AGES 18-60. TERMINATE ALL OTHERS]"
+    )
+    untaught = parse_prose_question(text, "S1")
+    assert untaught.terminate_if is None
+    assert "terminate" in untaught.missing
+
+    taught = parse_prose_question(
+        text, "S1", [LearnedPattern("screen_out_range", "QUALIFY IF AGES")]
+    )
+    from src.core.survey_definition import evaluate
+
+    rule = taught.terminate_if
+    assert rule is not None
+    assert "terminate" not in taught.missing
+    assert evaluate(rule, {"S1": 17}) is True
+    assert evaluate(rule, {"S1": 61}) is True
+    assert evaluate(rule, {"S1": 30}) is False
+
+
+# --- hidden_variable ----------------------------------------------------------
+
+
+def test_taught_hidden_variable_marks_a_question_derived():
+    text = "S2. Audience Code"
+    untaught = parse_prose_question(text, "S2")
+    assert untaught.derived is False
+
+    taught = parse_prose_question(
+        text, "S2", [LearnedPattern("hidden_variable", "Audience Code")]
+    )
+    assert taught.derived is True
+    assert taught.qtype is QuestionType.INFO
+
+
 # --- field_alias (spec tables) ----------------------------------------------
 
 

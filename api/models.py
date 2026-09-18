@@ -266,6 +266,12 @@ class QuestionUpdateRequest(BaseModel):
     randomize_options: bool | None = None
     show_if: dict | None = None
     terminate_if: dict | None = None
+    # Numeric range / constant-sum / technique metadata (T-constant-sum): the
+    # editor sends {"min":0,"max":T,"sum":T} for a constant-sum question. Merged
+    # into the existing dict rather than replacing it — a question's validation
+    # can also carry `techniques` (masks, pipes) that an unrelated edit must not
+    # wipe. Explicit null clears the whole dict, same as every other field here.
+    validation: dict | None = None
 
     # "Clear this field" (explicit null) vs. "leave unchanged" (omitted) are
     # distinguished by the route via `model_fields_set`, since both surface here

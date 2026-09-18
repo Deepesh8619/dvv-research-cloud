@@ -58,7 +58,7 @@ from src.engines.questionnaire.datamap_recovery import (
     recover_missing,
 )
 from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
-from src.engines.questionnaire.learned import LearnedPattern
+from src.engines.questionnaire.learned import LearnedPattern, learned_hidden_variable
 from src.engines.questionnaire.list_sources import fill_lists, points_at_a_list
 from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import detect_techniques
@@ -286,7 +286,11 @@ def _question_from_raw(content: dict, chunk: QuestionChunk) -> tuple[Question, d
     return question, routing
 
 
-def _flag_derived_variable(result: ExtractionResult, chunk: QuestionChunk) -> None:
+def _flag_derived_variable(
+    result: ExtractionResult,
+    chunk: QuestionChunk,
+    patterns: list[LearnedPattern] | None = None,
+) -> None:
     """Detect a hidden/derived variable and label it honestly (no derivation).
 
     A ``HID_*`` qid is a programmer-computed flag derived from OTHER answers, not
@@ -297,25 +301,28 @@ def _flag_derived_variable(result: ExtractionResult, chunk: QuestionChunk) -> No
     surfacing a mis-extracted, unanswerable question. Run BEFORE validation so
     the info type suppresses the (irrelevant) empty-options check.
 
-    Two signals, one per convention seen in real client documents: the ``HID_``
-    qid prefix (GBK), and an all-caps ``CODE ...`` wording addressed to the
-    scripter (Bubble, Vivo — "C1. CODE AGE - BASED ON RESPONSES AT S1..."). The
-    second lives in prose_directives so both parsers apply the same rule.
+    Three signals: the ``HID_`` qid prefix (GBK), a founder-taught
+    ``hidden_variable`` phrase ("SAMPLE SOURCE", "AUDIENCE CODE" — exact,
+    never a guess), and an all-caps ``CODE ...`` wording addressed to the
+    scripter (Bubble, Vivo — "C1. CODE AGE - BASED ON RESPONSES AT S1...").
+    The last two live in prose_directives so both parsers apply the same rule.
     """
     qid = chunk.candidate_qid or result.question.qid or ""
     text = result.question.text or ""
     named_source = re.search(r"\bBASED\s+ON\b|\bFROM\b\s+[A-Z]{1,4}\d", text, re.I)
     by_prefix = qid.upper().startswith("HID_")
-    if by_prefix or is_derived_wording(text):
+    taught = learned_hidden_variable(patterns, text)
+    if by_prefix or taught or is_derived_wording(text):
         result.question.type = QuestionType.INFO
         result.add_flag(schema.FLAG_DERIVED_VARIABLE)
         result.question.extraction_evidence.setdefault(
             "derived",
             "the HID_ prefix" if by_prefix
+            else (f"learned: {taught}" if taught
             else (f"{text[:40]} — it names its source" if named_source
-                  else f"{text[:40]} — an all-caps instruction to the scripter"),
+                  else f"{text[:40]} — an all-caps instruction to the scripter")),
         )
-        if not by_prefix and not named_source:
+        if not by_prefix and not taught and not named_source:
             # Wording alone. Usually right, occasionally a real question somebody
             # shouted, and the difference decides whether anybody is asked it.
             result.add_flag(schema.FLAG_DERIVED_VARIABLE_UNCONFIRMED)
@@ -486,6 +493,7 @@ def _extract_via_spec_table(
     chunk: QuestionChunk,
     fields: SpecTableFields,
     datamap_question: DatamapQuestion | None = None,
+    patterns: list[LearnedPattern] | None = None,
 ) -> ExtractionResult | None:
     """Deterministic parse, plus ONE small call for whatever it could not state.
 
@@ -512,7 +520,7 @@ def _extract_via_spec_table(
         # A HID_* variable is programmer-computed, not respondent-facing. The
         # full-extraction path runs this before validation; the deterministic
         # paths must too, or a derived variable surfaces as a real question.
-        _flag_derived_variable(result, chunk)
+        _flag_derived_variable(result, chunk, patterns)
         # No model-emitted routing block exists on a structured parse; the
         # terminate came from the table and is already on the Question.
         _validate_question(result, {})
@@ -566,7 +574,7 @@ def _extract_via_spec_table(
             question.validation[_ROUTING_VERBATIM_KEY] = verbatim
 
     result = ExtractionResult(question=question, confidence=confidence)
-    _flag_derived_variable(result, chunk)
+    _flag_derived_variable(result, chunk, patterns)
     _validate_question(result, {})
     return result
 
@@ -711,6 +719,7 @@ def _extract_via_prose(
     chunk: QuestionChunk,
     fields: ProseFields,
     datamap_question: DatamapQuestion | None = None,
+    patterns: list[LearnedPattern] | None = None,
 ) -> ExtractionResult | None:
     """Prose directives, plus one small call for what they do not state.
 
@@ -774,7 +783,7 @@ def _extract_via_prose(
 
     question.validation["extracted_by"] = f"{response.backend}:{response.model}"
     result = ExtractionResult(question=question, confidence=confidence)
-    _flag_derived_variable(result, chunk)
+    _flag_derived_variable(result, chunk, patterns)
     _validate_question(result, {})
     return result
 
@@ -816,7 +825,7 @@ def extract_question(
     # the table is not parseable or the residue call fails.
     fields = _spec_table_fields(chunk, patterns)
     if fields is not None:
-        structured = _extract_via_spec_table(chunk, fields, datamap_question)
+        structured = _extract_via_spec_table(chunk, fields, datamap_question, patterns)
         if structured is not None:
             return structured
 
@@ -832,7 +841,7 @@ def extract_question(
     # full LLM extraction anyway. Measured on a 3-question document: 951s and
     # three model calls, for questions the parser answers in milliseconds.
     if prose is not None and (prose.complete or prose.options or prose.terminate_if):
-        via_prose = _extract_via_prose(chunk, prose, datamap_question)
+        via_prose = _extract_via_prose(chunk, prose, datamap_question, patterns)
         if via_prose is not None:
             return via_prose
 
@@ -874,7 +883,7 @@ def extract_question(
         question=question,
         confidence=dict(question.extraction_confidence),
     )
-    _flag_derived_variable(result, chunk)  # may flip type -> info before validation
+    _flag_derived_variable(result, chunk, patterns)  # may flip type -> info before validation
     _validate_question(result, routing)
     return result
 

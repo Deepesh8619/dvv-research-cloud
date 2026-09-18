@@ -106,19 +106,27 @@ def test_options_without_a_type_instruction_escalate():
     assert "type" in f.missing
 
 
-def test_a_prose_terminate_with_no_option_codes_is_preserved_not_invented():
+def test_a_prose_terminate_with_no_option_codes_reads_the_range_untaught():
     """'CONTINUE IF AGES 18-60. TERMINATE ALL OTHERS' is about a RANGE.
 
-    Inventing option codes for it would screen out the wrong people.
+    A per-option code would screen out the wrong people, so this is never
+    invented as one — but the wording is common enough to read as a real
+    lt/gt screen-out without teaching (see prose_directives._range_terminate).
     """
+    from src.core.survey_definition import evaluate
+
     f = parse_prose_question(
         "S1. What is your age? [ENTER NUMBER 1-100]\n"
         "[PN: CONTINUE IF AGES 18-60. TERMINATE ALL OTHERS.]",
         "S1",
     )
-    assert f.terminate_if is None                 # no codes invented
     assert "TERMINATE ALL OTHERS" in f.terminate_verbatim   # never dropped
-    assert "terminate" in f.missing               # escalated to a model
+    assert "terminate" not in f.missing            # resolved, not escalated
+    rule = f.terminate_if
+    assert rule is not None and rule.op == "or"
+    assert evaluate(rule, {"S1": 17}) is True     # below the range
+    assert evaluate(rule, {"S1": 61}) is True     # above the range
+    assert evaluate(rule, {"S1": 30}) is False    # inside the range
 
 
 def test_unmodelled_directives_are_kept_visible():

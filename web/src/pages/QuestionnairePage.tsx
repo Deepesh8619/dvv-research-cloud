@@ -27,6 +27,14 @@ import { canCorrect as hasCorrectRole, canWrite as hasWriteRole } from '../auth/
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
 
+// The type picker offers "Adds up to (constant sum)" right next to "Number" —
+// it is a UI-only pseudo-type layered on QUESTION_TYPES (the real wire
+// vocabulary, shared with the builder), never added there, since it saves as
+// numeric + rows + validation.sum rather than a type of its own.
+const TYPE_CHOICES: string[] = QUESTION_TYPES.flatMap((t) =>
+  t === 'numeric' ? [t, 'constant_sum'] : [t],
+)
+
 // --- Small presentational helpers -------------------------------------------
 
 function lowestConfidence(conf: Record<string, number>): number | null {
@@ -216,19 +224,33 @@ function QuestionRow({
 
 interface DetailState {
   text: string
+  // 'constant_sum' is a UI-only pseudo-type: see isConstantSum below.
   type: string
   options: QuestionOption[]
+  // Constant-sum rows (one box per item) and the total they must reach.
+  rows: QuestionOption[]
+  sumTotal: number
   showIf: FlatRouting
   terminateIf: FlatRouting
   showIfVerbatim: string | null
   terminateIfVerbatim: string | null
 }
 
+// A numeric question WITH rows is what the backend calls a constant sum (see
+// src/engines/questionnaire/constant_sum.py) — a numeric question with no
+// rows is just a plain number and stays that way.
+function isConstantSumQuestion(q: Question): boolean {
+  return q.type === 'numeric' && (q.rows?.length ?? 0) > 0
+}
+
 function buildDetailState(q: Question): DetailState {
+  const sum = q.validation?.sum
   return {
     text: q.text,
-    type: q.type,
+    type: isConstantSumQuestion(q) ? 'constant_sum' : q.type,
     options: q.options.map((o) => ({ ...o })),
+    rows: (q.rows ?? []).map((o) => ({ ...o })),
+    sumTotal: typeof sum === 'number' ? sum : 100,
     showIf: toFlatRouting(q.show_if),
     terminateIf: toFlatRouting(q.terminate_if),
     showIfVerbatim: q.show_if?.verbatim_text ?? null,
@@ -505,6 +527,7 @@ export function QuestionDetail({
   }
 
   const hasOptions = ['single', 'multi', 'dropdown', 'rank'].includes(state.type)
+  const isConstantSum = state.type === 'constant_sum'
 
   const setOption = (i: number, patch: Partial<QuestionOption>) =>
     set('options', state.options.map((o, idx) => (idx === i ? { ...o, ...patch } : o)))
@@ -514,6 +537,17 @@ export function QuestionDetail({
   }
   const removeOption = (i: number) => set('options', state.options.filter((_, idx) => idx !== i))
 
+  // Rows are re-coded 1..n on every change — order IS the code, so there is
+  // nothing for a reviewer to get wrong by hand.
+  const setRowLabel = (i: number, label: string) =>
+    set('rows', state.rows.map((r, idx) => (idx === i ? { ...r, label } : r)))
+  const addRow = () => set('rows', [...state.rows, { code: state.rows.length + 1, label: '' }])
+  const removeRow = (i: number) =>
+    set(
+      'rows',
+      state.rows.filter((_, idx) => idx !== i).map((r, idx) => ({ ...r, code: idx + 1 })),
+    )
+
   const handleSave = async () => {
     setSaving(true)
     setProblems([])
@@ -522,14 +556,24 @@ export function QuestionDetail({
     try {
       const showIf = fromFlatRouting(state.showIf, state.showIfVerbatim)
       const terminateIf = fromFlatRouting(state.terminateIf, state.terminateIfVerbatim)
-      const patch = {
+      const patch: Record<string, unknown> = {
         text: state.text,
-        type: state.type,
+        // The pseudo-type never reaches the API — what is saved is always the
+        // real wire type (numeric), with the rows/total carrying the meaning.
+        type: isConstantSum ? 'numeric' : state.type,
         options: hasOptions
           ? state.options.map((o) => ({ code: o.code, label: o.label }))
           : [],
         show_if: (showIf as unknown as Record<string, unknown>) ?? null,
         terminate_if: (terminateIf as unknown as Record<string, unknown>) ?? null,
+      }
+      if (isConstantSum) {
+        patch.rows = state.rows.map((r) => ({ code: r.code, label: r.label }))
+        patch.validation = { min: 0, max: state.sumTotal, sum: state.sumTotal }
+      } else if (isConstantSumQuestion(q)) {
+        // Leaving constant-sum for another type: a plain numeric (or anything
+        // else) has no per-item boxes, so the stale rows must not survive.
+        patch.rows = null
       }
       const res = await questionnaireApi.update(studyId, q.qid, patch)
       onSaved(res.data)
@@ -664,7 +708,7 @@ export function QuestionDetail({
           onChange={(e) => set('type', e.target.value)}
           className="h-9 px-3 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:bg-slate-50"
         >
-          {QUESTION_TYPES.map((t) => (
+          {TYPE_CHOICES.map((t) => (
             <option key={t} value={t}>
               {typeLabel(t)}
             </option>
@@ -740,6 +784,65 @@ export function QuestionDetail({
               + Add option
             </button>
           )}
+        </div>
+      )}
+
+      {/* Constant sum: one line per item, plus the total they must reach.
+          Saved as numeric + rows + validation.sum — see handleSave. */}
+      {isConstantSum && (
+        <div>
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-500 block mb-2">
+            Items
+          </span>
+          <div className="space-y-2">
+            {state.rows.map((r, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="h-8 w-8 shrink-0 flex items-center justify-center text-xs text-slate-400 font-mono">
+                  {r.code}
+                </span>
+                <input
+                  value={r.label}
+                  disabled={!canWrite}
+                  onChange={(e) => setRowLabel(i, e.target.value)}
+                  placeholder="item"
+                  className="h-8 flex-1 px-2 rounded-md border border-slate-300 text-sm disabled:bg-slate-50"
+                  aria-label="item label"
+                />
+                {canWrite && (
+                  <button
+                    type="button"
+                    onClick={() => removeRow(i)}
+                    className="text-slate-400 hover:text-red-600 px-1"
+                    aria-label="remove item"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+            {state.rows.length === 0 && <p className="text-sm text-slate-400">No items.</p>}
+          </div>
+          {canWrite && (
+            <button
+              type="button"
+              onClick={addRow}
+              className="mt-2 text-xs text-primary-500 hover:text-primary-600 font-medium"
+            >
+              + Add item
+            </button>
+          )}
+          <label className="block mt-3">
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              Must total
+            </span>
+            <input
+              type="number"
+              value={state.sumTotal}
+              disabled={!canWrite}
+              onChange={(e) => set('sumTotal', Number(e.target.value) || 0)}
+              className="mt-1 h-8 w-24 px-2 rounded-md border border-slate-300 text-sm disabled:bg-slate-50"
+            />
+          </label>
         </div>
       )}
 
