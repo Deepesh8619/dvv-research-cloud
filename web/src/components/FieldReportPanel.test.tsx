@@ -79,4 +79,30 @@ describe('FieldReportPanel', () => {
     expect(screen.getByRole('table')).toBeTruthy()
     expect(screen.getByText('100%')).toBeTruthy()
   })
+
+  it('groups cards into buckets and follows a link across them', async () => {
+    const links = (over: Record<string, unknown>) => ({
+      asked_if: [], asked_if_text: null, screens_out_on: [], options_from: [], text_from: [],
+      computed_from: [], loop_of: null, used_by: [], ...over,
+    })
+    const card = (qid: string, bucket: string, over: Record<string, unknown> = {}) => ({
+      qid, text: `${qid} text`, type: 'multi', base: 2, answered: 2, bucket,
+      bucket_reason: '', bucket_suggested: false, options: [], links: links(over),
+    })
+    await renderWith({
+      ...base,
+      questions: [
+        card('S1', 'screener', { used_by: ['Q2b'] }),
+        card('Q2a', 'core', { used_by: ['Q2b'] }),
+        card('Q2b', 'core', { options_from: ['Q2a'], asked_if: ['S1'] }),
+      ],
+    })
+    expect(await screen.findByRole('tab', { name: /Screener 1/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: /Core measures 2/ }))
+    expect(screen.queryByText('S1 text')).toBeNull() // filtered to core
+    Element.prototype.scrollIntoView = vi.fn()
+    // Q2b is asked if S1 — a screener, outside the filter. Following it shows all.
+    fireEvent.click(screen.getByRole('button', { name: 'S1' }))
+    expect(await screen.findByText('S1 text')).toBeTruthy()
+  })
 })

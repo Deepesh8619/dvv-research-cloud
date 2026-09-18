@@ -208,6 +208,10 @@ def make_executor(db: Session, user: UserDB):
         report = run_heavy_detached(db, build_field_report, pinned, plain_sessions(sessions),
                                     answers, cells).to_dict()
         report["terminates_by_question"] = _screen_outs(pinned, report["terminates_by_question"])
+        # The per-question cards are for the report page. Handed to the model
+        # they are tokens it does not need for a field question — and past the
+        # tool-result cap they arrived as truncated JSON it could not read.
+        report.pop("questions", None)
         return report
 
     def soft_launch_check(args):
