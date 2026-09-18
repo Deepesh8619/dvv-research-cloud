@@ -206,3 +206,23 @@ def test_a_negation_of_an_impossible_code_is_not_impossible() -> None:
         show_if=Expression(op="ne", qid="S2", value=9),
     )
     assert unsatisfiable_conditions(_survey(_gender(), fine)) == []
+
+
+def test_a_long_screener_does_not_screen_out_the_whole_run() -> None:
+    """Ten screeners each ruling out half the answers let ~0.1% of random
+    respondents through: the live run showed 493 of 500 screened out, and
+    every question after the screener was reached by a handful. A panel is
+    targeted, so most synthetic respondents answer to qualify — and the rest
+    still trip every screen-out, which is what the run is for."""
+    screeners = [
+        Question(
+            qid=f"S{i}", text="?", type=QuestionType.SINGLE,
+            options=[Option(code=c, label=str(c)) for c in (1, 2, 3, 4)],
+            terminate_if=Expression(op="in", qid=f"S{i}", values=[3, 4]),
+        )
+        for i in range(1, 11)
+    ]
+    report = simulate(_survey(*screeners, _gender("Q1")), n=500)
+    assert report.dispositions["complete"] >= 400
+    assert report.never_fired == []  # every screen-out still fired
+    assert report.to_dict()["qualify_rate"] == 0.85

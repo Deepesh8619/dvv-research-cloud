@@ -67,6 +67,8 @@ class ConditionResult:
 class DryRunReport:
     n_respondents: int = 0
     seed: int = 0
+    #: Share of synthetic respondents who answer each screener so as to pass it.
+    qualify_rate: float = 0.0
     dispositions: dict[str, int] = field(default_factory=dict)
     conditions: list[ConditionResult] = field(default_factory=list)
     never_fired: list[str] = field(default_factory=list)
@@ -87,6 +89,7 @@ class DryRunReport:
         return {
             "n_respondents": self.n_respondents,
             "seed": self.seed,
+            "qualify_rate": self.qualify_rate,
             "passed": self.passed,
             "dispositions": self.dispositions,
             "conditions": [c.to_dict() for c in self.conditions],
@@ -158,12 +161,70 @@ def _answer(
     return None
 
 
+#: Share of synthetic respondents who are on-target and pass every screener.
+#: Each of the rest fails one screen-out, chosen at random, on purpose.
+#: Answering every screener at random is not a panel anyone fields to: ten
+#: screeners each ruling out part of the range let ~1% through, so the run was
+#: 99% screen-outs and every question after the screener was reached by a
+#: handful — the bases and quotas it exists to test went untested. A real panel
+#: is targeted. The rest still answer at random, so every screen-out fires.
+QUALIFY_RATE = 0.85
+#: Draws tried before accepting that no answer passes (an impossible screener).
+_QUALIFY_TRIES = 12
+
+
+def _qualifying(
+    survey: SurveyDefinition,
+    question: Question,
+    rng: random.Random,
+    allowed: set[int] | None,
+    answers: dict[str, Any],
+    fallback: Any,
+) -> Any:
+    """An answer to this question that does not screen the respondent out.
+
+    Drawn and tested through `terminating_question` — the live engine's own
+    rule — so a screen-out written against another question's answer counts too.
+    """
+    for _ in range(_QUALIFY_TRIES):
+        candidate = _answer(question, rng, allowed)
+        if candidate is None:
+            return fallback
+        if terminating_question(survey, {**answers, question.qid: candidate}) is None:
+            return candidate
+    return fallback
+
+
+def _tripping(
+    survey: SurveyDefinition,
+    question: Question,
+    rng: random.Random,
+    allowed: set[int] | None,
+    answers: dict[str, Any],
+    aim: str,
+) -> Any:
+    """An answer here that fires the screen-out on `aim`, or None if none does.
+
+    Tested through the live rule, so a screen-out stored on one question but
+    written against another's answer is tripped where the answer is given.
+    """
+    for _ in range(_QUALIFY_TRIES):
+        candidate = _answer(question, rng, allowed)
+        if candidate is None:
+            return None
+        hit = terminating_question(survey, {**answers, question.qid: candidate})
+        if hit is not None and hit.qid == aim:
+            return candidate
+    return None
+
+
 def simulate(
     survey: SurveyDefinition,
     quota_cells: list[QuotaCell] | None = None,
     n: int = DEFAULT_RESPONDENTS,
     seed: int = 20260903,
     collect: bool = False,
+    qualify_rate: float = QUALIFY_RATE,
 ) -> DryRunReport:
     """Run `n` synthetic respondents through the survey's own conditions.
 
@@ -179,7 +240,7 @@ def simulate(
     cells = list(quota_cells or [])
     counts = {cell.id: cell.count for cell in cells}
 
-    report = DryRunReport(n_respondents=n, seed=seed)
+    report = DryRunReport(n_respondents=n, seed=seed, qualify_rate=qualify_rate)
     report.impossible = unsatisfiable_conditions(survey)
 
     screen_outs = {q.qid: ConditionResult(q.qid, "screen_out") for q in survey.questions
@@ -201,6 +262,14 @@ def simulate(
     for respondent in range(1, n + 1):
         answers: dict[str, Any] = {}
         status = STATUS_COMPLETE
+        # Most of a panel is on-target and passes every screener. Each of the
+        # rest is aimed at ONE screen-out and fails exactly that one: answering
+        # the rest at random, they all fell at the first screener and the tenth
+        # was never tested.
+        aim = (
+            None if not screen_outs or rng.random() < qualify_rate
+            else rng.choice(sorted(screen_outs))
+        )
 
         for qid in survey.question_order():
             question = by_qid.get(qid)
@@ -222,6 +291,13 @@ def simulate(
                     masks[qid].fired += 1
 
             value = _answer(question, rng, allowed)
+            tripped = _tripping(survey, question, rng, allowed, answers, aim) if aim else None
+            if tripped is not None:
+                value = tripped
+            elif value is not None and terminating_question(
+                survey, {**answers, qid: value}
+            ) is not None:
+                value = _qualifying(survey, question, rng, allowed, answers, value)
             if value is not None:
                 answers[qid] = value
 

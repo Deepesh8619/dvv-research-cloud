@@ -403,3 +403,53 @@ def test_the_soft_launch_check_unknown_link_404(client):
     _seed(sf)
     resp = test_client.get("/api/studies/study_m1/fielding/links/nope/soft-launch-check")
     assert resp.status_code == 404
+
+
+def test_live_responses_show_labels_newest_first(client):
+    """What a researcher watches in the first hour: who got through, and are
+    the answers sane — as labels a person reads, not punch codes."""
+    test_client, sf, _ = client
+    _seed(sf)
+    link = test_client.post("/api/studies/study_m1/fielding/links").json()
+    _run_respondent(test_client, link["token"], age=30, coffee=1, brands=[1, 2])
+    _run_respondent(test_client, link["token"], age=15, coffee=None, brands=None)
+
+    resp = test_client.get(f"/api/studies/study_m1/fielding/links/{link['id']}/responses")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 2
+    assert body["columns"] == ["Q1", "Q2", "Q3", "Q4"]
+    statuses = sorted(r["status"] for r in body["rows"])
+    assert statuses == ["complete", "screened out"]
+    complete = next(r for r in body["rows"] if r["status"] == "complete")
+    assert complete["answers"]["Q2"] == "Yes"
+    assert complete["answers"]["Q3"] == "Alpha, Beta"
+
+
+def test_respondent_answers_follow_the_data_rule(client):
+    """An analyst sees answers once the soft launch reaches its hold — before
+    that, only an owner or founder. The refusal says when it opens. The same
+    rule now guards the delivery download, which any signed-in user could take."""
+    test_client, sf, state = client
+    _seed(sf)
+    link = test_client.post(
+        "/api/studies/study_m1/fielding/links", json={"soft_launch_limit": 2}
+    ).json()
+    _run_respondent(test_client, link["token"], age=30, coffee=1, brands=[1])
+
+    state["role"] = "analyst"
+    live = test_client.get(f"/api/studies/study_m1/fielding/links/{link['id']}/responses")
+    assert live.status_code == 403
+    assert "reaches 2 completes (currently 1)" in live.json()["detail"]
+    assert test_client.get("/api/studies/study_m1/download/responses").status_code == 403
+
+    state["role"] = "owner"
+    assert test_client.get(
+        f"/api/studies/study_m1/fielding/links/{link['id']}/responses"
+    ).status_code == 200
+
+    _run_respondent(test_client, link["token"], age=40, coffee=2, brands=[2])
+    state["role"] = "analyst"  # the hold is reached: now it opens
+    assert test_client.get(
+        f"/api/studies/study_m1/fielding/links/{link['id']}/responses"
+    ).status_code == 200

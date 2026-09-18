@@ -12,6 +12,7 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import DryRunPanel from '../components/DryRunPanel'
 import FieldReportPanel from '../components/FieldReportPanel'
+import LiveResponsesPanel from '../components/LiveResponsesPanel'
 import SoftLaunchPanel from '../components/SoftLaunchPanel'
 import { CardListSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
@@ -275,6 +276,7 @@ function LinkCard({
   const [materializeMsg, setMaterializeMsg] = useState<string | null>(null)
   const [showQuotas, setShowQuotas] = useState(false)
   const [showReport, setShowReport] = useState(false)
+  const [showLive, setShowLive] = useState(false)
   const [showSoftLaunch, setShowSoftLaunch] = useState(link.soft_launch_reached)
   const [delivery, setDelivery] = useState<string[]>([])
 
@@ -446,6 +448,15 @@ function LinkCard({
         {showReport ? '▾ Hide field report' : '▸ Field report'}
       </button>
       {showReport && <FieldReportPanel studyId={studyId} linkId={link.id} />}
+
+      <button
+        type="button"
+        onClick={() => setShowLive((v) => !v)}
+        className="mt-3 mr-4 text-xs text-slate-500 hover:text-slate-700"
+      >
+        {showLive ? '▾ Hide live data' : '▸ Live data'}
+      </button>
+      {showLive && <LiveResponsesPanel studyId={studyId} linkId={link.id} />}
 
       <button
         type="button"

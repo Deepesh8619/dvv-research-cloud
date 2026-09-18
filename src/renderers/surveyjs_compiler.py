@@ -397,6 +397,12 @@ def display_warnings(survey: SurveyDefinition) -> list[dict[str, str]]:
         techniques = _techniques(question)
         for pipe in techniques.get("pipes") or []:
             source = pipe.get("source_qid")
+            verbatim = pipe.get("verbatim") or ""
+            if verbatim and verbatim not in (question.text or ""):
+                # Already filled in: a loop writes each brand's name where
+                # "[INSERT PROVIDER]" stood, and the copied pipe record was
+                # reported as a gap in a sentence that no longer has one.
+                continue
             if not source or source not in by_qid:
                 warnings.append(
                     {

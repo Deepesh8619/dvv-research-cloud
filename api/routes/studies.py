@@ -867,6 +867,13 @@ def download_deck(
     if fmt in ("responses", "spss"):
         # Respondent-level delivery files written by materialize: every
         # disposition, with the data map travelling alongside the data.
+        # Respondent answers leave only under the study's data rule — this
+        # door was open to any signed-in user.
+        from api.routes.materialize import data_access
+
+        decision = data_access(db, study_id, user)
+        if not decision.allowed:
+            raise HTTPException(status_code=403, detail=decision.reason)
         suffix = "xlsx" if fmt == "responses" else "sav"
         path = str(STUDIES_DIR / study_id / f"{study_id}_responses.{suffix}")
         media = (

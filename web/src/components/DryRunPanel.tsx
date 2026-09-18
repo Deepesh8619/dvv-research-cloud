@@ -195,6 +195,13 @@ export default function DryRunPanel({
           )}
 
           <p className="text-xs text-slate-400">
+            {report.qualify_rate !== undefined && (
+              <>
+                {Math.round(report.qualify_rate * 100)}% of synthetic respondents are on-target
+                and pass every screener; each of the rest fails one screen-out on purpose, so
+                every rule is tested. These are not an incidence forecast.{' '}
+              </>
+            )}
             Seed {report.seed} — the same survey and seed always give the same run.
             {report.never_fired.length > 0 && (
               <>

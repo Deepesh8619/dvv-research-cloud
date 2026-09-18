@@ -594,6 +594,8 @@ export interface FieldingRedirects {
 export interface DryRunReport {
   n_respondents: number
   seed: number
+  /** Share of synthetic respondents on-target (pass every screener). */
+  qualify_rate?: number
   passed: boolean
   dispositions: { complete: number; terminate: number; overquota: number }
   conditions: Array<{
@@ -631,6 +633,19 @@ export interface FieldReport {
   dropoff_by_question: Array<{ qid: string; n: number }>
   /** One topline card per question, counted over completes only. */
   questions?: QuestionSummary[]
+}
+
+/** Respondent answers as they arrive, as labels (the files carry the codes). */
+export interface LiveResponses {
+  columns: string[]
+  total: number
+  rows: Array<{
+    id: string
+    status: string
+    started_at: string | null
+    last_seen_at: string | null
+    answers: Record<string, string>
+  }>
 }
 
 export interface QuestionSummary {
@@ -810,6 +825,9 @@ export const fieldingApi = {
 
   fieldReport: async (studyId: string, linkId: string) =>
     api.get<FieldReport>(`/studies/${studyId}/fielding/links/${linkId}/field-report`),
+
+  liveResponses: async (studyId: string, linkId: string) =>
+    api.get<LiveResponses>(`/studies/${studyId}/fielding/links/${linkId}/responses`),
 
   materialize: async (studyId: string, linkId: string) =>
     api.post<MaterializeResult>(
