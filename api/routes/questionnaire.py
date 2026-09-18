@@ -51,6 +51,7 @@ from api.models import (
     QuestionnaireStatusResponse,
     QuestionnaireUploadResponse,
     QuestionOrderRequest,
+    QuestionSplitRequest,
     QuestionUpdateRequest,
 )
 from src.ai.router import friendly_backend_error
@@ -64,7 +65,7 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.fielding.materialize import plan_datamap
-from src.engines.questionnaire.extractor import extract_survey_definition
+from src.engines.questionnaire.extractor import extract_survey_definition, reread_question
 from src.intake.questionnaire_loader import (
     load_docx,
     load_pdf,
@@ -1405,3 +1406,276 @@ def set_question_links(
     _save_definition(db, questionnaire, survey)
     update_questionnaire_status(db, questionnaire.id, "in_review")
     return _question_payload(question, set(questionnaire.approved_qids or []))
+
+
+# --- Re-read (current parser, no model call) --------------------------------
+
+
+def _opt_dicts(options: list[Option] | None) -> list[dict] | None:
+    return [o.to_dict() for o in options] if options else None
+
+
+def _reread_diff(old: Question, new: Question) -> list[str]:
+    """Field names where a re-read would change what is stored.
+
+    `show_if` is compared only in the direction "found something new" — the
+    caller applies it the same way (never clears an existing base just because
+    this pass didn't happen to re-find it)."""
+    changed = []
+    if old.text != new.text:
+        changed.append("text")
+    if old.type != new.type:
+        changed.append("type")
+    for field_name, old_val, new_val in (
+        ("options", old.options, new.options),
+        ("rows", old.rows, new.rows),
+        ("cols", old.cols, new.cols),
+    ):
+        if _opt_dicts(old_val) != _opt_dicts(new_val):
+            changed.append(field_name)
+    old_term = old.terminate_if.to_dict() if old.terminate_if else None
+    new_term = new.terminate_if.to_dict() if new.terminate_if else None
+    if old_term != new_term:
+        changed.append("terminate_if")
+    if new.show_if is not None:
+        old_show = old.show_if.to_dict() if old.show_if else None
+        if old_show != new.show_if.to_dict():
+            changed.append("show_if")
+    old_techniques = (old.validation or {}).get("techniques")
+    new_techniques = (new.validation or {}).get("techniques")
+    if old_techniques != new_techniques:
+        changed.append("validation")
+    if (old.extraction_evidence or {}) != (new.extraction_evidence or {}):
+        changed.append("extraction_evidence")
+    if sorted(old.flags) != sorted(new.flags):
+        changed.append("flags")
+    return changed
+
+
+def _reread_is_regression(old: Question, new: Question) -> bool:
+    """True when the re-read is worse than what is already stored.
+
+    A parser fix should only ever ADD structure; losing an option list, grid
+    shape, or the wording itself means this re-read parsed the source WORSE
+    than whatever produced the stored question (a different chunking, a table
+    the rebuilt rows didn't fully capture) — never something to save over.
+    """
+    if old.options and not new.options:
+        return True
+    if old.rows and not new.rows:
+        return True
+    if old.cols and not new.cols:
+        return True
+    if old.text and not new.text:
+        return True
+    return False
+
+
+def _apply_reread(question: Question, new: Question) -> None:
+    """Overwrite the parser-produced fields on `question` in place.
+
+    qid and approval state are the caller's to keep — neither is touched here.
+    """
+    question.text = new.text
+    question.type = new.type
+    question.options = new.options
+    question.rows = new.rows
+    question.cols = new.cols
+    question.terminate_if = new.terminate_if
+    if new.show_if is not None:
+        question.show_if = new.show_if
+    validation = dict(question.validation or {})
+    validation.update(new.validation or {})
+    question.validation = validation
+    question.extraction_evidence = dict(new.extraction_evidence or {})
+    question.flags = list(new.flags or [])
+
+
+def _rerun_reread_safe_passes(survey: SurveyDefinition) -> None:
+    """The survey-level passes safe to replay after a re-read.
+
+    Only the ones that read the whole survey and are idempotent on questions
+    they've already processed (a masked list, a named carousel, a constant-sum
+    group). Section paths / intro screens / loop and grid expansion restructure
+    the question list itself and must not run again on an already-expanded
+    survey."""
+    from src.engines.questionnaire.carousel import apply as apply_carousels
+    from src.engines.questionnaire.constant_sum import apply as apply_constant_sums
+    from src.engines.questionnaire.list_sources import fill_lists
+
+    fill_lists(survey)
+    apply_carousels(survey)
+    apply_constant_sums(survey)
+
+
+@router.post("/studies/{study_id}/questionnaire/questions/{qid}/reread")
+def reread_one_question(
+    study_id: str,
+    qid: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Re-run the CURRENT deterministic parsers on one question. (Owner/Analyst)
+
+    No model call: `reread_question` replays `parse_prose_question`/
+    `_apply_table_shape` against the SAME `source_text` already stored, so a
+    parser fix landed after this question was first extracted reaches it for
+    free. 422, unchanged, if the re-read finds nothing better than what is
+    already stored (see `_reread_is_regression`) or nothing changed at all."""
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    if qid not in survey:
+        raise HTTPException(status_code=404, detail=f"Question {qid} not found")
+
+    question = survey[qid]
+    reread = reread_question(question)
+    if reread is None:
+        raise HTTPException(
+            status_code=422, detail=f"{qid} has no source text the current parser can read"
+        )
+    if _reread_is_regression(question, reread):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Re-read of {qid} found less than what is already stored — left unchanged",
+        )
+    changed = _reread_diff(question, reread)
+    if not changed:
+        raise HTTPException(status_code=422, detail=f"Re-read of {qid} found no improvement")
+
+    _apply_reread(question, reread)
+    survey._rebuild_index()
+    _rerun_reread_safe_passes(survey)
+
+    survey.metadata["validation_errors"] = survey.validate()
+    _save_definition(db, questionnaire, survey)
+    update_questionnaire_status(db, questionnaire.id, "in_review")
+
+    approved = set(questionnaire.approved_qids or [])
+    payload = _question_payload(survey[qid], approved)
+    payload["changed"] = changed
+    return payload
+
+
+@router.post("/studies/{study_id}/questionnaire/questions/reread-all")
+def reread_all_questions(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Re-read every question with the current parsers, in one pass. (Owner/Analyst)
+
+    Same no-model-call re-read as the single-question endpoint; the survey-level
+    passes run once at the end rather than after each question. A question with
+    no improvement is simply left alone — this never errors on a clean survey,
+    it just reports 0 updated."""
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+
+    updated: list[dict] = []
+    for question in list(survey.questions):
+        reread = reread_question(question)
+        if reread is None or _reread_is_regression(question, reread):
+            continue
+        changed = _reread_diff(question, reread)
+        if not changed:
+            continue
+        _apply_reread(question, reread)
+        updated.append({"qid": question.qid, "changed": changed})
+
+    if updated:
+        survey._rebuild_index()
+        _rerun_reread_safe_passes(survey)
+        survey.metadata["validation_errors"] = survey.validate()
+        _save_definition(db, questionnaire, survey)
+        update_questionnaire_status(db, questionnaire.id, "in_review")
+
+    return {"n_questions": len(survey.questions), "n_updated": len(updated), "updated": updated}
+
+
+# --- Split ("for each X, ask Y" -> one question per X) ----------------------
+
+
+@router.post("/studies/{study_id}/questionnaire/questions/{qid}/split")
+def split_question(
+    study_id: str,
+    qid: str,
+    request: QuestionSplitRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Turn one question into one-per-item copies: {qid}_1..{qid}_n. (Owner/Analyst)
+
+    "For each category, which brands have you used" is really N questions asked
+    once each — the same shape `loops.expand_loops`/`carousel.apply` already
+    produce from a document's own wording, just chosen by a reviewer instead of
+    read from prose. Refused (422) if fewer than two items are given, or if any
+    {qid}_{i} already exists (a second split of the same question)."""
+    from src.engines.questionnaire.loops import _replace
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    if len(request.items) < 2:
+        raise HTTPException(status_code=422, detail="Split needs at least two items")
+
+    new_qids = [f"{qid}_{i}" for i in range(1, len(request.items) + 1)]
+    clash = sorted({q.qid for q in survey.questions if q.qid in new_qids})
+    if qid not in survey:
+        # A qid already split has no question left under its own name (`_replace`
+        # took it out) — that is a stale request, not a 404: the client is
+        # pointing at the qid it already split, so say so rather than a bare
+        # "not found" that looks like a typo.
+        if clash:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{qid} was already split — {', '.join(clash)} already exist",
+            )
+        raise HTTPException(status_code=404, detail=f"Question {qid} not found")
+    if clash:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{qid} was already split — {', '.join(clash)} already exist",
+        )
+
+    try:
+        copy_type = QuestionType(request.type) if request.type else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid type: {exc}") from exc
+
+    template = survey[qid]
+    parts: list[Question] = []
+    for index, item in enumerate(request.items, start=1):
+        validation = dict(template.validation or {})
+        validation["loop"] = {"of": qid, "index": index, "label": item.label}
+        parts.append(Question(
+            qid=new_qids[index - 1],
+            text=f"{template.text} ({item.label})",
+            type=copy_type or template.type,
+            options=_build_options(item.options) if item.options is not None
+            else list(template.options),
+            rows=list(template.rows) if template.rows else None,
+            cols=list(template.cols) if template.cols else None,
+            required=template.required,
+            randomize_options=template.randomize_options,
+            show_if=Expression.from_dict(item.show_if) if item.show_if else None,
+            terminate_if=template.terminate_if,
+            piping_refs=list(template.piping_refs or []),
+            validation=validation,
+            source_text=template.source_text,
+            source_location=template.source_location,
+            extraction_method="manual_split",
+            extraction_evidence=dict(template.extraction_evidence),
+        ))
+
+    _replace(survey, template, parts)
+    survey._rebuild_index()
+
+    survey.metadata["validation_errors"] = survey.validate()
+    _save_definition(db, questionnaire, survey)
+    update_questionnaire_status(db, questionnaire.id, "in_review")
+
+    approved = set(questionnaire.approved_qids or [])
+    return {
+        "replaced": qid,
+        "into": [q.qid for q in parts],
+        "questions": [_question_payload(q, approved) for q in parts],
+    }

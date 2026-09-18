@@ -649,6 +649,64 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     return question
 
 
+def _rebuild_table_rows(source_text: str) -> list[list[str]]:
+    """Recover a table's raw cells from the `source_text` a Question kept.
+
+    Only `source_text` survives on a stored Question — the loader's real
+    `DocumentBlock.rows` is never persisted. A generic (non Q-Name) table is
+    serialized one row per line, cells joined by " | " (questionnaire_loader's
+    plain pipe-join fallback), so splitting each such line back on " | "
+    recovers the same cell list `_apply_table_shape`/`capture_carousel`
+    originally saw. Lines with no " | " are not a table row and are dropped.
+    """
+    return [line.split(" | ") for line in (source_text or "").splitlines() if " | " in line]
+
+
+def reread_question(question: Question) -> Question | None:
+    """Re-run the CURRENT deterministic parsers on one question's own text.
+
+    No model call — ever. A stored question was parsed by whatever parser code
+    existed the day it was extracted, and a fix since then only reaches it on a
+    full re-extract. This replays `parse_prose_question` (and, when the source
+    text still carries a table, `_apply_table_shape`/`capture_carousel` against
+    rows rebuilt by `_rebuild_table_rows`) over the SAME `source_text` captured
+    then, so a parser improvement reaches this one question for free.
+
+    Returns None when there is no source_text, or nothing in it the parser can
+    read (no label the segmenter would have recognised) — the caller decides
+    whether the rebuilt question is actually an improvement over what is
+    stored.
+    """
+    text = question.source_text or ""
+    if not text.strip():
+        return None
+
+    table_rows = _rebuild_table_rows(text)
+    blocks: list[DocumentBlock] = []
+    if table_rows:
+        blocks.append(
+            DocumentBlock(block_type="table", text=text, paragraph_index=0, rows=table_rows)
+        )
+    chunk = QuestionChunk(
+        chunk_text=text,
+        candidate_qid=question.qid,
+        source_blocks=blocks,
+        provenance=question.source_location or "",
+    )
+
+    fields = parse_prose_question(chunk.chunk_text, chunk.candidate_qid)
+    if fields is None:
+        return None
+
+    new_question = _question_from_prose(fields, chunk)  # also runs _apply_table_shape
+    if blocks:
+        capture_carousel(new_question, [table_rows])
+    result = ExtractionResult(question=new_question)
+    _flag_derived_variable(result, chunk)
+    _validate_question(result, {})
+    return new_question
+
+
 def _extract_via_prose(
     chunk: QuestionChunk,
     fields: ProseFields,

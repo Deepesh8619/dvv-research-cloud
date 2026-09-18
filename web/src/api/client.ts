@@ -441,6 +441,20 @@ export interface UnresolvedQuestion {
   reasons: string[]
 }
 
+/** One item of a "Split by..." request — becomes {qid}_{n}. */
+export interface QuestionSplitItem {
+  label: string
+  show_if?: Record<string, unknown> | null
+  /** Omitted keeps the original question's options for this copy. */
+  options?: Array<Record<string, unknown>> | null
+}
+
+export interface RereadAllResult {
+  n_questions: number
+  n_updated: number
+  updated: { qid: string; changed: string[] }[]
+}
+
 export const QUESTION_TYPES = [
   'single',
   'multi',
@@ -583,6 +597,25 @@ export const questionnaireApi = {
   // Survey-level presentation settings (T24). `theme` null clears it to default.
   settings: async (studyId: string, theme: string | null) =>
     api.patch<QuestionnaireStatus>(`/studies/${studyId}/questionnaire/settings`, { theme }),
+
+  /** Re-run the current deterministic parsers on this question's own source
+      text — no model call. 422, unchanged, if there is nothing better to find. */
+  reread: async (studyId: string, qid: string) =>
+    api.post<Question & { changed: string[] }>(
+      `/studies/${studyId}/questionnaire/questions/${qid}/reread`,
+      {},
+    ),
+
+  /** Same re-read, run once across every question in the questionnaire. */
+  rereadAll: async (studyId: string) =>
+    api.post<RereadAllResult>(`/studies/${studyId}/questionnaire/questions/reread-all`, {}),
+
+  /** Turn one question into one-per-item copies: {qid}_1..{qid}_n. */
+  split: async (studyId: string, qid: string, items: QuestionSplitItem[], type?: string) =>
+    api.post<{ replaced: string; into: string[]; questions: Question[] }>(
+      `/studies/${studyId}/questionnaire/questions/${qid}/split`,
+      { items, type },
+    ),
 }
 
 // --- Fielding / respondent runtime (T9') ------------------------------------
