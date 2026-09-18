@@ -170,6 +170,7 @@ _BORROWED_OPTIONS_RE = re.compile(
 _GRID_DIRECTIVE_RE = re.compile(r"\bIN ROWS\b|\bROWS\b|\bSTATEMENTS\b", re.I)
 
 # Tags carried by an individual option.
+_BARE_TERMINATE_RE = re.compile(r"\s(TERMINATE|SCREEN\s*-?\s*OUT)\s*$")
 _TERMINATE_TAG = re.compile(r"\bTERMINATE\b|\bSCREEN\s*-?\s*OUT\b", re.I)
 _EXCLUSIVE_TAG = re.compile(r"\bEXCLUSIVE\b", re.I)
 _ANCHOR_TAG = re.compile(r"\bANCHOR\b", re.I)
@@ -203,7 +204,10 @@ def _is_answer_blank(line: str) -> bool:
 # the scripter, not the respondent: "CODE AGE - BASED ON RESPONSES AT S1...".
 # These are derived variables computed from other answers, so they have no type
 # to find and must not be counted as a question the model still has to resolve.
-_DERIVED_RE = re.compile(r"^(RE)?CODE\b")
+# "CODE AGE", "RECODE REGION" — and "BUBBLE AUDIENCE CODE", where the verb
+# comes last. Anywhere in the line: the all-caps test below is what keeps a
+# respondent's question out.
+_DERIVED_RE = re.compile(r"(?<!ZIP )(?<!POSTAL )(?<!AREA )(?<!PROMO )\b(RE)?CODE\b")
 
 
 # Wordings that cannot be multi-select whatever the scripter left in the type
@@ -233,7 +237,13 @@ def is_derived_wording(text: str) -> bool:
     the allowed characters — which is how the first version missed most of them.
     """
     stripped = text.strip()
-    return bool(_DERIVED_RE.match(stripped)) and not any(c.islower() for c in stripped)
+    # A question mark means somebody is being asked: "WHAT IS YOUR ZIP CODE?"
+    # shouted in capitals is still a question, never a computed variable.
+    return (
+        bool(_DERIVED_RE.search(stripped))
+        and not any(c.islower() for c in stripped)
+        and "?" not in stripped
+    )
 
 # A line that continues the question rather than starting the answer list —
 # these read as instructions to the respondent, not as options.
@@ -690,6 +700,12 @@ def parse_prose_question(
 
         # Otherwise: an answer option. Codes are positional (1-based), which is
         # how prose lists are scripted.
+        # "Male TERMINATE": the same instruction without its brackets. Written
+        # in capitals, like every scripter instruction, so an answer that
+        # merely uses the word ("I would terminate my plan") is untouched.
+        bare = _BARE_TERMINATE_RE.search(line)
+        if bare and not _OPTION_TAG_RE.search(line):
+            line = f"{line[: bare.start()].rstrip()} [{bare.group(1)}]"
         tags = _OPTION_TAG_RE.search(line)
         label = _OPTION_TAG_RE.sub("", line).strip() if tags else line
         written = _OPTION_CODE_RE.match(label)

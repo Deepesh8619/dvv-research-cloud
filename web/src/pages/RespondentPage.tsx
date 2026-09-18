@@ -95,6 +95,15 @@ function PoweredBy() {
 // reading it left the header frozen at "1 / 20" for the whole interview. And its
 // question count is the real one: getAllQuestions() included an element nobody
 // answers, which is how the total read 20 against the survey's own 19.
+// What a respondent may read as the survey's name. A title that is really the
+// uploaded FILE ("02QRE_FINAL_-_Bubble_Consumer_Research_5.6.26") is scripter
+// vocabulary, and it names the sponsor — which a blind study must never show.
+export function respondentTitle(title: string | undefined): string {
+  const t = (title || '').trim()
+  if (!t || /_|\.(docx?|pdf)$|\bQRE\b|\bFINAL\b|\bv\d+\b|\d+\.\d+\.\d+/i.test(t)) return ''
+  return t
+}
+
 function positionOf(survey: Model): { at: number; of: number } {
   const info = survey.getProgressInfo()
   const of = info.questionCount || 1
@@ -232,7 +241,7 @@ export default function RespondentPage() {
         // Dev builds only: the live model, for inspecting it from the console.
         if (import.meta.env.DEV) (window as unknown as { __dvvSurvey: Model }).__dvvSurvey = survey
         setModel(survey)
-        setTitle(survey.title || 'Survey')
+        setTitle(respondentTitle(survey.title))
         setTheme(surveyTheme)
         setPhase('welcome')
       } catch {
@@ -314,7 +323,7 @@ export default function RespondentPage() {
         <Emblem theme={theme}>
           <ClipboardIcon className="w-8 h-8" />
         </Emblem>
-        <h1 className="text-2xl font-semibold text-slate-900 mb-3">{title}</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 mb-3">{title || 'Welcome'}</h1>
         <p className="text-slate-600 mb-7 max-w-sm mx-auto">
           Your answers are confidential. There are no right or wrong responses — please answer honestly.
         </p>

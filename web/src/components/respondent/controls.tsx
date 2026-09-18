@@ -1,5 +1,12 @@
 import { createElement, useEffect, useReducer, useState } from 'react'
-import type { ItemValue, MatrixRowModel, Question, QuestionMatrixModel, QuestionRankingModel } from 'survey-core'
+import type {
+  ItemValue,
+  MatrixRowModel,
+  Question,
+  QuestionMatrixModel,
+  QuestionRankingModel,
+  QuestionRatingModel,
+} from 'survey-core'
 import { Serializer } from 'survey-core'
 import { ReactQuestionFactory, SurveyQuestionText } from 'survey-react-ui'
 
@@ -95,6 +102,9 @@ export function MatrixCarousel({ question }: { question: QuestionMatrixModel }) 
 
       <div key={row.name} className="dvv-slide rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5">
         <p className="mb-4 text-[17px] font-semibold leading-snug text-slate-900">{row.text}</p>
+        {isNumberScale(columns) ? (
+          <NumberScale columns={columns} value={row.value} label={row.text} onPick={pick} />
+        ) : (
         <div
           role="radiogroup"
           aria-label={row.text}
@@ -121,6 +131,7 @@ export function MatrixCarousel({ question }: { question: QuestionMatrixModel }) 
             )
           })}
         </div>
+        )}
       </div>
 
       <div className="mt-3 flex justify-between text-sm">
@@ -142,6 +153,105 @@ export function MatrixCarousel({ question }: { question: QuestionMatrixModel }) 
         </button>
       </div>
     </div>
+  )
+}
+
+/** 0-10 and the like: consecutive numbers, labelled only at a few points. */
+function isNumberScale(columns: ItemValue[]): boolean {
+  if (columns.length < 5) return false
+  const values = columns.map((c) => Number(c.value))
+  if (values.some((v, i) => Number.isNaN(v) || (i > 0 && v !== values[i - 1] + 1))) return false
+  const bare = columns.filter((c) => (c.text || '').trim() === String(c.value)).length
+  return bare * 2 >= columns.length
+}
+
+/**
+ * A scale as one row of numbers with its words underneath.
+ *
+ * Eleven full-width buttons, "0 … Somewhat more likely … 10", ran past the
+ * bottom of a phone, and the statement being rated scrolled away with them:
+ * the respondent was choosing a number for something they could no longer see.
+ * The numbers fit in one or two rows; the labelled points become captions.
+ */
+function NumberScale({
+  columns,
+  value,
+  label,
+  onPick,
+  ends,
+}: {
+  columns: ItemValue[]
+  value: unknown
+  label: string
+  onPick: (value: unknown) => void
+  /** Words for the two ends when the points themselves carry none. */
+  ends?: { min?: string; max?: string }
+}) {
+  const worded = columns.filter((c) => (c.text || '').trim() !== String(c.value))
+  const firstPoint = worded.find((c) => c === columns[0])
+  const lastPoint = worded.find((c) => c === columns[columns.length - 1])
+  const middle = worded.find((c) => c !== firstPoint && c !== lastPoint)
+  const first = { text: firstPoint?.text || ends?.min }
+  const last = { text: lastPoint?.text || ends?.max }
+  return (
+    <div>
+      {/* Equal cells that wrap as whole rows: 0-10 is one row on a laptop and
+          6 + 5 on a phone, never a lone "10" stretched across the width. */}
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className="grid gap-1.5 [grid-template-columns:repeat(var(--phone),minmax(0,1fr))] sm:[grid-template-columns:repeat(var(--wide),minmax(0,1fr))]"
+        style={{
+          ['--phone' as string]: columns.length > 7 ? Math.ceil(columns.length / 2) : columns.length,
+          ['--wide' as string]: columns.length,
+        }}
+      >
+        {columns.map((c) => {
+          const on = value == c.value
+          return (
+            <button
+              key={String(c.value)}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              aria-label={(c.text || '').trim() === String(c.value) ? String(c.value) : `${c.value} — ${c.text}`}
+              onClick={() => onPick(c.value)}
+              className="dvv-choice h-12 rounded-xl border-[1.5px] text-base font-semibold tabular-nums transition-all duration-150 active:scale-95"
+              style={{
+                borderColor: on ? ACCENT : '#e2e8f0',
+                background: on ? ACCENT : '#fff',
+                color: on ? '#fff' : '#334155',
+              }}
+            >
+              {String(c.value)}
+            </button>
+          )
+        })}
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-xs leading-snug text-slate-500">
+        <span>{first?.text}</span>
+        <span className="text-center">{middle ? `${middle.value} = ${middle.text}` : ''}</span>
+        <span className="text-right">{last?.text}</span>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One thing rated 0-10 ("How do you feel about Bubble now?"): the same number
+ * pad as a grid statement, so a respondent learns it once.
+ */
+export function RatingPad({ question }: { question: QuestionRatingModel }) {
+  const value = useAnswer(question)
+  const columns = question.visibleRateValues as ItemValue[]
+  return (
+    <NumberScale
+      columns={columns}
+      value={value}
+      label={question.title}
+      onPick={(v) => !question.isReadOnly && (question.value = v)}
+      ends={{ min: question.minRateDescription, max: question.maxRateDescription }}
+    />
   )
 }
 
@@ -377,6 +487,8 @@ export function registerRespondentControls(): void {
   const factory = ReactQuestionFactory.Instance
   factory.registerQuestion('matrix', ((props: { question: QuestionMatrixModel }) =>
     createElement(MatrixCarousel, props)) as never)
+  factory.registerQuestion('rating', ((props: { question: QuestionRatingModel }) =>
+    createElement(RatingPad, props)) as never)
   factory.registerQuestion('ranking', ((props: { question: QuestionRankingModel }) =>
     createElement(TapToRank, props)) as never)
   factory.registerQuestion('text', ((props: { question: Question }) =>
