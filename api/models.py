@@ -627,3 +627,21 @@ class CopilotResponse(BaseModel):
     proposals: list[CopilotProposal] = Field(default_factory=list)
     tools_used: list[str] = Field(default_factory=list)
     answered_by: str
+
+
+class QuestionLinkMask(BaseModel):
+    """ "Options from": which earlier question's list this one shows, and how."""
+
+    source_qid: str
+    # selected: only what was chosen there · full_list: the whole list ·
+    # list_except: the list minus what was chosen at `exclude_qid`.
+    mode: str = "selected"
+    exclude_qid: str | None = None
+
+
+class QuestionLinksRequest(BaseModel):
+    """The links a reviewer sets on one question. Each field replaces that kind
+    of link entirely; an omitted field is left as it is."""
+
+    options_from: list[QuestionLinkMask] | None = None
+    text_from: list[str] | None = None

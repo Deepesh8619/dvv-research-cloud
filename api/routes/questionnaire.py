@@ -45,6 +45,7 @@ from api.db import (
 )
 from api.models import (
     QuestionCreateRequest,
+    QuestionLinksRequest,
     QuestionnaireCreateRequest,
     QuestionnaireSettingsRequest,
     QuestionnaireStatusResponse,
@@ -1286,3 +1287,119 @@ def _start_label_merge(db: Session, study_id: str, survey: SurveyDefinition) -> 
 
     threading.Thread(target=_job, daemon=True).start()
     return True
+
+
+@router.get("/studies/{study_id}/questionnaire/map")
+def questionnaire_map(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """Every question's bucket and links, read from the definition itself.
+
+    What kind of variable each question is (screener, profile, core measure,
+    loop, open end, hidden) and how it connects: asked if, options from, text
+    uses, computed from, and the reverse — what its answer decides. No model is
+    asked; every link is something the questionnaire already states.
+    """
+    from src.engines.questionnaire.buckets import bucket_of, links
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    connections = links(survey)
+    return {
+        "questions": {
+            q.qid: {
+                "bucket": bucket,
+                "reason": reason,
+                "suggested": suggested,
+                "links": connections.get(q.qid, {}),
+            }
+            for q in survey.questions
+            for bucket, reason, suggested in [bucket_of(q)]
+        }
+    }
+
+
+_MASK_MODES = {"selected", "full_list", "list_except", "not_selected"}
+
+
+@router.put("/studies/{study_id}/questionnaire/questions/{qid}/links")
+def set_question_links(
+    study_id: str,
+    qid: str,
+    request: QuestionLinksRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Add or remove what a question takes from earlier ones. (Owner/Analyst)
+
+    "Options from" is a mask: this question's list comes from an earlier one,
+    narrowed per respondent. "Text uses" is a pipe: an earlier answer is written
+    into the wording. Both may only point BACKWARDS — a question cannot show
+    options from one the respondent has not reached yet — and a question with no
+    list of its own gets the source's list, as a document's "[SHOW Q26 LIST]"
+    would.
+    """
+    from src.engines.questionnaire.list_sources import fill_lists
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    if qid not in survey:
+        raise HTTPException(status_code=404, detail=f"Question {qid} not found")
+    order = survey.question_order()
+    earlier = set(order[: order.index(qid)]) if qid in order else set()
+
+    def check_source(source: str) -> None:
+        if source not in survey:
+            raise HTTPException(
+                status_code=422, detail=f"{source} is not a question in this survey"
+            )
+        if source not in earlier:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{source} comes after {qid}: a respondent has not answered it yet",
+            )
+
+    question = survey[qid]
+    validation = dict(question.validation or {})
+    techniques = dict(validation.get("techniques") or {})
+    provided = request.model_fields_set
+
+    if "options_from" in provided:
+        masks = []
+        for mask in request.options_from or []:
+            if mask.mode not in _MASK_MODES:
+                raise HTTPException(status_code=422, detail=f"Unknown mode: {mask.mode}")
+            check_source(mask.source_qid)
+            if mask.exclude_qid:
+                check_source(mask.exclude_qid)
+            masks.append({
+                "source_qid": mask.source_qid, "mode": mask.mode,
+                "exclude_qid": mask.exclude_qid, "verbatim": f"set in review by {user.name}",
+            })
+        techniques["masks"] = masks
+    if "text_from" in provided:
+        pipes = []
+        for source in request.text_from or []:
+            check_source(source)
+            pipes.append({"source_qid": source, "name": None, "verbatim": f"[INSERT {source}]"})
+            if f"[INSERT {source}]" not in (question.text or ""):
+                # Where the answer goes: at the end unless the reviewer moves it.
+                question.text = f"{(question.text or '').rstrip()} [INSERT {source}]"
+        # A pipe removed takes its placeholder with it — left in, it prints.
+        kept = {p["source_qid"] for p in pipes}
+        for old in techniques.get("pipes") or []:
+            source = old.get("source_qid")
+            if source and source not in kept:
+                question.text = (question.text or "").replace(old.get("verbatim") or "", "").strip()
+        techniques["pipes"] = pipes
+
+    validation["techniques"] = techniques
+    question.validation = validation
+    fill_lists(survey)  # a masked question with no list of its own takes the source's
+
+    survey.metadata["validation_errors"] = survey.validate()
+    _save_definition(db, questionnaire, survey)
+    update_questionnaire_status(db, questionnaire.id, "in_review")
+    return _question_payload(question, set(questionnaire.approved_qids or []))
