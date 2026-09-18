@@ -135,3 +135,26 @@ def test_a_base_stated_in_words_is_reported_as_its_own_thing():
     assert "base_stated_in_words_only" in checks
     # Not confused with the parser's own failure to apply an exact condition.
     assert "base_stated_but_not_applied" not in checks
+
+
+def test_a_loop_that_filled_in_the_brand_is_not_reported_as_a_gap():
+    """Each turn of a loop writes its brand where "[INSERT PROVIDER]" stood; the
+    copied pipe record was then reported as a hole in the sentence."""
+    from src.renderers.surveyjs_compiler import display_warnings
+
+    filled = Question(
+        qid="DA_ATTITUDES_1",
+        text="How much do you agree about Google Ads?",
+        options=[Option(code=1, label="Agree")],
+        validation={"techniques": {"pipes": [
+            {"source_qid": None, "name": "PROVIDER", "verbatim": "[INSERT PROVIDER]"}
+        ]}},
+    )
+    survey = SurveyDefinition(
+        study_id="T", source="extracted", status="approved",
+        blocks=[Block(block_id="B1", question_ids=["DA_ATTITUDES_1"])], questions=[filled],
+    )
+    assert display_warnings(survey) == []
+    # Still reported when the placeholder really is left in the sentence.
+    filled.text = "How much do you agree about [INSERT PROVIDER]?"
+    assert [w["kind"] for w in display_warnings(survey)] == ["unresolved_pipe"]

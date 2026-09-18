@@ -19,7 +19,7 @@ import polars as pl
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from api.auth import UserRole, require_role
+from api.auth import UserRole, get_current_user, require_role
 from api.config import STUDIES_DIR
 from api.db import (
     UserDB,
@@ -27,6 +27,7 @@ from api.db import (
     get_db,
     get_fielding_link,
     get_study,
+    list_questionnaires_for_study,
     list_respondent_sessions,
     set_study_artifacts,
     update_study_paths,
@@ -338,3 +339,106 @@ def soft_launch_check(
         **result,
         "run_by": user.name,
     }
+
+
+def data_access(db: Session, study_id: str, user: UserDB):
+    """Whether this user may see respondent answers for the study, and why.
+
+    One rule for every door the answers leave by — the delivery files and the
+    live view alike. Owners and founders from approval; everyone else once a
+    soft launch reaches its hold or a quota cell fills (see fielding/access.py).
+    """
+    from api.db import count_completes, list_fielding_links_for_study, list_quota_cells
+    from src.engines.fielding.access import LinkState, may_download_data
+
+    approved = any(
+        q.status == "approved" for q in list_questionnaires_for_study(db, study_id)
+    )
+    links = list_fielding_links_for_study(db, study_id)
+    states = [
+        LinkState(
+            soft_launch_limit=link.soft_launch_limit, completes=count_completes(db, link.id)
+        )
+        for link in links
+    ]
+    quota_filled = any(
+        cell.count >= cell.cell_limit for link in links for cell in list_quota_cells(db, link.id)
+    )
+    role = getattr(user.role, "value", user.role)
+    return may_download_data(str(role), approved, states, quota_filled)
+
+
+_STATUS_LABELS = {10: "complete", 20: "screened out", 30: "security", 40: "over quota"}
+
+
+def _display(question, value) -> str:
+    """One answer as a person reads it: labels, not punch codes."""
+    from src.core.survey_definition import QuestionType
+
+    labels = {o.code: o.label for o in (question.options if question else [])}
+    is_grid = question is not None and question.type is QuestionType.GRID_SINGLE
+    if is_grid and isinstance(value, dict):
+        rows = {str(r.code): r.label for r in question.rows or []}
+        cols = {c.code: c.label for c in question.cols or []}
+        return "; ".join(
+            f"{rows.get(str(r), r)}: {cols.get(_as_int(c), c)}" for r, c in value.items()
+        )
+    if isinstance(value, list):
+        return ", ".join(str(labels.get(_as_int(v), v)) for v in value)
+    return str(labels.get(_as_int(value), value))
+
+
+def _as_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
+@router.get("/studies/{study_id}/fielding/links/{link_id}/responses")
+def live_responses(
+    study_id: str,
+    link_id: str,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """Respondent answers as they arrive, newest first. Gated like a download.
+
+    What a researcher watches in the first hour of field: is anyone getting
+    through, and are the answers sane. Labels, not codes, because this is read
+    by a person; the delivery files carry the codes.
+    """
+    decision = data_access(db, study_id, user)
+    if not decision.allowed:
+        raise HTTPException(status_code=403, detail=decision.reason)
+    link = get_fielding_link(db, link_id)
+    if not link or link.study_id != study_id:
+        raise HTTPException(status_code=404, detail="Fielding link not found")
+
+    survey = SurveyDefinition.from_json(link.survey_json)
+    by_qid = {q.qid: q for q in survey.questions}
+    order = [
+        qid for qid in survey.question_order()
+        if by_qid.get(qid) and by_qid[qid].type.value != "info"
+    ]
+    sessions = sorted(
+        list_respondent_sessions(db, link_id),
+        key=lambda s: s.last_seen_at or s.started_at or "",
+        reverse=True,
+    )
+    answers = answers_by_session(db, link_id)
+    limit = max(1, min(int(limit), 1000))
+    rows = []
+    for session in sessions[:limit]:
+        given = answers.get(session.id, {})
+        rows.append({
+            "id": session.id[:8],
+            "status": _STATUS_LABELS.get(session.status_code, "in progress"),
+            "started_at": session.started_at,
+            "last_seen_at": session.last_seen_at,
+            "answers": {
+                qid: _display(by_qid.get(qid), given[qid]) for qid in order if qid in given
+            },
+        })
+    return {"columns": order, "rows": rows, "total": len(sessions)}
