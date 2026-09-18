@@ -412,15 +412,13 @@ def test_cooldown_is_per_model_not_per_backend():
 
 def test_fallback_models_can_be_disabled(monkeypatch):
     """Uniformity matters more than capacity for some deployments."""
+    # Not importlib.reload(router): that mints a second BackendUnavailable
+    # class, so every module holding the first one stops catching what the
+    # router raises (the copilot's 503 path failed only in suite order).
     monkeypatch.setenv("GROQ_FALLBACK_MODELS", "")
-    import importlib
-
-    importlib.reload(router)
-    try:
-        assert router.GROQ_FALLBACK_MODELS == []
-    finally:
-        monkeypatch.delenv("GROQ_FALLBACK_MODELS", raising=False)
-        importlib.reload(router)
+    assert router._fallback_models_from_env() == []
+    monkeypatch.setenv("GROQ_FALLBACK_MODELS", " a/one , ,b/two ")
+    assert router._fallback_models_from_env() == ["a/one", "b/two"]
 
 
 def _timeouts_seen(monkeypatch, cloud_key: bool) -> dict[str, int]:

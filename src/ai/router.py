@@ -609,13 +609,12 @@ _OLLAMA_COOLDOWN = float(os.getenv("OLLAMA_COOLDOWN_SECONDS", "300"))
 # recorded on the ExtractionResult, so the difference is never silent.
 #
 # Empty string disables the behaviour entirely.
-GROQ_FALLBACK_MODELS = [
-    m.strip()
-    for m in os.environ.get(
-        "GROQ_FALLBACK_MODELS", ""
-    ).split(",")
-    if m.strip()
-]
+def _fallback_models_from_env() -> list[str]:
+    raw = os.environ.get("GROQ_FALLBACK_MODELS", "")
+    return [m.strip() for m in raw.split(",") if m.strip()]
+
+
+GROQ_FALLBACK_MODELS = _fallback_models_from_env()
 
 
 def _extraction_chain() -> list[dict[str, str]]:
