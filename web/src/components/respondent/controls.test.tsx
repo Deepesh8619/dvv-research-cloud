@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { QuestionRatingModel } from 'survey-core'
 
 import { respondentTitle } from '../../pages/RespondentPage'
-import { MatrixCarousel, NumberStepper, RatingPad, TapToRank, registerRespondentControls } from './controls'
+import { ConstantSum, MatrixCarousel, NumberStepper, RatingPad, TapToRank, registerRespondentControls } from './controls'
 
 registerRespondentControls() // registers the optOuts property
 
@@ -126,5 +126,24 @@ describe('respondentTitle', () => {
     expect(respondentTitle('02QRE_FINAL_-_Bubble_Consumer_Research_5.6.26')).toBe('')
     expect(respondentTitle('study.docx')).toBe('')
     expect(respondentTitle('Skincare Habits Study')).toBe('Skincare Habits Study')
+  })
+})
+
+describe('ConstantSum', () => {
+  it('keeps a running total and says when it adds up', () => {
+    const { model, question } = survey({
+      type: 'multipletext',
+      items: [{ name: '1', title: 'Brands I trust', inputType: 'number' },
+              { name: '2', title: 'New brands', inputType: 'number' }],
+      validators: [{ type: 'expression', expression: '{Q.1} + {Q.2} = 100' }],
+    })
+    render(<ConstantSum question={question as Question} />)
+    fireEvent.change(screen.getByLabelText('Brands I trust'), { target: { value: '70' } })
+    expect(screen.getByText('70 of 100')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('New brands'), { target: { value: '40' } })
+    expect(screen.getByText('110 — that is 10 over 100')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('New brands'), { target: { value: '30' } })
+    expect(screen.getByText('Adds up to 100 ✓')).toBeTruthy()
+    expect(model.getValue('Q')).toEqual({ 1: 70, 2: 30 })
   })
 })

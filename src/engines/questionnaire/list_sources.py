@@ -31,6 +31,7 @@ from dataclasses import replace
 
 from src.core.survey_definition import Option, Question, QuestionType, SurveyDefinition
 from src.engines.questionnaire import schema
+from src.engines.questionnaire.carousel import coded, list_for
 from src.engines.questionnaire.prose_directives import is_terminal_option
 
 _CHOICE_TYPES = {QuestionType.SINGLE, QuestionType.MULTI, QuestionType.DROPDOWN, QuestionType.RANK}
@@ -87,6 +88,15 @@ def fill_lists(survey: SurveyDefinition) -> list[dict]:
     for qid in survey.question_order():
         q = survey[qid] if qid in survey else None
         if q is None:
+            continue
+        study = list_for(survey, q.qid) if _needs_list(q) else None
+        if study and not ((q.validation or {}).get("techniques") or {}).get("masks"):
+            # "FOR Q6-Q10 REFER TO CORE COMPETITOR SET OF 10 BRANDS": named for
+            # exactly these questions, so nothing to confirm.
+            _fill(q, coded(survey, study["items"], q))
+            q.extraction_evidence["options"] = study["verbatim"]
+            filled.append({"qid": q.qid, "from": study["verbatim"], "named": True})
+            seen.append(q)
             continue
         if _needs_list(q):
             source, named = _named_source(q, by_upper), True

@@ -475,6 +475,80 @@ function StepButton({
   )
 }
 
+// ---------------------------------------------------------------- constant sum
+
+/** The total a constant-sum question must reach, from its own validator. */
+function totalOf(question: Question): number | null {
+  for (const v of question.validators || []) {
+    const m = /=\s*(\d+)\s*$/.exec((v as unknown as { expression?: string }).expression || '')
+    if (m) return Number(m[1])
+  }
+  return null
+}
+
+/**
+ * Shares that must add up — "what percentage goes to each?" — as one row per
+ * item and a running total that fills as they type. The rule is visible while
+ * they answer, not discovered as an error when they press Next.
+ */
+export function ConstantSum({ question }: { question: Question }) {
+  const value = (useAnswer(question) as Record<string, number> | undefined) ?? {}
+  const items = (question as unknown as { items: Array<{ name: string; title: string }> }).items
+  const total = totalOf(question)
+  const sum = items.reduce((acc, it) => acc + (Number(value[it.name]) || 0), 0)
+  const done = total !== null && sum === total
+  const over = total !== null && sum > total
+  const set = (name: string, raw: string) => {
+    if (question.isReadOnly) return
+    const next = { ...value }
+    if (raw === '') delete next[name]
+    else next[name] = Math.max(0, Number(raw))
+    question.value = Object.keys(next).length ? next : undefined
+  }
+  return (
+    // SurveyJS sets nowrap on this question type; the labels ran off the card.
+    <div className="space-y-2.5 whitespace-normal">
+      {items.map((it) => (
+        <label
+          key={it.name}
+          className="flex items-center gap-3 rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 focus-within:border-[color:var(--sjs-primary-backcolor)]"
+        >
+          <span className="min-w-0 flex-1 text-[15px] leading-snug text-slate-800">{it.title}</span>
+          <span className="flex shrink-0 items-center gap-1">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={total ?? undefined}
+              aria-label={it.title}
+              value={value[it.name] ?? ''}
+              onChange={(e) => set(it.name, e.target.value)}
+              className="h-11 w-16 rounded-lg border border-slate-200 text-center text-lg font-semibold tabular-nums text-slate-900 focus:outline-none"
+            />
+            {total === 100 && <span className="text-sm font-medium text-slate-500">%</span>}
+          </span>
+        </label>
+      ))}
+      {total !== null && (
+        <div className="pt-1" aria-live="polite">
+          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full transition-all duration-300"
+              style={{
+                width: `${Math.min(100, (sum / total) * 100)}%`,
+                background: done ? '#10b981' : over ? '#ef4444' : ACCENT,
+              }}
+            />
+          </div>
+          <p className={`mt-1.5 text-sm font-medium tabular-nums ${done ? 'text-emerald-600' : over ? 'text-red-600' : 'text-slate-500'}`}>
+            {done ? `Adds up to ${total} ✓` : over ? `${sum} — that is ${sum - total} over ${total}` : `${sum} of ${total}`}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 let registered = false
 
 /** Swap SurveyJS's renderers for ours. Idempotent; the respondent page calls it. */
@@ -487,6 +561,8 @@ export function registerRespondentControls(): void {
   const factory = ReactQuestionFactory.Instance
   factory.registerQuestion('matrix', ((props: { question: QuestionMatrixModel }) =>
     createElement(MatrixCarousel, props)) as never)
+  factory.registerQuestion('multipletext', ((props: { question: Question }) =>
+    createElement(ConstantSum, props)) as never)
   factory.registerQuestion('rating', ((props: { question: QuestionRatingModel }) =>
     createElement(RatingPad, props)) as never)
   factory.registerQuestion('ranking', ((props: { question: QuestionRankingModel }) =>
