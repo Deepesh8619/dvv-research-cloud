@@ -449,6 +449,9 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
         validation["unrecognised_rows"] = fields.extras
     if fields.randomize:
         validation["randomize"] = fields.randomize
+    if fields.numeric_range:
+        # "Allow 0-999": the bounds the compiler turns into a validator.
+        validation.update(fields.numeric_range)
     techniques = detect_techniques(fields.text or "", fields.notes or "", fields.show or "")
     if techniques:
         validation["techniques"] = techniques.to_dict()
@@ -470,6 +473,8 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
         validation=validation,
         extraction_method="spec_table",
         extraction_evidence=dict(fields.evidence),
+        # A screen-out stated only in part stays in front of a reviewer.
+        flags=[schema.FLAG_AMBIGUOUS_ROUTING] if "terminate_gap" in fields.evidence else [],
     )
 
 

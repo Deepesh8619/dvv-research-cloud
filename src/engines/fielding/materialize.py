@@ -192,6 +192,10 @@ def _specs_for_question(question: Question) -> list[_ColumnSpec]:
             question_ref=qid,
             question_text=text,
             provenance="fielding",
+            # "99: Prefer not to answer": labelled, and declared missing so a
+            # mean of ages is not dragged up by everyone who declined.
+            values={o.code: o.label for o in question.options},
+            missing_values=[o.code for o in question.options],
         )
         return [_ColumnSpec(var, lambda a, q=qid: _to_float(a.get(q)))]
 

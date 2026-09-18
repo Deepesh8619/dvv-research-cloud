@@ -11,7 +11,7 @@ different row labels, so these use several conventions, not one client's.
 
 from __future__ import annotations
 
-from src.core.survey_definition import QuestionType
+from src.core.survey_definition import QuestionType, evaluate
 from src.engines.questionnaire.spec_table import FIELD_ALIASES, parse_spec_table
 from src.intake.questionnaire_loader import DocumentBlock
 
@@ -456,3 +456,46 @@ def test_a_question_with_one_list_is_unchanged():
     fields = parse_spec_table(block)
     assert [o.label for o in fields.options] == ["Under 25", "25 or over"]
     assert fields.rows == [] and fields.cols == []
+
+
+# The RESP_AGE table exactly as the GBK document writes it.
+AGE = [
+    ["AGE"],
+    ["Q Name", "RESP_AGE"],
+    ["What is your age?"],
+    ["", "Response list:"],
+    ["", "[Numeric OE: 3-digit max]"],
+    ["99", "Prefer not to answer"],
+    ["Among who", "(blank)"],
+    ["Show / HV", "(blank)"],
+    ["Q type", "(blank)"],
+    ["Randomize", "(blank)"],
+    ["Other details", "Allow 0-999 to be entered\nTERMINATE if age<25 or age>?? OR if 99 selected"],
+]
+
+
+def test_a_number_box_with_a_way_out_is_a_number_box():
+    """One coded line beside "[Numeric OE]" was read as the whole answer list:
+    the question became a single choice whose only option was "Prefer not to
+    answer", and nobody could type an age."""
+    fields = parse_spec_table(_table(AGE))
+    assert fields.qtype is QuestionType.NUMERIC
+    assert fields.numeric_range == {"min": 0, "max": 999}
+    # 99 is kept — as a way out of typing, not as an answer list.
+    [opt_out] = fields.options
+    assert (opt_out.code, opt_out.label, opt_out.exclusive) == (99, "Prefer not to answer", True)
+    # And the reviewer is told 99 is also a typeable age.
+    assert "cannot be told apart" in fields.evidence["opt_out"]
+
+
+def test_the_stated_part_of_a_numeric_screen_out_is_applied_and_the_gap_is_flagged():
+    fields = parse_spec_table(_table(AGE))
+    rule = fields.terminate_if
+    assert rule is not None and rule.op == "or"
+    assert evaluate(rule, {"RESP_AGE": 24}) is True  # under 25
+    assert evaluate(rule, {"RESP_AGE": 99}) is True  # declined
+    assert evaluate(rule, {"RESP_AGE": 40}) is False
+    # "age>??" — a limit nobody wrote. Flagged for a person, never guessed,
+    # and not handed to a model that would overwrite the exact part.
+    assert "terminate_gap" in fields.evidence
+    assert "terminate" not in fields.missing

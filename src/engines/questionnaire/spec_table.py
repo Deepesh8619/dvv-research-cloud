@@ -157,6 +157,20 @@ _TERMINATE_AT_RE = re.compile(r"\bat\s+([A-Za-z][A-Za-z0-9_]{1,30})\b", re.I)
 # "3-99", "13 - 99": every punch from one bound to the other.
 _CODE_RANGE_RE = re.compile(r"^\s*(\d{1,3})\s*[-\u2013]\s*(\d{1,3})\s*$")
 
+# "[Numeric OE: 3-digit max]" in the response list: the respondent TYPES a
+# number. A coded line beside it ("99: Prefer not to answer") is a way out of
+# typing, not an answer list — read as one, the number box vanished and the
+# question became a single choice with one option.
+_NUMERIC_ENTRY_RE = re.compile(r"\[\s*numeric\b[^\]]*\]|\bnumeric\s+(?:OE|open)", re.I)
+# "Allow 0-999 to be entered"
+_ALLOWED_RANGE_RE = re.compile(r"\ballow\w*\s+(\d+)\s*(?:-|\u2013|to)\s*(\d+)", re.I)
+# "3-digit max"
+_DIGIT_MAX_RE = re.compile(r"(\d)\s*-?\s*digits?\s*max", re.I)
+# "age<25", "age >= 65": a screen-out on the number typed.
+_NUMERIC_BOUND_RE = re.compile(r"(?:^|[\s(,])[A-Za-z_]*\s*(<=|>=|<|>)\s*(\d+|\?\?+)")
+# "OR if 99 selected"
+_CODE_SELECTED_RE = re.compile(r"\b(\d{1,3})\s+(?:is\s+)?(?:selected|chosen)\b", re.I)
+
 _TYPE_WORDS = [
     ("multi", QuestionType.MULTI),
     ("multiple", QuestionType.MULTI),
@@ -191,6 +205,9 @@ class SpecTableFields:
     cols: list[Option] = field(default_factory=list)
     terminate_if: Expression | None = None
     terminate_verbatim: str | None = None
+    #: For a typed number: {"min": 0, "max": 999}. Options on a numeric question
+    #: are its opt-out codes ("99: Prefer not to answer").
+    numeric_range: dict[str, int] = field(default_factory=dict)
     base: str | None = None
     show: str | None = None
     randomize: str | None = None
@@ -343,6 +360,56 @@ def _infer_type(
     return None, ""
 
 
+def _numeric_range(text: str) -> dict[str, int]:
+    """The range a typed number may take, when the document states one."""
+    allowed = _ALLOWED_RANGE_RE.search(text)
+    if allowed:
+        low, high = int(allowed.group(1)), int(allowed.group(2))
+        if low <= high:
+            return {"min": low, "max": high}
+    digits = _DIGIT_MAX_RE.search(text)
+    if digits:
+        return {"min": 0, "max": 10 ** int(digits.group(1)) - 1}
+    return {}
+
+
+def _parse_numeric_terminate(
+    notes: str, qid: str, opt_outs: list[Option]
+) -> tuple[Expression | None, bool]:
+    """ "TERMINATE if age<25 or age>?? OR if 99 selected" on a typed number.
+
+    Returns the screen-out it can state exactly, and whether part of it could
+    NOT be read. A bound written "??" is a number the scripter never filled in:
+    the rest still holds (under 25 is out whatever the upper limit), and the
+    gap goes to a person rather than being guessed.
+    """
+    if not re.search(r"terminate|term\b|screen\s*-?\s*out", notes or "", re.I):
+        return None, False
+    rule = re.split(r"terminate|term\b|screen\s*-?\s*out", notes, maxsplit=1, flags=re.I)[1]
+    parts: list[Expression] = []
+    unread = False
+    for op, bound in _NUMERIC_BOUND_RE.findall(rule):
+        if bound.startswith("?"):
+            unread = True
+            continue
+        value = int(bound)
+        # Whole numbers, so "<= 24" is "< 25"; the model has no <= of its own.
+        if op == "<=":
+            op, value = "<", value + 1
+        elif op == ">=":
+            op, value = ">", value - 1
+        parts.append(Expression(op="lt" if op == "<" else "gt", qid=qid, value=value))
+    known = {o.code for o in opt_outs}
+    codes = [int(c) for c in _CODE_SELECTED_RE.findall(rule) if int(c) in known]
+    if codes:
+        parts.append(Expression(op="in", qid=qid, values=codes))
+    if not parts:
+        return None, True
+    expression = parts[0] if len(parts) == 1 else Expression(op="or", children=parts)
+    expression.verbatim_text = notes.strip()
+    return expression, unread
+
+
 def parse_spec_table(
     block: DocumentBlock, patterns: list[LearnedPattern] | None = None
 ) -> SpecTableFields | None:
@@ -360,6 +427,7 @@ def parse_spec_table(
     in_row_list = False
     in_list = False
 
+    table_text = "\n".join(" ".join(_cells(row)) for row in rows)
     for row in rows:
         cells = _cells(row)
 
@@ -445,7 +513,44 @@ def parse_spec_table(
             f"a variable list of {len(grid_rows)} rated on a "
             f"{len(grid_cols)}-point response list"
         )
-    fields.terminate_if = _parse_terminate(notes, options, qid)
+    numeric_entry = _NUMERIC_ENTRY_RE.search(table_text)
+    stated_type = (found.get("type") or "").strip()
+    if numeric_entry and not grid_rows and (
+        not stated_type or _BLANK_CELL.match(stated_type) or "numer" in stated_type.lower()
+    ):
+        fields.qtype = QuestionType.NUMERIC
+        fields.evidence["type"] = numeric_entry.group(0)
+        fields.numeric_range = _numeric_range(table_text)
+        if fields.numeric_range:
+            fields.evidence["range"] = (
+                f"{fields.numeric_range['min']}-{fields.numeric_range['max']}"
+            )
+        # The coded lines are ways out of typing a number.
+        for option in fields.options:
+            option.exclusive = True
+            option.anchored = True
+        clash = [
+            o.code for o in fields.options
+            if fields.numeric_range
+            and fields.numeric_range["min"] <= o.code <= fields.numeric_range["max"]
+        ]
+        if clash:
+            # 99 typed as an age and 99 meaning "prefer not to say" land in the
+            # same column as the same number. The document chose it; say so.
+            fields.evidence["opt_out"] = (
+                f"code {clash[0]} is also a number a respondent may type "
+                f"({fields.evidence.get('range')}) — the two cannot be told apart in the data"
+            )
+        fields.terminate_if, unread = _parse_numeric_terminate(notes, qid, fields.options)
+        if unread:
+            # Not sent to a model: it cannot know a number the scripter never
+            # wrote either, and it would overwrite the part that WAS exact.
+            fields.evidence["terminate_gap"] = (
+                "part of this screen-out is not stated (a bound written '??') — "
+                "the rest is applied; confirm the missing limit"
+            )
+    else:
+        fields.terminate_if = _parse_terminate(notes, options, qid)
     if fields.terminate_if is not None:
         fields.terminate_verbatim = notes.strip()
         fields.evidence["terminate"] = notes.strip()
@@ -461,7 +566,7 @@ def parse_spec_table(
     if fields.base and not re.fullmatch(r"[\w\s=,<>\-\d/]+", fields.base):
         fields.missing.append("base")
     if notes and re.search(r"terminate|term\b|screen\s*-?\s*out", notes, re.IGNORECASE):
-        if fields.terminate_if is None:
+        if fields.terminate_if is None and "terminate_gap" not in fields.evidence:
             # It states a screen-out we could not parse — never silently drop it.
             fields.missing.append("terminate")
 

@@ -3,7 +3,9 @@ import { Model } from 'survey-core'
 import type { Question, QuestionMatrixModel, QuestionRankingModel } from 'survey-core'
 import { describe, expect, it, vi } from 'vitest'
 
-import { MatrixCarousel, NumberStepper, TapToRank } from './controls'
+import { MatrixCarousel, NumberStepper, TapToRank, registerRespondentControls } from './controls'
+
+registerRespondentControls() // registers the optOuts property
 
 // Against a REAL SurveyJS model: the point of these controls is that they write
 // through the model, so the answer the server receives is the model's.
@@ -48,6 +50,22 @@ describe('NumberStepper', () => {
     fireEvent.click(plus) // past the maximum
     expect(model.getValue('Q')).toBe(2)
     expect((screen.getByRole('spinbutton') as HTMLInputElement).value).toBe('2')
+  })
+})
+
+describe('NumberStepper opt-out', () => {
+  it('stores the code, empties the box, and typing clears it', () => {
+    const { model, question } = survey({
+      type: 'text', inputType: 'number', optOuts: [{ value: 99, text: 'Prefer not to answer' }],
+    })
+    render(<NumberStepper question={question as Question} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Prefer not to answer' }))
+    expect(model.getValue('Q')).toBe(99)
+    // 99 is a choice here, not an age: the box stays empty.
+    expect((screen.getByRole('spinbutton') as HTMLInputElement).value).toBe('')
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '31' } })
+    expect(model.getValue('Q')).toBe(31)
+    expect(screen.getByRole('checkbox').getAttribute('aria-checked')).toBe('false')
   })
 })
 

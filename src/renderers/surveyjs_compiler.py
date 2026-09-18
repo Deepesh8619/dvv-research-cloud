@@ -203,6 +203,26 @@ def _numeric_validators(validation: dict[str, Any] | None) -> list[dict[str, Any
     return [validator]
 
 
+def _numeric_validators_with_opt_outs(
+    qid: str, validation: dict[str, Any] | None, codes: list[int]
+) -> list[dict[str, Any]]:
+    """The range, unless the answer is one of the opt-out codes."""
+    minimum = (validation or {}).get("min")
+    maximum = (validation or {}).get("max")
+    bounds = [f"{{{qid}}} >= {minimum}" if minimum is not None else "",
+              f"{{{qid}}} <= {maximum}" if maximum is not None else ""]
+    in_range = " and ".join(b for b in bounds if b)
+    if not in_range:
+        return []
+    opt_out = " or ".join(f"{{{qid}}} = {code}" for code in codes)
+    return [{
+        "type": "expression",
+        "expression": f"{opt_out} or ({in_range})",
+        "text": f"Please enter a number from {minimum if minimum is not None else ''}"
+                f"{' to ' + str(maximum) if maximum is not None else ''}.",
+    }]
+
+
 def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[str, Any]:
     """Compile one `Question` into its SurveyJS element dict."""
     qtype = question.type
@@ -239,6 +259,14 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
         element["type"] = "text"
         element["inputType"] = "number"
         validators = _numeric_validators(question.validation)
+        if question.options:
+            # "99: Prefer not to answer" beside a number box: a way out of
+            # typing. It is stored as its code, so the range check must let the
+            # code through even when the code sits outside the range.
+            element["optOuts"] = _choices(question.options, by_qid)
+            validators = _numeric_validators_with_opt_outs(
+                question.qid, question.validation, [o.code for o in question.options]
+            )
         if validators:
             element["validators"] = validators
     elif qtype == QuestionType.OPEN_TEXT:
