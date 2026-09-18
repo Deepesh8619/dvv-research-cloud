@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 
-import { FieldReport, QuestionSummary, fieldingApi } from '../api/client'
+import { FieldReport, QuestionLinks, QuestionSummary, fieldingApi } from '../api/client'
 
 /**
  * The numbers a researcher is asked for the morning after a launch.
@@ -80,12 +80,81 @@ function Stat({ label, value }: { label: string; value: number }) {
   )
 }
 
+// How a researcher reads a report: by kind, in the order a respondent meets them.
+const BUCKETS: Array<{ key: string; label: string; hint: string }> = [
+  { key: 'screener', label: 'Screener', hint: 'Who got in' },
+  { key: 'profile', label: 'Profile', hint: 'Who they are — what tables are cut by' },
+  { key: 'core', label: 'Core measures', hint: 'What the study measures' },
+  { key: 'loop', label: 'Brand loops', hint: 'Asked once per brand' },
+  { key: 'open_end', label: 'Open-ends', hint: 'What people wrote' },
+  { key: 'hidden', label: 'Hidden', hint: 'Computed, not asked' },
+]
+
+// Following a link may cross buckets: the report clears its filter first.
+const GoTo = createContext<(qid: string) => void>(scrollToCard)
+
+function scrollToCard(qid: string) {
+  const card = document.getElementById(`card-${qid}`)
+  if (!card) return
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  card.classList.add('ring-2', 'ring-indigo-400')
+  window.setTimeout(() => card.classList.remove('ring-2', 'ring-indigo-400'), 1400)
+}
+
+/** A link to another question: click to go to it. */
+function Chip({ label, qids, tone }: { label: string; qids: string[]; tone: string }) {
+  const goTo = useContext(GoTo)
+  if (qids.length === 0) return null
+  return (
+    <span className={`inline-flex flex-wrap items-center gap-1 rounded-lg px-2 py-1 text-xs ${tone}`}>
+      <span className="opacity-75">{label}</span>
+      {qids.map((qid) => (
+        <button
+          key={qid}
+          type="button"
+          onClick={() => goTo(qid)}
+          className="rounded bg-white/70 px-1.5 font-mono font-medium hover:bg-white"
+          title={`Go to ${qid}`}
+        >
+          {qid}
+        </button>
+      ))}
+    </span>
+  )
+}
+
+/** Everything the questionnaire says connects this question to others. */
+function Links({ links }: { links?: QuestionLinks }) {
+  if (!links) return null
+  const any =
+    links.asked_if.length + links.screens_out_on.length + links.options_from.length +
+    links.text_from.length + links.computed_from.length + links.used_by.length > 0 || links.loop_of
+  if (!any) return null
+  return (
+    <div className="mb-4 flex flex-wrap gap-1.5">
+      <Chip label="asked if" qids={links.asked_if} tone="bg-sky-50 text-sky-800" />
+      <Chip label="screens out on" qids={links.screens_out_on} tone="bg-amber-50 text-amber-800" />
+      <Chip label="options from" qids={links.options_from} tone="bg-violet-50 text-violet-800" />
+      <Chip label="text uses" qids={links.text_from} tone="bg-violet-50 text-violet-800" />
+      <Chip label="computed from" qids={links.computed_from} tone="bg-slate-100 text-slate-700" />
+      {links.loop_of && <Chip label="loop of" qids={[links.loop_of]} tone="bg-emerald-50 text-emerald-800" />}
+      <Chip label="decides" qids={links.used_by} tone="bg-indigo-50 text-indigo-800" />
+    </div>
+  )
+}
+
 /** One question, answered: what a researcher looks at first. */
 function QuestionCard({ q }: { q: QuestionSummary }) {
-  // Multi-select shares sum past 100%: each is a share of the people ASKED.
-  const of = q.base
+  // Every share is of the people who ANSWERED this question. Of all completes,
+  // a question asked of 46% had a grid row reading 0 / 15 / 31% — adding up to
+  // 46, which reads as most people skipping it. (Multi-select still sums past
+  // 100%: each option is its own share of those answering.)
+  const of = q.answered
   return (
-    <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <article
+      id={`card-${q.qid}`}
+      className="scroll-mt-24 rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow"
+    >
       <header className="mb-4">
         <span className="mb-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-500">
           {q.qid}
@@ -94,8 +163,13 @@ function QuestionCard({ q }: { q: QuestionSummary }) {
         <p className="mt-1 text-sm font-medium text-indigo-600 tabular-nums">
           {q.answered} {q.answered === 1 ? 'response' : 'responses'}
           {q.type === 'rank' && <span className="text-slate-400 font-normal"> · ranked 1st</span>}
+          {/* Asked of fewer than all completes: say so, or every share reads as of everyone. */}
+          {q.base > 0 && q.answered < q.base && q.links?.asked_if.length ? (
+            <span className="font-normal text-slate-400"> · asked of {pct(q.answered, q.base)}</span>
+          ) : null}
         </p>
       </header>
+      <Links links={q.links} />
 
       {q.options && (
         <ul className="space-y-3">
@@ -205,7 +279,7 @@ function Tabular({ questions }: { questions: QuestionSummary[] }) {
                 </td>
                 <td className="px-4 py-2 text-slate-700">{label}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{n}</td>
-                <td className="px-4 py-2 text-right tabular-nums font-medium">{pct(n, q.base)}</td>
+                <td className="px-4 py-2 text-right tabular-nums font-medium">{pct(n, q.answered)}</td>
               </tr>
             ))
           })}
@@ -217,9 +291,19 @@ function Tabular({ questions }: { questions: QuestionSummary[] }) {
 
 function Responses({ report }: { report: FieldReport }) {
   const [view, setView] = useState<'analytics' | 'tabular'>('analytics')
-  const questions = report.questions ?? []
+  const [bucket, setBucket] = useState<string>('all')
+  const all = report.questions ?? []
+  const counts = Object.fromEntries(BUCKETS.map((b) => [b.key, all.filter((q) => q.bucket === b.key).length]))
+  const questions = bucket === 'all' ? all : all.filter((q) => q.bucket === bucket)
+  const goTo = (qid: string) => {
+    if (bucket !== 'all' && !questions.some((q) => q.qid === qid)) {
+      setBucket('all')
+      window.setTimeout(() => scrollToCard(qid), 60) // after the card mounts
+    } else scrollToCard(qid)
+  }
   const completes = report.dispositions.complete
   return (
+    <GoTo.Provider value={goTo}>
     <section className="mt-6">
       <div className="mb-4 flex flex-wrap items-center gap-4">
         <h3 className="text-xl font-semibold text-slate-900 tabular-nums">
@@ -240,22 +324,76 @@ function Responses({ report }: { report: FieldReport }) {
             </button>
           ))}
         </div>
-        <span className="text-xs text-slate-400">completes only</span>
+        <span className="text-xs text-slate-400">completes only · % of those who answered</span>
       </div>
+      {view === 'analytics' && all.some((q) => q.bucket) && (
+        <div className="mb-5 flex flex-wrap gap-2" role="tablist" aria-label="Buckets">
+          {[{ key: 'all', label: 'All', hint: '' }, ...BUCKETS].map((b) => {
+            const n = b.key === 'all' ? all.length : counts[b.key]
+            if (!n) return null
+            const on = bucket === b.key
+            return (
+              <button
+                key={b.key}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                onClick={() => setBucket(b.key)}
+                title={b.hint}
+                className={`rounded-full border px-3.5 py-1.5 text-sm transition-colors ${
+                  on
+                    ? 'border-slate-900 bg-slate-900 text-white'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                }`}
+              >
+                {b.label} <span className={`tabular-nums ${on ? 'text-slate-300' : 'text-slate-400'}`}>{n}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
       {completes === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
           The first completed interview will appear here.
         </p>
       ) : view === 'analytics' ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {questions.map((q) => (
-            <QuestionCard key={q.qid} q={q} />
-          ))}
+        <div className="space-y-8">
+          {BUCKETS.filter((b) => (bucket === 'all' || bucket === b.key) && counts[b.key] > 0).map((b) => {
+            const inBucket = questions.filter((q) => q.bucket === b.key)
+            const suggested = inBucket.filter((q) => q.bucket_suggested).length
+            return (
+              <section key={b.key}>
+                <div className="mb-3 flex items-baseline gap-3">
+                  <h4 className="text-base font-semibold text-slate-900">{b.label}</h4>
+                  <span className="text-sm text-slate-500">{b.hint}</span>
+                  {suggested > 0 && (
+                    <span className="text-xs text-amber-700" title="Placed by wording, not structure">
+                      {suggested} placed by wording — check
+                    </span>
+                  )}
+                </div>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {inBucket.map((q) => (
+                    <QuestionCard key={q.qid} q={q} />
+                  ))}
+                </div>
+              </section>
+            )
+          })}
+          {/* Cards from a report built before buckets existed. */}
+          {questions.some((q) => !q.bucket) && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {questions.filter((q) => !q.bucket).map((q) => (
+                <QuestionCard key={q.qid} q={q} />
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <Tabular questions={questions} />
       )}
     </section>
+    </GoTo.Provider>
   )
 }
 

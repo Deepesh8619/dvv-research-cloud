@@ -660,6 +660,24 @@ export interface QuestionSummary {
   rows?: Array<{ code: number; label: string; counts: number[] }>
   numeric?: { mean: number; median: number; min: number; max: number }
   verbatims?: string[]
+  /** screener | profile | core | loop | open_end | hidden */
+  bucket?: string
+  bucket_reason?: string
+  /** Read from wording, not structure: a person should confirm it. */
+  bucket_suggested?: boolean
+  links?: QuestionLinks
+}
+
+/** What the questionnaire states about how this question connects. */
+export interface QuestionLinks {
+  asked_if: string[]
+  asked_if_text: string | null
+  screens_out_on: string[]
+  options_from: string[]
+  text_from: string[]
+  computed_from: string[]
+  loop_of: string | null
+  used_by: string[]
 }
 
 export interface FieldingLink extends FieldingRedirects {

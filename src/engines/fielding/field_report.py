@@ -33,6 +33,7 @@ from src.engines.fielding.decisions import (
     matching_cells,
     terminating_question,
 )
+from src.engines.questionnaire.buckets import HIDDEN, bucket_of, links
 
 
 @dataclass
@@ -149,11 +150,18 @@ def build_field_report(
         {"qid": qid, "n": n}
         for qid, n in sorted(dropoff.items(), key=lambda kv: (-kv[1], kv[0]))
     ]
-    report.questions = [
-        summarise(question, completed)
-        for question in survey.questions
-        if question.type is not QuestionType.INFO
-    ]
+    # Each card carries its kind and its links, so the report can be read by
+    # bucket and followed from one question to the ones it decides.
+    connections = links(survey)
+    report.questions = []
+    for question in survey.questions:
+        derived = bucket_of(question)[0] == HIDDEN
+        if question.type is QuestionType.INFO and not derived:
+            continue  # display text: nobody answers it
+        card = summarise(question, completed)
+        card["bucket"], card["bucket_reason"], card["bucket_suggested"] = bucket_of(question)
+        card["links"] = connections.get(question.qid, {})
+        report.questions.append(card)
     return report
 
 
