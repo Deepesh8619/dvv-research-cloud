@@ -35,8 +35,10 @@ from dataclasses import dataclass, field
 from src.core.survey_definition import Expression, Option, QuestionType
 from src.engines.questionnaire.learned import (
     LearnedPattern,
+    learned_hidden_variable,
     learned_option_tags,
     learned_randomize,
+    learned_screen_out_range,
     learned_type,
 )
 from src.engines.questionnaire.routing_prose import parse_routing
@@ -175,6 +177,52 @@ _TERMINATE_TAG = re.compile(r"\bTERMINATE\b|\bSCREEN\s*-?\s*OUT\b", re.I)
 _EXCLUSIVE_TAG = re.compile(r"\bEXCLUSIVE\b", re.I)
 _ANCHOR_TAG = re.compile(r"\bANCHOR\b", re.I)
 
+# "CONTINUE IF AGES 18-60. TERMINATE ALL OTHERS" — the one range-screening
+# wording common enough across client documents to read without teaching.
+# Anything else needs a founder to teach it (screen_out_range in learned.py).
+_CONTINUE_IF_RE = re.compile(r"\bCONTINUE\s+IF\b", re.I)
+_TERMINATE_ALL_OTHERS_RE = re.compile(r"\bTERMINATE\s+ALL\s+OTHERS\b", re.I)
+_RANGE_RE = re.compile(r"(\d{1,3})\s*-\s*(\d{1,3})")
+
+
+def _range_terminate(
+    body: str, qid: str, patterns: list[LearnedPattern] | None
+) -> tuple[Expression, str] | None:
+    """A document-level screen-out stated as a range, not per-option codes.
+
+    Two ways in: the built-in "CONTINUE IF ... N-M ... TERMINATE ALL OTHERS"
+    wording (no teaching needed), or a founder-taught screen_out_range phrase
+    with the range read right after it. Either way the result is the same
+    shape: terminate if the answer is below the low bound OR above the high
+    one — never a per-option code, since this question has none.
+
+    Returns (expression, evidence) or None; evidence names the built-in match
+    or the taught phrase that found it, so a reviewer can see where it came
+    from without expanding the expression.
+    """
+    if _CONTINUE_IF_RE.search(body) and _TERMINATE_ALL_OTHERS_RE.search(body):
+        match = _RANGE_RE.search(body)
+        if match:
+            low, high = int(match.group(1)), int(match.group(2))
+            if low <= high:
+                return _range_expression(qid, low, high, body), body
+    taught = learned_screen_out_range(patterns, body)
+    if taught is not None:
+        low, high, matched = taught
+        return _range_expression(qid, low, high, body), f"learned: {matched}"
+    return None
+
+
+def _range_expression(qid: str, low: int, high: int, verbatim: str) -> Expression:
+    return Expression(
+        op="or",
+        children=[
+            Expression(op="lt", qid=qid, value=low),
+            Expression(op="gt", qid=qid, value=high),
+        ],
+        verbatim_text=verbatim,
+    )
+
 # A scale row: "0=Not Important At All | 1 | 2 | ... | 10=Very Important".
 # Pipe-separated points above a statement list is how these documents write a
 # rating grid; the statements below are the rows, not the answer options.
@@ -230,7 +278,7 @@ def is_single_select_wording(text: str) -> bool:
     return bool(_SINGLE_WORDING_RE.search(text or ""))
 
 
-def is_derived_wording(text: str) -> bool:
+def is_derived_wording(text: str, patterns: list[LearnedPattern] | None = None) -> bool:
     """All-caps CODE/RECODE wording = an instruction to the scripter.
 
     The "no lowercase" test is what keeps this from swallowing a real question
@@ -238,8 +286,14 @@ def is_derived_wording(text: str) -> bool:
     and speak to respondents in sentence case. Punctuation varies (en dashes,
     ampersands, brackets), so testing case is more portable than enumerating
     the allowed characters — which is how the first version missed most of them.
+
+    A taught `hidden_variable` phrase ("SAMPLE SOURCE", "AUDIENCE CODE")
+    overrides this heuristic entirely: a founder naming their client's own
+    convention is exact, not a guess, so it applies whatever the casing.
     """
     stripped = text.strip()
+    if learned_hidden_variable(patterns, stripped) is not None:
+        return True
     # A question mark means somebody is being asked: "WHAT IS YOUR ZIP CODE?"
     # shouted in capitals is still a question, never a computed variable.
     return (
@@ -564,6 +618,8 @@ def parse_prose_question(
     options: list[Option] = []
     terminate_codes: list[int] = []
     terminate_lines: list[str] = []
+    range_terminate: Expression | None = None
+    range_terminate_evidence = ""
     show_if: Expression | None = None
     show_if_verbatim = ""
     written_codes: list[int | None] = []
@@ -608,10 +664,18 @@ def parse_prose_question(
                 ) and not re.search(r"KEEP ORDER|DO NOT RANDOMI[SZ]E", body, re.I):
                     randomize = True
                     randomize_evidence = f"[{body}]"
-                if _TERMINATE_TAG.search(body):
-                    # A document-level terminate rule ("CONTINUE IF AGES 18-60,
-                    # TERMINATE ALL OTHERS") is prose about a range, not
-                    # per-option codes — record it, do not invent an expression.
+                range_result = _range_terminate(body, qid, patterns)
+                if range_result is not None:
+                    # A document-level terminate rule stated as a RANGE
+                    # ("CONTINUE IF AGES 18-60, TERMINATE ALL OTHERS"), not
+                    # per-option codes — built the real expression above rather
+                    # than deferring it, since this question has no option list
+                    # for a code-based screen-out to attach to.
+                    range_terminate, range_terminate_evidence = range_result
+                elif _TERMINATE_TAG.search(body):
+                    # Stated in prose but not a range we can read (built-in or
+                    # taught) — preserve it and let a model resolve it, never
+                    # invent an expression.
                     terminate_lines.append(body)
                 elif show_if is None:
                     # "[IF S2 = 2 or S2=3]" states this question's base. First
@@ -803,12 +867,16 @@ def parse_prose_question(
         fields.evidence["base"] = f"[{show_if_verbatim}]"
     if randomize_evidence:
         fields.evidence["randomize"] = randomize_evidence
-    if question_text and is_derived_wording(question_text):
+    taught_hidden = question_text and learned_hidden_variable(patterns, question_text)
+    if question_text and (taught_hidden or is_derived_wording(question_text, patterns)):
         # Scripter-computed, not asked. Labelled the same way the extractor
         # labels a HID_ variable, so the review UI says "needs manual setup".
         fields.derived = True
         fields.qtype = QuestionType.INFO
-        fields.evidence["type"] = "an all-caps CODE instruction to the scripter"
+        fields.evidence["type"] = (
+            f"learned: {taught_hidden}" if taught_hidden
+            else "an all-caps CODE instruction to the scripter"
+        )
     elif scale_row:
         fields.qtype = QuestionType.GRID_SINGLE
         fields.evidence["type"] = scale_row
@@ -830,7 +898,11 @@ def parse_prose_question(
         if type_evidence:
             fields.evidence["type"] = type_evidence
 
-    if terminate_codes:
+    if range_terminate is not None:
+        fields.terminate_if = range_terminate
+        fields.terminate_verbatim = range_terminate.verbatim_text
+        fields.evidence["terminate"] = range_terminate_evidence
+    elif terminate_codes:
         fields.terminate_if = Expression.from_dict(
             {
                 "op": "in",

@@ -14,6 +14,7 @@ from src.core.survey_definition import (
 from src.engines.fielding.materialize import plan_datamap
 from src.engines.questionnaire import schema
 from src.engines.questionnaire.extractor import ExtractionResult, _flag_derived_variable
+from src.engines.questionnaire.learned import LearnedPattern
 from src.engines.questionnaire.prose_directives import (
     is_quota_instruction,
     parse_prose_question,
@@ -127,3 +128,25 @@ def test_a_named_source_or_a_hid_prefix_needs_no_confirmation():
     _flag_derived_variable(prefixed, _chunk("HID_SEGMENT"))
     assert schema.FLAG_DERIVED_VARIABLE_UNCONFIRMED not in prefixed.flags
     assert "derived" in prefixed.question.extraction_evidence
+
+
+def test_a_taught_hidden_variable_phrase_flags_a_question_derived():
+    """A founder-taught phrase ("SAMPLE SOURCE") is exact, not a heuristic guess
+    from ALL-CAPS wording — so it needs no confirmation, whatever the casing,
+    and it works through both the extractor's flag and the prose parser's own
+    derived detection."""
+    result = ExtractionResult(
+        question=Question(qid="S9", text="Sample Source (respondent panel code)")
+    )
+    _flag_derived_variable(
+        result, _chunk("S9"), [LearnedPattern("hidden_variable", "SAMPLE SOURCE")]
+    )
+    assert schema.FLAG_DERIVED_VARIABLE in result.flags
+    assert schema.FLAG_DERIVED_VARIABLE_UNCONFIRMED not in result.flags
+    assert result.question.type is QuestionType.INFO
+
+    fields = parse_prose_question(
+        "S9. Sample Source", "S9", [LearnedPattern("hidden_variable", "SAMPLE SOURCE")]
+    )
+    assert fields.derived is True
+    assert fields.qtype is QuestionType.INFO

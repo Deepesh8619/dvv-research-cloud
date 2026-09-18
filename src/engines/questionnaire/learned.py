@@ -10,12 +10,14 @@ parsers read directly, so the second document that uses a convention is parsed
 for free. The measurable claim is cost per document falling as founders work,
 not just accuracy rising.
 
-Four kinds, one per decision the parsers actually make:
+Six kinds, one per decision the parsers actually make:
 
-    type_signal      "[SHOWCARD]"      -> single          (both parsers)
-    field_alias      "Asked of:"       -> base            (spec table rows)
-    option_tag       "[SO]"            -> terminate       (option suffixes)
-    randomize_signal "[SCRAMBLE]"      -> (no value)      (directive lines)
+    type_signal      "[SHOWCARD]"        -> single          (both parsers)
+    field_alias      "Asked of:"         -> base            (spec table rows)
+    option_tag       "[SO]"              -> terminate       (option suffixes)
+    randomize_signal "[SCRAMBLE]"        -> (no value)      (directive lines)
+    screen_out_range "CONTINUE IF AGES"  -> (no value)      (numeric range screen-out)
+    hidden_variable  "SAMPLE SOURCE"     -> (no value)      (computed, never asked)
 
 **Patterns are literal fragments, not regexes.** A founder types what they see
 in the document — `[SHOWCARD]` — and it is matched case-insensitively as a
@@ -31,6 +33,7 @@ free of `api.db`.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from src.core.survey_definition import QuestionType
@@ -45,7 +48,14 @@ FIELD_VALUES = frozenset(
 OPTION_TAG_VALUES = frozenset({"terminate", "exclusive", "anchor"})
 
 PATTERN_KINDS = frozenset(
-    {"type_signal", "field_alias", "option_tag", "randomize_signal"}
+    {
+        "type_signal",
+        "field_alias",
+        "option_tag",
+        "randomize_signal",
+        "screen_out_range",
+        "hidden_variable",
+    }
 )
 
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
@@ -61,7 +71,8 @@ class LearnedPattern:
 
     `pattern` is a literal fragment as it appears in the document.
     `value` is what it means — see `_ALLOWED_VALUES`; unused by
-    `randomize_signal`, whose presence is the whole meaning.
+    `randomize_signal`, `screen_out_range` and `hidden_variable`, whose
+    presence is the whole meaning.
     """
 
     kind: str
@@ -170,6 +181,50 @@ def learned_randomize(
     return None
 
 
+# The range written after a taught screen_out_range phrase: "CONTINUE IF AGES
+# 18-60" -> 18, 60. Fixed and internal, never built from what a founder types —
+# the taught phrase only says WHERE to look; this regex says HOW to read what
+# follows it, same security boundary as every other kind here.
+_RANGE_AFTER_RE = re.compile(r"(\d{1,3})\s*-\s*(\d{1,3})")
+
+
+def learned_screen_out_range(
+    patterns: list[LearnedPattern] | tuple[LearnedPattern, ...] | None, text: str
+) -> tuple[int, int, str] | None:
+    """A taught screen_out_range phrase in `text`, with the range after it.
+
+    Returns (low, high, matched pattern) for the first taught phrase whose
+    following text holds a parseable N-M range; None if no taught phrase
+    matches or none is followed by one.
+    """
+    haystack = text or ""
+    low_haystack = haystack.lower()
+    for pattern in of_kind(patterns, "screen_out_range"):
+        needle = pattern.needle
+        if not needle:
+            continue
+        idx = low_haystack.find(needle)
+        if idx == -1:
+            continue
+        match = _RANGE_AFTER_RE.search(haystack[idx + len(needle) :])
+        if not match:
+            continue
+        low, high = int(match.group(1)), int(match.group(2))
+        if low <= high:
+            return low, high, pattern.pattern
+    return None
+
+
+def learned_hidden_variable(
+    patterns: list[LearnedPattern] | tuple[LearnedPattern, ...] | None, text: str
+) -> str | None:
+    """The taught hidden-variable phrase found in `text`, if any."""
+    for pattern in of_kind(patterns, "hidden_variable"):
+        if _matches(pattern, text):
+            return pattern.pattern
+    return None
+
+
 def _demo() -> None:
     """Self-check: taught patterns win, bad ones are refused, empties can't match."""
     patterns = [
@@ -177,6 +232,8 @@ def _demo() -> None:
         LearnedPattern("field_alias", "Asked of", "base"),
         LearnedPattern("option_tag", "[SO]", "terminate"),
         LearnedPattern("randomize_signal", "[SCRAMBLE]"),
+        LearnedPattern("screen_out_range", "CONTINUE IF AGES"),
+        LearnedPattern("hidden_variable", "SAMPLE SOURCE"),
     ]
     assert learned_type(patterns, "Q1 [showcard]") == (
         QuestionType.SINGLE,
@@ -186,6 +243,17 @@ def _demo() -> None:
     assert learned_field(patterns, "Asked of:") == "base"
     assert learned_option_tags(patterns, "SO") == {"terminate"}
     assert learned_randomize(patterns, "[PN: SCRAMBLE]") == "[SCRAMBLE]"
+    assert learned_screen_out_range(
+        patterns, "continue if ages 18-60. terminate all others"
+    ) == (18, 60, "CONTINUE IF AGES")
+    assert learned_screen_out_range(patterns, "nothing here") is None
+    assert learned_hidden_variable(patterns, "S9. Sample Source") == "SAMPLE SOURCE"
+    # A regex-looking taught phrase is matched literally, never compiled: "."
+    # would match any character as a regex, so "SAMPLE" would wrongly match a
+    # "S.MPLE" pattern if it were compiled. Literal matching refuses that.
+    regex_pattern = [LearnedPattern("hidden_variable", "S.MPLE")]
+    assert learned_hidden_variable(regex_pattern, "the wording says SAMPLE here") is None
+    assert learned_hidden_variable(regex_pattern, "the wording says S.MPLE here") == "S.MPLE"
 
     # An empty needle is a substring of everything — it must never be stored.
     assert validate_pattern("type_signal", "  ", "single") is not None

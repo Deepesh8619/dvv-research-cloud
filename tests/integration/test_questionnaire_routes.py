@@ -251,6 +251,86 @@ def test_patch_updates_question(client):
     assert detail["text"] == "How old are you (in years)?"
 
 
+def test_patch_constant_sum_round_trips(client):
+    """Editing a plain numeric into "adds up to" (constant sum) by hand: the
+    UI sends type=numeric + rows + validation.sum, and what comes back — and
+    what compiles — must be the real constant-sum shape (multipletext + a sum
+    validator), not a display-only convention."""
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    resp = test_client.patch(
+        "/api/studies/study_q1/questionnaire/questions/Q1",
+        json={
+            "type": "numeric",
+            "text": "Split 100% across these",
+            "rows": [
+                {"code": 1, "label": "Brands I already trust"},
+                {"code": 2, "label": "Brands new to me"},
+            ],
+            "validation": {"min": 0, "max": 100, "sum": 100},
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["type"] == "numeric"
+    assert [r["code"] for r in body["rows"]] == [1, 2]
+    assert body["validation"]["sum"] == 100
+
+    # Persisted, not just echoed.
+    detail = test_client.get("/api/studies/study_q1/questionnaire/questions/Q1").json()
+    assert detail["rows"] is not None
+    assert detail["validation"] == {"min": 0, "max": 100, "sum": 100}
+
+    # Compiles to SurveyJS as a real constant-sum: one box per row, plus the
+    # expression validator that enforces the total.
+    from src.core.survey_definition import SurveyDefinition
+    from src.renderers.surveyjs_compiler import compile_to_surveyjs
+
+    survey = SurveyDefinition.from_json(_fetch_definition_json(session_factory, "study_q1"))
+    compiled = compile_to_surveyjs(survey)
+    element = next(e for p in compiled["pages"] for e in p["elements"] if e["name"] == "Q1")
+    assert element["type"] == "multipletext"
+    assert [item["name"] for item in element["items"]] == ["1", "2"]
+    assert element["validators"][0]["expression"] == "{Q1.1} + {Q1.2} = 100"
+
+
+def test_patch_plain_numeric_edit_leaves_rows_none(client):
+    """A numeric question WITHOUT rows stays a plain number — editing its text
+    (or its range) must not invent a constant-sum shape nobody asked for."""
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    resp = test_client.patch(
+        "/api/studies/study_q1/questionnaire/questions/Q1",
+        json={"validation": {"min": 0, "max": 120}},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["rows"] is None
+    assert body["validation"] == {"min": 0, "max": 120}
+
+
+def _fetch_definition_json(session_factory, study_id: str) -> str:
+    from api.db import QuestionnaireDB
+
+    db = session_factory()
+    try:
+        row = (
+            db.query(QuestionnaireDB)
+            .filter(QuestionnaireDB.study_id == study_id)
+            .order_by(QuestionnaireDB.created_at.desc())
+            .first()
+        )
+        return row.definition_json
+    finally:
+        db.close()
+
+
 def test_patch_rejects_invalid_edit(client):
     """An edit that breaks SurveyDefinition.validate() (duplicate option codes)
     must be rejected and NOT persisted."""

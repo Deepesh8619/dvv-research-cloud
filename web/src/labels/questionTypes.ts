@@ -29,6 +29,13 @@ export const QUESTION_TYPE_LABELS: Record<string, TypeLabel> = {
     label: 'Not a question',
     hint: 'Shown as text, or computed by the scripter — nothing is asked here.',
   },
+  // UI-only: not a wire type. Saved as numeric + rows + validation.sum (see
+  // src/engines/questionnaire/constant_sum.py) — this only lets the editor
+  // offer it as one choice instead of "pick numeric, then go add rows by hand".
+  constant_sum: {
+    label: 'Adds up to (constant sum)',
+    hint: 'Respondent splits a number across items so they add up to a fixed total.',
+  },
 }
 
 export function typeLabel(type: string | null | undefined): string {

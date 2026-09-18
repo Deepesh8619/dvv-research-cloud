@@ -823,6 +823,15 @@ def _apply_update(question, request: QuestionUpdateRequest) -> None:
         question.terminate_if = (
             Expression.from_dict(request.terminate_if) if request.terminate_if else None
         )
+    if "validation" in provided:
+        # Merged, not replaced: `validation` also carries `techniques` (masks,
+        # pipes) and extraction diagnostics that an edit to the numeric range or
+        # constant-sum total must not wipe. Explicit null is still a full clear.
+        question.validation = (
+            {**(question.validation or {}), **request.validation}
+            if request.validation is not None
+            else None
+        )
 
 
 @router.patch("/studies/{study_id}/questionnaire/questions/{qid}")

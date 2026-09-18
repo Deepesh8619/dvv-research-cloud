@@ -108,3 +108,41 @@ describe('option code box', () => {
     expect(codes()[1].value).toBe('98')
   })
 })
+
+describe('constant sum editor', () => {
+  it('shows no items editor for a plain numeric question', () => {
+    renderDetail(question({ type: 'numeric', rows: null, options: [] }))
+    expect(screen.queryByText('Items')).toBeNull()
+  })
+
+  it('picking "Adds up to (constant sum)" reveals the items editor', async () => {
+    const user = userEvent.setup()
+    renderDetail(question({ type: 'numeric', rows: null, options: [] }))
+
+    await user.selectOptions(screen.getByRole('combobox'), 'constant_sum')
+
+    expect(screen.getByText('Items')).toBeTruthy()
+    const total = screen.getByLabelText('Must total') as HTMLInputElement
+    expect(total.value).toBe('100')
+  })
+
+  it('loads an existing constant-sum question pre-filled', () => {
+    renderDetail(
+      question({
+        type: 'numeric',
+        options: [],
+        rows: [
+          { code: 1, label: 'Brands I already trust' },
+          { code: 2, label: 'Brands new to me' },
+        ],
+        validation: { min: 0, max: 100, sum: 100 },
+      }),
+    )
+
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('constant_sum')
+    expect(screen.getByDisplayValue('Brands I already trust')).toBeTruthy()
+    expect(screen.getByDisplayValue('Brands new to me')).toBeTruthy()
+    const total = screen.getByLabelText('Must total') as HTMLInputElement
+    expect(total.value).toBe('100')
+  })
+})
