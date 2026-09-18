@@ -65,6 +65,13 @@ export const FLAG_INFO: Record<string, FlagInfo> = {
     blocking: false,
     severity: 'warn',
   },
+  LIST_INHERITED: {
+    label: 'List copied — check',
+    description:
+      'The wording points at a list ("each of these brands") without naming it, so the nearest earlier list of that kind was copied in. It decides the data columns: confirm it is the right one, or edit the rows.',
+    blocking: false,
+    severity: 'warn',
+  },
 }
 
 export function flagInfo(code: string): FlagInfo {
