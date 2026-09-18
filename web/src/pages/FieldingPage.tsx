@@ -13,6 +13,7 @@ import { useAuth } from '../auth/AuthContext'
 import DryRunPanel from '../components/DryRunPanel'
 import FieldReportPanel from '../components/FieldReportPanel'
 import LiveResponsesPanel from '../components/LiveResponsesPanel'
+import Preflight from '../components/review/Preflight'
 import SoftLaunchPanel from '../components/SoftLaunchPanel'
 import { CardListSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
@@ -488,6 +489,8 @@ function CreatePanel({
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [blocked, setBlocked] = useState<string | null>(null)
+  // The pre-link check runs first; the link is created from its verdict.
+  const [checking, setChecking] = useState(false)
   const [showRedirects, setShowRedirects] = useState(false)
   const [redirects, setRedirects] = useState<FieldingRedirects>({})
   // '' = inherit the survey's default theme (don't stamp an override on the link).
@@ -517,6 +520,7 @@ function CreatePanel({
       setTheme('')
       setShowRedirects(false)
       setBlocked(null)
+      setChecking(false)
       onCreated()
     } catch (err) {
       const message = errorMessage(err) || 'Could not create fielding link'
@@ -541,14 +545,23 @@ function CreatePanel({
           </p>
         </div>
         <button
-          onClick={() => handleCreate(false)}
-          disabled={creating || !canCreate}
+          onClick={() => { setError(null); setChecking(true) }}
+          disabled={creating || checking || !canCreate}
           title={canCreate ? '' : 'The study needs an approved questionnaire first'}
           className="bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600 disabled:opacity-50 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
         >
-          {creating ? 'Creating…' : 'Create link'}
+          {creating ? 'Creating…' : checking ? 'Checking…' : 'Create link'}
         </button>
       </div>
+
+      {checking && (
+        <Preflight
+          studyId={studyId}
+          creating={creating}
+          onProceed={(force) => void handleCreate(force)}
+          onCancel={() => setChecking(false)}
+        />
+      )}
 
       {blocked && (
         <div className="mt-3 border border-red-200 bg-red-50/60 rounded-md px-3 py-2.5">

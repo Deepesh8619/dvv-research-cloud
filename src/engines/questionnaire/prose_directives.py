@@ -207,7 +207,10 @@ def _is_answer_blank(line: str) -> bool:
 # "CODE AGE", "RECODE REGION" — and "BUBBLE AUDIENCE CODE", where the verb
 # comes last. Anywhere in the line: the all-caps test below is what keeps a
 # respondent's question out.
-_DERIVED_RE = re.compile(r"(?<!ZIP )(?<!POSTAL )(?<!AREA )(?<!PROMO )\b(RE)?CODE\b")
+# "SAMPLE SPLIT", "RANDOMLY ASSIGN": the scripter assigns it — nobody is asked.
+_DERIVED_RE = re.compile(
+    r"(?<!ZIP )(?<!POSTAL )(?<!AREA )(?<!PROMO )\b(RE)?CODE\b|\bSPLIT\b|\bRANDOMLY ASSIGN"
+)
 
 
 # Wordings that cannot be multi-select whatever the scripter left in the type
@@ -342,6 +345,18 @@ _INSTRUCTION_VERB = re.compile(
     r"RECORD|CODE|CAPTURE)\b",
     re.I,
 )
+
+
+# A header a scripter writes over a section: capitals, several words, and the
+# condition that routes people into it — "CONSUMER PANEL ... & SCREENER (S0=1)".
+_SECTION_HEADER_RE = re.compile(
+    r"^[^a-z]{12,}\(\s*[A-Z][A-Za-z0-9_.]*\s*=\s*[\d][\d,\s\-]*\)\s*$"
+)
+
+
+def is_section_header(line: str) -> bool:
+    """True for an all-caps section title carrying its entry condition."""
+    return bool(_SECTION_HEADER_RE.match(strip_brackets(line or "").strip()))
 
 
 def is_quota_instruction(line: str) -> bool:
@@ -672,6 +687,14 @@ def parse_prose_question(
             _OPTION_CODE_RE.match(line) or _OPTION_LETTER_RE.match(line)
         ):
             directives.append(line.strip())
+            continue
+
+        if options and is_section_header(line):
+            # "CONSUMER PANEL INTRODUCTION & SCREENER (S0=1)" opens the NEXT
+            # section; read as an answer it became option 3 of the sample split.
+            # Everything under it is that section's, not this question's.
+            directives.append(line.strip())
+            intro_follows = True
             continue
 
         if options and is_quota_instruction(line):

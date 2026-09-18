@@ -87,7 +87,7 @@ from src.core.survey_definition import (
     SurveyDefinition,
     evaluate,
 )
-from src.engines.fielding.decisions import QuotaCell, unsatisfiable_conditions
+from src.engines.fielding.decisions import QuotaCell
 from src.engines.fielding.dryrun import simulate
 from src.renderers.surveyjs_compiler import compile_to_surveyjs, display_warnings
 
@@ -234,6 +234,44 @@ def _approved_questionnaire(db: Session, study_id: str):
     return approved[0]  # list is most-recent-first
 
 
+def _preflight(db: Session, study_id: str) -> dict:
+    """The whole instrument checked once more, as the respondent will meet it."""
+    from api.routes.questionnaire import _BLOCKING_FLAGS
+    from src.engines.fielding.preflight import preflight
+
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    questionnaires = list_questionnaires_for_study(db, study_id)
+    if not questionnaires:
+        raise HTTPException(status_code=404, detail="This study has no questionnaire yet")
+    approved = next((q for q in questionnaires if q.status == "approved"), None)
+    current = approved or questionnaires[0]
+    payload = _read_definition_json(db, current)
+    if payload is None:
+        raise HTTPException(status_code=409, detail="The questionnaire is still being read")
+    survey = SurveyDefinition.from_json(payload)
+    return run_heavy_detached(
+        db, preflight, survey, approved is not None, _BLOCKING_FLAGS,
+        set(current.approved_qids or []),
+    )
+
+
+@router.get("/studies/{study_id}/fielding/preflight")
+def fielding_preflight(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Re-check everything before a link is created. (Owner/Analyst)
+
+    Review happens question by question over days; a link pins the instrument
+    the second it is created. This reads the whole thing once more and says what
+    would reach a respondent wrong — with the questions each problem is about.
+    """
+    return _preflight(db, study_id)
+
+
 @router.post(
     "/studies/{study_id}/fielding/links",
     response_model=FieldingLinkResponse,
@@ -266,8 +304,21 @@ def create_link(
         survey.metadata["theme"] = theme
         payload = survey.to_json()  # stamp into the pinned snapshot only
 
+    # Checked BEFORE the link exists. The old check ran after the insert, so a
+    # refused link was refused and saved at the same time.
+    check = _preflight(db, study_id)
+    if not check["ok"] and not (body.force if body else False):
+        failing = [c for c in check["checks"] if c["status"] == "fail"]
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "The pre-link check found problems a respondent would meet.",
+                "checks": failing,
+            },
+        )
+
     redirects = (
-        body.model_dump(exclude_unset=True, exclude={"theme"}) if body else None
+        body.model_dump(exclude_unset=True, exclude={"theme", "force"}) if body else None
     )
     link = create_fielding_link(
         db,
@@ -279,25 +330,11 @@ def create_link(
         redirects=redirects,
         soft_launch_limit=body.soft_launch_limit if body else None,
     )
-    # A condition that can never be true is not a warning: the survey does not
-    # do what the document says it does, and every downstream number will be
-    # computed on the wrong people. It looks perfect until the data comes back.
-    impossible = unsatisfiable_conditions(survey)
-    if impossible and not (body.force if body else False):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "This questionnaire has "
-                f"{len(impossible)} condition(s) that can never be true: "
-                + "; ".join(i["detail"] for i in impossible[:3])
-                + (" …" if len(impossible) > 3 else "")
-                + " Fix them, or open the link with force=true to field it anyway."
-            ),
-        )
-    if impossible:
+    if not check["ok"]:
+        # Opened over a failing check on purpose: say so where it can be found.
         logger.warning(
-            f"[{study_id}] Link opened with force despite "
-            f"{len(impossible)} unsatisfiable condition(s) by {user.email}"
+            f"[{study_id}] Link opened with force despite {check['n_fail']} failing "
+            f"pre-link check(s) by {user.email}"
         )
 
     unenforced = _unenforced_routing(survey)

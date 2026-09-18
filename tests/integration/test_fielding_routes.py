@@ -579,7 +579,9 @@ def test_a_link_is_refused_when_a_condition_can_never_be_true(client) -> None:
     resp = test_client.post("/api/studies/study_f1/fielding/links", json={})
 
     assert resp.status_code == 409
-    assert "never be true" in resp.json()["detail"]
+    # Refused by the pre-link check, which names the rule that cannot be met.
+    failing = {c["id"] for c in resp.json()["detail"]["checks"]}
+    assert "possible" in failing
 
 
 def test_the_refusal_can_be_overridden_deliberately(client) -> None:

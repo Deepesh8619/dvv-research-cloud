@@ -343,6 +343,37 @@ export interface Question {
   approved: boolean
 }
 
+/** One question's place in the instrument: its kind, and what it connects to. */
+export interface QuestionMapEntry {
+  bucket: string
+  reason: string
+  /** Placed by wording, not structure: a person should confirm it. */
+  suggested: boolean
+  links: QuestionLinks
+}
+
+export interface MaskLink {
+  source_qid: string
+  /** selected | full_list | list_except | not_selected */
+  mode: string
+  exclude_qid?: string | null
+}
+
+export interface PreflightCheck {
+  id: string
+  label: string
+  status: 'pass' | 'warn' | 'fail'
+  detail: string
+  qids: string[]
+}
+
+export interface PreflightResult {
+  ok: boolean
+  n_fail: number
+  n_warn: number
+  checks: PreflightCheck[]
+}
+
 export interface QuestionnaireStatus {
   id: string
   study_id: string
@@ -473,6 +504,17 @@ export const codingApi = {
 export const questionnaireApi = {
   status: async (studyId: string) =>
     api.get<QuestionnaireStatus>(`/studies/${studyId}/questionnaire`),
+
+  /** Every question's bucket and links, read from the definition itself. */
+  map: async (studyId: string) =>
+    api.get<{ questions: Record<string, QuestionMapEntry> }>(`/studies/${studyId}/questionnaire/map`),
+
+  /** Replace this question's "options from" and/or "text uses" links. */
+  setLinks: async (
+    studyId: string,
+    qid: string,
+    body: { options_from?: MaskLink[]; text_from?: string[] },
+  ) => api.put<Question>(`/studies/${studyId}/questionnaire/questions/${qid}/links`, body),
 
   /** The questionnaire document as it was uploaded — served from the database
       copy, so it still works after a restart has wiped the disk. */
@@ -777,6 +819,10 @@ export const fieldingApi = {
     api.get<{ study_id: string; links: FieldingLink[] }>(`/studies/${studyId}/fielding/links`),
 
   // `theme` (T24) is stamped into this link's pinned snapshot only.
+  /** Everything re-checked before a link may be created. */
+  preflight: async (studyId: string) =>
+    api.get<PreflightResult>(`/studies/${studyId}/fielding/preflight`),
+
   createLink: async (
     studyId: string,
     redirects?: FieldingRedirects,
