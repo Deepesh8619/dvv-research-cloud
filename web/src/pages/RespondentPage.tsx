@@ -16,6 +16,10 @@ import {
   ListIcon,
 } from '../components/Icons'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { registerRespondentControls } from '../components/respondent/controls'
+
+// Grid, rank and number questions are drawn by us — see controls.tsx.
+registerRespondentControls()
 
 // A single respondent view: fetch the compiled SurveyJS JSON for a public
 // fielding token, render it ONE QUESTION PER PAGE, and stream answers back to
@@ -86,6 +90,23 @@ function PoweredBy() {
   return <p className="mt-8 text-xs font-medium tracking-wide text-slate-400">Powered by DVV Research Cloud</p>
 }
 
+// Where the respondent is, from the survey's OWN counters. `currentPageNo` does
+// not move in questionPerPage mode — SurveyJS swaps the content of one page — so
+// reading it left the header frozen at "1 / 20" for the whole interview. And its
+// question count is the real one: getAllQuestions() included an element nobody
+// answers, which is how the total read 20 against the survey's own 19.
+function positionOf(survey: Model): { at: number; of: number } {
+  const info = survey.getProgressInfo()
+  const of = info.questionCount || 1
+  // The question ON SCREEN. Counting answers instead said "2 of 7" the moment
+  // one statement of a six-row grid was answered, while still on question 1.
+  const current = survey.currentSingleQuestion
+  const answerable = survey.getAllQuestions(true).filter((q) => q.getType() !== 'html')
+  const index = current ? answerable.indexOf(current) : -1
+  if (index >= 0) return { at: Math.min(index + 1, of), of }
+  return { at: Math.min(info.answeredQuestionCount + 1, of), of }
+}
+
 export default function RespondentPage() {
   const { token } = useParams<{ token: string }>()
   const [phase, setPhase] = useState<Phase>('loading')
@@ -93,6 +114,12 @@ export default function RespondentPage() {
   const [model, setModel] = useState<Model | null>(null)
   const [title, setTitle] = useState('')
   const [theme, setTheme] = useState<Theme>(DEFAULT_THEME)
+  // Where the respondent is, kept in state because SurveyJS mutates its model
+  // in place: reading currentPageNo during render shows the page they were on
+  // last time React happened to draw.
+  const [position, setPosition] = useState({ at: 1, of: 1 })
+  // The blocks the script was written in: the progress bar's segments.
+  const [sections, setSections] = useState(1)
   // Live refs the async event handlers read (state would be stale in closures).
   const sessionIdRef = useRef<string>('')
   const terminatedRef = useRef(false)
@@ -149,12 +176,38 @@ export default function RespondentPage() {
         // We swap to our own warm thank-you view on complete, so suppress SurveyJS's.
         survey.showCompletedPage = false
         applySurveyTheme(survey, surveyTheme)
+        // Rankings are tapped into order, which builds the answer one item at a
+        // time — the model's select-to-rank mode is the one that holds a
+        // partial ranking without filling in the rest.
+        for (const q of survey.getAllQuestions()) {
+          if (q.getType() === 'ranking') (q as unknown as { selectToRankEnabled: boolean }).selectToRankEnabled = true
+          // A stepper writes on every tap; auto-advance would leave after the
+          // first "+" and nobody could ever enter 2.
+          if (q.getType() === 'text' && (q as unknown as { inputType: string }).inputType === 'number') {
+            ;(q as unknown as { supportGoNextPageAutomatic: () => boolean }).supportGoNextPageAutomatic = () => false
+          }
+        }
+        // A required ranking is a full ranking: stopping at #2 of 7 leaves the
+        // data file with five blanks the analyst cannot tell from "skipped".
+        survey.onValidateQuestion.add((_, options) => {
+          const q = options.question
+          if (q.getType() !== 'ranking' || !q.isRequired) return
+          const total = (q as unknown as { visibleChoices: unknown[] }).visibleChoices.length
+          const done = Array.isArray(options.value) ? options.value.length : 0
+          if (done > 0 && done < total) options.error = `Please rank all ${total} — ${total - done} left.`
+        })
+        setSections(Math.max(1, survey.visiblePages.length))
+        setPosition(positionOf(survey))
 
         // Per-page incremental capture: POST accumulated answers on every advance.
         // Multi/checkbox/text don't auto-advance — their Next click fires this too.
         survey.onCurrentPageChanged.add(async (sender) => {
+          setPosition(positionOf(sender))
           await submitPage(sender, sender.currentPageNo)
         })
+
+        // A multi-punch or text answer changes the count without changing page.
+        survey.onValueChanged.add((sender) => setPosition(positionOf(sender)))
 
         // Final page + finish: POST the last page's answers, then mark complete.
         survey.onComplete.add(async (sender) => {
@@ -176,6 +229,8 @@ export default function RespondentPage() {
           }
         })
 
+        // Dev builds only: the live model, for inspecting it from the console.
+        if (import.meta.env.DEV) (window as unknown as { __dvvSurvey: Model }).__dvvSurvey = survey
         setModel(survey)
         setTitle(survey.title || 'Survey')
         setTheme(surveyTheme)
@@ -321,34 +376,172 @@ export default function RespondentPage() {
     )
   }
 
-  // running — one question per page, centered card
+  // running — one question per page on ONE surface.
+  //
+  // SurveyJS's default chrome nests a page panel inside a question panel inside
+  // the card: three borders around a single question, with the BLOCK's internal
+  // name ("Main") printed above it as a heading. On a phone that pushed the
+  // first option below the fold and showed a respondent a word from the
+  // scripter's vocabulary. Everything below flattens that to one surface and
+  // spends the height it frees on the answers.
+  const progress = Math.min(100, Math.round((position.at / Math.max(position.of, 1)) * 100))
+  const segments = sections >= 2 && sections <= 8 ? sections : Math.min(5, Math.max(position.of, 1))
+
   return (
-    <div className="min-h-screen py-8" style={{ background: theme.wash }}>
-      {/* Scoped polish: larger question type + touch-friendly, full-width options.
-          The selected option row is tinted with the theme accent (~10% alpha bg +
-          accent border) — the accent CSS var comes from applySurveyTheme. */}
+    <div className="min-h-screen pb-32" style={{ background: theme.wash }}>
       <style>{`
-        .dvv-survey .sd-question__title { font-size: 1.25rem; line-height: 1.75rem; }
-        .dvv-survey .sd-item {
-          padding: 0.75rem 1rem; min-height: 44px; border-radius: 0.5rem; border: 1px solid transparent;
-          transition: background 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out;
+        /* One surface: no panel inside a panel inside a card. */
+        .dvv-survey .sd-root-modern, .dvv-survey .sd-container-modern,
+        .dvv-survey .sd-page, .dvv-survey .sd-body { background: transparent; }
+        .dvv-survey .sd-page { padding: 0; }
+        .dvv-survey .sd-question { box-shadow: none; background: transparent; padding: 0; }
+        /* "Main" is a block name from the script, never respondent-facing, and
+           the study title already sits in the header above where it costs no
+           height on a phone. The survey HEADER only: sd-title is also the class
+           on every question title, so hiding that took the question with it and
+           left a page of unlabelled options. */
+        .dvv-survey .sd-page__title, .dvv-survey .sd-page__description,
+        .dvv-survey .sd-container-modern__title, .dvv-survey .sd-header { display: none; }
+        /* Our own progress lives in the header; SurveyJS's duplicates it. */
+        .dvv-survey .sd-progress, .dvv-survey .sd-body__progress { display: none; }
+
+        .dvv-survey .sd-question__title {
+          font-size: 1.375rem; line-height: 1.85rem; font-weight: 600;
+          color: #0f172a; letter-spacing: -0.01em; margin-bottom: 1.25rem;
         }
-        .dvv-survey .sd-item:hover { background: rgba(0,0,0,0.03); }
-        .dvv-survey .sd-item--checked { background: ${theme.accent}1A; border-color: ${theme.accent}; box-shadow: inset 0 0 0 1px ${theme.accent}; }
-        .dvv-survey .sd-selectbase__label { width: 100%; }
-        /* Slim, rounded progress bar; tabular figures on its label. */
-        .dvv-survey .sd-progress { height: 6px; border-radius: 9999px; }
-        .dvv-survey .sd-progress__bar { border-radius: 9999px; transition: width 250ms ease-out; }
-        .dvv-survey .sd-progress__text { font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+        .dvv-survey .sd-question__required-text { color: ${theme.accent}; }
+
+        /* Every option is its own row you can hit with a thumb: a bordered card,
+           48px minimum, the whole row clickable — not a 20px circle with a label
+           sitting somewhere to its right. */
+        .dvv-survey .sd-item {
+          width: 100%;
+          min-height: 52px; padding: 0.875rem 1rem; margin-bottom: 0.625rem;
+          border: 1.5px solid #e2e8f0; border-radius: 0.75rem; background: #fff;
+          cursor: pointer;
+          transition: border-color 160ms ease-out, background 160ms ease-out,
+                      box-shadow 160ms ease-out, transform 120ms ease-out;
+        }
+        .dvv-survey .sd-item:hover { border-color: ${theme.accent}80; background: ${theme.accent}08; }
+        .dvv-survey .sd-item:active { transform: scale(0.995); }
+        .dvv-survey .sd-item--checked {
+          border-color: ${theme.accent}; background: ${theme.accent}12;
+          box-shadow: 0 0 0 1px ${theme.accent};
+        }
+        .dvv-survey .sd-item__control-label { font-size: 1rem; color: #1e293b; }
+        /* The whole row is the target; the control keeps its own size. */
+        .dvv-survey .sd-selectbase__label { display: flex; align-items: center; width: 100%; gap: 0.75rem; }
+        .dvv-survey .sd-item__decorator { flex: 0 0 auto; }
+        .dvv-survey .sd-item__control-label { flex: 1 1 auto; }
+
+        /* Text and numeric answers get the same card treatment. */
+        .dvv-survey .sd-input {
+          min-height: 52px; font-size: 1rem; border-radius: 0.75rem;
+          border: 1.5px solid #e2e8f0; padding: 0.875rem 1rem; background: #fff;
+        }
+        .dvv-survey .sd-input:focus { border-color: ${theme.accent}; box-shadow: 0 0 0 3px ${theme.accent}26; outline: none; }
+
+        /* The actions float in a dark bar at the bottom, where the thumb is —
+           always in the same place, whatever the length of the question. */
+        .dvv-survey .sd-action-bar.sd-body__navigation {
+          position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+          width: min(608px, calc(100% - 24px)); z-index: 30; margin: 0;
+          /* !important: SurveyJS's responsive body rule zeroes three sides. */
+          display: flex; gap: 8px; padding: 8px !important; border-radius: 20px; background: #111827;
+          box-shadow: 0 12px 32px -8px rgba(15,23,42,0.45);
+        }
+        .dvv-survey .sd-body__navigation .sv-action { flex: 1 1 0; margin: 0; }
+        .dvv-survey .sd-body__navigation .sv-action__content { width: 100%; }
+        .dvv-survey .sd-body__navigation .sd-btn { width: 100%; min-height: 48px; border-radius: 14px; margin: 0; }
+        .dvv-survey .sd-body__navigation .sd-navigation__prev-btn {
+          background: transparent; color: #e2e8f0; border: 1.5px solid #374151;
+        }
+        /* SurveyJS pads its body for its own chrome; ours is the card. */
+        .dvv-survey .sd-body.sd-body--responsive, .dvv-survey .sd-body--responsive .sd-page { padding: 0; }
+        /* Grid questions inherit nowrap from SurveyJS's table layout, which
+           cut a long statement off mid-word. */
+        .dvv-survey .dvv-carousel { white-space: normal; }
+        /* The root scrolls sideways by default, and the floating bar counted as
+           overflow — a stray scrollbar under every question on a phone. */
+        .dvv-survey .sd-root-modern { overflow: visible; }
+        /* A rule under the question title, from SurveyJS's grid layout. */
+        .dvv-survey .sd-question__header::after { display: none; }
+        /* The error sits inside the card, not bled past its edge. */
+        .dvv-survey .sd-question__erbox {
+          margin: 0 0 12px; padding: 10px 14px; border-radius: 12px; font-size: 0.875rem;
+        }
+
+        /* A grid statement or a ranked item slides in rather than appearing. */
+        .dvv-survey .dvv-slide { animation: dvv-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+        @keyframes dvv-in {
+          from { opacity: 0; transform: translateX(14px); }
+          to   { opacity: 1; transform: none; }
+        }
+
+        /* One solid action, full width on a phone where the thumb is. */
+        .dvv-survey .sd-btn, .dvv-survey .sd-navigation__next-btn,
+        .dvv-survey .sd-navigation__complete-btn {
+          background: ${theme.accent}; color: #fff; border: none;
+          min-height: 52px; border-radius: 0.75rem; font-size: 1rem; font-weight: 600;
+          box-shadow: 0 1px 2px rgba(15,23,42,0.08);
+          transition: filter 160ms ease-out, transform 120ms ease-out;
+        }
+        .dvv-survey .sd-btn:hover { filter: brightness(0.94); }
+        .dvv-survey .sd-btn:active { transform: translateY(1px); }
+        .dvv-survey .sd-navigation__prev-btn {
+          background: #fff; color: #475569; border: 1.5px solid #e2e8f0; box-shadow: none;
+        }
+        .dvv-survey .sd-action-bar { padding: 0; gap: 0.75rem; }
+
+        /* The question arrives rather than appearing. Short enough that a fast
+           respondent never waits on it. */
+        .dvv-survey .sd-question { animation: dvv-rise 220ms ease-out both; }
+        @keyframes dvv-rise {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: none; }
+        }
         @media (prefers-reduced-motion: reduce) {
-          .dvv-survey .sd-item, .dvv-survey .sd-progress__bar { transition: none; }
+          .dvv-survey .sd-question, .dvv-survey .dvv-slide { animation: none; }
+          .dvv-survey .sd-item, .dvv-survey .sd-btn { transition: none; }
+          .dvv-progress__fill { transition: none; }
         }
       `}</style>
-      <div className="dvv-survey max-w-[640px] mx-auto px-4">
-        <div className="bg-white rounded-2xl shadow-md border border-slate-200/80 overflow-hidden">
-          <div style={{ height: 4, background: gradientBar(theme) }} />
-          <div className="p-6 sm:p-8">{model && <Survey model={model} />}</div>
+
+      {/* Progress first: how much is left is the single thing a respondent most
+          wants to know, and the commonest reason they abandon. */}
+      <div className="sticky top-0 z-20 pt-3" style={{ background: theme.wash }}>
+        {/* Segments, not one hairline: a finished chunk reads as a milestone,
+            which is what keeps someone going through a long questionnaire. The
+            script's own sections when it has several, otherwise five steps. */}
+        <div className="max-w-[640px] mx-auto px-4 sm:px-0 flex gap-1.5" aria-hidden>
+          {Array.from({ length: segments }, (_, i) => (
+            <div key={i} className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200/80">
+              <div
+                className="dvv-progress__fill h-full rounded-full"
+                style={{
+                  width: `${Math.max(0, Math.min(1, (progress / 100) * segments - i)) * 100}%`,
+                  background: theme.accent,
+                  transition: 'width 280ms cubic-bezier(0.4, 0, 0.2, 1)',
+                }}
+              />
+            </div>
+          ))}
         </div>
+        <div className="max-w-[640px] mx-auto px-4 sm:px-0 flex items-center justify-between py-3">
+          <span className="text-sm font-medium text-slate-500 truncate pr-3">{title}</span>
+          <span className="text-sm font-semibold text-slate-400 tabular-nums shrink-0">
+            {position.at} / {position.of}
+          </span>
+        </div>
+      </div>
+
+      <div className="dvv-survey max-w-[640px] mx-auto px-4 sm:px-0 pt-2">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/70 p-5 sm:p-8">
+          {model && <Survey model={model} />}
+        </div>
+        <p className="mt-6 text-center text-xs font-medium tracking-wide text-slate-400">
+          Powered by DVV Research Cloud
+        </p>
       </div>
     </div>
   )

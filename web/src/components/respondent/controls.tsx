@@ -1,0 +1,352 @@
+import { createElement, useEffect, useReducer, useState } from 'react'
+import type { ItemValue, MatrixRowModel, Question, QuestionMatrixModel, QuestionRankingModel } from 'survey-core'
+import { ReactQuestionFactory, SurveyQuestionText } from 'survey-react-ui'
+
+// The three answer controls a respondent spends the most time in, drawn by us
+// instead of by SurveyJS. The MODEL stays SurveyJS's: every value is written
+// through the question, so validation, row conditions, piping, the per-page
+// save and the server's checks see exactly what they saw before. Only the
+// drawing changes.
+//
+// Colour comes from the theme SurveyJS already carries (--sjs-primary-*), so a
+// study's theme recolours these the same as everything else.
+
+const ACCENT = 'var(--sjs-primary-backcolor, #4F46E5)'
+const TINT = 'var(--sjs-primary-backcolor-light, rgba(79,70,229,0.1))'
+
+/** Re-render when the question's answer changes, whoever changed it. */
+function useAnswer(question: Question): unknown {
+  const [, bump] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    // The survey's own event: the question's `value` property does not fire a
+    // change for every question type, which left a stepper showing an empty
+    // box over an answer the model already held.
+    const survey = question.survey as unknown as {
+      onValueChanged: { add: (f: (s: unknown, o: { name: string }) => void) => void; remove: (f: unknown) => void }
+    } | null
+    const onChange = (_: unknown, options: { name: string }) => {
+      if (options.name === question.getValueName()) bump()
+    }
+    survey?.onValueChanged.add(onChange)
+    return () => survey?.onValueChanged.remove(onChange)
+  }, [question])
+  return question.value
+}
+
+// ---------------------------------------------------------------- grid
+
+/**
+ * A grid, one statement at a time.
+ *
+ * Drawn as SurveyJS draws it, six statements on a five-point scale is thirty
+ * stacked cards, and the respondent scrolls past the same five labels six
+ * times — the page every soft launch loses people on. Here each statement gets
+ * the screen to itself: pick, and the next slides in. The dots show what is
+ * left and take you back to any statement to change it.
+ */
+export function MatrixCarousel({ question }: { question: QuestionMatrixModel }) {
+  useAnswer(question)
+  const rows: MatrixRowModel[] = question.visibleRows
+  const columns: ItemValue[] = question.visibleColumns
+  const firstOpen = rows.findIndex((r) => r.value == null)
+  const [at, setAt] = useState(firstOpen < 0 ? 0 : firstOpen)
+  if (rows.length === 0) return null
+  const index = Math.min(at, rows.length - 1)
+  const row = rows[index]
+  // A scale reads best side by side from tablet width up — a label may wrap
+  // inside its button. Phones, and long answer lists, stack.
+  const inline = columns.length <= 7 && columns.every((c) => (c.text || '').length <= 24)
+
+  const pick = (value: unknown) => {
+    if (question.isReadOnly) return
+    row.value = value
+    const next = rows.findIndex((r, i) => i > index && r.value == null)
+    const wrapped = next >= 0 ? next : rows.findIndex((r) => r.value == null)
+    // Long enough to see the choice land, short enough to never feel slow.
+    if (wrapped >= 0) window.setTimeout(() => setAt(wrapped), 260)
+  }
+
+  return (
+    <div className="dvv-carousel">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 tabular-nums">
+          {index + 1} of {rows.length}
+        </span>
+        <div className="flex flex-wrap justify-end gap-1.5" role="tablist" aria-label="Statements">
+          {rows.map((r, i) => (
+            <button
+              key={r.name}
+              type="button"
+              role="tab"
+              aria-selected={i === index}
+              aria-label={`${r.text}${r.value != null ? ' (answered)' : ''}`}
+              onClick={() => setAt(i)}
+              className="h-2.5 rounded-full transition-all duration-200"
+              style={{
+                width: i === index ? 22 : 10,
+                background: i === index || r.value != null ? ACCENT : '#e2e8f0',
+                opacity: i === index || r.value == null ? 1 : 0.45,
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div key={row.name} className="dvv-slide rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5">
+        <p className="mb-4 text-[17px] font-semibold leading-snug text-slate-900">{row.text}</p>
+        <div
+          role="radiogroup"
+          aria-label={row.text}
+          className={inline ? 'grid gap-2 sm:grid-flow-col sm:auto-cols-fr' : 'grid gap-2'}
+        >
+          {columns.map((c) => {
+            const on = row.value == c.value
+            return (
+              <button
+                key={String(c.value)}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                onClick={() => pick(c.value)}
+                className="dvv-choice min-h-[48px] rounded-xl leading-tight border-[1.5px] px-3 py-2.5 text-[15px] font-medium transition-all duration-150 active:scale-[0.98]"
+                style={{
+                  borderColor: on ? ACCENT : '#e2e8f0',
+                  background: on ? ACCENT : '#fff',
+                  color: on ? '#fff' : '#1e293b',
+                }}
+              >
+                {c.text}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="mt-3 flex justify-between text-sm">
+        <button
+          type="button"
+          disabled={index === 0}
+          onClick={() => setAt(index - 1)}
+          className="rounded-lg px-2 py-1 font-medium text-slate-500 hover:text-slate-800 disabled:invisible"
+        >
+          ‹ Previous statement
+        </button>
+        <button
+          type="button"
+          disabled={index === rows.length - 1}
+          onClick={() => setAt(index + 1)}
+          className="rounded-lg px-2 py-1 font-medium text-slate-500 hover:text-slate-800 disabled:invisible"
+        >
+          Next statement ›
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- rank
+
+/**
+ * Rank by tapping, favourite first.
+ *
+ * Dragging a list of eight on a phone is the worst interaction in a survey:
+ * the page scrolls when you meant to drag, and the item you let go of lands one
+ * slot off. Tapping in order is the same decision without the motor skill. The
+ * last one left is placed for you, since there is nowhere else for it to go.
+ */
+export function TapToRank({ question }: { question: QuestionRankingModel }) {
+  const value = useAnswer(question)
+  const ranked: unknown[] = Array.isArray(value) ? value : []
+  const choices: ItemValue[] = question.visibleChoices
+  const byValue = new Map(choices.map((c) => [String(c.value), c]))
+  const rankedItems = ranked.map((v) => byValue.get(String(v))).filter(Boolean) as ItemValue[]
+  const open = choices.filter((c) => !ranked.some((v) => String(v) === String(c.value)))
+
+  const set = (next: unknown[]) => {
+    if (question.isReadOnly) return
+    question.value = next.length ? next : undefined
+  }
+  const add = (c: ItemValue) => {
+    const next = [...ranked, c.value]
+    const rest = open.filter((o) => o !== c)
+    set(rest.length === 1 ? [...next, rest[0].value] : next)
+  }
+  const move = (i: number, by: number) => {
+    const next = [...ranked]
+    ;[next[i], next[i + by]] = [next[i + by], next[i]]
+    set(next)
+  }
+
+  return (
+    <div className="space-y-5">
+      <ol className="space-y-2" aria-label="Your ranking">
+        {rankedItems.map((c, i) => (
+          <li
+            key={String(c.value)}
+            className="dvv-slide flex items-center gap-3 rounded-xl border-[1.5px] bg-white px-3 py-2.5"
+            style={{ borderColor: ACCENT, background: TINT }}
+          >
+            <span
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white tabular-nums"
+              style={{ background: ACCENT }}
+            >
+              {i + 1}
+            </span>
+            <span className="flex-1 text-[15px] font-medium text-slate-900">{c.text}</span>
+            <span className="flex shrink-0 gap-1">
+              <IconButton label={`Move ${c.text} up`} disabled={i === 0} onClick={() => move(i, -1)}>↑</IconButton>
+              <IconButton label={`Move ${c.text} down`} disabled={i === rankedItems.length - 1} onClick={() => move(i, 1)}>↓</IconButton>
+              <IconButton label={`Remove ${c.text}`} onClick={() => set(ranked.filter((v) => v !== c.value))}>×</IconButton>
+            </span>
+          </li>
+        ))}
+        {rankedItems.length === 0 && (
+          <li className="rounded-xl border-[1.5px] border-dashed border-slate-300 px-4 py-4 text-center text-sm text-slate-500">
+            Tap your favourite first — it becomes #1
+          </li>
+        )}
+      </ol>
+
+      {open.length > 0 && (
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            {rankedItems.length ? `Next: #${rankedItems.length + 1}` : 'Tap to rank'}
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {open.map((c) => (
+              <button
+                key={String(c.value)}
+                type="button"
+                onClick={() => add(c)}
+                className="dvv-choice flex min-h-[48px] items-center gap-3 rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 text-left text-[15px] text-slate-800 transition-all duration-150 hover:border-slate-300 active:scale-[0.98]"
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-[1.5px] border-dashed border-slate-300 text-sm text-slate-400">
+                  +
+                </span>
+                {c.text}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function IconButton({
+  label,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string
+  disabled?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-slate-900 disabled:opacity-25"
+    >
+      {children}
+    </button>
+  )
+}
+
+// ---------------------------------------------------------------- number
+
+function bounds(question: Question): { min?: number; max?: number } {
+  const v = (question.validators || []).find((x) => x.getType() === 'numericvalidator') as
+    | { minValue?: number; maxValue?: number }
+    | undefined
+  return { min: v?.minValue ?? undefined, max: v?.maxValue ?? undefined }
+}
+
+/**
+ * A count, with a minus and a plus a thumb can hit.
+ *
+ * Most numeric questions are small counts — products used, people in the
+ * household — and a phone keyboard is a heavy way to enter "2". The box in the
+ * middle still takes typing, for the ages and amounts that are not small.
+ */
+export function NumberStepper({ question }: { question: Question }) {
+  const value = useAnswer(question)
+  const { min, max } = bounds(question)
+  const n = value === undefined || value === null || value === '' ? undefined : Number(value)
+  const clamp = (x: number) => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, x))
+  const step = (by: number) => {
+    if (question.isReadOnly) return
+    // The first tap lands on a real answer — 1, or the minimum if higher — not
+    // on a 0 that looks like the tap did nothing.
+    if (n === undefined) question.value = clamp(by > 0 ? Math.max(min ?? 1, 1) : min ?? 0)
+    else question.value = clamp(n + by)
+  }
+  return (
+    <div className="flex items-stretch gap-3">
+      <StepButton label="Decrease" disabled={n !== undefined && min !== undefined && n <= min} onClick={() => step(-1)}>
+        −
+      </StepButton>
+      <input
+        type="number"
+        inputMode="numeric"
+        aria-label={question.title}
+        value={n ?? ''}
+        min={min}
+        max={max}
+        readOnly={question.isReadOnly}
+        onChange={(e) => (question.value = e.target.value === '' ? undefined : Number(e.target.value))}
+        className="min-w-0 flex-1 rounded-xl border-[1.5px] border-slate-200 bg-white text-center text-2xl font-semibold text-slate-900 tabular-nums focus:outline-none"
+        style={{ height: 56, borderColor: n !== undefined ? ACCENT : undefined }}
+      />
+      <StepButton label="Increase" disabled={n !== undefined && max !== undefined && n >= max} onClick={() => step(1)}>
+        +
+      </StepButton>
+    </div>
+  )
+}
+
+function StepButton({
+  label,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string
+  disabled: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="w-16 shrink-0 rounded-xl bg-slate-100 text-2xl font-medium text-slate-700 transition-all duration-150 hover:bg-slate-200 active:scale-95 disabled:opacity-30"
+      style={{ height: 56 }}
+    >
+      {children}
+    </button>
+  )
+}
+
+let registered = false
+
+/** Swap SurveyJS's renderers for ours. Idempotent; the respondent page calls it. */
+export function registerRespondentControls(): void {
+  if (registered) return
+  registered = true
+  const factory = ReactQuestionFactory.Instance
+  factory.registerQuestion('matrix', ((props: { question: QuestionMatrixModel }) =>
+    createElement(MatrixCarousel, props)) as never)
+  factory.registerQuestion('ranking', ((props: { question: QuestionRankingModel }) =>
+    createElement(TapToRank, props)) as never)
+  factory.registerQuestion('text', ((props: { question: Question }) =>
+    props.question.inputType === 'number'
+      ? createElement(NumberStepper, props)
+      : createElement(SurveyQuestionText, props as never)) as never)
+}
