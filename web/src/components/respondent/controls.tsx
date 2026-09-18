@@ -1,5 +1,6 @@
 import { createElement, useEffect, useReducer, useState } from 'react'
 import type { ItemValue, MatrixRowModel, Question, QuestionMatrixModel, QuestionRankingModel } from 'survey-core'
+import { Serializer } from 'survey-core'
 import { ReactQuestionFactory, SurveyQuestionText } from 'survey-react-ui'
 
 // The three answer controls a respondent spends the most time in, drawn by us
@@ -276,7 +277,11 @@ function bounds(question: Question): { min?: number; max?: number } {
 export function NumberStepper({ question }: { question: Question }) {
   const value = useAnswer(question)
   const { min, max } = bounds(question)
-  const n = value === undefined || value === null || value === '' ? undefined : Number(value)
+  // "99: Prefer not to answer" — stored as its code, shown as a choice, never
+  // as a number in the box.
+  const optOuts: ItemValue[] = (question as unknown as { optOuts?: ItemValue[] }).optOuts ?? []
+  const declined = optOuts.find((o) => value != null && String(o.value) === String(value))
+  const n = declined || value === undefined || value === null || value === '' ? undefined : Number(value)
   const clamp = (x: number) => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, x))
   const step = (by: number) => {
     if (question.isReadOnly) return
@@ -286,7 +291,8 @@ export function NumberStepper({ question }: { question: Question }) {
     else question.value = clamp(n + by)
   }
   return (
-    <div className="flex items-stretch gap-3">
+    <div>
+    <div className="flex items-stretch gap-3" style={{ opacity: declined ? 0.45 : 1 }}>
       <StepButton label="Decrease" disabled={n !== undefined && min !== undefined && n <= min} onClick={() => step(-1)}>
         −
       </StepButton>
@@ -305,6 +311,31 @@ export function NumberStepper({ question }: { question: Question }) {
       <StepButton label="Increase" disabled={n !== undefined && max !== undefined && n >= max} onClick={() => step(1)}>
         +
       </StepButton>
+    </div>
+    {optOuts.length > 0 && (
+      <div className="mt-3 flex flex-wrap gap-2">
+        {optOuts.map((o) => {
+          const on = declined === o
+          return (
+            <button
+              key={String(o.value)}
+              type="button"
+              role="checkbox"
+              aria-checked={on}
+              onClick={() => !question.isReadOnly && (question.value = on ? undefined : o.value)}
+              className="rounded-full border-[1.5px] px-4 py-2 text-sm font-medium transition-colors"
+              style={{
+                borderColor: on ? ACCENT : '#e2e8f0',
+                background: on ? TINT : '#fff',
+                color: on ? '#0f172a' : '#475569',
+              }}
+            >
+              {o.text}
+            </button>
+          )
+        })}
+      </div>
+    )}
     </div>
   )
 }
@@ -340,6 +371,9 @@ let registered = false
 export function registerRespondentControls(): void {
   if (registered) return
   registered = true
+  // The compiler emits a number box's opt-out codes as `optOuts`; unregistered,
+  // SurveyJS drops the property on load.
+  if (!Serializer.findProperty('text', 'optOuts')) Serializer.addProperty('text', { name: 'optOuts:itemvalues' })
   const factory = ReactQuestionFactory.Instance
   factory.registerQuestion('matrix', ((props: { question: QuestionMatrixModel }) =>
     createElement(MatrixCarousel, props)) as never)

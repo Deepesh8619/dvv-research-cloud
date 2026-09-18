@@ -204,7 +204,16 @@ def summarise(question: Question, answers: list[Mapping[str, Any]]) -> dict[str,
                 "counts": [picked.count(str(c.code)) for c in cols],
             })
     elif kind is QuestionType.NUMERIC:
-        numbers = sorted(float(v) for v in given if _is_number(v))
+        # Opt-out codes are not numbers anyone gave: "99 = prefer not to say"
+        # averaged in as an age of 99 moves every statistic on the card.
+        opt_outs = {str(o.code) for o in question.options}
+        if opt_outs:
+            card["options"] = [
+                {"code": o.code, "label": o.label,
+                 "n": sum(1 for v in given if str(v) == str(o.code))}
+                for o in question.options
+            ]
+        numbers = sorted(float(v) for v in given if _is_number(v) and str(v) not in opt_outs)
         if numbers:
             card["numeric"] = {
                 "mean": round(sum(numbers) / len(numbers), 2),
