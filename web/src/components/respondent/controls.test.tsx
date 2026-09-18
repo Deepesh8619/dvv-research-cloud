@@ -3,7 +3,10 @@ import { Model } from 'survey-core'
 import type { Question, QuestionMatrixModel, QuestionRankingModel } from 'survey-core'
 import { describe, expect, it, vi } from 'vitest'
 
-import { MatrixCarousel, NumberStepper, TapToRank, registerRespondentControls } from './controls'
+import type { QuestionRatingModel } from 'survey-core'
+
+import { respondentTitle } from '../../pages/RespondentPage'
+import { MatrixCarousel, NumberStepper, RatingPad, TapToRank, registerRespondentControls } from './controls'
 
 registerRespondentControls() // registers the optOuts property
 
@@ -84,5 +87,44 @@ describe('MatrixCarousel', () => {
     expect(screen.getByText('Taste')).toBeTruthy()
     expect(screen.getByText('2 of 2')).toBeTruthy()
     vi.useRealTimers()
+  })
+})
+
+const ZERO_TEN = Array.from({ length: 11 }, (_, i) => ({
+  value: i,
+  text: i === 0 ? 'Very Unlikely' : i === 5 ? 'Might or Might Not' : i === 10 ? 'Very Likely' : String(i),
+}))
+
+describe('a 0-10 scale', () => {
+  it('is a number pad inside a grid statement, with its words underneath', () => {
+    const { model, question } = survey({
+      type: 'matrix', rows: [{ value: 1, text: 'Bubble' }], columns: ZERO_TEN,
+    })
+    render(<MatrixCarousel question={question as QuestionMatrixModel} />)
+    // Numbers on the buttons, not eleven full-width labels.
+    expect(screen.getByRole('radio', { name: '7' })).toBeTruthy()
+    expect(screen.getByText('Very Unlikely')).toBeTruthy()
+    expect(screen.getByText('5 = Might or Might Not')).toBeTruthy()
+    fireEvent.click(screen.getByRole('radio', { name: '7' }))
+    expect(model.getValue('Q')).toEqual({ 1: 7 })
+  })
+
+  it('is the same pad for one thing rated', () => {
+    const { model, question } = survey({
+      type: 'rating', rateValues: ZERO_TEN.map((c) => ({ value: c.value, text: String(c.value) })),
+      minRateDescription: 'Very Unfavorable', maxRateDescription: 'Very Favorable',
+    })
+    render(<RatingPad question={question as QuestionRatingModel} />)
+    expect(screen.getByText('Very Favorable')).toBeTruthy()
+    fireEvent.click(screen.getByRole('radio', { name: '8' }))
+    expect(model.getValue('Q')).toBe(8)
+  })
+})
+
+describe('respondentTitle', () => {
+  it('never shows a respondent the file name, which names the sponsor', () => {
+    expect(respondentTitle('02QRE_FINAL_-_Bubble_Consumer_Research_5.6.26')).toBe('')
+    expect(respondentTitle('study.docx')).toBe('')
+    expect(respondentTitle('Skincare Habits Study')).toBe('Skincare Habits Study')
   })
 })

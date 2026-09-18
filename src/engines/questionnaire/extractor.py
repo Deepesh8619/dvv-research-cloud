@@ -56,6 +56,7 @@ from src.engines.questionnaire.datamap_recovery import (
 )
 from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
 from src.engines.questionnaire.learned import LearnedPattern
+from src.engines.questionnaire.list_sources import fill_lists, points_at_a_list
 from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import detect_techniques
 from src.engines.questionnaire.profiles import detect_profile
@@ -583,6 +584,15 @@ def _apply_table_shape(question: Question, chunk: QuestionChunk) -> None:
         return
     shape = question_from_tables(tables, list(question.options))
     if shape is None:
+        return
+    if not shape.rows and not points_at_a_list(question.text):
+        # "How do you feel about Bubble now?" over a 0-10 strip: ONE thing
+        # rated, so one answer from the scale — not a grid waiting for rows.
+        question.type = QuestionType.SINGLE
+        question.options = list(shape.cols)
+        question.extraction_evidence["options"] = f"a {len(shape.cols)}-point scale"
+        if schema.FLAG_EMPTY_OPTIONS in question.flags:
+            question.flags.remove(schema.FLAG_EMPTY_OPTIONS)
         return
     question.type = QuestionType.GRID_SINGLE
     question.rows = shape.rows
@@ -1207,6 +1217,9 @@ def extract_survey_definition(
     # "Q2a. ever heard of? | Q2b. Ever purchased from?" across one brand list is
     # two questions, not one grid allowing a single answer per brand.
     split_subquestion_grids(survey)
+    # "[SHOW Q26 LIST]", "each of these brands": a list stated once and used
+    # again. Filled before loops, which copy each template's list.
+    fill_lists(survey)
     # A question asked once per brand is not one question: held as one it is
     # eight columns with no way to tell one brand's answers from another's.
     expand_loops(survey)

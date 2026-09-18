@@ -121,11 +121,14 @@ def test_a_scale_alone_takes_its_statements_from_the_prose():
     assert [o.label for o in result.rows] == [o.label for o in prose]
 
 
-def test_half_a_grid_is_refused():
-    """A scale with no statements anywhere must NOT become a grid: a grid with
-    no rows emits no data columns, and inventing rows would put statements
-    nobody wrote into a delivery file."""
-    assert question_from_tables([SCALE_STRIP], prose_options=[]) is None
+def test_half_a_grid_invents_no_statements():
+    """A scale with no statements anywhere keeps its SCALE and no rows: inventing
+    rows would put statements nobody wrote into a delivery file. Discarding the
+    scale too left "How do you feel about Bubble?" with no answers at all — it is
+    either one thing rated on that scale, or a grid whose rows the document
+    states elsewhere, and the extractor decides which."""
+    shape = question_from_tables([SCALE_STRIP], prose_options=[])
+    assert shape is not None and shape.rows == [] and shape.cols
     assert question_from_tables([QUOTA_TABLE], prose_options=[]) is None
     assert question_from_tables([], prose_options=[]) is None
 

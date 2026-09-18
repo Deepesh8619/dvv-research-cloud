@@ -27,6 +27,7 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.questionnaire.grid_subquestions import without_question_label
+from src.engines.questionnaire.prose_directives import is_derived_wording
 
 # Square brackets are a SCRIPTING convention, not respondent language. Across
 # every instrument we have — client documents and public federal ones alike —
@@ -91,7 +92,12 @@ def _choices_visible_if(mask: dict, by_qid: dict[str, Question]) -> str | None:
     against = mask.get("exclude_qid") if mode == "list_except" else mask.get("source_qid")
     source = by_qid.get(against or "")
     if source is None:
-        return None
+        # The parser upper-cases a qid it reads ("Q2B"); the question is "Q2b".
+        wanted = str(against or "").upper()
+        source = next((q for k, q in by_qid.items() if k.upper() == wanted), None)
+        if source is None:
+            return None
+        against = source.qid
     keeps_what_was_chosen = mode == "selected"
     if source.type in _MULTI_VALUED:
         operator = "contains" if keeps_what_was_chosen else "notcontains"
@@ -203,6 +209,23 @@ def _numeric_validators(validation: dict[str, Any] | None) -> list[dict[str, Any
     return [validator]
 
 
+def _is_numeric_scale(options: list) -> bool:
+    """A 0-10 style scale: consecutive codes, labelled at most at a few points."""
+    if len(options) < 5:
+        return False
+    codes = [o.code for o in options]
+    if codes != list(range(codes[0], codes[0] + len(codes))):
+        return False
+    bare = sum(1 for o in options if (o.label or "").strip() == str(o.code))
+    return bare * 2 >= len(options)
+
+
+def _scale_end(option) -> str:
+    """ "Very Unfavorable" from "0=Very Unfavorable"; nothing when it is just a number."""
+    label = (option.label or "").strip()
+    return "" if label == str(option.code) else label
+
+
 def _numeric_validators_with_opt_outs(
     qid: str, validation: dict[str, Any] | None, codes: list[int]
 ) -> list[dict[str, Any]]:
@@ -235,7 +258,17 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
 
     element: dict[str, Any] = {"name": question.qid, "title": title}
 
-    if qtype == QuestionType.SINGLE:
+    if qtype == QuestionType.SINGLE and _is_numeric_scale(question.options):
+        # "0=Very Unfavorable, 1 ... 10=Very Favorable": eleven stacked radio
+        # cards pushed the question off the screen. A rating row keeps it in
+        # one line; the codes are the same values, so the data is unchanged.
+        options = question.options
+        element["type"] = "rating"
+        element["rateValues"] = [{"value": o.code, "text": str(o.code)} for o in options]
+        element["minRateDescription"] = _scale_end(options[0])
+        element["maxRateDescription"] = _scale_end(options[-1])
+        element["displayMode"] = "buttons"
+    elif qtype == QuestionType.SINGLE:
         element["type"] = "radiogroup"
         element["choices"] = _choices(question.options, by_qid)
     elif qtype == QuestionType.MULTI:
@@ -299,11 +332,16 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
     # every option, and picked ones they had never named. The first condition
     # we can express wins; a question carrying two contradictory masks is a
     # scripting error for a human, not something to silently AND together.
-    if "choices" in element:
+    # A grid is masked on its ROWS: "FOR Q2c SHOW BRANDS SELECTED AT Q2b" asks
+    # when each brand was last bought only for the brands actually bought.
+    masked = "choicesVisibleIf" if "choices" in element else (
+        "rowsVisibleIf" if "rows" in element else None
+    )
+    if masked:
         for mask in techniques.get("masks") or []:
             condition = _choices_visible_if(mask, by_qid)
             if condition:
-                element["choicesVisibleIf"] = condition
+                element[masked] = condition
                 break
 
     return element
@@ -319,17 +357,27 @@ _SCRIPTER_ONLY_FLAGS = frozenset({"DERIVED_VARIABLE"})
 # carries none — and a respondent was shown a page reading "CODE AGE". The
 # wording is the same signal the extractor uses, and checking it here means an
 # old definition stops leaking without being re-extracted first.
-_SCRIPTER_ONLY_WORDING = re.compile(r"^[^a-z]*\bCODE\b[^a-z]*$")
+
+
+# "Recent Bubble Buyer (Q2c.1=1 OR 2)", "Unaware (Not selected at Q2a)": an
+# answer list where the answers are RULES over other questions is a computed
+# variable's definition, whatever type it was stored as.
+_RULE_OPTION = re.compile(r"\(\s*[A-Z][A-Za-z0-9_.]*\s*=|\bselected at\s+[A-Z]", re.I)
+
+
+def _options_are_rules(question: Question) -> bool:
+    labels = [o.label for o in question.options or []]
+    return len(labels) >= 2 and sum(bool(_RULE_OPTION.search(x)) for x in labels) * 2 > len(labels)
 
 
 def _is_respondent_facing(question: Question) -> bool:
     if _SCRIPTER_ONLY_FLAGS & set(question.flags or ()):
         return False
-    if question.type is QuestionType.INFO and _SCRIPTER_ONLY_WORDING.match(
-        (question.text or "").strip()
-    ):
+    # Any type: "BUBBLE AUDIENCE CODE" was stored as a single choice and a
+    # respondent was asked to pick which audience segment they are.
+    if is_derived_wording(question.text or ""):
         return False
-    return True
+    return not _options_are_rules(question)
 
 
 def _compile_block(block: Block, survey: SurveyDefinition) -> dict[str, Any]:

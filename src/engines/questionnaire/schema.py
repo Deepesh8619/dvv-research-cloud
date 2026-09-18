@@ -64,6 +64,10 @@ FLAG_DERIVED_VARIABLE = "DERIVED_VARIABLE"
 # it is a real question a scripter shouted, and the difference decides whether
 # anybody is asked it. So the reviewer is asked to confirm rather than told.
 FLAG_DERIVED_VARIABLE_UNCONFIRMED = "DERIVED_VARIABLE_UNCONFIRMED"
+# The answer list was copied from an earlier question the wording points at
+# ("each of these brands") but does not name. Usually right; the list decides
+# the data columns, so a reviewer confirms which one.
+FLAG_LIST_INHERITED = "LIST_INHERITED"
 
 
 # --- Extraction schema ------------------------------------------------------

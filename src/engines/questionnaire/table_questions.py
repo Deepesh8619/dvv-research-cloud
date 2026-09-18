@@ -75,6 +75,20 @@ def scale_strip(rows: list[list[str]]) -> list[Option] | None:
     11-point scale into eleven single-select answers.
     """
     filled = [row for row in rows if any(cell.strip() for cell in row)]
+    if len(filled) == 2:
+        # "Within the past 3 months | 3-5 months ago | ..." over "1 | 2 | ...":
+        # the labels on one row and their punch codes on the next.
+        labels = [_clean(c) for c in filled[0] if _clean(c)]
+        codes = [_clean(c) for c in filled[1] if _clean(c)]
+        if (
+            len(labels) == len(codes) >= _MIN_SCALE_POINTS
+            and all(c.isdigit() for c in codes)
+            and [int(c) for c in codes] == sorted({int(c) for c in codes})
+            and not any(label.isdigit() for label in labels)
+        ):
+            pairs = zip(codes, labels, strict=True)
+            return [Option(code=int(c), label=label) for c, label in pairs]
+        return None
     if len(filled) != 1:
         return None
     points = [_scale_point(cell) for cell in filled[0] if cell.strip()]
@@ -246,12 +260,26 @@ def question_from_tables(
         if whole:
             return whole
 
-    scale = next((s for s in (scale_strip(t) for t in tables) if s), None)
-    if not scale:
+    scale_table = next((t for t in tables if scale_strip(t)), None)
+    if scale_table is None:
         return None
-    statements = next((s for s in (statements_table(t) for t in tables) if s), None)
+    scale = scale_strip(scale_table)
+    # Never from the scale's own table: its code row "1 | 2 | 3" reads as a
+    # statement numbered 1 called "2", and one statement sank the whole grid.
+    statements = next(
+        (s for s in (statements_table(t) for t in tables if t is not scale_table) if s), None
+    )
     if not statements:
         statements = [o for o in prose_options if o.label.strip()]
+    if not statements:
+        # "How likely are you to consider each of these brands?" over a 0-10
+        # strip, and no list under it: the rows are a list stated EARLIER, and
+        # `list_sources.fill_lists` takes them from there. Throwing the scale
+        # away too left a grid with no rows AND no columns — a blank page.
+        return TableQuestion(
+            rows=[], cols=list(scale),
+            evidence=f"a {len(scale)}-point scale; its rows are a list stated elsewhere",
+        )
     if len(statements) < _MIN_GRID_ROWS:
         return None
     return TableQuestion(
