@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 
 import { FieldReport, QuestionLinks, QuestionSummary, fieldingApi } from '../api/client'
+import { BUCKETS } from '../lib/buckets'
 
 /**
  * The numbers a researcher is asked for the morning after a launch.
@@ -81,14 +82,6 @@ function Stat({ label, value }: { label: string; value: number }) {
 }
 
 // How a researcher reads a report: by kind, in the order a respondent meets them.
-const BUCKETS: Array<{ key: string; label: string; hint: string }> = [
-  { key: 'screener', label: 'Screener', hint: 'Who got in' },
-  { key: 'profile', label: 'Profile', hint: 'Who they are — what tables are cut by' },
-  { key: 'core', label: 'Core measures', hint: 'What the study measures' },
-  { key: 'loop', label: 'Brand loops', hint: 'Asked once per brand' },
-  { key: 'open_end', label: 'Open-ends', hint: 'What people wrote' },
-  { key: 'hidden', label: 'Hidden', hint: 'Computed, not asked' },
-]
 
 // Following a link may cross buckets: the report clears its filter first.
 const GoTo = createContext<(qid: string) => void>(scrollToCard)

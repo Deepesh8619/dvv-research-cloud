@@ -144,3 +144,53 @@ def test_one_thing_rated_on_a_scale_is_a_rating_row():
     # An ordinary short list stays a list.
     yes_no = Question(qid="Q1", text="?", options=YES_NO)
     assert _elements(_survey(yes_no))["Q1"]["type"] == "radiogroup"
+
+
+def test_a_pipe_written_in_other_case_still_fills_the_sentence():
+    """"[INSERT Q2c RESPONSE FOR BUBBLE]" was stored as Q2C: the answer vanished
+    and a respondent read "the last time you purchased Bubble was ."."""
+    from src.renderers.surveyjs_compiler import display_warnings
+
+    q2c = Question(qid="Q2c", text="When did you last buy from each brand?",
+                   type=QuestionType.GRID_SINGLE, rows=list(BRAND_OPTIONS[:2]),
+                   cols=[Option(code=1, label="Recently"), Option(code=2, label="Long ago")])
+    q14 = Question(qid="Q14", type=QuestionType.OPEN_TEXT,
+                   text="You last bought Bubble [INSERT Q2c RESPONSE FOR BUBBLE]. Why not since?",
+                   validation={"techniques": {"pipes": [
+                       {"source_qid": "Q2C", "name": None, "verbatim": "INSERT Q2c"}]}})
+    survey = _survey(q2c, q14)
+    # ONE row of the grid — SurveyJS prints that cell's column label.
+    assert _elements(survey)["Q14"]["title"] == "You last bought Bubble {Q2c.1}. Why not since?"
+    assert display_warnings(survey) == []
+
+
+def test_a_pipe_that_names_no_question_means_the_single_answer_just_given():
+    q24 = Question(qid="Q24", text="Rate the message", options=ZERO_TEN)
+    q25 = Question(qid="Q25", text="Why did you rate it a [INSERT RATING]?",
+                   type=QuestionType.OPEN_TEXT,
+                   validation={"techniques": {"pipes": [
+                       {"source_qid": None, "name": "RATING", "verbatim": "INSERT RATING]"}]}})
+    survey = _survey(q24, q25)
+    fill_lists(survey)
+    assert _elements(survey)["Q25"]["title"] == "Why did you rate it a {Q24}?"
+
+
+def test_after_a_grid_the_rating_is_left_for_a_person():
+    """"This message's rating" after a grid names a row nobody identified."""
+    grid = Question(qid="Q24", text="Rate each message", type=QuestionType.GRID_SINGLE,
+                    rows=list(BRAND_OPTIONS[:2]), cols=ZERO_TEN)
+    q25 = Question(qid="Q25", text="Why that rating [INSERT RATING]?", type=QuestionType.OPEN_TEXT,
+                   validation={"techniques": {"pipes": [
+                       {"source_qid": None, "name": "RATING", "verbatim": "INSERT RATING"}]}})
+    fill_lists(_survey(grid, q25))
+    assert q25.validation["techniques"]["pipes"][0]["source_qid"] is None
+
+
+def test_a_sample_split_is_assigned_and_a_section_header_is_not_an_answer():
+    fields = parse_prose_question(
+        "S0a. SAMPLE SPLIT\nSPLIT A\nSPLIT B\n"
+        "CONSUMER PANEL INTRODUCTION & SCREENER (S0=1)\nThank you for taking part.",
+        "S0a",
+    )
+    assert [o.label for o in fields.options] == ["SPLIT A", "SPLIT B"]
+    assert is_derived_wording("SAMPLE SPLIT")

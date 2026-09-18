@@ -263,7 +263,9 @@ def _status_response(
         ),
         n_approved=len(questionnaire.approved_qids or []),
         source=survey.source if survey else None,
-        validation_errors=metadata.get("validation_errors", []),
+        # Read fresh, not from the snapshot taken at extraction: a definition
+        # stored before that snapshot moved still reports what is true NOW.
+        validation_errors=survey.validate() if survey else metadata.get("validation_errors", []),
         extraction_summary=metadata.get("extraction_summary", {}),
         # Only meaningful when status == 'error'; None otherwise. Names the root
         # cause (missing key, circuit-breaker abort) instead of a bare 'error'.

@@ -273,7 +273,19 @@ def simulate(
 
         for qid in survey.question_order():
             question = by_qid.get(qid)
-            if question is None or question.type == QuestionType.INFO:
+            if question is None:
+                continue
+            if question.type == QuestionType.INFO:
+                # A hidden variable with codes — "CODE SAMPLE SOURCE", a sample
+                # split — is set by the script, not asked. Left empty, every
+                # path gated on it (S0=1: the whole consumer screener) was
+                # unreachable, and the run reported a third of the survey as
+                # never shown. Each synthetic respondent is given one of its
+                # codes, as the panel or the script would.
+                # ponytail: uniform over codes; a computed variable (age bands)
+                # can disagree with the answers it is computed from.
+                if question.options and qid not in answers:
+                    answers[qid] = rng.choice([o.code for o in question.options])
                 continue
 
             if qid in bases:

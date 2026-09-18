@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
 import {
   Question,
+  QuestionMapEntry,
   QuestionnaireStatus,
   QUESTION_TYPES,
   questionnaireApi,
@@ -18,6 +19,8 @@ import CorrectionBox from '../components/CorrectionBox'
 import ExtractionProvenance from '../components/ExtractionProvenance'
 import TeachFormat from '../components/TeachFormat'
 import { useLabel } from '../labels/LabelContext'
+import { BucketBar, ConnectionsPanel, IssuesPanel, ProgressRing } from '../components/review/QuestionMap'
+import { bucketInfo } from '../lib/buckets'
 import { typeHint, typeLabel } from '../labels/questionTypes'
 import { canCorrect as hasCorrectRole, canWrite as hasWriteRole } from '../auth/roles'
 
@@ -118,6 +121,7 @@ function UploadPanel({ studyId, onUploaded, disabled }: { studyId: string; onUpl
 
 function QuestionRow({
   q,
+  entry,
   selected,
   onClick,
   draggable,
@@ -130,6 +134,7 @@ function QuestionRow({
   onMoveKey,
 }: {
   q: Question
+  entry?: QuestionMapEntry
   selected: boolean
   onClick: () => void
   draggable: boolean
@@ -141,8 +146,17 @@ function QuestionRow({
   onDragEnd: () => void
   onMoveKey: (delta: number) => void
 }) {
+  const bucket = bucketInfo(entry?.bucket)
+  const links = entry?.links
+  const summary = [
+    links?.asked_if.length ? `asked if ${links.asked_if.join(', ')}` : '',
+    links?.options_from.length ? `options from ${links.options_from.join(', ')}` : '',
+    links?.text_from.length ? `pipes ${links.text_from.join(', ')}` : '',
+    links?.used_by.length ? `decides ${links.used_by.length}` : '',
+  ].filter(Boolean)
   return (
     <button
+      id={`qrow-${q.qid}`}
       onClick={onClick}
       draggable={draggable}
       onDragStart={onDragStart}
@@ -159,12 +173,19 @@ function QuestionRow({
         }
       }}
       title={draggable ? 'Drag to reorder, or Alt+↑ / Alt+↓' : undefined}
-      className={`w-full text-left px-3 py-2.5 border-b border-slate-100 hover:bg-slate-50 transition-colors ${
-        selected ? 'bg-sky-50' : ''
+      className={`relative w-full text-left pl-4 pr-3 py-2.5 border-b border-slate-100 transition-all duration-200 ${
+        selected ? 'bg-indigo-50/70 shadow-[inset_3px_0_0_0_#6366f1]' : 'hover:bg-slate-50'
       } ${dragging ? 'opacity-40' : ''} ${
         dropBefore ? 'border-t-2 border-t-sky-500' : ''
       } ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
     >
+      {bucket && (
+        <span
+          aria-hidden
+          title={bucket.label}
+          className={`absolute left-0 top-2.5 bottom-2.5 w-1 rounded-r ${bucket.dot} ${selected ? 'opacity-0' : 'opacity-70'}`}
+        />
+      )}
       <div className="flex items-center gap-2">
         <ConfidenceDot conf={q.extraction_confidence} />
         <span className="font-mono text-xs text-slate-700 shrink-0">{q.qid}</span>
@@ -176,6 +197,9 @@ function QuestionRow({
         )}
       </div>
       <p className="text-sm text-slate-800 mt-1 truncate">{q.text || <em className="text-slate-400">(no text)</em>}</p>
+      {summary.length > 0 && (
+        <p className="mt-1 truncate text-[11px] text-slate-400">↳ {summary.join(' · ')}</p>
+      )}
       {q.flags.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1.5">
           {q.flags.map((f) => (
@@ -631,6 +655,13 @@ export default function QuestionnairePage() {
   const [approvingClean, setApprovingClean] = useState(false)
   const [cleanMsg, setCleanMsg] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  // Each question's bucket and links, from the server's reading of the
+  // definition. Refreshed after any edit, since an edit can change a link.
+  const [map, setMap] = useState<Record<string, QuestionMapEntry>>({})
+  const [bucket, setBucket] = useState('all')
+  // "?q=Q2c" — arriving from the pre-link check, straight to the question.
+  const [search] = useSearchParams()
+  const wanted = search.get('q')
 
   const loadStatus = useCallback(async () => {
     if (!studyId) return
@@ -656,15 +687,26 @@ export default function QuestionnairePage() {
     }
   }, [studyId])
 
+  const loadMap = useCallback(async () => {
+    if (!studyId) return
+    try {
+      const res = await questionnaireApi.map(studyId)
+      setMap(res.data.questions)
+    } catch {
+      /* the list still works without it — buckets and links just stay hidden */
+    }
+  }, [studyId])
+
   const loadQuestions = useCallback(async () => {
     if (!studyId) return
     try {
       const res = await questionnaireApi.questions(studyId)
       setQuestions(res.data.questions)
+      void loadMap()
     } catch {
       /* still processing / none — status drives the UI */
     }
-  }, [studyId])
+  }, [studyId, loadMap])
 
   useEffect(() => {
     loadStatus()
@@ -713,7 +755,44 @@ export default function QuestionnairePage() {
 
   const onQuestionSaved = (updated: Question) => {
     setQuestions((qs) => qs.map((q) => (q.qid === updated.qid ? updated : q)))
+    void loadMap() // routing or a list may have changed a link
   }
+
+  // Go to a question from anywhere — an issue, a link chip — even if the
+  // bucket filter is hiding it.
+  const goTo = useCallback(
+    (qid: string) => {
+      if (!questions.some((q) => q.qid === qid)) return
+      if (bucket !== 'all' && map[qid]?.bucket !== bucket) setBucket('all')
+      setSelectedQid(qid)
+      // Scroll the LIST only: scrollIntoView also moved every scrolling
+      // ancestor, and pushed the app's own header off the screen.
+      window.setTimeout(() => {
+        const row = document.getElementById(`qrow-${qid}`)
+        const list = row?.closest('[data-question-list]') as HTMLElement | null
+        if (row && list) {
+          list.scrollTo({ top: row.offsetTop - list.clientHeight / 2 + row.clientHeight / 2, behavior: 'smooth' })
+        }
+      }, 60)
+    },
+    [questions, bucket, map],
+  )
+
+  useEffect(() => {
+    if (wanted && questions.some((q) => q.qid === wanted)) goTo(wanted)
+    // Once, when the list arrives — not on every later edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted, questions.length > 0])
+
+  const bucketCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const q of questions) {
+      const key = map[q.qid]?.bucket
+      if (key) counts[key] = (counts[key] ?? 0) + 1
+    }
+    return counts
+  }, [questions, map])
+  const visible = bucket === 'all' ? questions : questions.filter((q) => map[q.qid]?.bucket === bucket)
   const onQuestionApproved = (qid: string) => {
     setQuestions((qs) => qs.map((q) => (q.qid === qid ? { ...q, approved: true } : q)))
     setApproveAllError(null)
@@ -825,18 +904,34 @@ export default function QuestionnairePage() {
         <Link to={`/projects/${studyId}`} className="text-sm text-slate-500 hover:text-slate-700">
           ← Back to project
         </Link>
-        <h1 className="text-2xl font-semibold text-slate-900 mt-1">{tTitle}</h1>
-        {status && (
-          <p className="text-sm text-slate-500 mt-1">
-            {status.title ?? status.source_filename} · status: <span className="font-medium">{status.status}</span>
-            {status.n_questions > 0 && ` · ${nApproved}/${status.n_questions} approved`}
-          </p>
-        )}
-        {status?.profile && (
-          <p className="text-xs text-slate-400 mt-0.5">
-            Detected format: {status.profile.label} ({(status.profile.confidence * 100).toFixed(0)}%)
-          </p>
-        )}
+        <div className="mt-2 flex flex-wrap items-center gap-4">
+          {status && status.n_questions > 0 && <ProgressRing done={nApproved} total={status.n_questions} />}
+          <div className="min-w-0 flex-1">
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{tTitle}</h1>
+            {status && (
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-500">
+                <span className="truncate">{status.title ?? status.source_filename}</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${
+                    status.status === 'approved'
+                      ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200'
+                      : 'bg-slate-100 text-slate-600 ring-1 ring-inset ring-slate-200'
+                  }`}
+                >
+                  {status.status.replace('_', ' ')}
+                </span>
+                {status.n_questions > 0 && (
+                  <span className="tabular-nums">{nApproved} of {status.n_questions} approved</span>
+                )}
+              </p>
+            )}
+            {status?.profile && (
+              <p className="text-xs text-slate-400 mt-0.5">
+                Detected format: {status.profile.label} ({(status.profile.confidence * 100).toFixed(0)}%)
+              </p>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Status load failed for a reason other than "no questionnaire yet" */}
@@ -931,16 +1026,7 @@ export default function QuestionnairePage() {
       {/* Ready → list + detail */}
       {status && !notFound && !['processing', 'error'].includes(status.status) && (
         <>
-          {status.validation_errors.length > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-md p-3 mb-4">
-              <p className="text-sm font-medium text-amber-800 mb-1">Outstanding validation issues:</p>
-              <ul className="list-disc list-inside text-sm text-amber-700">
-                {status.validation_errors.map((e, i) => (
-                  <li key={i}>{e}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <IssuesPanel errors={status.validation_errors} onGoTo={goTo} />
 
           {approveAllError && (
             <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
@@ -976,9 +1062,11 @@ export default function QuestionnairePage() {
 
           <div className="grid grid-cols-5 gap-6">
             {/* List */}
-            <div className="col-span-2 bg-white rounded-lg border border-slate-200 overflow-hidden h-fit">
-              <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between">
-                <span className="text-sm font-medium text-slate-700">{questions.length} questions</span>
+            <div className="col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
+              <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-800 tabular-nums">
+                  {bucket === 'all' ? `${questions.length} questions` : `${visible.length} of ${questions.length}`}
+                </span>
                 {canWrite && (
                   <div className="flex items-center gap-2">
                     <button
@@ -1000,19 +1088,30 @@ export default function QuestionnairePage() {
                   </div>
                 )}
               </div>
+              {Object.keys(bucketCounts).length > 0 && (
+                <div className="border-b border-slate-100 bg-slate-50/60">
+                  <BucketBar counts={bucketCounts} total={questions.length} value={bucket} onChange={setBucket} />
+                  {bucket !== 'all' && (
+                    <p className="px-3 pb-2 text-[11px] text-slate-500">
+                      {bucketInfo(bucket)?.hint}. Showing this kind only — reorder from All.
+                    </p>
+                  )}
+                </div>
+              )}
               {reorderError && (
                 <p className="text-xs text-red-700 bg-red-50 border-b border-red-100 px-3 py-2">
                   {reorderError}
                 </p>
               )}
-              <div className="max-h-[70vh] overflow-y-auto">
-                {questions.map((q) => (
+              <div key={bucket} data-question-list className="relative max-h-[70vh] overflow-y-auto dvv-cascade">
+                {visible.map((q) => (
                   <QuestionRow
                     key={q.qid}
                     q={q}
+                    entry={map[q.qid]}
                     selected={q.qid === selectedQid}
                     onClick={() => setSelectedQid(q.qid)}
-                    draggable={canWrite}
+                    draggable={canWrite && bucket === 'all'}
                     dragging={dragQid === q.qid}
                     dropBefore={dropBeforeQid === q.qid && dragQid !== q.qid}
                     onDragStart={() => setDragQid(q.qid)}
@@ -1044,8 +1143,18 @@ export default function QuestionnairePage() {
             </div>
 
             {/* Detail */}
-            <div className="col-span-3 bg-white rounded-lg border border-slate-200 p-6">
+            <div className="col-span-3 bg-white rounded-xl border border-slate-200 shadow-sm p-6">
               {selected ? (
+                <div key={selected.qid} className="dvv-rise">
+                <ConnectionsPanel
+                  studyId={studyId!}
+                  question={selected}
+                  entry={map[selected.qid]}
+                  earlier={questions.slice(0, questions.findIndex((q) => q.qid === selected.qid))}
+                  canWrite={canWrite}
+                  onChanged={onQuestionSaved}
+                  onGoTo={goTo}
+                />
                 <QuestionDetail
                   key={selected.qid}
                   studyId={studyId!}
@@ -1057,8 +1166,18 @@ export default function QuestionnairePage() {
                   onSaved={onQuestionSaved}
                   onApproved={onQuestionApproved}
                 />
+                </div>
               ) : (
-                <p className="text-sm text-slate-400">{tEmpty}</p>
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-2xl text-indigo-400">
+                    ⇄
+                  </div>
+                  <p className="text-sm font-medium text-slate-600">{tEmpty}</p>
+                  <p className="mt-1 max-w-xs text-xs text-slate-400">
+                    Each question shows what decides who sees it, where its options come from, and what its
+                    answer decides later.
+                  </p>
+                </div>
               )}
             </div>
           </div>

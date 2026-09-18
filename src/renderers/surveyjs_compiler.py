@@ -47,7 +47,40 @@ _MULTI_VALUED = frozenset({QuestionType.MULTI, QuestionType.RANK})
 
 
 def _normalize(text: str) -> str:
-    return _WHITESPACE.sub(" ", (text or "")).strip().casefold()
+    # Brackets are the directive's frame, not its words: a pipe stored as
+    # "INSERT RATING]" still names "[INSERT RATING]".
+    return _WHITESPACE.sub(" ", (text or "").strip("[] ")).strip().casefold()
+
+
+def _find(by_qid: dict[str, Question], qid: str | None) -> Question | None:
+    """A question by id, whatever case the document wrote it in.
+
+    The technique parser upper-cases what it reads ("Q2C"), and the question is
+    "Q2c": the pipe resolved to nothing, and a respondent read "the last time you
+    purchased Bubble was ." with the answer missing from the sentence.
+    """
+    if not qid:
+        return None
+    if qid in by_qid:
+        return by_qid[qid]
+    wanted = qid.upper()
+    return next((q for k, q in by_qid.items() if k.upper() == wanted), None)
+
+
+def _pipe_marker(source: Question, body: str) -> str:
+    """{Q7} for a question; {Q2c.1} for ONE row of a grid named in the pipe.
+
+    "[INSERT Q2c RESPONSE FOR BUBBLE]" wants the answer on Bubble's row — the
+    whole grid's answer is a map no sentence can hold. SurveyJS prints a cell's
+    column LABEL for {Q2c.1}, which is what the sentence needs.
+    """
+    if source.type is QuestionType.GRID_SINGLE and source.rows:
+        lowered = body.casefold()
+        for row in sorted(source.rows, key=lambda r: -len(r.label or "")):
+            label = (row.label or "").casefold()
+            if label and re.search(rf"\b(?:for|of|on)\s+{re.escape(label)}\b", lowered):
+                return "{" + f"{source.qid}.{row.code}" + "}"
+    return "{" + source.qid + "}"
 
 
 def _resolve_pipes(text: str, pipes: list[dict], by_qid: dict[str, Question]) -> str:
@@ -59,14 +92,15 @@ def _resolve_pipes(text: str, pipes: list[dict], by_qid: dict[str, Question]) ->
     the respondent was the instruction itself.
     """
     for pipe in pipes:
-        source = pipe.get("source_qid")
-        if not source or source not in by_qid:
+        question = _find(by_qid, pipe.get("source_qid"))
+        if question is None:
             continue  # unresolvable — the strip below removes it
+        source = question.qid
         wanted = _normalize(pipe.get("verbatim") or "")
         for group in _BRACKETED.findall(text):
             body = _normalize(group[1:-1])
             if body == wanted or (wanted and wanted in body) or source.casefold() in body:
-                text = text.replace(group, "{" + source + "}", 1)
+                text = text.replace(group, _pipe_marker(question, group[1:-1]), 1)
                 break
     return text
 
@@ -90,14 +124,10 @@ def _choices_visible_if(mask: dict, by_qid: dict[str, Question]) -> str | None:
     if mode == "full_list":
         return None
     against = mask.get("exclude_qid") if mode == "list_except" else mask.get("source_qid")
-    source = by_qid.get(against or "")
+    source = _find(by_qid, against)
     if source is None:
-        # The parser upper-cases a qid it reads ("Q2B"); the question is "Q2b".
-        wanted = str(against or "").upper()
-        source = next((q for k, q in by_qid.items() if k.upper() == wanted), None)
-        if source is None:
-            return None
-        against = source.qid
+        return None
+    against = source.qid  # the parser upper-cases what it reads ("Q2B" is "Q2b")
     keeps_what_was_chosen = mode == "selected"
     if source.type in _MULTI_VALUED:
         operator = "contains" if keeps_what_was_chosen else "notcontains"
@@ -445,6 +475,7 @@ def display_warnings(survey: SurveyDefinition) -> list[dict[str, str]]:
         techniques = _techniques(question)
         for pipe in techniques.get("pipes") or []:
             source = pipe.get("source_qid")
+            source = _find(by_qid, source).qid if _find(by_qid, source) else source
             verbatim = pipe.get("verbatim") or ""
             if verbatim and verbatim not in (question.text or ""):
                 # Already filled in: a loop writes each brand's name where

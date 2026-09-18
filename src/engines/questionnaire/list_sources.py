@@ -105,7 +105,38 @@ def fill_lists(survey: SurveyDefinition) -> list[dict]:
 
     if filled:
         survey.metadata["lists_filled"] = filled
+    _point_generic_pipes(survey)
     return filled
+
+
+# "[INSERT RATING]", "[INSERT ANSWER]": a pipe that names no question means the
+# one just answered. Left unresolved, it printed as a gap: "Why did you rate
+# this message for Bubble a ?"
+_GENERIC_PIPE = {"RATING", "SCORE", "ANSWER", "RESPONSE", "SELECTION", "CHOICE"}
+_ONE_VALUE = {QuestionType.SINGLE, QuestionType.DROPDOWN, QuestionType.NUMERIC}
+
+
+def _point_generic_pipes(survey: SurveyDefinition) -> None:
+    previous: Question | None = None
+    for qid in survey.question_order():
+        q = survey[qid] if qid in survey else None
+        if q is None:
+            continue
+        techniques = (q.validation or {}).get("techniques") or {}
+        for pipe in techniques.get("pipes") or []:
+            name = str(pipe.get("name") or "").strip().upper()
+            # Only when "the answer just given" is ONE value: after a grid,
+            # "this message's rating" names a row nobody identified.
+            if (
+                not pipe.get("source_qid") and name in _GENERIC_PIPE
+                and previous is not None and previous.type in _ONE_VALUE
+            ):
+                pipe["source_qid"] = previous.qid
+                q.extraction_evidence["pipe"] = (
+                    f"[INSERT {name}] names no question — read as {previous.qid}, the one before"
+                )
+        if q.type is not QuestionType.INFO:
+            previous = q
 
 
 def _named_source(q: Question, by_upper: dict[str, Question]) -> Question | None:

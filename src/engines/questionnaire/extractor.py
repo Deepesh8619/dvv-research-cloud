@@ -1249,6 +1249,10 @@ def extract_survey_definition(
         if recovered:
             survey.metadata["recovered_from_datamap"] = [q.qid for q in recovered]
 
+    # Last, after every pass that changes the survey: the list was taken before
+    # lists were filled and sections applied, and the review screen showed four
+    # questions "with no rows" that had them.
+    survey.metadata["validation_errors"] = survey.validate()
     return survey
 
 
