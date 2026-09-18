@@ -830,3 +830,95 @@ def test_anchored_option_is_last_in_the_link_the_respondent_gets(client):
         assert element["choices"][-1]["text"] == "None of the above"
         firsts.add(element["choices"][0]["text"])
     assert len(firsts) > 1  # a real shuffle, per respondent
+
+
+# --- Test links: dry-run data + jump-to-question ----------------------------
+
+
+def test_a_test_link_opens_even_when_a_real_link_would_be_refused(client):
+    """The pre-link check would 409 this survey (see the non-test version of
+    this test above) — a test link skips that gate entirely, on purpose: it
+    exists to try a script, including a broken one, on nobody real."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf, survey=_impossible_survey("study_f1"))
+
+    resp = test_client.post("/api/studies/study_f1/fielding/links", json={"test": True})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["is_test"] is True
+    assert test_client.get(f"/api/r/{body['token']}").json()["is_test"] is True
+
+
+def test_populate_adds_synthetic_sessions_and_shows_in_field_report(client):
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = test_client.post(
+        "/api/studies/study_f1/fielding/links", json={"test": True}
+    ).json()
+
+    resp = test_client.post(
+        f"/api/studies/study_f1/fielding/links/{link['id']}/populate", json={"n": 50}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["added"] == 50
+    assert sum(body["dispositions"].values()) == 50
+
+    report = test_client.get(
+        f"/api/studies/study_f1/fielding/links/{link['id']}/field-report"
+    ).json()
+    assert report["starts"] == 50
+
+
+def test_populate_on_a_real_link_is_refused(client):
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = _create_link(test_client).json()
+
+    resp = test_client.post(
+        f"/api/studies/study_f1/fielding/links/{link['id']}/populate", json={"n": 10}
+    )
+    assert resp.status_code == 409
+
+
+def test_jump_on_a_test_link_reaches_the_target_with_the_screener_answered(client):
+    """Q3 sits behind Q2 (show_if Q2==1) — jumping there must also clear Q1's
+    terminate (age >= 18), since a screened-out respondent never reaches Q3."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = test_client.post(
+        "/api/studies/study_f1/fielding/links", json={"test": True}
+    ).json()
+    token = link["token"]
+    sid = test_client.get(f"/api/r/{token}").json()["session_id"]
+
+    resp = test_client.post(
+        f"/api/r/{token}/sessions/{sid}/jump", json={"qid": "Q3"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["target"] == "Q3"
+    assert body["answers"]["Q1"] >= 18
+    assert body["answers"]["Q2"] == 1
+
+    # And the session itself now carries that path.
+    resume = test_client.get(f"/api/r/{token}/sessions/{sid}").json()
+    assert resume["answers"]["Q1"] >= 18
+    assert resume["answers"]["Q2"] == 1
+
+
+def test_jump_on_a_real_link_is_refused(client):
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    token = _create_link(test_client).json()["token"]
+    sid = test_client.get(f"/api/r/{token}").json()["session_id"]
+
+    resp = test_client.post(
+        f"/api/r/{token}/sessions/{sid}/jump", json={"qid": "Q3"}
+    )
+    assert resp.status_code == 403

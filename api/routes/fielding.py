@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 from api.auth import UserRole, get_current_user, require_role
 from api.db import (
     UserDB,
+    add_synthetic_sessions,
     close_fielding_link,
     count_completes,
     create_fielding_link,
@@ -71,6 +72,8 @@ from api.models import (
     FieldingLinkCreateRequest,
     FieldingLinkListResponse,
     FieldingLinkResponse,
+    JumpRequest,
+    PopulateRequest,
     QuotaCellResponse,
     QuotaCellsCreateRequest,
     QuotaCellsResponse,
@@ -88,7 +91,7 @@ from src.core.survey_definition import (
     evaluate,
 )
 from src.engines.fielding.decisions import QuotaCell
-from src.engines.fielding.dryrun import simulate
+from src.engines.fielding.dryrun import path_to, simulate
 from src.renderers.surveyjs_compiler import compile_to_surveyjs, display_warnings
 
 logger = logging.getLogger(__name__)
@@ -208,6 +211,7 @@ def _link_response(link, counts: dict | None = None) -> FieldingLinkResponse:
             link.soft_launch_limit is not None
             and (counts or {}).get("completes", 0) >= link.soft_launch_limit
         ),
+        is_test=bool(link.is_test),
     )
 
 
@@ -304,21 +308,28 @@ def create_link(
         survey.metadata["theme"] = theme
         payload = survey.to_json()  # stamp into the pinned snapshot only
 
+    is_test = bool(body.test) if body else False
+
     # Checked BEFORE the link exists. The old check ran after the insert, so a
-    # refused link was refused and saved at the same time.
-    check = _preflight(db, study_id)
-    if not check["ok"] and not (body.force if body else False):
-        failing = [c for c in check["checks"] if c["status"] == "fail"]
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "The pre-link check found problems a respondent would meet.",
-                "checks": failing,
-            },
-        )
+    # refused link was refused and saved at the same time. A test link skips
+    # this: it exists to try the script, including a broken one, on nobody real.
+    check = {"ok": True, "checks": []}
+    if not is_test:
+        check = _preflight(db, study_id)
+        if not check["ok"] and not (body.force if body else False):
+            failing = [c for c in check["checks"] if c["status"] == "fail"]
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "The pre-link check found problems a respondent would meet.",
+                    "checks": failing,
+                },
+            )
 
     redirects = (
-        body.model_dump(exclude_unset=True, exclude={"theme", "force"}) if body else None
+        body.model_dump(exclude_unset=True, exclude={"theme", "force", "test"})
+        if body
+        else None
     )
     link = create_fielding_link(
         db,
@@ -328,7 +339,9 @@ def create_link(
         survey_json=payload,
         created_by=user.email,
         redirects=redirects,
-        soft_launch_limit=body.soft_launch_limit if body else None,
+        # A test link never soft-launches — there's no real sample to protect.
+        soft_launch_limit=(body.soft_launch_limit if body and not is_test else None),
+        is_test=is_test,
     )
     if not check["ok"]:
         # Opened over a failing check on purpose: say so where it can be found.
@@ -494,6 +507,50 @@ def set_soft_launch(
         f"{'released' if body.limit is None else f'held at {body.limit}'} by {user.name}"
     )
     return _link_response(link, fielding_link_counts(db, link.id))
+
+
+@router.post("/studies/{study_id}/fielding/links/{link_id}/populate")
+def populate_link(
+    study_id: str,
+    link_id: str,
+    body: PopulateRequest | None = None,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Fill a TEST link with `n` dry-run respondents. (Owner/Analyst)
+
+    Walks the link's own pinned survey and live quota cells through `simulate`
+    (the same engine the dry-run report uses) and writes the result as real
+    session/answer rows — so the field monitor, field report and live-data
+    views all show something the moment a test link exists, with no panel and
+    no cost. Refused on a real link: this is not a shortcut for seeding fake
+    completes into data anyone will analyze.
+    """
+    link = _owner_link(db, study_id, link_id)
+    if not link.is_test:
+        raise HTTPException(
+            status_code=409,
+            detail="Only a test link can be populated with dry-run respondents",
+        )
+    n = max(1, min(int(body.n if body else 200), 2000))
+
+    survey = SurveyDefinition.from_json(link.survey_json)
+    cells = [
+        QuotaCell(
+            id=cell.id,
+            condition=Expression.from_dict(json.loads(cell.condition_json)),
+            limit=cell.cell_limit,
+            count=cell.count,
+        )
+        for cell in list_quota_cells(db, link.id)
+    ]
+    report = run_heavy_detached(db, simulate, survey, cells, n=n, collect=True)
+    added = add_synthetic_sessions(db, link.id, report.respondents)
+    logger.info(
+        f"[{study_id}] Test link {link_id} populated with {added} synthetic "
+        f"respondents by {user.name}: {report.dispositions}"
+    )
+    return {"added": added, "dispositions": report.dispositions}
 
 
 # --- Quota management (owner/analyst) ---------------------------------------
@@ -684,6 +741,7 @@ def enter_survey(token: str, request: Request, db: Session = Depends(get_db)):
         surveyjs_json=surveyjs_json,
         current_page=session.current_page or 0,
         theme=survey.metadata.get("theme"),
+        is_test=bool(link.is_test),
     )
 
 
@@ -881,3 +939,45 @@ def resume_session(
         completed_at=session.completed_at,
         redirect_url=_redirect_url(link, session),
     )
+
+
+@router.post("/r/{token}/sessions/{session_id}/jump")
+def jump_to_question(
+    token: str,
+    session_id: str,
+    body: JumpRequest,
+    db: Session = Depends(get_db),
+):
+    """Jump a TEST session straight to `qid`. Public, like the other /r/ routes —
+    a tester has no account either — but 403 on any real link: this is a way to
+    skip past a screener, and a real respondent must never be able to.
+
+    Finds one path of answers that reaches `qid` the way a qualifying
+    respondent would (`path_to`), keeping the tester's own answers where they
+    still allow it. Replaces the session's answers to every question BEFORE the
+    target with that path, then hands them back so the client can preload the
+    model and land on `qid`.
+    """
+    link = _resolve_link(db, token)
+    if not link.is_test:
+        raise HTTPException(status_code=403, detail="Jump is only available on a test link")
+    _resolve_session(db, link, session_id)  # 404 if unknown or belongs elsewhere
+
+    survey = SurveyDefinition.from_json(link.survey_json)
+    current = get_session_answers_map(db, session_id)
+    result = path_to(survey, body.qid, given=current)
+    if result is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No path of answers reaches {body.qid} — its base may never be met",
+        )
+    answers, kept_given = result
+
+    order = survey.question_order()
+    before = set(order[: order.index(body.qid)]) if body.qid in order else set()
+    stale = [qid for qid in before if qid in current and qid not in answers]
+    delete_respondent_answers(db, session_id, stale)
+    for qid, value in answers.items():
+        upsert_respondent_answer(db, session_id, qid, value)
+
+    return {"target": body.qid, "answers": answers, "kept_your_answers": kept_given}

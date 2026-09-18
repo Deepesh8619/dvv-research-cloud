@@ -280,6 +280,8 @@ function LinkCard({
   const [showLive, setShowLive] = useState(false)
   const [showSoftLaunch, setShowSoftLaunch] = useState(link.soft_launch_reached)
   const [delivery, setDelivery] = useState<string[]>([])
+  const [populateN, setPopulateN] = useState(200)
+  const [populateMsg, setPopulateMsg] = useState<string | null>(null)
 
   const publicUrl = `${window.location.origin}${link.respondent_path}`
   const c = link.counts
@@ -293,6 +295,21 @@ function LinkCard({
       onChanged()
     } catch (err) {
       setError(errorMessage(err) || 'Could not close link')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handlePopulate = async () => {
+    setBusy(true)
+    setError(null)
+    setPopulateMsg(null)
+    try {
+      const res = await fieldingApi.populate(studyId, link.id, populateN)
+      setPopulateMsg(`Added ${res.data.added} synthetic respondents`)
+      onChanged()
+    } catch (err) {
+      setError(errorMessage(err) || 'Could not populate link')
     } finally {
       setBusy(false)
     }
@@ -332,6 +349,14 @@ function LinkCard({
             >
               {link.status}
             </span>
+            {link.is_test && (
+              <span
+                className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700"
+                title="Jump-to-question works here, and it can be filled with dry-run data. Never a study's real data."
+              >
+                TEST
+              </span>
+            )}
             {/* A hold is not a closure — the same link resumes on release, so it
                 gets its own badge rather than overwriting the status. */}
             {link.soft_launch_limit !== null && link.status === 'open' && (
@@ -385,6 +410,29 @@ function LinkCard({
         <CountPill label="overquota" value={c.overquota ?? 0} color="text-red-500" />
         <CountPill label="security" value={c.security ?? 0} color="text-red-500" />
       </div>
+
+      {link.is_test && canWrite && (
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={2000}
+            value={populateN}
+            onChange={(e) => setPopulateN(Math.max(1, Number(e.target.value) || 1))}
+            className="h-8 w-24 px-2 rounded border border-slate-300 text-sm"
+            aria-label="Number of synthetic respondents"
+          />
+          <button
+            type="button"
+            onClick={handlePopulate}
+            disabled={busy}
+            className="text-xs border border-amber-300 text-amber-700 font-medium px-3 py-1.5 rounded-md hover:bg-amber-50 disabled:opacity-50"
+          >
+            {busy ? 'Working…' : 'Populate with dry-run data'}
+          </button>
+          {populateMsg && <span className="text-xs text-emerald-700">{populateMsg}</span>}
+        </div>
+      )}
 
       {materializeMsg && (
         <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-md p-3 text-sm text-emerald-700 flex items-center justify-between">
@@ -533,6 +581,21 @@ function CreatePanel({
     }
   }
 
+  // A test link skips the pre-link check panel entirely — that check exists to
+  // protect real respondents, and a test link never has any.
+  const handleCreateTest = async () => {
+    setCreating(true)
+    setError(null)
+    try {
+      await fieldingApi.createLink(studyId, undefined, undefined, false, null, true)
+      onCreated()
+    } catch (err) {
+      setError(errorMessage(err) || 'Could not create test link')
+    } finally {
+      setCreating(false)
+    }
+  }
+
   if (!canWrite) return null
 
   return (
@@ -544,14 +607,28 @@ function CreatePanel({
             Opens a public respondent link for the study's approved questionnaire.
           </p>
         </div>
-        <button
-          onClick={() => { setError(null); setChecking(true) }}
-          disabled={creating || checking || !canCreate}
-          title={canCreate ? '' : 'The study needs an approved questionnaire first'}
-          className="bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600 disabled:opacity-50 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-        >
-          {creating ? 'Creating…' : checking ? 'Checking…' : 'Create link'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleCreateTest}
+            disabled={creating || checking || !canCreate}
+            title={
+              canCreate
+                ? 'Opens immediately, no pre-link check — jump-to-question and dry-run data only.'
+                : 'The study needs an approved questionnaire first'
+            }
+            className="text-sm border border-amber-300 text-amber-700 font-medium px-4 py-2 rounded-md hover:bg-amber-50 disabled:opacity-50 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2"
+          >
+            Create test link
+          </button>
+          <button
+            onClick={() => { setError(null); setChecking(true) }}
+            disabled={creating || checking || !canCreate}
+            title={canCreate ? '' : 'The study needs an approved questionnaire first'}
+            className="bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600 disabled:opacity-50 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+          >
+            {creating ? 'Creating…' : checking ? 'Checking…' : 'Create link'}
+          </button>
+        </div>
       </div>
 
       {checking && (

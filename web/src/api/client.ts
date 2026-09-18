@@ -603,6 +603,8 @@ export interface RespondentEntry {
   // Set only on a terminal-at-entry outcome (duplicate-pid security = 30).
   status_code?: number | null
   redirect_url?: string | null
+  /** A test link: the respondent client shows the jump-to-question bar. */
+  is_test?: boolean
 }
 
 export interface RespondentSession {
@@ -744,6 +746,10 @@ export interface FieldingLink extends FieldingRedirects {
   soft_launch_limit: number | null
   /** Whether the hold is engaged RIGHT NOW — computed server-side from counts. */
   soft_launch_reached: boolean
+  /** A test link: jump-to-question works, and it can be filled with dry-run
+      respondents. It opened even if the pre-link check would have refused a
+      real link. Never a study's real data. */
+  is_test: boolean
 }
 
 /** What the soft-launch pause is for: the QC cross-check + field report run on
@@ -829,6 +835,7 @@ export const fieldingApi = {
     theme?: string | null,
     force = false,
     softLaunchLimit?: number | null,
+    test = false,
   ) =>
     api.post<FieldingLink>(`/studies/${studyId}/fielding/links`, {
       ...(redirects ?? {}),
@@ -837,7 +844,26 @@ export const fieldingApi = {
       // Opening a link is refused while a condition can never be true. This is
       // the deliberate override, and the server logs who chose it.
       ...(force ? { force: true } : {}),
+      // A test link skips the pre-link check and the soft launch entirely —
+      // it never carries real data, so there's nothing to hold back for.
+      ...(test ? { test: true } : {}),
     }),
+
+  /** Fill a TEST link with `n` dry-run respondents (409 on a real link). */
+  populate: async (studyId: string, linkId: string, n: number) =>
+    api.post<{ added: number; dispositions: Record<string, number> }>(
+      `/studies/${studyId}/fielding/links/${linkId}/populate`,
+      { n },
+    ),
+
+  /** Jump a TEST session straight to `qid` (403 on a real link). Returns the
+      path of answers the server filled in and whether the tester's own
+      answers were kept. */
+  jump: async (token: string, sessionId: string, qid: string) =>
+    api.post<{ target: string; answers: Record<string, unknown>; kept_your_answers: boolean }>(
+      `/r/${token}/sessions/${sessionId}/jump`,
+      { qid },
+    ),
 
   closeLink: async (studyId: string, linkId: string) =>
     api.post<FieldingLink>(`/studies/${studyId}/fielding/links/${linkId}/close`, {}),

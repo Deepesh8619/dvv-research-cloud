@@ -341,6 +341,10 @@ class FieldingLinkResponse(BaseModel):
     # computed from counts so the UI never has to do the comparison itself.
     soft_launch_limit: int | None = None
     soft_launch_reached: bool = False
+    # A test link: jump-to-question works, it can be filled with dry-run
+    # respondents, and it opened even if the pre-link check would have refused
+    # a real link. Never a study's real data.
+    is_test: bool = False
 
 
 class FieldingLinkListResponse(BaseModel):
@@ -369,6 +373,8 @@ class RespondentEntryResponse(BaseModel):
     # `redirect_url` is the substituted vendor URL, or None to use built-in screens.
     status_code: int | None = None
     redirect_url: str | None = None
+    # Lets the respondent client show the jump-to-question bar.
+    is_test: bool = False
 
 
 class RespondentAnswersRequest(BaseModel):
@@ -459,6 +465,10 @@ class FieldingLinkCreateRequest(FieldingRedirectsRequest):
     # says. Opening a link is refused in that state; this is the deliberate
     # override, recorded in the log so the decision is somebody's.
     force: bool = False
+    # A test link: skips the pre-link check gate and any soft launch — it is
+    # never real data, so there is nothing to hold back for. See is_test on
+    # FieldingLinkDB.
+    test: bool = False
 
 
 class SoftLaunchRequest(BaseModel):
@@ -475,6 +485,20 @@ class DryRunRequest(BaseModel):
     #: Dry-run an existing link (its pinned survey and live quota cells) rather
     #: than the currently approved questionnaire.
     link_id: str | None = None
+
+
+class PopulateRequest(BaseModel):
+    """Fill a TEST link with dry-run respondents (`populate`). Clamped 1..2000 —
+    the same ceiling as a dry run's respondent count."""
+
+    n: int = 200
+
+
+class JumpRequest(BaseModel):
+    """Jump a test session straight to `qid`, filling whatever answers a
+    qualifying respondent would have given on the way there."""
+
+    qid: str
 
 
 # --- Correction loop (founders teach the questionnaire parser) ---

@@ -381,3 +381,66 @@ def simulate(
         "overquota": dispositions[STATUS_OVERQUOTA],
     }
     return report
+
+
+def path_to(
+    survey: SurveyDefinition,
+    target: str,
+    given: dict[str, Any] | None = None,
+    seed: int = 0,
+    tries: int = 300,
+) -> tuple[dict[str, Any], bool] | None:
+    """Answers that take one respondent to `target` the way a qualifier would.
+
+    For testing a live link: jump straight to Q30 and see it exactly as a
+    respondent who got there would — the screeners passed, the paths that lead
+    to it taken, the lists narrowed by what they said. Every skipped question is
+    answered through the same rules the dry run uses; a question the path does
+    not show gets no answer at all, as it would in the field.
+
+    The tester's own answers (`given`) are kept where they allow the target. If
+    they rule it out — a screener answered to fail, a base not met — a fresh
+    path is taken instead, and the second value says so.
+
+    Returns (answers, kept_given), or None when no attempt reaches the target:
+    a question nobody can be shown, which the pre-link check reports too.
+    """
+    by_qid = {q.qid: q for q in survey.questions}
+    order = survey.question_order()
+    if target not in by_qid or target not in order:
+        return None
+    before = order[: order.index(target)]
+    seeded = {k: v for k, v in (given or {}).items() if k in before}
+
+    for attempt in range(tries):
+        # Half the attempts try to keep what the tester answered.
+        keep = bool(seeded) and attempt < tries // 2
+        rng = random.Random(seed + attempt)
+        answers: dict[str, Any] = dict(seeded) if keep else {}
+        failed = False
+        for qid in before:
+            question = by_qid.get(qid)
+            if question is None:
+                continue
+            if question.type == QuestionType.INFO:
+                if question.options and qid not in answers:
+                    answers[qid] = rng.choice([o.code for o in question.options])
+                continue
+            if not is_visible(question, answers):
+                answers.pop(qid, None)  # not shown on this path: no answer
+                continue
+            if qid not in answers:
+                allowed = _mask_allowed_codes(question, answers, by_qid)
+                value = _answer(question, rng, allowed)
+                if value is not None and terminating_question(
+                    survey, {**answers, qid: value}
+                ) is not None:
+                    value = _qualifying(survey, question, rng, allowed, answers, value)
+                if value is not None:
+                    answers[qid] = value
+            if terminating_question(survey, answers) is not None:
+                failed = True
+                break
+        if not failed and is_visible(by_qid[target], answers):
+            return answers, keep
+    return None
