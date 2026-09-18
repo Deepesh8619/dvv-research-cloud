@@ -5,7 +5,7 @@ import { useParams } from 'react-router-dom'
 import { Model } from 'survey-core'
 import { BorderlessLight } from 'survey-core/themes'
 import { Survey } from 'survey-react-ui'
-import { fieldingApi } from '../api/client'
+import { errorMessage, fieldingApi } from '../api/client'
 import { Theme, themeFor } from '../api/themes'
 import {
   ArrowRightIcon,
@@ -104,6 +104,10 @@ export function respondentTitle(title: string | undefined): string {
   return t
 }
 
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
 function positionOf(survey: Model): { at: number; of: number } {
   const info = survey.getProgressInfo()
   const of = info.questionCount || 1
@@ -132,6 +136,11 @@ export default function RespondentPage() {
   // Live refs the async event handlers read (state would be stale in closures).
   const sessionIdRef = useRef<string>('')
   const terminatedRef = useRef(false)
+  // Test-link jump-to-question (see api/routes/fielding.py jump_to_question).
+  const [isTest, setIsTest] = useState(false)
+  const [jumping, setJumping] = useState(false)
+  const [jumpNote, setJumpNote] = useState<string | null>(null)
+  const [jumpError, setJumpError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -171,6 +180,7 @@ export default function RespondentPage() {
           return
         }
         sessionIdRef.current = res.data.session_id
+        setIsTest(!!res.data.is_test)
         const surveyTheme = themeFor(res.data.theme)
         const survey = new Model(res.data.surveyjs_json)
 
@@ -286,6 +296,35 @@ export default function RespondentPage() {
       cancelled = true
     }
   }, [token])
+
+  // Jump straight to a question: the server fills in every answer a
+  // qualifying respondent would have given on the way there (screeners
+  // passed, bases met), we push those onto the live model, then land on it.
+  const handleJump = async (qid: string) => {
+    if (!qid || !token || !model) return
+    setJumping(true)
+    setJumpError(null)
+    setJumpNote(null)
+    try {
+      const res = await fieldingApi.jump(token, sessionIdRef.current, qid)
+      const { answers, kept_your_answers } = res.data
+      for (const [k, v] of Object.entries(answers)) model.setValue(k, v)
+      const target = model.getQuestionByName(qid)
+      if (target) model.currentSingleQuestion = target
+      setPosition(positionOf(model))
+      const n = Object.keys(answers).length
+      setJumpNote(
+        `Filled ${n} earlier answer${n === 1 ? '' : 's'} so every condition before ${qid} is met` +
+          (kept_your_answers
+            ? ''
+            : ' — your earlier answers could not reach it, so a fresh path was used'),
+      )
+    } catch (err) {
+      setJumpError(errorMessage(err) || `Could not jump to ${qid}`)
+    } finally {
+      setJumping(false)
+    }
+  }
 
   if (phase === 'loading') return <LoadingSpinner />
 
@@ -520,6 +559,30 @@ export default function RespondentPage() {
           .dvv-progress__fill { transition: none; }
         }
       `}</style>
+
+      {isTest && (
+        <div className="sticky top-0 z-30 bg-amber-100 border-b border-amber-300 px-4 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-amber-900">
+          <span className="font-semibold">Test link — answers are not real data</span>
+          <select
+            value=""
+            disabled={jumping || !model}
+            onChange={(e) => {
+              if (e.target.value) void handleJump(e.target.value)
+            }}
+            className="h-6 px-1.5 rounded border border-amber-300 bg-white text-xs text-amber-900"
+            aria-label="Jump to question"
+          >
+            <option value="">{jumping ? 'Jumping…' : 'Jump to question…'}</option>
+            {model?.getAllQuestions().map((q) => (
+              <option key={q.name} value={q.name}>
+                {q.name} — {truncate(String(q.title || q.name), 60)}
+              </option>
+            ))}
+          </select>
+          {jumpNote && <span className="text-emerald-700">{jumpNote}</span>}
+          {jumpError && <span className="text-red-700">{jumpError}</span>}
+        </div>
+      )}
 
       {/* Progress first: how much is left is the single thing a respondent most
           wants to know, and the commonest reason they abandon. */}
