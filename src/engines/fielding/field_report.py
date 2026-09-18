@@ -23,7 +23,7 @@ from datetime import datetime
 from statistics import median
 from typing import Any
 
-from src.core.survey_definition import SurveyDefinition
+from src.core.survey_definition import Question, QuestionType, SurveyDefinition
 from src.engines.fielding.decisions import (
     STATUS_COMPLETE,
     STATUS_OVERQUOTA,
@@ -45,6 +45,8 @@ class FieldReport:
     overquota_by_cell: list[dict[str, Any]] = field(default_factory=list)
     median_loi_sec: float | None = None
     dropoff_by_question: list[dict[str, Any]] = field(default_factory=list)
+    #: One card per question: how the COMPLETES answered it. See `summarise`.
+    questions: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +57,7 @@ class FieldReport:
             "overquota_by_cell": self.overquota_by_cell,
             "median_loi_sec": self.median_loi_sec,
             "dropoff_by_question": self.dropoff_by_question,
+            "questions": self.questions,
         }
 
 
@@ -95,6 +98,7 @@ def build_field_report(
     overquota: dict[str, int] = {}
     durations: list[float] = []
     dropoff: dict[str, int] = {}
+    completed: list[Mapping[str, Any]] = []
 
     for session in sessions:
         status = getattr(session, "status_code", None)
@@ -102,6 +106,7 @@ def build_field_report(
         given = answers.get(session.id, {})
 
         if status == STATUS_COMPLETE:
+            completed.append(given)
             start = _parsed(getattr(session, "started_at", None))
             end = _parsed(getattr(session, "completed_at", None))
             if start and end:
@@ -144,4 +149,77 @@ def build_field_report(
         {"qid": qid, "n": n}
         for qid, n in sorted(dropoff.items(), key=lambda kv: (-kv[1], kv[0]))
     ]
+    report.questions = [
+        summarise(question, completed)
+        for question in survey.questions
+        if question.type is not QuestionType.INFO
+    ]
     return report
+
+
+#: Open ends shown on a card. The file has all of them; the card is a glance.
+_SAMPLE_VERBATIMS = 5
+
+
+def summarise(question: Question, answers: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """How the completes answered one question — the topline a researcher reads first.
+
+    Completes only: a screen-out never reached most questions, and counting
+    half-finished interviews makes every base different and every share wrong.
+    Codes are compared as text because a stored answer may be 3 or "3".
+    """
+    given = [a[question.qid] for a in answers if a.get(question.qid) not in (None, "", [], {})]
+    card: dict[str, Any] = {
+        "qid": question.qid,
+        "text": question.text,
+        "type": question.type.value,
+        "base": len(answers),
+        "answered": len(given),
+    }
+    kind = question.type
+    if kind in (QuestionType.SINGLE, QuestionType.DROPDOWN, QuestionType.MULTI, QuestionType.RANK):
+        tally: dict[str, int] = {}
+        for value in given:
+            if kind is QuestionType.RANK:
+                picked = value[:1] if isinstance(value, list) else []  # ranked 1st
+            else:
+                picked = value if isinstance(value, list) else [value]
+            for code in picked:
+                tally[str(code)] = tally.get(str(code), 0) + 1
+        card["options"] = [
+            {"code": o.code, "label": o.label, "n": tally.get(str(o.code), 0)}
+            for o in question.options
+        ]
+    elif kind is QuestionType.GRID_SINGLE:
+        cols = question.cols or []
+        card["columns"] = [{"code": c.code, "label": c.label} for c in cols]
+        card["rows"] = []
+        for row in question.rows or []:
+            picked = [
+                str(v.get(str(row.code), v.get(row.code))) for v in given if isinstance(v, dict)
+            ]
+            card["rows"].append({
+                "code": row.code,
+                "label": row.label,
+                "counts": [picked.count(str(c.code)) for c in cols],
+            })
+    elif kind is QuestionType.NUMERIC:
+        numbers = sorted(float(v) for v in given if _is_number(v))
+        if numbers:
+            card["numeric"] = {
+                "mean": round(sum(numbers) / len(numbers), 2),
+                "median": median(numbers),
+                "min": numbers[0],
+                "max": numbers[-1],
+            }
+    else:
+        card["verbatims"] = [str(v) for v in given[-_SAMPLE_VERBATIMS:]][::-1]
+    return card
+
+
+def _is_number(value: Any) -> bool:
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return False
+    return True

@@ -137,3 +137,42 @@ def test_nobody_judged_yet_reports_no_incidence_rather_than_zero() -> None:
 
     assert report.incidence_pct is None
     assert report.median_loi_sec is None
+
+
+def test_each_question_gets_a_topline_card_from_the_completes():
+    """The report a researcher reads first: per question, how many answered and
+    how the answers split — completes only, so every share has the same base."""
+    from src.core.survey_definition import Option, Question, QuestionType
+    from src.engines.fielding.field_report import summarise
+
+    brands = [Option(code=1, label="Bubble"), Option(code=2, label="Anua")]
+    completes = [
+        {"Q1": 1, "Q2": [1, 2], "Q3": {"1": 2}, "Q4": 30, "Q5": "fine", "Q6": [2, 1]},
+        {"Q1": "1", "Q2": [2], "Q3": {"1": 1}, "Q4": "40", "Q6": [1, 2]},
+    ]
+    single = summarise(Question(qid="Q1", text="?", options=brands), completes)
+    assert (single["base"], single["answered"]) == (2, 2)
+    assert [o["n"] for o in single["options"]] == [2, 0]  # 1 and "1" are one code
+
+    multi = summarise(
+        Question(qid="Q2", text="?", type=QuestionType.MULTI, options=brands), completes
+    )
+    assert [o["n"] for o in multi["options"]] == [1, 2]
+
+    grid = summarise(
+        Question(qid="Q3", text="?", type=QuestionType.GRID_SINGLE,
+                 rows=[Option(code=1, label="Price")], cols=brands),
+        completes,
+    )
+    assert grid["rows"][0]["counts"] == [1, 1]
+
+    numeric = summarise(Question(qid="Q4", text="?", type=QuestionType.NUMERIC), completes)
+    assert numeric["numeric"]["mean"] == 35
+
+    text = summarise(Question(qid="Q5", text="?", type=QuestionType.OPEN_TEXT), completes)
+    assert (text["answered"], text["verbatims"]) == (1, ["fine"])
+
+    rank = summarise(
+        Question(qid="Q6", text="?", type=QuestionType.RANK, options=brands), completes
+    )
+    assert [o["n"] for o in rank["options"]] == [1, 1]  # ranked FIRST

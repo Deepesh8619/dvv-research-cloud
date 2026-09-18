@@ -629,6 +629,22 @@ export interface FieldReport {
   overquota_by_cell: Array<{ cell: string; n: number }>
   median_loi_sec: number | null
   dropoff_by_question: Array<{ qid: string; n: number }>
+  /** One topline card per question, counted over completes only. */
+  questions?: QuestionSummary[]
+}
+
+export interface QuestionSummary {
+  qid: string
+  text: string
+  type: string
+  /** Completes: the denominator every share on the card uses. */
+  base: number
+  answered: number
+  options?: Array<{ code: number; label: string; n: number }>
+  columns?: Array<{ code: number; label: string }>
+  rows?: Array<{ code: number; label: string; counts: number[] }>
+  numeric?: { mean: number; median: number; min: number; max: number }
+  verbatims?: string[]
 }
 
 export interface FieldingLink extends FieldingRedirects {

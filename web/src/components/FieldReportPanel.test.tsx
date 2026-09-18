@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import FieldReportPanel from './FieldReportPanel'
@@ -60,5 +60,23 @@ describe('FieldReportPanel', () => {
     await renderWith(base)
     expect(await screen.findByText('S1')).toBeTruthy()
     expect(screen.getByText('No cell has turned anyone away.')).toBeTruthy()
+  })
+
+  it('shows each question as a card, and the same numbers as a table', async () => {
+    await renderWith({
+      ...base,
+      questions: [
+        {
+          qid: 'Q2a', text: 'Which brands have you heard of?', type: 'multi', base: 2, answered: 2,
+          options: [{ code: 1, label: 'Bubble', n: 1 }, { code: 2, label: 'Anua', n: 2 }],
+        },
+      ],
+    })
+    expect(await screen.findByText('2 Responses')).toBeTruthy()
+    expect(screen.getByText('Which brands have you heard of?')).toBeTruthy()
+    expect(screen.getByText('50%')).toBeTruthy() // 1 of the 2 completes
+    fireEvent.click(screen.getByRole('tab', { name: 'tabular' }))
+    expect(screen.getByRole('table')).toBeTruthy()
+    expect(screen.getByText('100%')).toBeTruthy()
   })
 })

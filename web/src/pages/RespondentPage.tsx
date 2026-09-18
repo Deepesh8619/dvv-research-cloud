@@ -16,6 +16,10 @@ import {
   ListIcon,
 } from '../components/Icons'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { registerRespondentControls } from '../components/respondent/controls'
+
+// Grid, rank and number questions are drawn by us — see controls.tsx.
+registerRespondentControls()
 
 // A single respondent view: fetch the compiled SurveyJS JSON for a public
 // fielding token, render it ONE QUESTION PER PAGE, and stream answers back to
@@ -94,6 +98,12 @@ function PoweredBy() {
 function positionOf(survey: Model): { at: number; of: number } {
   const info = survey.getProgressInfo()
   const of = info.questionCount || 1
+  // The question ON SCREEN. Counting answers instead said "2 of 7" the moment
+  // one statement of a six-row grid was answered, while still on question 1.
+  const current = survey.currentSingleQuestion
+  const answerable = survey.getAllQuestions(true).filter((q) => q.getType() !== 'html')
+  const index = current ? answerable.indexOf(current) : -1
+  if (index >= 0) return { at: Math.min(index + 1, of), of }
   return { at: Math.min(info.answeredQuestionCount + 1, of), of }
 }
 
@@ -108,6 +118,8 @@ export default function RespondentPage() {
   // in place: reading currentPageNo during render shows the page they were on
   // last time React happened to draw.
   const [position, setPosition] = useState({ at: 1, of: 1 })
+  // The blocks the script was written in: the progress bar's segments.
+  const [sections, setSections] = useState(1)
   // Live refs the async event handlers read (state would be stale in closures).
   const sessionIdRef = useRef<string>('')
   const terminatedRef = useRef(false)
@@ -164,6 +176,27 @@ export default function RespondentPage() {
         // We swap to our own warm thank-you view on complete, so suppress SurveyJS's.
         survey.showCompletedPage = false
         applySurveyTheme(survey, surveyTheme)
+        // Rankings are tapped into order, which builds the answer one item at a
+        // time — the model's select-to-rank mode is the one that holds a
+        // partial ranking without filling in the rest.
+        for (const q of survey.getAllQuestions()) {
+          if (q.getType() === 'ranking') (q as unknown as { selectToRankEnabled: boolean }).selectToRankEnabled = true
+          // A stepper writes on every tap; auto-advance would leave after the
+          // first "+" and nobody could ever enter 2.
+          if (q.getType() === 'text' && (q as unknown as { inputType: string }).inputType === 'number') {
+            ;(q as unknown as { supportGoNextPageAutomatic: () => boolean }).supportGoNextPageAutomatic = () => false
+          }
+        }
+        // A required ranking is a full ranking: stopping at #2 of 7 leaves the
+        // data file with five blanks the analyst cannot tell from "skipped".
+        survey.onValidateQuestion.add((_, options) => {
+          const q = options.question
+          if (q.getType() !== 'ranking' || !q.isRequired) return
+          const total = (q as unknown as { visibleChoices: unknown[] }).visibleChoices.length
+          const done = Array.isArray(options.value) ? options.value.length : 0
+          if (done > 0 && done < total) options.error = `Please rank all ${total} — ${total - done} left.`
+        })
+        setSections(Math.max(1, survey.visiblePages.length))
         setPosition(positionOf(survey))
 
         // Per-page incremental capture: POST accumulated answers on every advance.
@@ -196,6 +229,8 @@ export default function RespondentPage() {
           }
         })
 
+        // Dev builds only: the live model, for inspecting it from the console.
+        if (import.meta.env.DEV) (window as unknown as { __dvvSurvey: Model }).__dvvSurvey = survey
         setModel(survey)
         setTitle(survey.title || 'Survey')
         setTheme(surveyTheme)
@@ -350,9 +385,10 @@ export default function RespondentPage() {
   // scripter's vocabulary. Everything below flattens that to one surface and
   // spends the height it frees on the answers.
   const progress = Math.min(100, Math.round((position.at / Math.max(position.of, 1)) * 100))
+  const segments = sections >= 2 && sections <= 8 ? sections : Math.min(5, Math.max(position.of, 1))
 
   return (
-    <div className="min-h-screen pb-24 sm:pb-8" style={{ background: theme.wash }}>
+    <div className="min-h-screen pb-32" style={{ background: theme.wash }}>
       <style>{`
         /* One surface: no panel inside a panel inside a card. */
         .dvv-survey .sd-root-modern, .dvv-survey .sd-container-modern,
@@ -405,6 +441,43 @@ export default function RespondentPage() {
         }
         .dvv-survey .sd-input:focus { border-color: ${theme.accent}; box-shadow: 0 0 0 3px ${theme.accent}26; outline: none; }
 
+        /* The actions float in a dark bar at the bottom, where the thumb is —
+           always in the same place, whatever the length of the question. */
+        .dvv-survey .sd-action-bar.sd-body__navigation {
+          position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+          width: min(608px, calc(100% - 24px)); z-index: 30; margin: 0;
+          /* !important: SurveyJS's responsive body rule zeroes three sides. */
+          display: flex; gap: 8px; padding: 8px !important; border-radius: 20px; background: #111827;
+          box-shadow: 0 12px 32px -8px rgba(15,23,42,0.45);
+        }
+        .dvv-survey .sd-body__navigation .sv-action { flex: 1 1 0; margin: 0; }
+        .dvv-survey .sd-body__navigation .sv-action__content { width: 100%; }
+        .dvv-survey .sd-body__navigation .sd-btn { width: 100%; min-height: 48px; border-radius: 14px; margin: 0; }
+        .dvv-survey .sd-body__navigation .sd-navigation__prev-btn {
+          background: transparent; color: #e2e8f0; border: 1.5px solid #374151;
+        }
+        /* SurveyJS pads its body for its own chrome; ours is the card. */
+        .dvv-survey .sd-body.sd-body--responsive, .dvv-survey .sd-body--responsive .sd-page { padding: 0; }
+        /* Grid questions inherit nowrap from SurveyJS's table layout, which
+           cut a long statement off mid-word. */
+        .dvv-survey .dvv-carousel { white-space: normal; }
+        /* The root scrolls sideways by default, and the floating bar counted as
+           overflow — a stray scrollbar under every question on a phone. */
+        .dvv-survey .sd-root-modern { overflow: visible; }
+        /* A rule under the question title, from SurveyJS's grid layout. */
+        .dvv-survey .sd-question__header::after { display: none; }
+        /* The error sits inside the card, not bled past its edge. */
+        .dvv-survey .sd-question__erbox {
+          margin: 0 0 12px; padding: 10px 14px; border-radius: 12px; font-size: 0.875rem;
+        }
+
+        /* A grid statement or a ranked item slides in rather than appearing. */
+        .dvv-survey .dvv-slide { animation: dvv-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+        @keyframes dvv-in {
+          from { opacity: 0; transform: translateX(14px); }
+          to   { opacity: 1; transform: none; }
+        }
+
         /* One solid action, full width on a phone where the thumb is. */
         .dvv-survey .sd-btn, .dvv-survey .sd-navigation__next-btn,
         .dvv-survey .sd-navigation__complete-btn {
@@ -428,7 +501,7 @@ export default function RespondentPage() {
           to   { opacity: 1; transform: none; }
         }
         @media (prefers-reduced-motion: reduce) {
-          .dvv-survey .sd-question { animation: none; }
+          .dvv-survey .sd-question, .dvv-survey .dvv-slide { animation: none; }
           .dvv-survey .sd-item, .dvv-survey .sd-btn { transition: none; }
           .dvv-progress__fill { transition: none; }
         }
@@ -436,16 +509,23 @@ export default function RespondentPage() {
 
       {/* Progress first: how much is left is the single thing a respondent most
           wants to know, and the commonest reason they abandon. */}
-      <div className="sticky top-0 z-20" style={{ background: theme.wash }}>
-        <div className="h-1 w-full bg-slate-200/70">
-          <div
-            className="dvv-progress__fill h-full rounded-r-full"
-            style={{
-              width: `${progress}%`,
-              background: gradientBar(theme),
-              transition: 'width 280ms cubic-bezier(0.4, 0, 0.2, 1)',
-            }}
-          />
+      <div className="sticky top-0 z-20 pt-3" style={{ background: theme.wash }}>
+        {/* Segments, not one hairline: a finished chunk reads as a milestone,
+            which is what keeps someone going through a long questionnaire. The
+            script's own sections when it has several, otherwise five steps. */}
+        <div className="max-w-[640px] mx-auto px-4 sm:px-0 flex gap-1.5" aria-hidden>
+          {Array.from({ length: segments }, (_, i) => (
+            <div key={i} className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200/80">
+              <div
+                className="dvv-progress__fill h-full rounded-full"
+                style={{
+                  width: `${Math.max(0, Math.min(1, (progress / 100) * segments - i)) * 100}%`,
+                  background: theme.accent,
+                  transition: 'width 280ms cubic-bezier(0.4, 0, 0.2, 1)',
+                }}
+              />
+            </div>
+          ))}
         </div>
         <div className="max-w-[640px] mx-auto px-4 sm:px-0 flex items-center justify-between py-3">
           <span className="text-sm font-medium text-slate-500 truncate pr-3">{title}</span>
