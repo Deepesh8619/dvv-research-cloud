@@ -54,6 +54,7 @@ from src.engines.questionnaire.datamap_recovery import (
     normalize_qid,
     recover_missing,
 )
+from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
 from src.engines.questionnaire.learned import LearnedPattern
 from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import detect_techniques
@@ -1197,6 +1198,9 @@ def extract_survey_definition(
     # the whole survey exists. Also emits the path as a HID_ variable.
     apply_section_paths(survey)
     apply_intro_screens(survey)
+    # "Q2a. ever heard of? | Q2b. Ever purchased from?" across one brand list is
+    # two questions, not one grid allowing a single answer per brand.
+    split_subquestion_grids(survey)
     # A question asked once per brand is not one question: held as one it is
     # eight columns with no way to tell one brand's answers from another's.
     expand_loops(survey)

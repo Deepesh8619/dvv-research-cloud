@@ -26,6 +26,7 @@ from src.core.survey_definition import (
     QuestionType,
     SurveyDefinition,
 )
+from src.engines.questionnaire.grid_subquestions import without_question_label
 
 # Square brackets are a SCRIPTING convention, not respondent language. Across
 # every instrument we have — client documents and public federal ones alike —
@@ -229,6 +230,10 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
     elif qtype == QuestionType.GRID_SINGLE:
         element["type"] = "matrix"
         element["columns"] = _choices(question.cols or [], by_qid)
+        # A definition stored before grids like Q2a/Q2b were split still heads
+        # its columns "Q2a. ever heard of?" — a label the respondent cannot read.
+        for column in element["columns"]:
+            column["text"] = without_question_label(column["text"])
         element["rows"] = _choices(question.rows or [], by_qid)
     elif qtype == QuestionType.NUMERIC:
         element["type"] = "text"
