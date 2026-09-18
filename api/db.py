@@ -236,6 +236,10 @@ class FieldingLinkDB(Base):
     # Soft launch (T25): while set, the link stops admitting NEW respondents
     # once this many completes exist. NULL = no hold, field to the full sample.
     soft_launch_limit = Column(Integer, nullable=True)
+    # A test link: jump-to-question is allowed, it can be filled with dry-run
+    # respondents, and it opens even when the pre-link check fails. Its data is
+    # never a study's real data.
+    is_test = Column(Boolean, default=False)
 
 
 class RespondentSessionDB(Base):
@@ -717,6 +721,7 @@ def _ensure_new_columns():
             "redirect_security": "VARCHAR",
             # Soft launch hold (T25).
             "soft_launch_limit": "INTEGER",
+            "is_test": "BOOLEAN",
         },
         "respondent_sessions": {
             "pid": "VARCHAR",
@@ -1175,6 +1180,7 @@ def create_fielding_link(
     created_by: str,
     redirects: dict | None = None,
     soft_launch_limit: int | None = None,
+    is_test: bool = False,
 ) -> "FieldingLinkDB":
     """Open a fielding link, pinning the approved SurveyDefinition JSON snapshot.
 
@@ -1200,6 +1206,7 @@ def create_fielding_link(
         redirect_overquota=redirects.get("redirect_overquota"),
         redirect_security=redirects.get("redirect_security"),
         soft_launch_limit=soft_launch_limit,
+        is_test=is_test,
     )
     db.add(link)
     db.commit()
@@ -1238,6 +1245,36 @@ def close_fielding_link(db: Session, link_id: str) -> "FieldingLinkDB":
         db.commit()
         db.refresh(link)
     return link
+
+
+def add_synthetic_sessions(
+    db: Session, fielding_link_id: str, respondents: list[tuple[dict, int]]
+) -> int:
+    """Store dry-run respondents on a TEST link: answers plus a disposition.
+
+    One commit for the whole batch — a session and its answers per respondent,
+    written a row at a time, took minutes for a few hundred. Each is marked
+    synthetic in its entry params so nothing downstream can mistake it for a
+    person.
+    """
+    from uuid import uuid4
+
+    now = datetime.now().isoformat()
+    for answers, status in respondents:
+        session_id = f"rsess_{uuid4().hex[:8]}"
+        db.add(RespondentSessionDB(
+            id=session_id, fielding_link_id=fielding_link_id,
+            status_code=status or None, entry_params={"synthetic": True}, pid="",
+            current_page=0, started_at=now, last_seen_at=now,
+            completed_at=now if status else None,
+        ))
+        for qid, value in answers.items():
+            db.add(RespondentAnswerDB(
+                id=f"rans_{uuid4().hex[:10]}", session_id=session_id, qid=qid,
+                value=value, answered_at=now,
+            ))
+    db.commit()
+    return len(respondents)
 
 
 def create_respondent_session(
