@@ -61,6 +61,7 @@ from src.engines.questionnaire.profiles import detect_profile
 from src.engines.questionnaire.prose_directives import (
     ProseFields,
     is_derived_wording,
+    order_terminal_options,
     parse_prose_question,
 )
 from src.engines.questionnaire.reconciler import reconcile_segmentation
@@ -454,7 +455,7 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
         qid=fields.qid,
         text=fields.text or "",
         type=fields.qtype or QuestionType.SINGLE,
-        options=list(fields.options),
+        options=order_terminal_options(list(fields.options)),
         # A grid's two lists, kept apart: the variable list is what is rated,
         # the response list is the scale. Flattened into `options` they collided
         # on code, and the grid emitted no data columns at all.
@@ -606,7 +607,7 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
         qid=fields.qid,
         text=fields.text or "",
         type=fields.qtype or QuestionType.SINGLE,
-        options=list(fields.options),
+        options=order_terminal_options(list(fields.options)),
         required=False,
         # The field fielding actually reads. It was being recorded only in
         # `validation`, which nothing downstream consults — so a question the

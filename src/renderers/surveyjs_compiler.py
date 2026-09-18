@@ -282,10 +282,21 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
 # not display text. `info` alone is not enough to exclude: a genuine intro or
 # transition screen is also `info` and SHOULD be shown.
 _SCRIPTER_ONLY_FLAGS = frozenset({"DERIVED_VARIABLE"})
+# The flag is set at extraction, so a definition stored BEFORE that rule existed
+# carries none — and a respondent was shown a page reading "CODE AGE". The
+# wording is the same signal the extractor uses, and checking it here means an
+# old definition stops leaking without being re-extracted first.
+_SCRIPTER_ONLY_WORDING = re.compile(r"^[^a-z]*\bCODE\b[^a-z]*$")
 
 
 def _is_respondent_facing(question: Question) -> bool:
-    return not (_SCRIPTER_ONLY_FLAGS & set(question.flags or ()))
+    if _SCRIPTER_ONLY_FLAGS & set(question.flags or ()):
+        return False
+    if question.type is QuestionType.INFO and _SCRIPTER_ONLY_WORDING.match(
+        (question.text or "").strip()
+    ):
+        return False
+    return True
 
 
 def _compile_block(block: Block, survey: SurveyDefinition) -> dict[str, Any]:

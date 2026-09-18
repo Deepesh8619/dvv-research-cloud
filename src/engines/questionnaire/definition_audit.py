@@ -43,6 +43,17 @@ _BASE_STATED = re.compile(
     r"[A-Za-z][A-Za-z0-9]{0,5}\s*=\s*\d[^\]]*\]",
     re.I,
 )
+# A base stated in WORDS, naming a question but no code: "[ASK IF MULTIPLE AT S6
+# SELECTED]", "[SHOW IF FILLED AT LEAST ONE PRESCRIPTION TYPE AT Q14]". No
+# parser should invent a condition from it — but it was invisible to the check
+# above, which needs an exact comparison, so a question the document plainly
+# gates went to everybody with nothing said about it. It is reported
+# SEPARATELY: the answer is a person writing the rule, not a re-extraction.
+_BASE_IN_WORDS = re.compile(
+    r"\[[^\]]*\b(?:ASK|SHOW|DISPLAY)\s+(?:ONLY\s+)?IF\b[^\]]*"
+    r"\b[A-Za-z]{1,6}\d+[A-Za-z]?\b[^\]]*\]",
+    re.I,
+)
 
 
 @dataclass
@@ -184,6 +195,28 @@ def audit_definition(survey: SurveyDefinition) -> list[Finding]:
             option_level.append(q.qid)
         else:
             stated_not_applied.append(q.qid)
+
+    stated_in_words = [
+        q.qid
+        for q in survey.questions
+        if q.show_if is None
+        and q.type is not QuestionType.INFO
+        and q.qid not in stated_not_applied
+        and q.qid not in option_level
+        and not _BASE_STATED.search(q.source_text or "")
+        and _BASE_IN_WORDS.search(q.source_text or "")
+    ]
+    if stated_in_words:
+        findings.append(
+            Finding(
+                "base_stated_in_words_only",
+                sorted(set(stated_in_words)),
+                "The source gates this question in words rather than codes — "
+                '"ASK IF MULTIPLE AT S6 SELECTED" — so no parser can turn it into a '
+                "condition without guessing what it means. It currently goes to "
+                "everyone. Somebody has to write the rule.",
+            )
+        )
 
     if option_level:
         findings.append(

@@ -323,6 +323,15 @@ _QUOTA_INSTRUCTION = re.compile(
     r"|\b\d+\s*/\s*\d+\b(?=[^a-z]*$)",
     re.I,
 )
+# "MONITOR S6 & S7 FALLOUT FOR CONSISTENCY WITH WAVE 1:" — an instruction to the
+# team, sitting under the answers because that is what it is about. Read as an
+# answer it became a punch a respondent could choose. A quota target was only
+# the first of these; the verb changes, the shape does not.
+_INSTRUCTION_VERB = re.compile(
+    r"^(?:MONITOR|CHECK|CONFIRM|VERIFY|REVIEW|FLAG|TRACK|COMPARE|ENSURE|NOTE|"
+    r"RECORD|CODE|CAPTURE)\b",
+    re.I,
+)
 
 
 def is_quota_instruction(line: str) -> bool:
@@ -335,7 +344,43 @@ def is_quota_instruction(line: str) -> bool:
     text = strip_brackets(line or "").strip()
     if not text or any(c.islower() for c in text):
         return False
-    return bool(_QUOTA_INSTRUCTION.search(text))
+    return bool(_QUOTA_INSTRUCTION.search(text) or _INSTRUCTION_VERB.match(text))
+
+
+# Answers that close a list: a respondent reads them last wherever the document
+# happened to type them, and a list that offers "None of these" in the middle
+# reads as a mistake and collects worse data. Universal across every client, and
+# never randomised into the body of the list.
+_TERMINAL_OPTION = re.compile(
+    # An optional "I" in front: a respondent reads "I don't know" and "Don't
+    # know" as the same closing answer, and anchoring on the phrase alone left
+    # the first one sitting in the middle of a list of health systems.
+    r"^\s*(?:i\s+|i'?m\s+)?"
+    r"(?:other|none|no,?\s|not\s+sure|don'?t\s+know|do\s+not\s+know|"
+    r"prefer\s+not|refuse|n/?a\b|all\s+of\s+(?:these|the\s+above)|"
+    r"none\s+of\s+(?:these|the\s+above))",
+    re.I,
+)
+
+
+def is_terminal_option(label: str) -> bool:
+    """An answer that closes a list rather than sitting inside it."""
+    return bool(_TERMINAL_OPTION.match((label or "").strip()))
+
+
+def order_terminal_options(options: list[Option]) -> list[Option]:
+    """Move the closing answers to the end and pin them there.
+
+    Codes are NEVER touched — the data is keyed on them, and reordering the
+    display must not renumber a single punch.
+    """
+    body = [o for o in options if not is_terminal_option(o.label)]
+    closing = [o for o in options if is_terminal_option(o.label)]
+    if not closing or not body:
+        return options
+    for option in closing:
+        option.anchored = True
+    return [*body, *closing]
 
 
 def _strip_bracket(text: str, body: str) -> str:
