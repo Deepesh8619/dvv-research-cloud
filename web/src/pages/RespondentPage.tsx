@@ -192,7 +192,12 @@ export default function RespondentPage() {
           if (q.getType() === 'ranking') (q as unknown as { selectToRankEnabled: boolean }).selectToRankEnabled = true
           // A stepper writes on every tap; auto-advance would leave after the
           // first "+" and nobody could ever enter 2.
-          if (q.getType() === 'text' && (q as unknown as { inputType: string }).inputType === 'number') {
+          // Constant-sum boxes too: filling the last box finished the survey
+          // before anyone could check the numbers.
+          const typed =
+            q.getType() === 'multipletext' ||
+            (q.getType() === 'text' && (q as unknown as { inputType: string }).inputType === 'number')
+          if (typed) {
             ;(q as unknown as { supportGoNextPageAutomatic: () => boolean }).supportGoNextPageAutomatic = () => false
           }
         }

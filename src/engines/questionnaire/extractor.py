@@ -46,6 +46,9 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.questionnaire import schema
+from src.engines.questionnaire.carousel import apply as apply_carousels
+from src.engines.questionnaire.carousel import capture as capture_carousel
+from src.engines.questionnaire.constant_sum import apply as apply_constant_sums
 from src.engines.questionnaire.datamap_recovery import (
     DatamapQuestion,
     fill_from_datamap,
@@ -1207,6 +1210,14 @@ def extract_survey_definition(
             on_checkpoint, checkpoint_every,
         )
 
+    # What a question's tables state beyond its own answers: a carousel of
+    # categories, a brand list named once for a range of questions. Captured
+    # while each chunk's tables are in hand; applied once the survey exists.
+    for result, chunk in zip(results, chunks, strict=False):
+        tables = [b.rows for b in chunk.source_blocks if b.rows]
+        if tables:
+            capture_carousel(result.question, tables)
+
     survey = _assemble_survey(results, study_id, detection, reconcile_meta)
 
     # A recruitment path's header ("... (IF S0=1 AND S1=26-60) ASK P1-P3") states
@@ -1217,6 +1228,10 @@ def extract_survey_definition(
     # "Q2a. ever heard of? | Q2b. Ever purchased from?" across one brand list is
     # two questions, not one grid allowing a single answer per brand.
     split_subquestion_grids(survey)
+    # "FOR Q6-Q10 ... SET OF 10 BRANDS", and Q6 asked once per category.
+    apply_carousels(survey)
+    # "___ % item" lines that must total 100: a number box per item.
+    apply_constant_sums(survey)
     # "[SHOW Q26 LIST]", "each of these brands": a list stated once and used
     # again. Filled before loops, which copy each template's list.
     fill_lists(survey)

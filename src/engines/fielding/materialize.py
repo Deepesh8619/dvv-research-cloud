@@ -184,6 +184,24 @@ def _specs_for_question(question: Question) -> list[_ColumnSpec]:
             specs.append(_ColumnSpec(var, read))
         return specs
 
+    if qtype == QuestionType.NUMERIC and question.rows:
+        # A constant sum: one number column per item, named like a grid's rows.
+        return [
+            _ColumnSpec(
+                Variable(
+                    name=f"{qid}r{row.code}",
+                    label=f"{text} — {row.label}",
+                    type=VarType.NUMERIC,
+                    question_ref=qid,
+                    question_text=text,
+                    row=str(row.code),
+                    provenance="fielding",
+                ),
+                lambda a, q=qid, rc=row.code: _to_float(_grid_cell(a.get(q), rc)),
+            )
+            for row in question.rows
+        ]
+
     if qtype == QuestionType.NUMERIC:
         var = Variable(
             name=qid,

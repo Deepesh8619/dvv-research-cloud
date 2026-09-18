@@ -27,7 +27,7 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.questionnaire.grid_subquestions import without_question_label
-from src.engines.questionnaire.prose_directives import is_derived_wording
+from src.engines.questionnaire.prose_directives import is_derived_wording, is_terminal_option
 
 # Square brackets are a SCRIPTING convention, not respondent language. Across
 # every instrument we have — client documents and public federal ones alike —
@@ -50,6 +50,9 @@ def _normalize(text: str) -> str:
     # Brackets are the directive's frame, not its words: a pipe stored as
     # "INSERT RATING]" still names "[INSERT RATING]".
     return _WHITESPACE.sub(" ", (text or "").strip("[] ")).strip().casefold()
+
+
+_WRITE_IN = re.compile(r"\(\s*specify\s*\)|\bnot listed\b", re.I)
 
 
 def _find(by_qid: dict[str, Question], qid: str | None) -> Question | None:
@@ -318,6 +321,28 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
         for column in element["columns"]:
             column["text"] = without_question_label(column["text"])
         element["rows"] = _choices(question.rows or [], by_qid)
+    elif qtype == QuestionType.NUMERIC and question.rows:
+        # One box per item, answered as {code: number} like a grid's row map,
+        # and — when the document states one — a total they must reach.
+        validation = question.validation or {}
+        element["type"] = "multipletext"
+        element["items"] = [
+            {
+                "name": str(row.code),
+                "title": _for_respondent(row.label, [], by_qid),
+                "inputType": "number",
+                "validators": _numeric_validators(validation),
+            }
+            for row in question.rows
+        ]
+        total = validation.get("sum")
+        if total is not None:
+            summed = " + ".join(f"{{{question.qid}.{row.code}}}" for row in question.rows)
+            element["validators"] = [{
+                "type": "expression",
+                "expression": f"{summed} = {total}",
+                "text": f"These should add up to {total}.",
+            }]
     elif qtype == QuestionType.NUMERIC:
         element["type"] = "text"
         element["inputType"] = "number"
@@ -371,6 +396,23 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
         for mask in techniques.get("masks") or []:
             condition = _choices_visible_if(mask, by_qid)
             if condition:
+                # An answer the source never offered — "98 Another brand not
+                # listed (Specify)" under an awareness mask — cannot have been
+                # chosen there, so the mask hid it from everyone.
+                # A write-in or "None" belongs to THIS question even when the
+                # source has the same code: "Another brand not listed" in a
+                # carousel was shown only to people who ticked Other at Q2a.
+                source = _find(by_qid, mask.get("source_qid"))
+                listed = (source.options or source.rows or []) if source else []
+                offered = {o.code for o in listed}
+                own = question.options if masked == "choicesVisibleIf" else (question.rows or [])
+                exempt = [
+                    o.code for o in own
+                    if o.code not in offered or o.open_other or is_terminal_option(o.label)
+                    or _WRITE_IN.search(o.label or "")
+                ]
+                if exempt and mask.get("mode") in ("selected", None):
+                    condition = f"({condition}) or {{item}} anyof [{', '.join(map(str, exempt))}]"
                 element[masked] = condition
                 break
 

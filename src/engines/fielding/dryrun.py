@@ -149,6 +149,12 @@ def _answer(
         if not rows or not cols:
             return None
         return {str(r.code): rng.choice([c.code for c in cols]) for r in rows}
+    if question.type == QuestionType.NUMERIC and question.rows:
+        # Shares that must reach the stated total: split it at random.
+        total = int((question.validation or {}).get("sum") or 100)
+        cuts = sorted(rng.randint(0, total) for _ in range(len(question.rows) - 1))
+        parts = [b - a for a, b in zip([0, *cuts], [*cuts, total], strict=True)]
+        return {str(row.code): part for row, part in zip(question.rows, parts, strict=True)}
     if question.type == QuestionType.NUMERIC:
         validation = question.validation or {}
         low = int(validation.get("min", 1) or 1)
