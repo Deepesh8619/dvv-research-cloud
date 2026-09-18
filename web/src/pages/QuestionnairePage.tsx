@@ -8,6 +8,7 @@ import {
   QUESTION_TYPES,
   questionnaireApi,
   QuestionOption,
+  QuestionSplitItem,
   UnresolvedQuestion,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -235,6 +236,218 @@ function buildDetailState(q: Question): DetailState {
   }
 }
 
+// --- Re-read with current parser ---------------------------------------
+
+/** Re-runs the deterministic parsers on this question's own source text — no
+ * model call. A stored question was parsed by whatever parser code existed
+ * the day it was extracted; this picks up a fix since then for free. */
+function RereadButton({
+  studyId,
+  qid,
+  onChanged,
+}: {
+  studyId: string
+  qid: string
+  onChanged: (updated: Question) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  const run = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const { changed, ...updated } = (await questionnaireApi.reread(studyId, qid)).data
+      onChanged(updated as Question)
+      setMsg(`Updated: ${changed.join(', ')}`)
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 422) {
+        setMsg('No improvement found — left unchanged.')
+      } else {
+        setMsg(errorMessage(err) || 'Re-read failed')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      <button
+        type="button"
+        onClick={run}
+        disabled={busy}
+        className="text-xs font-medium text-sky-700 hover:text-sky-900 hover:underline disabled:opacity-50"
+      >
+        {busy ? 'Re-reading…' : 'Re-read with current parser'}
+      </button>
+      {msg && <span className="text-xs text-slate-500">{msg}</span>}
+    </span>
+  )
+}
+
+// --- Split by... ----------------------------------------------------------
+
+interface SplitItemState {
+  label: string
+  qid: string
+  codes: string
+}
+
+/** Labels pre-filled from whatever list the question already has — a grid's
+ * rows/cols if it is one, else its own options — so splitting a carousel-
+ * shaped question ("for each category...") starts from what it already says. */
+function defaultSplitItems(q: Question): SplitItemState[] {
+  const source = (q.rows?.length ? q.rows : q.cols?.length ? q.cols : q.options) || []
+  if (source.length >= 2) {
+    return source.map((o) => ({ label: o.label, qid: '', codes: '' }))
+  }
+  return [
+    { label: '', qid: '', codes: '' },
+    { label: '', qid: '', codes: '' },
+  ]
+}
+
+/** "Q6. for each category, which brands" -> Q6_1..Q6_n, one real question per
+ * item. The "asked if" column is a plain qid + codes pair rather than the full
+ * RoutingEditor — this only ever needs one leaf condition per item, and N
+ * embedded routing editors would be a lot of state for that. */
+function SplitPanel({
+  studyId,
+  q,
+  onSplit,
+}: {
+  studyId: string
+  q: Question
+  onSplit: (qids: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [items, setItems] = useState<SplitItemState[]>(() => defaultSplitItems(q))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const setItem = (i: number, patch: Partial<SplitItemState>) =>
+    setItems((s) => s.map((it, idx) => (idx === i ? { ...it, ...patch } : it)))
+  const addItem = () => setItems((s) => [...s, { label: '', qid: '', codes: '' }])
+  const removeItem = (i: number) => setItems((s) => s.filter((_, idx) => idx !== i))
+
+  const validLabels = items.filter((it) => it.label.trim()).length
+
+  const submit = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const payload: QuestionSplitItem[] = items
+        .filter((it) => it.label.trim())
+        .map((it) => {
+          const codes = it.codes
+            .split(',')
+            .map((c) => c.trim())
+            .filter(Boolean)
+            .map((c) => (Number.isNaN(Number(c)) ? c : Number(c)))
+          return {
+            label: it.label.trim(),
+            show_if: it.qid.trim() && codes.length ? { op: 'in', qid: it.qid.trim(), values: codes } : null,
+          }
+        })
+      const res = await questionnaireApi.split(studyId, q.qid, payload)
+      setOpen(false)
+      onSplit(res.data.into)
+    } catch (err) {
+      setError(errorMessage(err) || 'Split failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setItems(defaultSplitItems(q))
+          setOpen(true)
+        }}
+        className="text-xs font-medium text-sky-700 hover:text-sky-900 hover:underline"
+      >
+        Split by…
+      </button>
+    )
+  }
+
+  return (
+    <div className="mt-3 border border-sky-200 bg-sky-50/40 rounded-md p-4 space-y-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <h4 className="text-sm font-semibold text-slate-800">
+          Split into one question per item
+        </h4>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="text-xs text-slate-400 hover:text-slate-600"
+        >
+          Cancel
+        </button>
+      </div>
+      <div className="space-y-2">
+        {items.map((it, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input
+              value={it.label}
+              onChange={(e) => setItem(i, { label: e.target.value })}
+              placeholder="label"
+              className="h-8 flex-1 px-2 rounded-md border border-slate-300 text-sm"
+              aria-label="item label"
+            />
+            <input
+              value={it.qid}
+              onChange={(e) => setItem(i, { qid: e.target.value })}
+              placeholder="asked if qid"
+              className="h-8 w-28 px-2 rounded-md border border-slate-300 text-sm"
+              aria-label="asked if qid"
+            />
+            <input
+              value={it.codes}
+              onChange={(e) => setItem(i, { codes: e.target.value })}
+              placeholder="codes e.g. 1,2"
+              className="h-8 w-28 px-2 rounded-md border border-slate-300 text-sm"
+              aria-label="asked if codes"
+            />
+            {items.length > 2 && (
+              <button
+                type="button"
+                onClick={() => removeItem(i)}
+                className="text-slate-400 hover:text-red-600 px-1"
+                aria-label="remove item"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={addItem}
+        className="text-xs text-primary-500 hover:text-primary-600 font-medium"
+      >
+        + Add item
+      </button>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <div className="pt-2 border-t border-slate-100">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={busy || validLabels < 2}
+          className="bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600 disabled:opacity-50"
+        >
+          {busy ? 'Splitting…' : `Split into ${validLabels || '…'} questions`}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // Exported for tests. The option-code and routing inputs hold non-obvious
 // draft state across keystrokes, and that behaviour is only observable by
 // driving a real input — not from the page's props.
@@ -247,6 +460,7 @@ export function QuestionDetail({
   profile,
   onSaved,
   onApproved,
+  onSplit,
 }: {
   studyId: string
   q: Question
@@ -257,6 +471,8 @@ export function QuestionDetail({
   profile?: { slug?: string; label?: string } | null
   onSaved: (updated: Question) => void
   onApproved: (qid: string) => void
+  /** After a successful split: reload the list and select the first copy. */
+  onSplit: (qids: string[]) => void
 }) {
   const [state, setState] = useState<DetailState>(() => buildDetailState(q))
   // Raw text of an option-code box while it has focus — see the input below.
@@ -353,14 +569,18 @@ export function QuestionDetail({
           </h2>
           {q.approved && <span className="text-xs text-emerald-600">✓ approved</span>}
         </div>
-        {canCorrect && (
-          <CorrectionBox
-            studyId={studyId}
-            questionId={q.qid}
-            profileSlug={profile?.slug}
-            profileLabel={profile?.label}
-          />
-        )}
+        <div className="flex items-center gap-3">
+          {canWrite && <RereadButton studyId={studyId} qid={q.qid} onChanged={onSaved} />}
+          {canWrite && <SplitPanel studyId={studyId} q={q} onSplit={onSplit} />}
+          {canCorrect && (
+            <CorrectionBox
+              studyId={studyId}
+              questionId={q.qid}
+              profileSlug={profile?.slug}
+              profileLabel={profile?.label}
+            />
+          )}
+        </div>
       </div>
 
       {/* Teaching is only meaningful once we know WHICH format we would be
@@ -654,6 +874,8 @@ export default function QuestionnairePage() {
   const [approvedOk, setApprovedOk] = useState(false)
   const [approvingClean, setApprovingClean] = useState(false)
   const [cleanMsg, setCleanMsg] = useState<string | null>(null)
+  const [rereadingAll, setRereadingAll] = useState(false)
+  const [rereadMsg, setRereadMsg] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   // Each question's bucket and links, from the server's reading of the
   // definition. Refreshed after any edit, since an edit can change a link.
@@ -758,6 +980,13 @@ export default function QuestionnairePage() {
     void loadMap() // routing or a list may have changed a link
   }
 
+  // The split copies replace the original in the list at the server; reload
+  // rather than patch locally, then land on the first copy.
+  const onQuestionSplit = async (qids: string[]) => {
+    await loadQuestions()
+    if (qids[0]) setSelectedQid(qids[0])
+  }
+
   // Go to a question from anywhere — an issue, a link chip — even if the
   // bucket filter is hiding it.
   const goTo = useCallback(
@@ -844,6 +1073,25 @@ export default function QuestionnairePage() {
       setCleanMsg(errorMessage(err) || 'Bulk approve failed')
     } finally {
       setApprovingClean(false)
+    }
+  }
+
+  const handleRereadAll = async () => {
+    if (!studyId) return
+    setRereadingAll(true)
+    setRereadMsg(null)
+    try {
+      const res = await questionnaireApi.rereadAll(studyId)
+      await loadQuestions()
+      setRereadMsg(
+        res.data.n_updated > 0
+          ? `Re-read ${res.data.n_questions} questions — ${res.data.n_updated} updated.`
+          : `Re-read ${res.data.n_questions} questions — nothing to update.`,
+      )
+    } catch (err) {
+      setRereadMsg(errorMessage(err) || 'Re-read all failed')
+    } finally {
+      setRereadingAll(false)
     }
   }
 
@@ -1054,6 +1302,11 @@ export default function QuestionnairePage() {
               {cleanMsg}
             </div>
           )}
+          {rereadMsg && (
+            <div className="bg-sky-50 border border-sky-200 rounded-md p-3 mb-4 text-sm text-sky-800">
+              {rereadMsg}
+            </div>
+          )}
           {approvedOk && (
             <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3 mb-4 text-sm text-emerald-700">
               Questionnaire approved.
@@ -1069,6 +1322,14 @@ export default function QuestionnairePage() {
                 </span>
                 {canWrite && (
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleRereadAll}
+                      disabled={rereadingAll || questions.length === 0}
+                      title="Re-run the current parser on every question — no model call, so parser fixes reach old questions for free"
+                      className="text-xs bg-white border border-slate-300 text-slate-700 font-medium px-3 py-1.5 rounded-md hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {rereadingAll ? 'Re-reading…' : 'Re-read all'}
+                    </button>
                     <button
                       onClick={handleApproveClean}
                       disabled={approvingClean || questions.length === 0}
@@ -1165,6 +1426,7 @@ export default function QuestionnairePage() {
                   profile={status?.profile}
                   onSaved={onQuestionSaved}
                   onApproved={onQuestionApproved}
+                  onSplit={onQuestionSplit}
                 />
                 </div>
               ) : (

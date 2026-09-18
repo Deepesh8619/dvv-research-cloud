@@ -653,6 +653,24 @@ class CopilotResponse(BaseModel):
     answered_by: str
 
 
+class QuestionSplitItem(BaseModel):
+    """One per-item copy the "Split by..." action creates from a question."""
+
+    label: str
+    show_if: dict | None = None
+    # Omitted (None) keeps the original question's options; an explicit list
+    # (even empty) replaces them for this copy.
+    options: list[dict] | None = None
+
+
+class QuestionSplitRequest(BaseModel):
+    """Turn one question into one-per-item copies: {qid}_1 .. {qid}_n."""
+
+    items: list[QuestionSplitItem]
+    # Omitted keeps the original question's type for every copy.
+    type: str | None = None
+
+
 class QuestionLinkMask(BaseModel):
     """ "Options from": which earlier question's list this one shows, and how."""
 

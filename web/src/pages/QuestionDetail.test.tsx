@@ -54,6 +54,7 @@ function renderDetail(q: Question = question()) {
       profile={null}
       onSaved={() => {}}
       onApproved={() => {}}
+      onSplit={() => {}}
     />,
   )
 }
