@@ -87,6 +87,11 @@ TOOLS = [
         "interview, markets, screening requirements, quota groups with their minimum "
         "and maximum. Absent in questionnaires that open at the first question.",
         _STUDY, ["study_id"]),
+    _fn("search_verbatims", "Search what respondents actually typed in this project's "
+        "open-ended questions, by meaning rather than by exact words. Returns the "
+        "closest answers with the question each one answered. Completed interviews "
+        "only. Quote them as what one respondent said, never as a finding.",
+        {**_STUDY, "query": {"type": "string"}}, ["study_id", "query"]),
     _fn("qc_findings", "The latest QC cross-check of the data against the questionnaire.",
         _STUDY, ["study_id"]),
     _fn("field_report", "A fielding link's starts, incidence, screen-outs by question, "

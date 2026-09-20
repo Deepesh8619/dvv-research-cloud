@@ -19,7 +19,12 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.rag import embeddings
-from src.engines.rag.store import chunks_for_survey, ensure_index, search
+from src.engines.rag.store import (
+    chunks_for_survey,
+    ensure_index,
+    ensure_verbatim_index,
+    search,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -175,3 +180,101 @@ def test_a_query_and_a_document_are_embedded_as_what_they_are(monkeypatch):
     seen.clear()
     embeddings.embed(["plain"], kind="query")
     assert seen == ["plain"]
+
+
+def _fielded(db, study_id="S1", statuses=(10, 10, 20)):
+    """A link with three interviews: two completes and one screened out."""
+    from api.db import FieldingLinkDB, RespondentAnswerDB, RespondentSessionDB
+
+    db.add(FieldingLinkDB(id="L1", study_id=study_id, token="t", status="open"))
+    said = [
+        "it left my skin really greasy and shiny by lunchtime",
+        "the smell was lovely but the pump kept jamming",
+        "i was screened out before i could say anything useful",
+    ]
+    for i, (status, text) in enumerate(zip(statuses, said, strict=True)):
+        db.add(RespondentSessionDB(id=f"s{i}", fielding_link_id="L1", status_code=status))
+        db.add(RespondentAnswerDB(id=f"a{i}", session_id=f"s{i}", qid="Q4", value=text))
+        db.add(RespondentAnswerDB(id=f"n{i}", session_id=f"s{i}", qid="Q1", value=30))
+    db.commit()
+
+
+def _survey_with_open_end():
+    survey = _survey()
+    survey.questions.append(
+        Question(qid="Q4", text="What did you dislike about it?", type=QuestionType.OPEN_TEXT)
+    )
+    survey.blocks[0].question_ids.append("Q4")
+    return survey
+
+
+def test_only_completed_interviews_are_indexed(db):
+    """A screened-out respondent's answer is not part of what the study found;
+    quoting one as "what people said" would report somebody it excluded."""
+    from api.db import ProjectChunkDB
+
+    _fielded(db)
+    result = ensure_verbatim_index(db, "S1", _survey_with_open_end())
+    assert result["indexed"] == 2 and result["remaining"] == 0
+    texts = [r.text for r in db.query(ProjectChunkDB).filter_by(kind="verbatim").all()]
+    assert not any("screened out" in t for t in texts)
+    assert all("What did you dislike" in t for t in texts)  # the question travels along
+
+
+def test_verbatims_are_added_as_they_arrive_and_never_re_embedded(db):
+    from api.db import ProjectChunkDB, RespondentAnswerDB, RespondentSessionDB
+
+    survey = _survey_with_open_end()
+    _fielded(db)
+    ensure_verbatim_index(db, "S1", survey)
+    assert ensure_verbatim_index(db, "S1", survey)["indexed"] == 0  # nothing new: no work
+
+    db.add(RespondentSessionDB(id="s9", fielding_link_id="L1", status_code=10))
+    db.add(RespondentAnswerDB(id="a9", session_id="s9", qid="Q4",
+                              value="the texture is far too thick for summer"))
+    db.commit()
+    assert ensure_verbatim_index(db, "S1", survey)["indexed"] == 1
+    assert db.query(ProjectChunkDB).filter_by(kind="verbatim").count() == 3
+
+
+def test_re_reading_the_questionnaire_does_not_throw_the_verbatims_away(db):
+    from api.db import ProjectChunkDB
+
+    _fielded(db)
+    ensure_index(db, "S1", _survey_with_open_end())
+    ensure_verbatim_index(db, "S1", _survey_with_open_end())
+    changed = _survey_with_open_end()
+    changed["Q1"].text = "How old are you?"
+    ensure_index(db, "S1", changed)
+    assert db.query(ProjectChunkDB).filter_by(kind="verbatim").count() == 2
+
+
+def test_a_verbatim_search_returns_what_people_said_and_not_the_questionnaire(db):
+    survey = _survey_with_open_end()
+    _fielded(db)
+    ensure_verbatim_index(db, "S1", survey)
+    ensure_index(db, "S1", survey)
+    found = search(db, "S1", "greasy skin", survey=survey, kinds=("verbatim",))
+    assert found["matches"], found
+    assert all(m["kind"] == "verbatim" for m in found["matches"])
+    assert "greasy" in found["matches"][0]["text"]
+    # And the questionnaire search still returns questions, not answers.
+    assert all(m["kind"] != "verbatim" for m in search(db, "S1", "age", survey=survey)["matches"])
+
+
+def test_a_one_word_answer_is_not_indexed(db):
+    from api.db import ProjectChunkDB
+
+    _fielded(db)
+    from api.db import RespondentAnswerDB
+
+    for row in db.query(RespondentAnswerDB).filter_by(qid="Q4"):
+        row.value = "n/a"
+    db.commit()
+    ensure_verbatim_index(db, "S1", _survey_with_open_end())
+    assert db.query(ProjectChunkDB).filter_by(kind="verbatim").count() == 0
+
+
+def test_a_questionnaire_with_no_open_ends_says_so(db):
+    result = ensure_verbatim_index(db, "S1", _survey())
+    assert result["indexed"] == 0 and "no open-ended" in result["note"]
