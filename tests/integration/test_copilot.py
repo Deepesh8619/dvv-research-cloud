@@ -231,3 +231,44 @@ def test_a_provider_failing_mid_answer_does_not_duplicate_cards(client, monkeypa
     resp = test_client.post("/api/copilot", json={"message": "close it"}).json()
     assert resp["answered_by"] == "Cerebras"
     assert len(resp["proposals"]) == 1
+
+
+def _complete(test_client, token, brand):
+    """One respondent through the real survey, ending with an open-end."""
+    session_id = test_client.get(f"/api/r/{token}").json()["session_id"]
+    test_client.post(f"/api/r/{token}/sessions/{session_id}/answers",
+                     json={"answers": {"Q1": 30, "Q2": 1, "Q3": brand}, "current_page": 1})
+    test_client.post(f"/api/r/{token}/sessions/{session_id}/complete", json={})
+
+
+def test_the_copilot_searches_what_people_typed_behind_the_data_rule(client, monkeypatch):  # noqa: F811
+    """Open-ends are respondent answers, so searching them opens the same door
+    as downloading them: owners and founders from approval, everyone else once
+    a soft launch reaches its hold. A refusal says what would change it."""
+    test_client, sf, state = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = test_client.post("/api/studies/study_f1/fielding/links",
+                            json={"soft_launch_limit": 5}).json()
+    _complete(test_client, link["token"], "the espresso from Blue Bottle tastes burnt to me")
+    _complete(test_client, link["token"], "I only drink instant, nothing fancy at all")
+
+    args = {"study_id": "study_f1", "query": "complaints about taste"}
+    def ask(seen):
+        test_client.post("/api/copilot", json={"message": "what did people say?"})
+        (message,) = [m for m in seen[-1] if m["role"] == "tool"]
+        return json.loads(message["content"].split("…(truncated)")[0])
+
+    state["role"] = "analyst"  # the hold is not reached yet
+    result = ask(_script(monkeypatch, ("tool", "search_verbatims", args),
+                         ("text", "I could not look.")))
+    assert result["success"] is False
+    assert "soft launch reaches 5 completes (currently 2)" in result["error"]
+
+    state["role"] = "owner"
+    result = ask(_script(monkeypatch, ("tool", "search_verbatims", args),
+                         ("text", "Two mentioned taste.")))
+    assert result["success"] is True
+    assert result["newly_indexed"] == 2 and result["not_yet_indexed"] == 0
+    assert [a["qid"] for a in result["answers"]] == ["Q3", "Q3"]
+    assert any("burnt" in a["said"] for a in result["answers"])

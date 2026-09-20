@@ -43,6 +43,7 @@ from src.engines.questionnaire.navigator_tools import (
     get_question_details,
     search_questionnaire,
 )
+from src.engines.rag.store import VERBATIM, ensure_verbatim_index
 from src.engines.rag.store import search as rag_search
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ router = APIRouter()
 
 _CAN_ACT = {UserRole.OWNER, UserRole.ANALYST, UserRole.FOUNDER}
 _MAX_FINDINGS = 12  # keep each tool result inside the model's context budget
+_MAX_VERBATIMS = 8  # enough to show a pattern, small enough to read in a side panel
 
 
 class _ToolError(Exception):
@@ -88,6 +90,7 @@ def _screen_outs(survey, by_question: list[dict]) -> list[dict]:
 def make_executor(db: Session, user: UserDB):
     """(execute, proposals): execute(name, args) runs a tool; proposals collects cards."""
     from api.routes.chat import _load_approved_survey, chat_with_study
+    from api.routes.materialize import data_access
 
     proposals: list[CopilotProposal] = []
     can_act = UserRole(user.role) in _CAN_ACT
@@ -225,6 +228,36 @@ def make_executor(db: Session, user: UserDB):
             result["related_by_meaning_note"] = found["note"]
         return result
 
+    def search_verbatims(args):
+        """What respondents typed, searched by meaning.
+
+        Behind the same door as every other route respondent answers leave by:
+        owners and founders from approval, everyone else once a soft launch
+        reaches its hold or a quota cell fills. A search that returned people's
+        words to someone who may not download them would be that door standing
+        open.
+        """
+        definition = survey(args)
+        study_id, query = args["study_id"], str(args.get("query", ""))
+        decision = data_access(db, study_id, user)
+        if not decision.allowed:
+            raise _ToolError(decision.reason)
+
+        state = ensure_verbatim_index(db, study_id, definition)
+        found = rag_search(db, study_id, query, survey=definition,
+                           kinds=(VERBATIM,), k=_MAX_VERBATIMS)
+        return {
+            "answers": [
+                {"qid": m["ref"].split(":")[0], "said": m["text"], "score": m["score"]}
+                for m in found["matches"]
+            ],
+            "searched_by": found["model"],
+            "newly_indexed": state.get("indexed", 0),
+            # Said plainly: a partial index is not the same as nothing found.
+            "not_yet_indexed": state.get("remaining", 0),
+            "note": state.get("note") or found.get("note"),
+        }
+
     def field_report(args):
         _s, ln = link(args)
         sessions = list_respondent_sessions(db, ln.id)
@@ -334,6 +367,7 @@ def make_executor(db: Session, user: UserDB):
                                                            str(a.get("qid", ""))),
         "who_was_asked": lambda a: explain_question_base(survey(a), a["study_id"],
                                                          str(a.get("qid", ""))),
+        "search_verbatims": search_verbatims,
         "qc_findings": qc_findings,
         "study_brief": study_brief,
         "field_report": field_report,
