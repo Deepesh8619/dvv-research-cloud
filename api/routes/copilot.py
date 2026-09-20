@@ -43,6 +43,7 @@ from src.engines.questionnaire.navigator_tools import (
     get_question_details,
     search_questionnaire,
 )
+from src.engines.rag.store import search as rag_search
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -199,6 +200,31 @@ def make_executor(db: Session, user: UserDB):
                     "against a real question, which a person has to confirm.",
         }
 
+    def find_question(args):
+        """Search the questionnaire by wording AND by meaning.
+
+        The substring search is exact and cheap: it finds "price" in a question
+        that says price. It cannot find "how much would you be willing to pay"
+        for "price sensitivity", which is how a client actually asks. The
+        project's indexed vectors answer that; the two lists are kept apart so
+        the model can tell an exact hit from a near one.
+        """
+        definition = survey(args)
+        study_id, query = args["study_id"], str(args.get("query", ""))
+        result = search_questionnaire(definition, study_id, query)
+        try:
+            found = rag_search(db, study_id, query, survey=definition)
+        except Exception:  # an index problem must never break the exact search
+            logger.exception("[%s] semantic search failed", study_id)
+            return result
+        result["related_by_meaning"] = [
+            {"ref": m["ref"], "text": m["text"][:300], "score": m["score"]}
+            for m in found["matches"]
+        ]
+        if found.get("note"):
+            result["related_by_meaning_note"] = found["note"]
+        return result
+
     def field_report(args):
         _s, ln = link(args)
         sessions = list_respondent_sessions(db, ln.id)
@@ -303,8 +329,7 @@ def make_executor(db: Session, user: UserDB):
     tools = {
         "list_studies": list_studies_tool,
         "study_overview": study_overview,
-        "find_question": lambda a: search_questionnaire(survey(a), a["study_id"],
-                                                        str(a.get("query", ""))),
+        "find_question": find_question,
         "question_details": lambda a: get_question_details(survey(a), a["study_id"],
                                                            str(a.get("qid", ""))),
         "who_was_asked": lambda a: explain_question_base(survey(a), a["study_id"],

@@ -577,6 +577,33 @@ class CorrectionPreviewDB(Base):
     completed_at = Column(String, nullable=True)
 
 
+class ProjectChunkDB(Base):
+    """One searchable piece of a project, with the vector that finds it.
+
+    A client asks "which question covers price sensitivity" and the document
+    says "how much would you be willing to pay" — no word in common, so the
+    substring search that serves the review screen returns nothing. These rows
+    are what the copilot searches by meaning instead.
+
+    `model` is the embedder that produced `vector_json`: vectors from different
+    makers are meaningless to each other, so they are never compared.
+    `fingerprint` is of the exact text indexed, so a re-read or a correction
+    rebuilds rather than letting the copilot quote wording that has changed.
+    """
+
+    __tablename__ = "project_chunks"
+
+    id = Column(String, primary_key=True, index=True)
+    study_id = Column(String, index=True)
+    kind = Column(String, index=True)  # question | brief
+    ref = Column(String, nullable=True)  # qid, or the section's name
+    text = Column(Text)
+    model = Column(String, index=True)
+    vector_json = Column(Text)
+    fingerprint = Column(String, index=True)
+    created_at = Column(String)
+
+
 def active_rules_for_profile(db, profile_slug: str) -> list[str]:
     """Ordered active rule texts for one profile — the prompt-ready rule set.
 

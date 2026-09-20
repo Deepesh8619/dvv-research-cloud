@@ -45,6 +45,12 @@ wait_healthy() {  # up to ~3 minutes: first boot builds indexes, pulls nothing
 
 pull_model() {  # only when this client runs the local AI model
   if grep -q '^COMPOSE_PROFILES=.*local-ai' .env; then
+    # The embedding model first: it is a few hundred MB, and it is what lets
+    # the copilot find "how much would you pay" from "price sensitivity".
+    # Without it search still works, by wording alone.
+    embed=$(grep '^DVV_EMBED_MODEL=' .env | cut -d= -f2); embed=${embed:-nomic-embed-text}
+    echo "Pulling embedding model $embed (first time only)..."
+    dc exec -T ollama ollama pull "$embed"
     model=$(grep '^OLLAMA_EXTRACT_MODEL=' .env | cut -d= -f2); model=${model:-llama3.2:3b}
     echo "Pulling local model $model (first time only; a few GB)..."
     dc exec -T ollama ollama pull "$model"
