@@ -5,7 +5,7 @@ import { useParams } from 'react-router-dom'
 import { Model } from 'survey-core'
 import { BorderlessLight } from 'survey-core/themes'
 import { Survey } from 'survey-react-ui'
-import { errorMessage, fieldingApi } from '../api/client'
+import { PipeVariable, errorMessage, fieldingApi } from '../api/client'
 import { Theme, themeFor } from '../api/themes'
 import {
   ArrowRightIcon,
@@ -108,6 +108,24 @@ function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
+/** One place in a ranking, as the label the respondent read.
+ *
+ * SurveyJS prints a whole ranking for {Q7} and cannot address one position, so
+ * a question about "your top choice" named every brand they ranked. The
+ * compiler asks for `{Q7_rank1}`; this fills it in as they answer.
+ */
+export function applyPipeVariables(survey: Model, variables: PipeVariable[]): void {
+  for (const v of variables) {
+    const question = survey.getQuestionByName(v.qid)
+    const ranked = (question?.value as unknown[]) ?? []
+    const code = v.position < 0 ? ranked[ranked.length - 1] : ranked[v.position - 1]
+    const choices = (question as unknown as { visibleChoices?: Array<{ value: unknown; text: string }> })
+      ?.visibleChoices
+    const label = choices?.find((c) => String(c.value) === String(code))?.text
+    survey.setVariable(v.name, label ?? '')
+  }
+}
+
 function positionOf(survey: Model): { at: number; of: number } {
   const info = survey.getProgressInfo()
   const of = info.questionCount || 1
@@ -183,6 +201,8 @@ export default function RespondentPage() {
         setIsTest(!!res.data.is_test)
         const surveyTheme = themeFor(res.data.theme)
         const survey = new Model(res.data.surveyjs_json)
+        const pipeVariables = (res.data.surveyjs_json as { pipeVariables?: PipeVariable[] })
+          .pipeVariables ?? []
 
         // One question per page: this is what makes the per-page answer POST (and
         // therefore the server-side terminate check) fire mid-survey.
@@ -231,7 +251,10 @@ export default function RespondentPage() {
         })
 
         // A multi-punch or text answer changes the count without changing page.
-        survey.onValueChanged.add((sender) => setPosition(positionOf(sender)))
+        survey.onValueChanged.add((sender) => {
+          setPosition(positionOf(sender))
+          applyPipeVariables(sender, pipeVariables)
+        })
 
         // Final page + finish: POST the last page's answers, then mark complete.
         survey.onComplete.add(async (sender) => {
@@ -255,6 +278,7 @@ export default function RespondentPage() {
 
         // Dev builds only: the live model, for inspecting it from the console.
         if (import.meta.env.DEV) (window as unknown as { __dvvSurvey: Model }).__dvvSurvey = survey
+        applyPipeVariables(survey, pipeVariables)
         setModel(survey)
         setTitle(respondentTitle(survey.title))
         setTheme(surveyTheme)

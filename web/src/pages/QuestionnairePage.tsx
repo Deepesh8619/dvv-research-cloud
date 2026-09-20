@@ -476,7 +476,7 @@ export function QuestionDetail({
   canCorrect: boolean
   profile?: { slug?: string; label?: string } | null
   onSaved: (updated: Question) => void
-  onApproved: (qid: string) => void
+  onApproved: (qid: string, clearedFlags?: string[]) => void
   /** After a successful split: reload the list and select the first copy. */
   onSplit: (qids: string[]) => void
 }) {
@@ -575,12 +575,14 @@ export function QuestionDetail({
     }
   }
 
+  const openBlockingFlag = q.flags.some((f) => flagInfo(f).blocking)
+
   const handleApprove = async () => {
     setApproving(true)
     setError(null)
     try {
-      await questionnaireApi.approve(studyId, q.qid)
-      onApproved(q.qid)
+      const res = await questionnaireApi.approve(studyId, q.qid)
+      onApproved(q.qid, (res.data as { cleared_flags?: string[] })?.cleared_flags ?? [])
     } catch (err) {
       setError(errorMessage(err) || 'Approve failed')
     } finally {
@@ -879,10 +881,18 @@ export function QuestionDetail({
           </button>
           <button
             onClick={handleApprove}
-            disabled={approving || q.approved}
+            // An approved question can pick up a blocking flag later — a re-read,
+            // a split, an edited route. Approving is what clears one, and a
+            // disabled "Approved" left it stuck: Finalize refused forever.
+            disabled={approving || (q.approved && !openBlockingFlag)}
+            title={openBlockingFlag && q.approved ? 'Confirms this question again and clears its blocking flags' : undefined}
             className="bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-emerald-700 disabled:opacity-50"
           >
-            {q.approved ? 'Approved' : approving ? 'Approving…' : 'Approve'}
+            {approving
+              ? 'Approving…'
+              : q.approved
+                ? openBlockingFlag ? 'Re-approve (clears flags)' : 'Approved'
+                : 'Approve'}
           </button>
         </div>
       )}
@@ -1109,8 +1119,16 @@ export default function QuestionnairePage() {
     return counts
   }, [questions, map])
   const visible = bucket === 'all' ? questions : questions.filter((q) => map[q.qid]?.bucket === bucket)
-  const onQuestionApproved = (qid: string) => {
-    setQuestions((qs) => qs.map((q) => (q.qid === qid ? { ...q, approved: true } : q)))
+  const onQuestionApproved = (qid: string, clearedFlags: string[] = []) => {
+    // Approving clears the question's blocking flags on the server; drop them
+    // here too, or the list still shows a flag the reviewer just resolved.
+    setQuestions((qs) =>
+      qs.map((q) =>
+        q.qid === qid
+          ? { ...q, approved: true, flags: q.flags.filter((f) => !clearedFlags.includes(f)) }
+          : q,
+      ),
+    )
     setApproveAllError(null)
   }
 

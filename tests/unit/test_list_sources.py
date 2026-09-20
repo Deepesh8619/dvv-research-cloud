@@ -194,3 +194,40 @@ def test_a_sample_split_is_assigned_and_a_section_header_is_not_an_answer():
     )
     assert [o.label for o in fields.options] == ["SPLIT A", "SPLIT B"]
     assert is_derived_wording("SAMPLE SPLIT")
+
+
+def test_a_ranked_position_is_piped_not_the_whole_ranking():
+    """"[INSERT Q7 #1 RANK]" is their top choice. SurveyJS prints the WHOLE
+    ranking for {Q7} and cannot address one place in it, so a question about
+    the brand they chose named every brand they ranked."""
+    from src.renderers.surveyjs_compiler import pipe_variables
+
+    q7 = Question(qid="Q7", text="Rank these brands", type=QuestionType.RANK,
+                  options=list(BRAND_OPTIONS))
+    q7a = Question(
+        qid="Q7a", type=QuestionType.OPEN_TEXT,
+        text="You mentioned [INSERT Q7 #1 RANK] as your top choice. "
+             "What draws you to [INSERT Q7 #1 RANK] over the others?",
+        validation={"techniques": {"pipes": [
+            {"source_qid": "Q7", "name": None, "verbatim": "INSERT Q7"}]}},
+    )
+    survey = _survey(q7, q7a)
+    compiled = compile_to_surveyjs(survey)
+    title = {e["name"]: e for p in compiled["pages"] for e in p["elements"]}["Q7a"]["title"]
+    # BOTH mentions: the second was stripped, leaving a hole in the sentence.
+    assert title == (
+        "You mentioned {Q7_rank1} as your top choice. "
+        "What draws you to {Q7_rank1} over the others?"
+    )
+    assert compiled["pipeVariables"] == [{"name": "Q7_rank1", "qid": "Q7", "position": 1}]
+    assert pipe_variables(compiled)[0]["position"] == 1
+
+
+def test_the_last_place_in_a_ranking_is_piped_too():
+    q8 = Question(qid="Q8", text="Rank these", type=QuestionType.RANK, options=list(BRAND_OPTIONS))
+    q8a = Question(qid="Q8a", type=QuestionType.OPEN_TEXT,
+                   text="Why is [INSERT Q8 LAST RANK] at the bottom?",
+                   validation={"techniques": {"pipes": [
+                       {"source_qid": "Q8", "name": None, "verbatim": "INSERT Q8"}]}})
+    compiled = compile_to_surveyjs(_survey(q8, q8a))
+    assert compiled["pipeVariables"] == [{"name": "Q8_ranklast", "qid": "Q8", "position": -1}]

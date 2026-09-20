@@ -45,7 +45,7 @@ def client(tmp_path):
     app.dependency_overrides.clear()
 
 
-def _seed(session, survey: SurveyDefinition) -> None:
+def _seed(session, survey: SurveyDefinition, approved: list[str] | None = None) -> None:
     db = session()
     now = datetime.now().isoformat()
     db.add(StudyDB(id="s1", client_name="T", status="classifying", created_at=now,
@@ -53,7 +53,7 @@ def _seed(session, survey: SurveyDefinition) -> None:
     db.add(QuestionnaireDB(
         id="qn1", study_id="s1", status="in_review", source_filename="q.docx", version=1,
         definition_json=survey.to_json(), definition_path=None,
-        approved_qids=[], created_at=now, updated_at=now,
+        approved_qids=approved or [], created_at=now, updated_at=now,
     ))
     db.commit()
     db.close()
@@ -202,3 +202,28 @@ def test_split_needs_at_least_two_items(client):
         json={"items": [{"label": "Only one"}]},
     )
     assert resp.status_code == 422
+
+
+def test_a_question_the_parser_changed_goes_back_to_needing_approval(client):
+    """A reviewer signed off the OLD reading. The parser then changed the
+    question, so the sign-off is on content nobody has seen — and an approved
+    question that later carries a blocking flag could never be approved again,
+    which left Finalize refusing forever."""
+    test_client, session = client
+    source = "S1. Are you male or female?\nMale TERMINATE\nFemale"
+    old = Question(
+        qid="S1", text="Are you male or female?", type=QuestionType.SINGLE,
+        options=[Option(code=1, label="Male TERMINATE"), Option(code=2, label="Female")],
+        source_text=source, extraction_method="prose_directives",
+    )
+    _seed(session, SurveyDefinition(
+        study_id="s1", title="t", source="extracted", status="in_review",
+        blocks=[Block(block_id="B1", question_ids=["S1"])], questions=[old],
+    ), approved=["S1"])
+
+    body = test_client.post("/api/studies/s1/questionnaire/questions/S1/reread").json()
+    assert body["approved"] is False
+
+    # And it can be approved again, which is what clears a blocking flag.
+    again = test_client.post("/api/studies/s1/questionnaire/questions/S1/approve")
+    assert again.status_code == 200 and again.json()["approved"] is True

@@ -147,3 +147,20 @@ describe('constant sum editor', () => {
     expect(total.value).toBe('100')
   })
 })
+
+describe('approving after a change', () => {
+  it('lets an approved question be approved again once it carries a blocking flag', () => {
+    // A re-read, a split or an edited route can flag a question a reviewer
+    // already signed off. Approving is what CLEARS a blocking flag, so a
+    // disabled "Approved" left Finalize refusing forever.
+    renderDetail(question({ approved: true, flags: ['AMBIGUOUS_ROUTING'] }))
+    const button = screen.getByRole('button', { name: /Re-approve/ }) as HTMLButtonElement
+    expect(button.disabled).toBe(false)
+  })
+
+  it('still shows a clean approved question as done', () => {
+    renderDetail(question({ approved: true, flags: [] }))
+    const button = screen.getByRole('button', { name: 'Approved' }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+  })
+})
