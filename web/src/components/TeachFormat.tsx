@@ -20,6 +20,7 @@ import { typeLabel } from '../labels/questionTypes'
  * silently never matches.
  */
 interface Props {
+  studyId: string
   profileSlug: string
   profileLabel?: string | null
   question: Question
@@ -58,6 +59,7 @@ function unrecognisedFragments(question: Question): string[] {
 }
 
 export default function TeachFormat({
+  studyId,
   profileSlug,
   profileLabel,
   question,
@@ -71,6 +73,7 @@ export default function TeachFormat({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [taught, setTaught] = useState<string | null>(null)
+  const [appliedMsg, setAppliedMsg] = useState<string | null>(null)
 
   const candidates = unrecognisedFragments(question)
 
@@ -89,15 +92,23 @@ export default function TeachFormat({
   const submit = async () => {
     setSaving(true)
     setError(null)
+    setAppliedMsg(null)
     try {
       const res = await correctionsApi.applyRule(profileSlug, {
         pattern_kind: kind,
         pattern: fragment.trim(),
         pattern_value: needsValue ? value : undefined,
+        study_id: studyId,
       })
       setTaught(res.data.rule_text)
       setFragment('')
       setValue('')
+      const n = res.data.applied_to_current?.n_updated ?? 0
+      setAppliedMsg(
+        n > 0
+          ? `Applied to ${n} question${n === 1 ? '' : 's'} in this questionnaire.`
+          : 'No question changed — the lesson may not match this wording.',
+      )
       onTaught?.()
     } catch (err) {
       const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null
@@ -147,6 +158,7 @@ export default function TeachFormat({
           Learned: {taught}
         </p>
       )}
+      {appliedMsg && <p className="text-xs text-slate-600">{appliedMsg}</p>}
 
       <label className="block">
         <span className="text-xs text-slate-600">What does it look like?</span>

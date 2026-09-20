@@ -467,6 +467,12 @@ export interface RereadAllResult {
   updated: { qid: string; changed: string[] }[]
 }
 
+export interface ApplyTeachingResult {
+  n_updated: number
+  updated: { qid: string; changed: string[] }[]
+  n_unchanged: number
+}
+
 export const QUESTION_TYPES = [
   'single',
   'multi',
@@ -621,6 +627,13 @@ export const questionnaireApi = {
   /** Same re-read, run once across every question in the questionnaire. */
   rereadAll: async (studyId: string) =>
     api.post<RereadAllResult>(`/studies/${studyId}/questionnaire/questions/reread-all`, {}),
+
+  /** Re-read every question with the profile's CURRENT taught patterns — the
+      same no-model-call pass reread-all uses, but scoped to what has been
+      taught. Lets "Teach this format" reach the document on screen instead
+      of only the next upload. */
+  applyTeaching: async (studyId: string) =>
+    api.post<ApplyTeachingResult>(`/studies/${studyId}/questionnaire/apply-teaching`, {}),
 
   /** Turn one question into one-per-item copies: {qid}_1..{qid}_n. */
   split: async (studyId: string, qid: string, items: QuestionSplitItem[], type?: string) =>
@@ -1033,6 +1046,8 @@ export interface ProfileRule {
   approved_by: string | null
   approved_at: string | null
   created_at: string | null
+  /** Set only when this call just re-read the study already in context. */
+  applied_to_current?: { n_updated: number } | null
 }
 
 export interface Discrepancy {
@@ -1125,6 +1140,9 @@ export const correctionsApi = {
       pattern_kind?: string
       pattern?: string
       pattern_value?: string
+      // The study the founder is actually looking at, so a taught pattern
+      // is applied to the questionnaire on screen, not just future uploads.
+      study_id?: string
     },
   ) => api.post<ProfileRule>(`/profiles/${profileSlug}/rules`, body),
 
@@ -1181,9 +1199,11 @@ export const previewApi = {
     ),
 
   approve: async (studyId: string, correctionId: string) =>
-    api.post<{ rule: ProfileRule; applied: boolean }>(
-      `/studies/${studyId}/corrections/${correctionId}/preview/approve`,
-    ),
+    api.post<{
+      rule: ProfileRule
+      applied: boolean
+      applied_to_current?: { n_updated: number }
+    }>(`/studies/${studyId}/corrections/${correctionId}/preview/approve`),
 }
 
 // --- Founder-editable UI copy (Tier A) ---
