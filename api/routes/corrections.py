@@ -551,6 +551,7 @@ def apply_rule(
             "pattern_value": value or None,
         },
     )
+    correction_study_id = None
     if request.correction_id:
         correction = (
             db.query(CorrectionDB)
@@ -559,10 +560,24 @@ def apply_rule(
         )
         if correction:
             correction.status = "applied"
+            correction_study_id = correction.study_id
     db.commit()
     db.refresh(rule)
     logger.info(f"Rule {rule.id} applied to profile {profile_slug} by {user.email}")
-    return _rule_response(rule)
+    response = _rule_response(rule)
+    if kind:
+        # A PATTERN (not a prose-only rule) just became active for this
+        # profile — apply it to whatever questionnaire the founder was
+        # looking at, so teaching helps the document in front of them, not
+        # only the next upload. TeachFormat sends `study_id` directly; a
+        # correction-derived pattern falls back to the correction's own study.
+        # Neither known (e.g. the bare pattern-authoring surface) -> unchanged.
+        from api.routes.questionnaire import apply_teaching_after_lesson
+
+        applied = apply_teaching_after_lesson(db, request.study_id or correction_study_id)
+        if applied is not None:
+            response.applied_to_current = applied
+    return response
 
 
 @router.get("/profiles/pattern-kinds")
@@ -980,7 +995,18 @@ def approve_preview(
     logger.info(
         f"[{study_id}] preview {preview.id} approved by {user.email} -> rule {rule.id}"
     )
-    return {"rule": _rule_response(rule).model_dump(), "applied": True}
+    # The candidate re-extraction just became the study's current definition.
+    # `study_id` is always known here (it is the route itself), so also sweep
+    # the now-current questionnaire with every active pattern for the profile —
+    # not just the one this correction taught — the same deterministic,
+    # no-model-call pass "Apply lessons" runs.
+    from api.routes.questionnaire import apply_teaching_after_lesson
+
+    applied = apply_teaching_after_lesson(db, study_id)
+    result = {"rule": _rule_response(rule).model_dump(), "applied": True}
+    if applied is not None:
+        result["applied_to_current"] = applied
+    return result
 
 
 # --------------------------------------------------------------------------

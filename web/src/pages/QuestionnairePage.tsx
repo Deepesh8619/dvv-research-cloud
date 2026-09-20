@@ -634,6 +634,7 @@ export function QuestionDetail({
       <div>
         {canCorrect && profile?.slug && (
           <TeachFormat
+            studyId={studyId}
             profileSlug={profile.slug}
             profileLabel={profile.label}
             question={q}

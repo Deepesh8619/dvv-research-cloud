@@ -12,7 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from api.auth import get_current_user
-from api.db import Base, QuestionnaireDB, StudyDB, UserDB, get_db
+from api.db import Base, ProfileRuleDB, QuestionnaireDB, StudyDB, UserDB, get_db
 from api.main import app
 from src.core.survey_definition import (
     Block,
@@ -132,6 +132,73 @@ def test_reread_all_updates_only_the_questions_with_something_to_gain(client):
     body = resp.json()
     assert body["n_updated"] == 1
     assert body["updated"][0]["qid"] == "S1"
+
+
+# --- Apply teaching (T33: a taught pattern reaches the CURRENT document) ---
+
+
+def _acme_survey(question: Question) -> SurveyDefinition:
+    return SurveyDefinition(
+        study_id="s1", title="t", source="extracted", status="in_review",
+        blocks=[Block(block_id="B1", question_ids=[question.qid])], questions=[question],
+        # A detected profile is what lets apply-teaching find this study's
+        # patterns at all — matches `survey.metadata["profile"]` as extraction
+        # actually stashes it (see profiles.py's ProfileDetection.to_metadata).
+        metadata={"profile": {
+            "slug": "acme_v1", "label": "Acme", "confidence": 0.9, "signals": {}}},
+    )
+
+
+def test_apply_teaching_updates_the_questions_a_taught_pattern_reaches(client):
+    test_client, session = client
+    db = session()
+    db.add(ProfileRuleDB(
+        id="rule1", profile_slug="acme_v1",
+        rule_text='"[SCREENER FAIL]" means terminate',
+        pattern_kind="option_tag", pattern="[SCREENER FAIL]", pattern_value="terminate",
+        scope="profile", ordinal=0, active=True,
+        approved_by="u1", approved_at="now", created_at="now",
+    ))
+    db.commit()
+    db.close()
+
+    source = "S2. Are you currently employed?\nYes\nNo [SCREENER FAIL]"
+    q = Question(
+        qid="S2", text="Are you currently employed?", type=QuestionType.SINGLE,
+        options=[Option(code=1, label="Yes"), Option(code=2, label="No [SCREENER FAIL]")],
+        source_text=source,
+    )
+    _seed(session, _acme_survey(q))
+
+    resp = test_client.post("/api/studies/s1/questionnaire/apply-teaching")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["n_updated"] == 1
+    assert body["updated"][0]["qid"] == "S2"
+    assert "terminate_if" in body["updated"][0]["changed"]
+    assert body["n_unchanged"] == 0
+
+    updated = test_client.get("/api/studies/s1/questionnaire/questions/S2").json()
+    assert updated["terminate_if"]["values"] == [2]
+    # The parser changed content nobody has approved yet — reread's own rule
+    # about going back to review applies here too.
+    assert updated["approved"] is False
+
+
+def test_apply_teaching_with_no_patterns_for_the_profile_changes_nothing(client):
+    test_client, session = client
+    source = "S2. Are you currently employed?\nYes\nNo [SCREENER FAIL]"
+    # Seeded already at what a patternless re-read produces, so there is
+    # nothing for apply-teaching to find without the rule from the test above.
+    q = reread_question(Question(qid="S2", text="", source_text=source))
+    assert q is not None  # sanity: the fixture text does parse
+    _seed(session, _acme_survey(q))
+
+    resp = test_client.post("/api/studies/s1/questionnaire/apply-teaching")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["n_updated"] == 0
+    assert body["n_unchanged"] == 1
 
 
 # --- Split ----------------------------------------------------------------

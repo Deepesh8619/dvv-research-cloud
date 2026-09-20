@@ -1500,6 +1500,96 @@ def _apply_reread(question: Question, new: Question) -> None:
     question.flags = list(new.flags or [])
 
 
+def _profile_slug_for(survey: SurveyDefinition) -> str | None:
+    """The detected format profile slug already stashed on this survey.
+
+    Mirrors corrections.py's `_profile_slug`, reading the already-loaded
+    SurveyDefinition instead of re-parsing `definition_json`. None when no
+    profile was detected — the caller's job to turn that into `patterns=[]`.
+    """
+    profile = (survey.metadata or {}).get("profile")
+    if isinstance(profile, dict):
+        return profile.get("slug")
+    return profile if isinstance(profile, str) else None
+
+
+def _patterns_for_survey(db: Session, survey: SurveyDefinition) -> list:
+    """The taught patterns that apply to this survey's detected profile.
+
+    `[]` when no profile was detected — the T32/T33 guarantee: an
+    undetected/untaught document behaves byte-identically to before the
+    correction loop existed."""
+    from api.db import active_patterns_for_profile
+
+    slug = _profile_slug_for(survey)
+    return list(active_patterns_for_profile(db, slug)) if slug else []
+
+
+def _unread_fragments(question: Question) -> list[str]:
+    """Fragments of `question` the parsers saw but could not interpret.
+
+    Mirrors TeachFormat.tsx's `unrecognisedFragments` so a founder told "no
+    improvement" also sees exactly what is worth teaching, without opening the
+    question and reading validation by hand. Anything already cited in
+    `extraction_evidence` is excluded: it WAS understood.
+    """
+    validation = question.validation or {}
+    directives = [str(d) for d in (validation.get("scripter_directives") or [])]
+    rows = validation.get("unrecognised_rows")
+    row_labels = list(rows.keys()) if isinstance(rows, dict) else []
+
+    def _norm(text: str) -> str:
+        return text.replace("[", "").replace("]", "").strip().lower()
+
+    cited = [_norm(str(v)) for v in (question.extraction_evidence or {}).values()]
+    seen: set[str] = set()
+    out: list[str] = []
+    for frag in [*directives, *row_labels]:
+        needle = _norm(frag)
+        if not needle or needle in seen or any(needle in c for c in cited):
+            continue
+        seen.add(needle)
+        out.append(frag)
+    return out
+
+
+def _reread_all_with_patterns(
+    survey: SurveyDefinition, patterns: list
+) -> tuple[list[dict], int]:
+    """Re-read every question in `survey`, applying `patterns`.
+
+    Shared by reread-all and apply-teaching so the two can never drift apart.
+    Returns (updated, n_unchanged); does not save — the caller decides that.
+    """
+    updated: list[dict] = []
+    n_unchanged = 0
+    for question in list(survey.questions):
+        reread = reread_question(question, patterns)
+        if reread is None or _reread_is_regression(question, reread):
+            n_unchanged += 1
+            continue
+        changed = _reread_diff(question, reread)
+        if not changed:
+            n_unchanged += 1
+            continue
+        _apply_reread(question, reread)
+        updated.append({"qid": question.qid, "changed": changed})
+    return updated, n_unchanged
+
+
+def _persist_reread(
+    db: Session, questionnaire, survey: SurveyDefinition, updated: list[dict]
+) -> None:
+    """Common tail of a successful re-read pass: rebuild, save, unapprove touched qids."""
+    survey._rebuild_index()
+    _rerun_reread_safe_passes(survey)
+    survey.metadata["validation_errors"] = survey.validate()
+    _save_definition(db, questionnaire, survey)
+    update_questionnaire_status(db, questionnaire.id, "in_review")
+    approved = set(questionnaire.approved_qids or []) - {u["qid"] for u in updated}
+    set_questionnaire_approved_qids(db, questionnaire.id, sorted(approved))
+
+
 def _rerun_reread_safe_passes(survey: SurveyDefinition) -> None:
     """The survey-level passes safe to replay after a re-read.
 
@@ -1529,15 +1619,19 @@ def reread_one_question(
     No model call: `reread_question` replays `parse_prose_question`/
     `_apply_table_shape` against the SAME `source_text` already stored, so a
     parser fix landed after this question was first extracted reaches it for
-    free. 422, unchanged, if the re-read finds nothing better than what is
-    already stored (see `_reread_is_regression`) or nothing changed at all."""
+    free. Also passes the profile's founder-taught patterns (T33 correction
+    loop) — without this, teaching the parser a convention never reached the
+    document a founder was actually looking at, only the next upload. 422,
+    unchanged, if the re-read finds nothing better than what is already stored
+    (see `_reread_is_regression`) or nothing changed at all."""
     questionnaire = _latest_questionnaire(db, study_id)
     survey = _load_definition(db, questionnaire)
     if qid not in survey:
         raise HTTPException(status_code=404, detail=f"Question {qid} not found")
 
     question = survey[qid]
-    reread = reread_question(question)
+    patterns = _patterns_for_survey(db, survey)
+    reread = reread_question(question, patterns)
     if reread is None:
         raise HTTPException(
             status_code=422, detail=f"{qid} has no source text the current parser can read"
@@ -1549,21 +1643,17 @@ def reread_one_question(
         )
     changed = _reread_diff(question, reread)
     if not changed:
-        raise HTTPException(status_code=422, detail=f"Re-read of {qid} found no improvement")
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": f"Re-read of {qid} found no improvement",
+                "unread_fragments": _unread_fragments(question),
+            },
+        )
 
     _apply_reread(question, reread)
-    survey._rebuild_index()
-    _rerun_reread_safe_passes(survey)
-
-    survey.metadata["validation_errors"] = survey.validate()
-    _save_definition(db, questionnaire, survey)
-    update_questionnaire_status(db, questionnaire.id, "in_review")
-
-    # The parser changed what a person signed off: it goes back to review, so it
-    # shows as needing approval rather than "approved" over content nobody saw.
-    approved = set(questionnaire.approved_qids or [])
-    approved.discard(qid)
-    set_questionnaire_approved_qids(db, questionnaire.id, sorted(approved))
+    _persist_reread(db, questionnaire, survey, [{"qid": qid}])
+    approved = set(questionnaire.approved_qids or []) - {qid}
     payload = _question_payload(survey[qid], approved)
     payload["changed"] = changed
     return payload
@@ -1577,34 +1667,81 @@ def reread_all_questions(
 ):
     """Re-read every question with the current parsers, in one pass. (Owner/Analyst)
 
-    Same no-model-call re-read as the single-question endpoint; the survey-level
-    passes run once at the end rather than after each question. A question with
-    no improvement is simply left alone — this never errors on a clean survey,
-    it just reports 0 updated."""
+    Same no-model-call re-read as the single-question endpoint, also passing
+    the profile's taught patterns; the survey-level passes run once at the end
+    rather than after each question. A question with no improvement is simply
+    left alone — this never errors on a clean survey, it just reports 0
+    updated."""
     questionnaire = _latest_questionnaire(db, study_id)
     survey = _load_definition(db, questionnaire)
+    patterns = _patterns_for_survey(db, survey)
 
-    updated: list[dict] = []
-    for question in list(survey.questions):
-        reread = reread_question(question)
-        if reread is None or _reread_is_regression(question, reread):
-            continue
-        changed = _reread_diff(question, reread)
-        if not changed:
-            continue
-        _apply_reread(question, reread)
-        updated.append({"qid": question.qid, "changed": changed})
-
+    updated, _n_unchanged = _reread_all_with_patterns(survey, patterns)
     if updated:
-        survey._rebuild_index()
-        _rerun_reread_safe_passes(survey)
-        survey.metadata["validation_errors"] = survey.validate()
-        _save_definition(db, questionnaire, survey)
-        update_questionnaire_status(db, questionnaire.id, "in_review")
-        approved = set(questionnaire.approved_qids or []) - {u["qid"] for u in updated}
-        set_questionnaire_approved_qids(db, questionnaire.id, sorted(approved))
+        _persist_reread(db, questionnaire, survey, updated)
 
     return {"n_questions": len(survey.questions), "n_updated": len(updated), "updated": updated}
+
+
+@router.post("/studies/{study_id}/questionnaire/apply-teaching")
+def apply_teaching(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Re-read every question with the profile's CURRENT taught patterns. (Owner/Analyst/Founder)
+
+    The point of this endpoint: a founder who just taught a convention should
+    not have to separately remember to click "Re-read all" to see it take
+    effect on the document in front of them. Reuses `_reread_all_with_patterns`
+    — the same machinery `reread-all` uses — so the two can never disagree
+    about what counts as an improvement."""
+    updated, n_unchanged = _apply_teaching_for_study(db, study_id)
+    return {"n_updated": len(updated), "updated": updated, "n_unchanged": n_unchanged}
+
+
+def _apply_teaching_for_study(db: Session, study_id: str) -> tuple[list[dict], int]:
+    """Core of the apply-teaching pass. Shared by the endpoint above and by
+    `apply_teaching_after_lesson` below, which corrections.py calls right after
+    a pattern is taught or a preview approved. Raises the same 409/500 as
+    `_load_definition` when there IS a questionnaire but it is not readable;
+    a study with no questionnaire at all is simply nothing to apply to."""
+    questionnaire = _latest_questionnaire(db, study_id)
+    if questionnaire is None:
+        return [], 0
+    survey = _load_definition(db, questionnaire)
+    patterns = _patterns_for_survey(db, survey)
+
+    updated, n_unchanged = _reread_all_with_patterns(survey, patterns)
+    if updated:
+        _persist_reread(db, questionnaire, survey, updated)
+    return updated, n_unchanged
+
+
+def apply_teaching_after_lesson(db: Session, study_id: str | None) -> dict | None:
+    """Best-effort apply-teaching pass for the moment a lesson is saved (a
+    pattern taught, a correction preview approved) when the caller already
+    knows which study is in context.
+
+    Never raises: teaching a pattern or approving a preview must still succeed
+    even when this side-effect cannot run (no questionnaire extracted yet, a
+    stale profile). Returns None — "leave the response unchanged", per the
+    caller's contract — when `study_id` is unknown or there is nothing to
+    apply to.
+    """
+    if not study_id:
+        return None
+    try:
+        updated, _n_unchanged = _apply_teaching_for_study(db, study_id)
+    except HTTPException:
+        return None
+    except Exception:  # noqa: BLE001 - a side-effect must not fail the lesson
+        # A definition this pass cannot read (an old or hand-written one) must
+        # not take down the thing the user actually asked for: the lesson is
+        # saved either way, and the reviewer can re-read by hand.
+        logger.exception(f"[{study_id}] apply-teaching after a lesson failed")
+        return None
+    return {"n_updated": len(updated)}
 
 
 # --- Split ("for each X, ask Y" -> one question per X) ----------------------

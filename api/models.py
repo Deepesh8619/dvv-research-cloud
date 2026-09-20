@@ -564,6 +564,10 @@ class ApplyRuleRequest(BaseModel):
     pattern_kind: str | None = None
     pattern: str | None = None
     pattern_value: str | None = None
+    # The study the founder was actually looking at (TeachFormat sends this).
+    # Without it, a newly taught pattern could only ever help the NEXT document
+    # uploaded of this profile — never the one on screen right now.
+    study_id: str | None = None
 
 
 class ProfileRuleResponse(BaseModel):
@@ -581,6 +585,9 @@ class ProfileRuleResponse(BaseModel):
     approved_by: str | None = None
     approved_at: str | None = None
     created_at: str | None = None
+    # Set only when a pattern was just applied to a study already in context
+    # (see ApplyRuleRequest.study_id / the correction preview-approve route).
+    applied_to_current: dict | None = None
 
 
 class ReviseRequest(BaseModel):

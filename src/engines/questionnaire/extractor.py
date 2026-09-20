@@ -670,7 +670,9 @@ def _rebuild_table_rows(source_text: str) -> list[list[str]]:
     return [line.split(" | ") for line in (source_text or "").splitlines() if " | " in line]
 
 
-def reread_question(question: Question) -> Question | None:
+def reread_question(
+    question: Question, patterns: list[LearnedPattern] | None = None
+) -> Question | None:
     """Re-run the CURRENT deterministic parsers on one question's own text.
 
     No model call — ever. A stored question was parsed by whatever parser code
@@ -679,6 +681,12 @@ def reread_question(question: Question) -> Question | None:
     text still carries a table, `_apply_table_shape`/`capture_carousel` against
     rows rebuilt by `_rebuild_table_rows`) over the SAME `source_text` captured
     then, so a parser improvement reaches this one question for free.
+
+    `patterns` is the profile's founder-taught patterns (T33 correction loop).
+    Without this, a founder teaching a convention could never see it applied to
+    the very document they were looking at — only to the next one uploaded.
+    `question_from_tables` (the grid-shape pass) reads no patterns, so there is
+    no separate spec-table path here to thread them into.
 
     Returns None when there is no source_text, or nothing in it the parser can
     read (no label the segmenter would have recognised) — the caller decides
@@ -702,7 +710,7 @@ def reread_question(question: Question) -> Question | None:
         provenance=question.source_location or "",
     )
 
-    fields = parse_prose_question(chunk.chunk_text, chunk.candidate_qid)
+    fields = parse_prose_question(chunk.chunk_text, chunk.candidate_qid, patterns)
     if fields is None:
         return None
 
@@ -710,7 +718,7 @@ def reread_question(question: Question) -> Question | None:
     if blocks:
         capture_carousel(new_question, [table_rows])
     result = ExtractionResult(question=new_question)
-    _flag_derived_variable(result, chunk)
+    _flag_derived_variable(result, chunk, patterns)
     _validate_question(result, {})
     return new_question
 
