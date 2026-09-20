@@ -59,7 +59,7 @@ export default function DryRunPanel({
     report && report.n_respondents ? Math.round((100 * part) / report.n_respondents) : 0
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-5">
+    <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="font-semibold text-slate-900">Dry run</h2>

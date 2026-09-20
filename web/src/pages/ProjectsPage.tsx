@@ -4,6 +4,10 @@ import { Study, studiesApi } from '../api/client'
 import { FolderIcon, PlusIcon, SearchIcon } from '../components/Icons'
 import { TableSkeleton } from '../components/Skeleton'
 import StatusPill from '../components/StatusPill'
+import PageHeader from '../components/ui/PageHeader'
+import { Card } from '../components/ui/Card'
+import EmptyState from '../components/ui/EmptyState'
+import { buttonClasses } from '../components/ui/Button'
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -51,10 +55,7 @@ export default function ProjectsPage() {
   if (loading) {
     return (
       <div>
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-slate-900">Projects</h1>
-          <p className="text-sm text-slate-500 mt-1">Loading projects…</p>
-        </div>
+        <PageHeader title="Projects" description="Loading projects…" icon={FolderIcon} />
         <TableSkeleton rows={6} cols={5} />
       </div>
     )
@@ -62,20 +63,20 @@ export default function ProjectsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Projects</h1>
-          <p className="text-sm text-slate-500 mt-1 tabular-nums">
+      <PageHeader
+        title="Projects"
+        description={
+          <span className="tabular-nums">
             {visible.length} of {studies.length} projects
-          </p>
-        </div>
-        <Link
-          to="/projects/new"
-          className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-        >
-          <PlusIcon className="w-4 h-4" /> New Project
-        </Link>
-      </div>
+          </span>
+        }
+        icon={FolderIcon}
+        actions={
+          <Link to="/projects/new" className={buttonClasses('primary')}>
+            <PlusIcon className="w-4 h-4" /> New Project
+          </Link>
+        }
+      />
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 mb-4">
@@ -93,7 +94,7 @@ export default function ProjectsPage() {
             <button
               key={f.key}
               onClick={() => setFilter(f.key)}
-              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+              className={`rounded px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${
                 filter === f.key ? 'bg-primary-500 text-white' : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
@@ -104,27 +105,22 @@ export default function ProjectsPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+      <Card padded={false} className="overflow-hidden dvv-rise">
         {visible.length === 0 ? (
-          <div className="px-6 py-16 flex flex-col items-center text-center">
-            <div className="w-12 h-12 rounded-xl bg-primary-50 text-primary-500 flex items-center justify-center mb-4">
-              <FolderIcon className="w-6 h-6" />
-            </div>
-            <p className="text-sm font-medium text-slate-900">
-              {studies.length === 0 ? 'No projects yet' : 'No projects match'}
-            </p>
-            <p className="text-sm text-slate-500 mt-1 mb-5 max-w-xs">
-              {studies.length === 0
+          <EmptyState
+            icon={FolderIcon}
+            title={studies.length === 0 ? 'No projects yet' : 'No projects match'}
+            description={
+              studies.length === 0
                 ? 'Create your first research project to get started.'
-                : 'Try a different search term or filter, or create a new project.'}
-            </p>
-            <Link
-              to="/projects/new"
-              className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md shadow-sm hover:bg-primary-600 transition-all duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-            >
-              <PlusIcon className="w-4 h-4" /> New Project
-            </Link>
-          </div>
+                : 'Try a different search term or filter, or create a new project.'
+            }
+            action={
+              <Link to="/projects/new" className={buttonClasses('primary')}>
+                <PlusIcon className="w-4 h-4" /> New Project
+              </Link>
+            }
+          />
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
@@ -166,7 +162,7 @@ export default function ProjectsPage() {
             </tbody>
           </table>
         )}
-      </div>
+      </Card>
     </div>
   )
 }

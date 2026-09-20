@@ -12,6 +12,8 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { canWrite as hasWriteRole } from '../auth/roles'
+import { ChatIcon } from '../components/Icons'
+import PageHeader from '../components/ui/PageHeader'
 
 // Roles allowed to resolve items (matches api require_role(OWNER, ANALYST)).
 
@@ -183,7 +185,7 @@ function VariableQueue({
 }) {
   const pending = variable.review_queue.filter((i) => i.status === 'pending').length
   return (
-    <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+    <div className="bg-white rounded-lg border border-slate-200 shadow-panel overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
         <div>
           <span className="text-sm font-semibold text-slate-800">{variable.question_var}</span>
@@ -294,12 +296,13 @@ export default function CodingPage() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="text-2xl font-semibold text-slate-900 mb-1">Verbatim Coding</h1>
-      <p className="text-sm text-slate-500 mb-6">
-        Review low-confidence AI codings — accept the suggestion or correct the codes.
-      </p>
+      <PageHeader
+        title="Verbatim Coding"
+        description="Review low-confidence AI codings — accept the suggestion or correct the codes."
+        icon={ChatIcon}
+      />
 
-      <div className="bg-white rounded-lg border border-slate-200 p-4 mb-6 flex items-center gap-3">
+      <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-4 mb-6 flex items-center gap-3">
         <label className="text-sm text-slate-600 shrink-0">Project:</label>
         <select
           value={selectedStudy}
@@ -332,7 +335,7 @@ export default function CodingPage() {
       )}
 
       {!selectedStudy && !notice && (
-        <div className="bg-white rounded-lg border border-slate-200 p-10 text-center">
+        <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-10 text-center">
           <p className="text-sm text-slate-500 max-w-md mx-auto">
             When a project's data contains open-ended questions, the pipeline generates a
             codeframe, codes every response with a confidence score, and queues low-confidence

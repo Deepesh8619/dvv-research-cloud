@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Study, studiesApi } from '../api/client'
-import { ClockIcon, DocChartIcon, FolderIcon, PlusIcon } from '../components/Icons'
+import { ClockIcon, DocChartIcon, FolderIcon, GridIcon, PlusIcon } from '../components/Icons'
 import { DashboardSkeleton } from '../components/Skeleton'
 import StatusPill from '../components/StatusPill'
 import { useLabel } from '../labels/LabelContext'
+import PageHeader from '../components/ui/PageHeader'
+import { Card, CardHeader } from '../components/ui/Card'
+import StatTile from '../components/ui/StatTile'
+import EmptyState from '../components/ui/EmptyState'
+import { buttonClasses } from '../components/ui/Button'
 
 export default function DashboardPage() {
   const tDashboard = useLabel('dashboard.title', 'Dashboard')
@@ -27,10 +32,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div>
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-slate-900">{tDashboard}</h1>
-          <p className="text-sm text-slate-500 mt-1">Loading overview…</p>
-        </div>
+        <PageHeader title={tDashboard} description="Loading overview…" icon={GridIcon} />
         <DashboardSkeleton />
       </div>
     )
@@ -50,58 +52,45 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">{tDashboard}</h1>
-          <p className="text-sm text-slate-500 mt-1">{tSubtitle}</p>
-        </div>
-        <Link
-          to="/projects/new"
-          className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-        >
-          <PlusIcon className="w-4 h-4" /> New Project
-        </Link>
-      </div>
+      <PageHeader
+        title={tDashboard}
+        description={tSubtitle}
+        icon={GridIcon}
+        actions={
+          <Link to="/projects/new" className={buttonClasses('primary')}>
+            <PlusIcon className="w-4 h-4" /> New Project
+          </Link>
+        }
+      />
 
       {/* KPI cards */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
+      <div className="dvv-cascade mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {kpis.map(({ label, value, icon: Icon, tint }) => (
-          <div key={label} className="bg-white rounded-lg border border-slate-200 p-5 flex items-center gap-4">
-            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${tint}`}>
-              <Icon className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-2xl font-semibold text-slate-900 leading-none font-mono tabular-nums">{value}</p>
-              <p className="text-xs text-slate-500 mt-1.5">{label}</p>
-            </div>
-          </div>
+          <StatTile key={label} label={label} value={value} icon={Icon} tint={tint} />
         ))}
       </div>
 
       {/* Recent projects */}
-      <div className="bg-white rounded-lg border border-slate-200">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <h2 className="font-semibold text-slate-900">Recent projects</h2>
-          <Link to="/projects" className="text-sm text-sky-600 hover:text-sky-700 font-medium">
-            View all
-          </Link>
-        </div>
-        {recent.length === 0 ? (
-          <div className="px-6 py-14 flex flex-col items-center text-center">
-            <div className="w-12 h-12 rounded-xl bg-primary-50 text-primary-500 flex items-center justify-center mb-4">
-              <FolderIcon className="w-6 h-6" />
-            </div>
-            <p className="text-sm font-medium text-slate-900">No projects yet</p>
-            <p className="text-sm text-slate-500 mt-1 mb-5 max-w-xs">
-              Create your first research project to start building surveys and delivering results.
-            </p>
-            <Link
-              to="/projects/new"
-              className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md shadow-sm hover:bg-primary-600 transition-all duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-            >
-              <PlusIcon className="w-4 h-4" /> New Project
+      <Card padded={false}>
+        <CardHeader
+          title="Recent projects"
+          actions={
+            <Link to="/projects" className="text-sm font-medium text-sky-600 hover:text-sky-700">
+              View all
             </Link>
-          </div>
+          }
+        />
+        {recent.length === 0 ? (
+          <EmptyState
+            icon={FolderIcon}
+            title="No projects yet"
+            description="Create your first research project to start building surveys and delivering results."
+            action={
+              <Link to="/projects/new" className={buttonClasses('primary')}>
+                <PlusIcon className="w-4 h-4" /> New Project
+              </Link>
+            }
+          />
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -137,7 +126,7 @@ export default function DashboardPage() {
             </tbody>
           </table>
         )}
-      </div>
+      </Card>
     </div>
   )
 }
