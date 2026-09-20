@@ -389,7 +389,10 @@ def test_a_rank_pipe_reaches_the_respondent():
     """"[#1 RANK FROM Q8]" is a pipe written without the word INSERT, which both
     other forms require — so it was not read as one, the compiler stripped it as
     an unknown tag, and the respondent was asked "Why do you rank as your most
-    preferred pharmacy?": the subject deleted, answered as an open end."""
+    preferred pharmacy?": the subject deleted, answered as an open end.
+
+    "#1 RANK" names one place in the ranking, so what reaches the respondent is
+    the brand they put first."""
     from src.engines.questionnaire.mr_techniques import detect_techniques
     from src.renderers.surveyjs_compiler import compile_to_surveyjs
 
@@ -409,7 +412,9 @@ def test_a_rank_pipe_reaches_the_respondent():
         for e in page["elements"]
         if e.get("name") == "Q9"
     )
-    assert element["title"] == "Why do you rank {Q8} as your most preferred pharmacy?"
+    # Their #1, not the whole ranking: {Q8} prints every brand they ranked, and
+    # SurveyJS cannot address one place in it — the link computes this one.
+    assert element["title"] == "Why do you rank {Q8_rank1} as your most preferred pharmacy?"
 
 
 def test_a_base_leaves_the_wording_once_it_is_a_condition():

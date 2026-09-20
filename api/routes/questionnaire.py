@@ -1559,7 +1559,11 @@ def reread_one_question(
     _save_definition(db, questionnaire, survey)
     update_questionnaire_status(db, questionnaire.id, "in_review")
 
+    # The parser changed what a person signed off: it goes back to review, so it
+    # shows as needing approval rather than "approved" over content nobody saw.
     approved = set(questionnaire.approved_qids or [])
+    approved.discard(qid)
+    set_questionnaire_approved_qids(db, questionnaire.id, sorted(approved))
     payload = _question_payload(survey[qid], approved)
     payload["changed"] = changed
     return payload
@@ -1597,6 +1601,8 @@ def reread_all_questions(
         survey.metadata["validation_errors"] = survey.validate()
         _save_definition(db, questionnaire, survey)
         update_questionnaire_status(db, questionnaire.id, "in_review")
+        approved = set(questionnaire.approved_qids or []) - {u["qid"] for u in updated}
+        set_questionnaire_approved_qids(db, questionnaire.id, sorted(approved))
 
     return {"n_questions": len(survey.questions), "n_updated": len(updated), "updated": updated}
 
