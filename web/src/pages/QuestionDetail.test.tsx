@@ -148,6 +148,31 @@ describe('constant sum editor', () => {
   })
 })
 
+describe('blank-question triage', () => {
+  it('explains a single-answer question read with no options', () => {
+    renderDetail(question({ type: 'single', options: [] }))
+    expect(
+      screen.getByText(/Nothing here was read as an answer list/),
+    ).toBeTruthy()
+    expect(screen.getByRole('button', { name: '+ Options from…' })).toBeTruthy()
+  })
+
+  it('stays quiet for a question that has options', () => {
+    renderDetail(question({ type: 'single', options: [{ code: 1, label: 'Yes' }] }))
+    expect(screen.queryByText(/Nothing here was read as an answer list/)).toBeNull()
+  })
+
+  it('stays quiet for a type that never carries an answer list', () => {
+    renderDetail(question({ type: 'open_text', options: [] }))
+    expect(screen.queryByText(/Nothing here was read as an answer list/)).toBeNull()
+  })
+
+  it('does not pile onto a derived variable, which is blank on purpose', () => {
+    renderDetail(question({ type: 'single', options: [], flags: ['DERIVED_VARIABLE'] }))
+    expect(screen.queryByText(/Nothing here was read as an answer list/)).toBeNull()
+  })
+})
+
 describe('approving after a change', () => {
   it('lets an approved question be approved again once it carries a blocking flag', () => {
     // A re-read, a split or an edited route can flag a question a reviewer

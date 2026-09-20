@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { MaskLink, Question, QuestionMapEntry, questionnaireApi } from '../../api/client'
 import { BUCKETS, bucketInfo } from '../../lib/buckets'
@@ -206,6 +206,7 @@ export function ConnectionsPanel({
   canWrite,
   onChanged,
   onGoTo,
+  focusAddOptions,
 }: {
   studyId: string
   question: Question
@@ -215,12 +216,23 @@ export function ConnectionsPanel({
   canWrite: boolean
   onChanged: (updated: Question) => void
   onGoTo: (qid: string) => void
+  /** Bumped by the blank-question triage's "+ Options from…" link, so the
+   * reviewer lands straight in this form instead of hunting for the button. */
+  focusAddOptions?: number
 }) {
   const [adding, setAdding] = useState<null | 'options' | 'text'>(null)
   const [source, setSource] = useState('')
   const [mode, setMode] = useState('selected')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!focusAddOptions) return
+    setAdding('options')
+    setMode('selected')
+    // Only the counter needs to be a dependency — see the prop's doc comment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusAddOptions])
 
   const links = entry?.links
   const masks = masksOf(question)

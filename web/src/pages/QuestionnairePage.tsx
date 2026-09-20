@@ -19,6 +19,8 @@ import { flagInfo } from '../components/questionnaireFlags'
 import CorrectionBox from '../components/CorrectionBox'
 import ExtractionProvenance from '../components/ExtractionProvenance'
 import TeachFormat from '../components/TeachFormat'
+import ReadPanel from '../components/review/ReadPanel'
+import Lessons from '../components/review/Lessons'
 import { useLabel } from '../labels/LabelContext'
 import { BucketBar, ConnectionsPanel, IssuesPanel, ProgressRing } from '../components/review/QuestionMap'
 import { bucketInfo } from '../lib/buckets'
@@ -69,6 +71,73 @@ function FlagBadge({ code }: { code: string }) {
     >
       {info.label}
     </span>
+  )
+}
+
+// Types whose whole point is an answer list — a plain number, open text or
+// info screen has nothing to look blank about, so they are left out.
+const ANSWER_LIST_TYPES = ['single', 'multi', 'dropdown', 'rank', 'grid_single']
+
+/** A question whose type expects an answer list, but nothing was read into it
+ * (or a blocking flag says the reading itself failed) — the "just looks
+ * blank, no clue why" case the triage below exists to explain. A derived
+ * variable is blank on purpose and already gets its own note, so it is
+ * excluded here rather than in every caller. */
+function looksBlank(q: Question): boolean {
+  if (q.flags.includes('DERIVED_VARIABLE') || !ANSWER_LIST_TYPES.includes(q.type)) return false
+  const hasList = q.type === 'grid_single' ? (q.rows?.length ?? 0) > 0 : q.options.length > 0
+  return !hasList || q.flags.some((f) => flagInfo(f).blocking)
+}
+
+/** Points at the two ways a blank answer list actually gets fixed, rather
+ * than leaving a reviewer to guess: the list may belong to another question
+ * (link it), or the document uses a convention the parser has never seen
+ * (teach it). Each link is only shown if the reviewer can actually use it. */
+function BlankAnswerTriage({
+  canWrite,
+  canTeach,
+  onOptionsFrom,
+  onTeach,
+}: {
+  canWrite: boolean
+  canTeach: boolean
+  onOptionsFrom: () => void
+  onTeach: () => void
+}) {
+  return (
+    <div className="text-sm rounded-md px-3 py-2 bg-indigo-50 text-indigo-800 border border-indigo-100">
+      Nothing here was read as an answer list. Either the list lives in another question
+      {canWrite && (
+        <>
+          {' '}
+          (use{' '}
+          <button
+            type="button"
+            onClick={onOptionsFrom}
+            className="underline font-medium hover:text-indigo-900"
+          >
+            + Options from…
+          </button>
+          )
+        </>
+      )}
+      , or the format is new
+      {canTeach && (
+        <>
+          {' '}
+          (
+          <button
+            type="button"
+            onClick={onTeach}
+            className="underline font-medium hover:text-indigo-900"
+          >
+            Teach this
+          </button>
+          )
+        </>
+      )}
+      .
+    </div>
   )
 }
 
@@ -483,6 +552,7 @@ export function QuestionDetail({
   onSaved,
   onApproved,
   onSplit,
+  onRequestOptionsFrom,
 }: {
   studyId: string
   q: Question
@@ -495,8 +565,18 @@ export function QuestionDetail({
   onApproved: (qid: string, clearedFlags?: string[]) => void
   /** After a successful split: reload the list and select the first copy. */
   onSplit: (qids: string[]) => void
+  /** Blank-answer triage's "+ Options from…" link — opens the add-link form
+   * on the Connections panel above, which owns that state itself. */
+  onRequestOptionsFrom?: () => void
 }) {
   const [state, setState] = useState<DetailState>(() => buildDetailState(q))
+  // What TeachFormat should open pre-filled with, requested from the read/
+  // unread panel or the blank-question triage below. Bumping `nonce` reopens
+  // even when the same fragment is picked twice in a row.
+  const [teachRequest, setTeachRequest] = useState<{ fragment: string; nonce: number } | null>(null)
+  // Bumped after teaching a lesson so the "Lessons learned" panel picks it up
+  // without the reviewer having to collapse and reopen it.
+  const [lessonsReload, setLessonsReload] = useState(0)
   // Raw text of an option-code box while it has focus — see the input below.
   const [codeDrafts, setCodeDrafts] = useState<Record<number, string>>({})
   // Display-only fallback: the extractor stashes the routing sentence in
@@ -631,15 +711,23 @@ export function QuestionDetail({
 
       {/* Teaching is only meaningful once we know WHICH format we would be
           teaching — an unrecognised document has no profile to attach it to. */}
-      <div>
-        {canCorrect && profile?.slug && (
+      {canCorrect && profile?.slug && (
+        <div className="space-y-3">
           <TeachFormat
             profileSlug={profile.slug}
             profileLabel={profile.label}
             question={q}
+            openRequest={teachRequest}
+            onTaught={() => setLessonsReload((n) => n + 1)}
           />
-        )}
-      </div>
+          <Lessons
+            profileSlug={profile.slug}
+            profileLabel={profile.label}
+            canCorrect={canCorrect}
+            reloadToken={lessonsReload}
+          />
+        </div>
+      )}
 
       {q.flags.length > 0 && (
         <div className="space-y-1.5">
@@ -662,6 +750,21 @@ export function QuestionDetail({
       )}
 
       <ExtractionProvenance method={q.extraction_method} evidence={q.extraction_evidence} />
+
+      <ReadPanel
+        question={q}
+        canTeach={canCorrect && !!profile?.slug}
+        onTeach={(fragment) => setTeachRequest({ fragment, nonce: Date.now() })}
+      />
+
+      {looksBlank(q) && (
+        <BlankAnswerTriage
+          canWrite={canWrite}
+          canTeach={canCorrect && !!profile?.slug}
+          onOptionsFrom={() => onRequestOptionsFrom?.()}
+          onTeach={() => setTeachRequest({ fragment: '', nonce: Date.now() })}
+        />
+      )}
 
       {/* A derived variable is computed by the scripter from other answers, so
           there is no wording, type or routing to review. Saying so plainly beats
@@ -982,6 +1085,11 @@ export default function QuestionnairePage() {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [selectedQid, setSelectedQid] = useState<string | null>(null)
+  // Bumped by the blank-question triage's "+ Options from…" link so the
+  // Connections panel above (a sibling, owning its own add-link form) opens
+  // it. Reset on every question switch so a stale bump never reopens it on
+  // the next question by accident.
+  const [optionsFromNonce, setOptionsFromNonce] = useState(0)
   const [approveAllError, setApproveAllError] = useState<UnresolvedQuestion[] | null>(null)
   const [approvingAll, setApprovingAll] = useState(false)
   const [approvedOk, setApprovedOk] = useState(false)
@@ -1087,6 +1195,8 @@ export default function QuestionnairePage() {
     () => questions.find((q) => q.qid === selectedQid) ?? null,
     [questions, selectedQid],
   )
+
+  useEffect(() => setOptionsFromNonce(0), [selectedQid])
 
   const onQuestionSaved = (updated: Question) => {
     setQuestions((qs) => qs.map((q) => (q.qid === updated.qid ? updated : q)))
@@ -1536,6 +1646,7 @@ export default function QuestionnairePage() {
                   canWrite={canWrite}
                   onChanged={onQuestionSaved}
                   onGoTo={goTo}
+                  focusAddOptions={optionsFromNonce}
                 />
                 <QuestionDetail
                   key={selected.qid}
@@ -1548,6 +1659,7 @@ export default function QuestionnairePage() {
                   onSaved={onQuestionSaved}
                   onApproved={onQuestionApproved}
                   onSplit={onQuestionSplit}
+                  onRequestOptionsFrom={() => setOptionsFromNonce((n) => n + 1)}
                 />
                 </div>
               ) : (
