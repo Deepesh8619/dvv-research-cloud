@@ -18,6 +18,8 @@ import SoftLaunchPanel from '../components/SoftLaunchPanel'
 import { CardListSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import ThemeSelect from '../components/ThemeSelect'
+import { ClockIcon } from '../components/Icons'
+import PageHeader from '../components/ui/PageHeader'
 import { canWrite as hasWriteRole } from '../auth/roles'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
@@ -336,7 +338,7 @@ function LinkCard({
   }
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-5">
+    <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-5">
       <div className="flex items-start justify-between mb-3">
         <div>
           <div className="flex items-center gap-2">
@@ -599,7 +601,7 @@ function CreatePanel({
   if (!canWrite) return null
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-5 mb-6">
+    <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-5 mb-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-semibold text-slate-900">New fielding link</h2>
@@ -816,10 +818,7 @@ export default function FieldingPage() {
   if (loading) {
     return (
       <div>
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-slate-900">Field monitor</h1>
-          <p className="text-sm text-slate-500 mt-1">Loading fielding links…</p>
-        </div>
+        <PageHeader title="Field monitor" description="Loading fielding links…" icon={ClockIcon} />
         <CardListSkeleton count={2} />
       </div>
     )
@@ -827,15 +826,14 @@ export default function FieldingPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <Link to={`/projects/${studyId}`} className="text-sm text-slate-500 hover:text-slate-700">
-          ← Back to project
-        </Link>
-        <h1 className="text-2xl font-semibold text-slate-900 mt-1">Field monitor</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Create fielding links, watch responses live, manage quotas, and materialize completes into analysis.
-        </p>
-      </div>
+      <Link to={`/projects/${studyId}`} className="mb-2 inline-block text-sm text-slate-500 hover:text-slate-700">
+        ← Back to project
+      </Link>
+      <PageHeader
+        title="Field monitor"
+        description="Create fielding links, watch responses live, manage quotas, and materialize completes into analysis."
+        icon={ClockIcon}
+      />
 
       {loadError && (
         <div className="bg-red-50 border border-red-200 rounded-md p-4 max-w-xl mb-6">

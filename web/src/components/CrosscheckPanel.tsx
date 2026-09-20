@@ -99,7 +99,7 @@ export default function CrosscheckPanel({
   }
 
   return (
-    <section className="bg-white rounded-lg border border-slate-200 p-6">
+    <section className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="font-semibold text-slate-900">Data vs questionnaire</h2>

@@ -2,6 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens — one accent (the existing navy primary), a neutral slate
+   base, one radius scale, one shadow, one spacing rhythm. Consumed by the
+   shared components in src/components/ui/ so every screen draws from the
+   same values instead of re-deriving them per page. */
+:root {
+  --color-accent: #1f2a44;
+  --color-accent-soft: #f0f4f8;
+
+  --radius-sm: 0.375rem;   /* controls, badges, inputs */
+  --radius-md: 0.625rem;   /* cards, panels, buttons */
+  --radius-lg: 0.875rem;   /* banners, hero-level surfaces */
+
+  /* Single restrained elevation — no glow, no neon. Used for anything raised
+     off the page background (banner, card, stat tile). */
+  --shadow-panel: 0 1px 2px rgba(15, 23, 42, 0.04), 0 2px 8px rgba(15, 23, 42, 0.05);
+
+  /* Vertical rhythm between stacked sections on a screen. */
+  --space-section: 2rem;
+}
+
+.shadow-panel {
+  box-shadow: var(--shadow-panel);
+}
+
 body {
   @apply bg-gray-50 text-gray-900 font-sans antialiased;
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';

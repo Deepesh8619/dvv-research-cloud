@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { activityApi, uiApi, type UIKey } from '../api/client'
 import { useReloadLabels } from '../labels/LabelContext'
 import { CardListSkeleton } from '../components/Skeleton'
+import { ChatIcon } from '../components/Icons'
+import PageHeader from '../components/ui/PageHeader'
 
 /**
  * The founders' wording console (Tier A).
@@ -126,13 +128,13 @@ export default function WordingPage() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="text-2xl font-semibold text-slate-900">Wording</h1>
-      <p className="text-sm text-slate-600 mt-1 max-w-2xl leading-relaxed">
-        Change what the app calls things, in your language rather than ours. Edits take effect
-        on the next page load and can always be put back.
-      </p>
+      <PageHeader
+        title="Wording"
+        description="Change what the app calls things, in your language rather than ours. Edits take effect on the next page load and can always be put back."
+        icon={ChatIcon}
+      />
 
-      <div className="flex items-center gap-3 mt-5 mb-4">
+      <div className="flex items-center gap-3 mb-4">
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}

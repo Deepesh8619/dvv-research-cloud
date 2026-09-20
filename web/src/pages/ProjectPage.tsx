@@ -10,6 +10,10 @@ import { CheckIcon, DocChartIcon, DownloadIcon, LinkIcon } from '../components/I
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatusPill from '../components/StatusPill'
 import { canWrite as hasWriteRole } from '../auth/roles'
+import PageHeader from '../components/ui/PageHeader'
+import { buttonClasses } from '../components/ui/Button'
+import { Card } from '../components/ui/Card'
+import EmptyState from '../components/ui/EmptyState'
 
 const PIPELINE = [
   { key: 'classify', label: 'Intake' },
@@ -175,51 +179,46 @@ export default function ProjectPage() {
   return (
     <div>
       {/* Header */}
-      <div className="mb-6">
-        <Link to="/projects" className="text-sm text-slate-500 hover:text-slate-700">
-          Projects /
-        </Link>
-        <div className="flex items-center justify-between mt-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold text-slate-900">{study.client_name}</h1>
+      <Link to="/projects" className="mb-2 inline-block text-sm text-slate-500 hover:text-slate-700">
+        ← Projects
+      </Link>
+      <PageHeader
+        title={
+          <span className="flex flex-wrap items-center gap-3">
+            {study.client_name}
             <StatusPill status={study.status} />
-          </div>
-          <div className="flex items-center gap-2">
+          </span>
+        }
+        description={<span className="font-mono text-xs text-slate-400">{study.id}</span>}
+        icon={DocChartIcon}
+        actions={
+          <>
             {hasWriteRole(user?.role) && (
               <button
                 onClick={handleReprocess}
                 disabled={reprocessing}
                 title="Re-run the full pipeline from the original file (recovers a study after a server restart; picks up new QC/coding features)"
-                className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50 disabled:opacity-50"
+                className={buttonClasses('secondary')}
               >
                 {reprocessing ? 'Starting…' : 'Re-process'}
               </button>
             )}
             {noQuestionnaire && hasWriteRole(user?.role) && (
-              <Link
-                to={`/projects/${study.id}/builder`}
-                className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
-              >
+              <Link to={`/projects/${study.id}/builder`} className={buttonClasses('secondary')}>
                 Build survey
               </Link>
             )}
-            <Link
-              to={`/projects/${study.id}/questionnaire`}
-              className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
-            >
+            <Link to={`/projects/${study.id}/questionnaire`} className={buttonClasses('secondary')}>
               Questionnaire
             </Link>
-            <Link
-              to={`/projects/${study.id}/fielding`}
-              className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
-            >
+            <Link to={`/projects/${study.id}/fielding`} className={buttonClasses('secondary')}>
               Fielding
             </Link>
             {study.excel_path && (
               <button
                 type="button"
                 onClick={() => studiesApi.download(study.id, 'excel', `${study.client_name}.xlsx`)}
-                className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
+                className={buttonClasses('secondary')}
               >
                 <DownloadIcon className="w-4 h-4" /> Excel
               </button>
@@ -228,7 +227,7 @@ export default function ProjectPage() {
               <button
                 type="button"
                 onClick={() => studiesApi.download(study.id, 'pptx', `${study.client_name}.pptx`)}
-                className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
+                className={buttonClasses('secondary')}
               >
                 <DownloadIcon className="w-4 h-4" /> PowerPoint
               </button>
@@ -237,29 +236,25 @@ export default function ProjectPage() {
               <button
                 onClick={handleApprove}
                 disabled={approving}
-                className="inline-flex items-center gap-2 bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-emerald-700 disabled:opacity-60"
+                className={buttonClasses('success')}
               >
                 <CheckIcon className="w-4 h-4" />
                 {approving ? 'Signing off…' : 'Sign off for delivery'}
               </button>
             )}
             {study.status === 'approved_for_delivery' && deliveryApproved && hasWriteRole(user?.role) && (
-              <button
-                onClick={() => setShowShareModal(true)}
-                className="inline-flex items-center gap-2 border border-slate-300 bg-white text-slate-700 text-sm font-medium px-3.5 py-2 rounded-md hover:bg-slate-50"
-              >
+              <button onClick={() => setShowShareModal(true)} className={buttonClasses('secondary')}>
                 <LinkIcon className="w-4 h-4" /> Share
               </button>
             )}
-          </div>
-        </div>
-        <p className="text-xs text-slate-400 font-mono mt-1">{study.id}</p>
-        {reprocessError && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2 mt-2">
-            {reprocessError}
-          </p>
-        )}
-      </div>
+          </>
+        }
+      />
+      {reprocessError && (
+        <p className="mb-4 -mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+          {reprocessError}
+        </p>
+      )}
 
       {/* Tab nav */}
       <div className="border-b border-slate-200 mb-6">
@@ -268,7 +263,7 @@ export default function ProjectPage() {
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              className={`rounded-t-sm px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${
                 tab === t
                   ? 'border-primary-500 text-primary-500'
                   : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -357,15 +352,19 @@ export default function ProjectPage() {
 
 function NoDataState() {
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-10 text-center">
-      <DocChartIcon className="w-10 h-10 text-slate-300 mx-auto mb-4" />
-      <h2 className="font-semibold text-slate-900">No data yet</h2>
-      <p className="text-sm text-slate-500 mt-1.5 max-w-md mx-auto">
-        Field this survey or upload responses to unlock tables and reports. Use the{' '}
-        <span className="font-medium text-slate-700">Questionnaire</span> and{' '}
-        <span className="font-medium text-slate-700">Fielding</span> links above to get started.
-      </p>
-    </div>
+    <Card>
+      <EmptyState
+        icon={DocChartIcon}
+        title="No data yet"
+        description={
+          <>
+            Field this survey or upload responses to unlock tables and reports. Use the{' '}
+            <span className="font-medium text-slate-700">Questionnaire</span> and{' '}
+            <span className="font-medium text-slate-700">Fielding</span> links above to get started.
+          </>
+        }
+      />
+    </Card>
   )
 }
 
@@ -378,7 +377,7 @@ function QuestionnaireChecksTab({
 }) {
   if (!canWrite) {
     return (
-      <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
+      <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-8 text-center">
         <p className="text-sm text-slate-500">
           Running the cross-check needs an owner, analyst or founder account.
         </p>
@@ -398,7 +397,7 @@ function OverviewTab({ study, progress }: { study: Study; progress: number }) {
     <div className="grid grid-cols-3 gap-6">
       <div className="col-span-2 space-y-6">
         {/* Pipeline */}
-        <div className="bg-white rounded-lg border border-slate-200 p-6">
+        <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
           <h2 className="font-semibold text-slate-900 mb-5">Pipeline</h2>
           <div className="flex items-center">
             {PIPELINE.map((step, i) => (
@@ -426,7 +425,7 @@ function OverviewTab({ study, progress }: { study: Study; progress: number }) {
         </div>
 
         {/* QC */}
-        <div className="bg-white rounded-lg border border-slate-200 p-6">
+        <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
           <h2 className="font-semibold text-slate-900 mb-4">Quality control</h2>
           {study.metadata.qc_passed == null ? (
             /* "QC pending…" was shown whether the pipeline was two seconds in,
@@ -470,7 +469,7 @@ function OverviewTab({ study, progress }: { study: Study; progress: number }) {
       </div>
 
       {/* Meta sidebar */}
-      <div className="bg-white rounded-lg border border-slate-200 p-6 h-fit">
+      <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6 h-fit">
         <h2 className="font-semibold text-slate-900 mb-4">Details</h2>
         <dl className="space-y-4 text-sm">
           <div>
@@ -556,7 +555,7 @@ function DataProfileCard({ studyId, ready }: { studyId: string; ready: boolean }
   }, [profile, search, sort])
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-6">
+    <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
       <div className="flex items-center justify-between mb-1">
         <h2 className="font-semibold text-slate-900">Data profile</h2>
       </div>
@@ -650,7 +649,7 @@ function ReportsTab({ study }: { study: Study }) {
   return (
     <div className="grid grid-cols-2 gap-6">
       {items.map((item) => (
-        <div key={item.fmt} className="bg-white rounded-lg border border-slate-200 p-6">
+        <div key={item.fmt} className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
           <h2 className="font-semibold text-slate-900 mb-1">{item.title}</h2>
           <p className="text-sm text-slate-500 mb-5">{item.desc}</p>
           {item.available ? (
@@ -684,7 +683,7 @@ function ActivityTab({ study }: { study: Study }) {
     delivery: 'Delivery sign-off',
   }
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-6 max-w-2xl">
+    <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6 max-w-2xl">
       <h2 className="font-semibold text-slate-900 mb-5">Approval history</h2>
       {events.length === 0 ? (
         <p className="text-sm text-slate-500">No activity yet.</p>

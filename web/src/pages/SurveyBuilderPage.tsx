@@ -616,7 +616,7 @@ function CreatePanel({ onCreate, canWrite }: { onCreate: (title: string) => Prom
   }
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-6 max-w-xl">
+    <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6 max-w-xl">
       <h2 className="font-semibold text-slate-900 mb-1">Build a survey from scratch</h2>
       <p className="text-sm text-slate-500 mb-4">
         Give your survey a title, then add questions one by one.
@@ -1014,7 +1014,7 @@ export default function SurveyBuilderPage() {
       {!loadError && status && status.source !== 'extracted' && (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
           {/* List */}
-          <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200 overflow-hidden h-fit">
+          <div className="lg:col-span-3 bg-white rounded-lg border border-slate-200 shadow-panel overflow-hidden h-fit">
             {canWrite && (
               <div className="p-3 border-b border-slate-200">
                 <AddQuestionPalette onPick={handleAddFromPalette} />
@@ -1114,7 +1114,7 @@ export default function SurveyBuilderPage() {
           </div>
 
           {/* Detail */}
-          <div className="lg:col-span-5 bg-white rounded-lg border border-slate-200 p-6">
+          <div className="lg:col-span-5 bg-white rounded-lg border border-slate-200 shadow-panel p-6">
             {selected ? (
               <QuestionDetail
                 key={selected.qid}
@@ -1141,7 +1141,7 @@ export default function SurveyBuilderPage() {
           </div>
 
           {/* Live respondent preview */}
-          <div className="lg:col-span-4 bg-white rounded-lg border border-slate-200 p-6 h-fit lg:sticky lg:top-32">
+          <div className="lg:col-span-4 bg-white rounded-lg border border-slate-200 shadow-panel p-6 h-fit lg:sticky lg:top-32">
             <h2 className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-3">
               {previewAll ? 'Respondent preview — whole survey' : 'Respondent preview'}
             </h2>

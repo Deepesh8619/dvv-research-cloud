@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { authApi, User } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { ShieldIcon } from '../components/Icons'
+import PageHeader from '../components/ui/PageHeader'
+import { CardHeader } from '../components/ui/Card'
+import { buttonClasses } from '../components/ui/Button'
 
 const ROLES = [
   { role: 'Owner', desc: 'Full access: projects, delivery sign-off, user management, archive' },
@@ -60,8 +64,7 @@ export default function AdminPage() {
   if (currentUser?.role !== 'owner') {
     return (
       <div className="max-w-4xl">
-        <h1 className="text-2xl font-semibold text-slate-900 mb-1">Admin</h1>
-        <p className="text-sm text-slate-500 mb-8">Organization, users, and access control</p>
+        <PageHeader title="Admin" description="Organization, users, and access control" icon={ShieldIcon} />
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
           <p className="text-sm text-amber-700">Only Owners can access the admin panel.</p>
         </div>
@@ -71,19 +74,17 @@ export default function AdminPage() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="text-2xl font-semibold text-slate-900 mb-1">Admin</h1>
-      <p className="text-sm text-slate-500 mb-8">Organization, users, and access control</p>
+      <PageHeader title="Admin" description="Organization, users, and access control" icon={ShieldIcon} />
 
-      <div className="bg-white rounded-lg border border-slate-200 mb-6">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <h2 className="font-semibold text-slate-900">Users</h2>
-          <button
-            onClick={() => setShowInviteForm(!showInviteForm)}
-            className="text-sm font-medium px-3.5 py-1.5 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
-          >
-            {showInviteForm ? 'Cancel' : 'Invite user'}
-          </button>
-        </div>
+      <div className="bg-white rounded-lg border border-slate-200 shadow-panel mb-6">
+        <CardHeader
+          title="Users"
+          actions={
+            <button onClick={() => setShowInviteForm(!showInviteForm)} className={buttonClasses('secondary')}>
+              {showInviteForm ? 'Cancel' : 'Invite user'}
+            </button>
+          }
+        />
 
         {/* Invite form */}
         {showInviteForm && (
@@ -127,10 +128,7 @@ export default function AdminPage() {
             {inviteError && <p className="text-sm text-red-600">{inviteError}</p>}
             {inviteSuccess && <p className="text-sm text-emerald-600">{inviteSuccess}</p>}
 
-            <button
-              type="submit"
-              className="px-3.5 py-1.5 rounded-md bg-primary-500 text-white text-sm font-medium hover:bg-primary-600"
-            >
+            <button type="submit" className={buttonClasses('primary')}>
               Create user
             </button>
           </form>
@@ -148,14 +146,17 @@ export default function AdminPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr>
-                <td colSpan={4} className="px-5 py-4 text-center text-slate-500">
-                  Loading...
-                </td>
-              </tr>
+              Array.from({ length: 3 }).map((_, i) => (
+                <tr key={i} className="animate-pulse">
+                  <td className="px-5 py-3.5"><div className="h-3 w-28 rounded bg-slate-200/70" /></td>
+                  <td className="px-5 py-3.5"><div className="h-3 w-36 rounded bg-slate-200/70" /></td>
+                  <td className="px-5 py-3.5"><div className="h-3 w-16 rounded bg-slate-200/70" /></td>
+                  <td className="px-5 py-3.5"><div className="h-3 w-14 rounded bg-slate-200/70" /></td>
+                </tr>
+              ))
             ) : users.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-5 py-4 text-center text-slate-500">
+                <td colSpan={4} className="px-5 py-8 text-center text-sm text-slate-500">
                   No users yet
                 </td>
               </tr>
@@ -182,10 +183,8 @@ export default function AdminPage() {
         </table>
       </div>
 
-      <div className="bg-white rounded-lg border border-slate-200">
-        <div className="px-5 py-4 border-b border-slate-100">
-          <h2 className="font-semibold text-slate-900">Roles</h2>
-        </div>
+      <div className="bg-white rounded-lg border border-slate-200 shadow-panel">
+        <CardHeader title="Roles" />
         <div className="divide-y divide-slate-100">
           {ROLES.map((r) => (
             <div key={r.role} className="px-5 py-3.5 flex gap-6">

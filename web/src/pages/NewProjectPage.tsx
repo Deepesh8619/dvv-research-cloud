@@ -4,6 +4,8 @@ import { studiesApi } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DocChartIcon, FileIcon, PlusIcon, UploadIcon } from '../components/Icons'
 import { canWrite as hasWriteRole } from '../auth/roles'
+import PageHeader from '../components/ui/PageHeader'
+import { buttonClasses } from '../components/ui/Button'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -105,12 +107,13 @@ export default function NewProjectPage() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-2xl font-semibold text-slate-900 mb-1">New Project</h1>
-      <p className="text-sm text-slate-500 mb-8">
-        Start from existing data, a questionnaire document, or a blank survey builder.
-      </p>
+      <PageHeader
+        title="New Project"
+        description="Start from existing data, a questionnaire document, or a blank survey builder."
+        icon={PlusIcon}
+      />
 
-      <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-6">
+      <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6 space-y-6">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1.5">Project name</label>
           <input
@@ -229,7 +232,7 @@ export default function NewProjectPage() {
             onClick={primaryAction}
             disabled={!canCreate || submitting || (choice === 'data' && !file)}
             title={canCreate ? undefined : 'Reviewers cannot create projects'}
-            className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-5 py-2.5 rounded-md hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150 ease-out active:scale-[0.98] disabled:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+            className={buttonClasses('primary')}
           >
             {choice !== 'data' && <PlusIcon className="w-4 h-4" />}
             {submitting ? 'Please wait…' : choice === 'data' ? 'Create project' : 'Create & continue'}

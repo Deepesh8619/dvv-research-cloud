@@ -47,7 +47,7 @@ export default function ResetPasswordPage() {
           <p className="text-sm text-slate-600">Reset the admin password</p>
         </div>
 
-        <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-6">
+        <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
           {success ? (
             <div className="space-y-4">
               <div className="rounded-md bg-emerald-50 border border-emerald-200 p-3">

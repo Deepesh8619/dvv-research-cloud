@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { DocChartIcon, EyeIcon, EyeOffIcon } from '../components/Icons'
 import { useAuth } from '../auth/AuthContext'
+import { buttonClasses } from '../components/ui/Button'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -105,11 +106,7 @@ export default function LoginPage() {
             )}
 
             {/* Submit button */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-2.5 px-3.5 rounded-md bg-primary-500 text-white text-sm font-medium shadow-sm hover:bg-primary-600 hover:shadow disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150 ease-out active:scale-[0.98] disabled:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-            >
+            <button type="submit" disabled={loading} className={buttonClasses('primary', 'w-full')}>
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
           </form>

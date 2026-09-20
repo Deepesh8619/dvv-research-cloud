@@ -25,6 +25,8 @@ import { BucketBar, ConnectionsPanel, IssuesPanel, ProgressRing } from '../compo
 import { bucketInfo } from '../lib/buckets'
 import { isConstantSumQuestion, TYPE_CHOICES, typeHint, typeLabel } from '../labels/questionTypes'
 import { canCorrect as hasCorrectRole, canWrite as hasWriteRole } from '../auth/roles'
+import { DocChartIcon } from '../components/Icons'
+import PageHeader from '../components/ui/PageHeader'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
 
@@ -155,7 +157,7 @@ function UploadPanel({ studyId, onUploaded, disabled }: { studyId: string; onUpl
   }
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-6">
+    <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
       <h2 className="font-semibold text-slate-900 mb-1">Upload questionnaire</h2>
       <p className="text-sm text-slate-500 mb-4">
         Upload a .docx or .pdf questionnaire. It will be extracted into structured questions for review.
@@ -1350,10 +1352,7 @@ export default function QuestionnairePage() {
   if (loading) {
     return (
       <div>
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-slate-900">{tTitle}</h1>
-          <p className="text-sm text-slate-500 mt-1">Loading questionnaire…</p>
-        </div>
+        <PageHeader title={tTitle} description="Loading questionnaire…" icon={DocChartIcon} />
         <TableSkeleton rows={8} cols={2} />
       </div>
     )
@@ -1447,7 +1446,7 @@ export default function QuestionnairePage() {
           minutes something is wrong. Showing nothing threw away the very thing
           checkpointing exists to provide. */}
       {status?.status === 'processing' && (
-        <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
+        <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-8 text-center">
           <LoadingSpinner />
           {status.n_questions === 0 ? (
             <>

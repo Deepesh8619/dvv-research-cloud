@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom'
 import { DocChartIcon, DownloadIcon } from '../components/Icons'
 import { shareApi, PublicStudy } from '../api/client'
 import LoadingSpinner from '../components/LoadingSpinner'
+import Badge from '../components/ui/Badge'
+import { buttonClasses } from '../components/ui/Button'
 
 export default function SharePage() {
   const { token } = useParams<{ token: string }>()
@@ -40,7 +42,7 @@ export default function SharePage() {
             </div>
             <h1 className="text-xl font-semibold text-slate-900">DVV Research Cloud</h1>
           </div>
-          <div className="bg-white rounded-lg border border-slate-200 p-6">
+          <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
             <p className="text-slate-600 mb-4">{error || 'Share link not found'}</p>
             <p className="text-sm text-slate-500">This link may have expired or been revoked.</p>
           </div>
@@ -67,7 +69,7 @@ export default function SharePage() {
       {/* Content */}
       <main className="max-w-4xl mx-auto px-6 py-8">
         {/* Project info card */}
-        <div className="bg-white rounded-lg border border-slate-200 p-6 mb-6">
+        <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6 mb-6">
           <div className="mb-6">
             <h2 className="text-2xl font-semibold text-slate-900 mb-2">{study.client_name}</h2>
             <p className="text-sm text-slate-500">Created {new Date(study.created_at).toLocaleDateString()}</p>
@@ -77,9 +79,9 @@ export default function SharePage() {
           <div className="mb-6">
             <div className="inline-flex items-center gap-2">
               <span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Status</span>
-              <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <Badge tone="success">
                 {study.status === 'approved_for_delivery' ? 'Ready for Download' : 'Delivered'}
-              </span>
+              </Badge>
             </div>
           </div>
 
@@ -91,7 +93,7 @@ export default function SharePage() {
                 <a
                   href={shareApi.publicDownloadUrl(token!, 'excel')}
                   download
-                  className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-md bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors"
+                  className={buttonClasses('primary')}
                 >
                   <DownloadIcon className="w-4 h-4" />
                   Download Excel
@@ -101,7 +103,7 @@ export default function SharePage() {
                 <a
                   href={shareApi.publicDownloadUrl(token!, 'pptx')}
                   download
-                  className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-md bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors"
+                  className={buttonClasses('primary')}
                 >
                   <DownloadIcon className="w-4 h-4" />
                   Download PowerPoint

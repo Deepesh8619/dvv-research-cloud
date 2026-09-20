@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { activityApi, type ActivityEntry, type AuditEntry } from '../api/client'
 import { CardListSkeleton } from '../components/Skeleton'
+import { DocChartIcon } from '../components/Icons'
+import PageHeader from '../components/ui/PageHeader'
 
 /**
  * The founders' activity log.
@@ -79,13 +81,13 @@ export default function ActivityPage() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="text-2xl font-semibold text-slate-900">Activity</h1>
-      <p className="text-sm text-slate-600 mt-1 max-w-2xl leading-relaxed">
-        Everything that changed, and everything that was looked for. Kept apart on purpose —
-        one answers what happened, the other what someone was trying to do.
-      </p>
+      <PageHeader
+        title="Activity"
+        description="Everything that changed, and everything that was looked for. Kept apart on purpose — one answers what happened, the other what someone was trying to do."
+        icon={DocChartIcon}
+      />
 
-      <div className="flex gap-2 mt-5 mb-4">
+      <div className="flex gap-2 mb-4">
         <button className={tabClass(tab === 'changes')} onClick={() => setTab('changes')}>
           Changes {audit ? `(${audit.length})` : ''}
         </button>
