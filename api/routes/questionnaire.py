@@ -66,6 +66,7 @@ from src.core.survey_definition import (
 )
 from src.engines.fielding.materialize import plan_datamap
 from src.engines.questionnaire.extractor import extract_survey_definition, reread_question
+from src.engines.rag.store import ensure_index
 from src.intake.questionnaire_loader import (
     load_docx,
     load_pdf,
@@ -1236,6 +1237,15 @@ def approve_all(
     _save_definition(db, questionnaire, survey)
     update_questionnaire_status(db, questionnaire.id, "approved")
     logger.info(f"[{study_id}] Questionnaire {questionnaire.id} approved by {user.name}")
+
+    # The instrument is fixed, so the project's content goes into the database
+    # as vectors the copilot can search by meaning. Best-effort on purpose:
+    # a search index that could not be built must never un-approve a
+    # questionnaire — the next search rebuilds it.
+    try:
+        ensure_index(db, study_id, survey)
+    except Exception:
+        logger.exception(f"[{study_id}] could not index the questionnaire for search")
 
     # Label merge (§3.2's datamap-merge fix): an approved questionnaire carries
     # the real question/option wording that a CSV/Excel import lacks. If this
