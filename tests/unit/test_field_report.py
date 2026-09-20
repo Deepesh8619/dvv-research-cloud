@@ -176,3 +176,28 @@ def test_each_question_gets_a_topline_card_from_the_completes():
         Question(qid="Q6", text="?", type=QuestionType.RANK, options=brands), completes
     )
     assert [o["n"] for o in rank["options"]] == [1, 1]  # ranked FIRST
+
+
+def test_the_report_says_what_they_answered_on_and_whether_the_place_agrees():
+    """A grid that fails on phones shows up as "mobile drops at Q12" only if the
+    device was recorded; a respondent nowhere near the area the sample was drawn
+    on is worth flagging — and never worth dropping silently."""
+    from src.engines.fielding.field_report import build_field_report
+
+    class _S:
+        def __init__(self, sid, device, place):
+            self.id, self.status_code = sid, 10
+            self.started_at = self.completed_at = "2026-09-20T10:00:00"
+            self.entry_params = {"device": device, "place_check": place}
+
+    survey = SurveyDefinition(
+        study_id="T", source="extracted", status="approved",
+        blocks=[Block(block_id="B", question_ids=["Q1"])],
+        questions=[Question(qid="Q1", text="?", options=[Option(code=1, label="Yes")])],
+    )
+    sessions = [_S("a", "mobile", "match"), _S("b", "mobile", "mismatch"),
+                _S("c", "desktop", None)]
+    report = build_field_report(survey, sessions, {s.id: {"Q1": 1} for s in sessions}).to_dict()
+    assert report["devices"] == {"mobile": 2, "desktop": 1}
+    assert report["place_checks"]["mismatch"] == 1
+    assert report["place_checks"]["not checked"] == 1

@@ -50,6 +50,8 @@ from src.core.survey_definition import (
     SurveyDefinition,
     evaluate,
 )
+from src.engines.fielding.paradata import DEVICE_CODES
+from src.engines.fielding.paradata import summarise as summarise_paradata
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,13 @@ PARA_START = "vStartTime"
 PARA_END = "vEndTime"
 PARA_DURATION = "vDurationSec"
 PARA_STATUS = "vStatus"
+# What the interview was taken on, and whether the respondent's stated place
+# agrees with their connection. Both are questions a client asks of every
+# study and neither can be answered after the fact.
+PARA_DEVICE = "vDevice"
+PARA_PLACE = "vPlaceCheck"
+PARA_COUNTRY = "vCountry"
+PARA_REGION = "vRegion"
 
 
 @dataclass
@@ -327,6 +336,19 @@ def _paradata_variables() -> list[Variable]:
                  provenance="fielding_paradata"),
         Variable(name=PARA_DURATION, label="Interview duration (seconds)",
                  type=VarType.NUMERIC, provenance="fielding_paradata"),
+        Variable(name=PARA_DEVICE, label="Device", type=VarType.SINGLE,
+                 values={v: k.capitalize() for k, v in DEVICE_CODES.items()},
+                 provenance="fielding_paradata"),
+        # Flagged, never acted on: a VPN and a neighbouring postcode are both
+        # ordinary, so this is a column an analyst can cut by, not a screen-out.
+        Variable(name=PARA_PLACE, label="Stated place vs connection",
+                 type=VarType.SINGLE,
+                 values={1: "Agrees", 2: "Disagrees", 99: "Not checked"},
+                 provenance="fielding_paradata"),
+        Variable(name=PARA_COUNTRY, label="Country (from connection)",
+                 type=VarType.TEXT, provenance="fielding_paradata"),
+        Variable(name=PARA_REGION, label="Region (from connection)",
+                 type=VarType.TEXT, provenance="fielding_paradata"),
     ]
 
 
@@ -426,7 +448,13 @@ def materialize_fielding(
         columns[spec.variable.name] = _pandas_series(spec.variable.type, cells)
 
     starts, ends, durations, dispositions = [], [], [], []
+    devices, places, countries, regions = [], [], [], []
     for s in completes:
+        para = summarise_paradata(getattr(s, "entry_params", None) or {})
+        devices.append(para["device"])
+        places.append(para["place"])
+        countries.append(para["country"])
+        regions.append(para["region"])
         start = _parse_iso(getattr(s, "started_at", None))
         end = _parse_iso(getattr(s, "completed_at", None))
         starts.append(start.isoformat() if start else None)
@@ -437,6 +465,10 @@ def materialize_fielding(
     columns[PARA_START] = _pandas_series(VarType.DATE, starts)
     columns[PARA_END] = _pandas_series(VarType.DATE, ends)
     columns[PARA_DURATION] = _pandas_series(VarType.NUMERIC, durations)
+    columns[PARA_DEVICE] = _pandas_series(VarType.SINGLE, devices)
+    columns[PARA_PLACE] = _pandas_series(VarType.SINGLE, places)
+    columns[PARA_COUNTRY] = _pandas_series(VarType.TEXT, countries)
+    columns[PARA_REGION] = _pandas_series(VarType.TEXT, regions)
 
     df = pd.DataFrame(columns, columns=[v.name for v in datamap.variables])
     return datamap, df
