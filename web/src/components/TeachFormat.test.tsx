@@ -11,6 +11,7 @@ vi.mock('../api/client', () => ({
     }),
     applyRule: vi.fn(),
   },
+  QUESTION_TYPES: ['single', 'multi'],
 }))
 
 function question(overrides: Partial<Question> = {}): Question {
@@ -41,6 +42,7 @@ describe('TeachFormat', () => {
     render(
       <TeachFormat
         profileSlug="acme"
+        studyId="S1"
         question={question()}
         openRequest={{ fragment: '[SHOWCARD]', nonce: 1 }}
       />,
@@ -50,7 +52,8 @@ describe('TeachFormat', () => {
   })
 
   it('stays closed with no request', () => {
-    render(<TeachFormat profileSlug="acme" question={question()} />)
+    render(<TeachFormat profileSlug="acme"
+        studyId="S1" question={question()} />)
     expect(screen.queryByPlaceholderText('e.g. [SHOWCARD]')).toBeNull()
     expect(screen.getByRole('button', { name: /Teach this format/ })).toBeTruthy()
   })

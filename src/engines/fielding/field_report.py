@@ -48,6 +48,10 @@ class FieldReport:
     dropoff_by_question: list[dict[str, Any]] = field(default_factory=list)
     #: One card per question: how the COMPLETES answered it. See `summarise`.
     questions: list[dict[str, Any]] = field(default_factory=list)
+    #: What they took it on — a grid that fails on phones shows up here first.
+    devices: dict[str, int] = field(default_factory=dict)
+    #: Stated place vs the connection. Flagged for a look, never acted on.
+    place_checks: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +63,8 @@ class FieldReport:
             "median_loi_sec": self.median_loi_sec,
             "dropoff_by_question": self.dropoff_by_question,
             "questions": self.questions,
+            "devices": self.devices,
+            "place_checks": self.place_checks,
         }
 
 
@@ -101,7 +107,14 @@ def build_field_report(
     dropoff: dict[str, int] = {}
     completed: list[Mapping[str, Any]] = []
 
+    devices: dict[str, int] = {}
+    places: dict[str, int] = {}
     for session in sessions:
+        params = getattr(session, "entry_params", None) or {}
+        device = str(params.get("device") or "unknown")
+        devices[device] = devices.get(device, 0) + 1
+        verdict = str(params.get("place_check") or "not checked")
+        places[verdict] = places.get(verdict, 0) + 1
         status = getattr(session, "status_code", None)
         counts[by_status.get(status, "in_progress")] += 1
         given = answers.get(session.id, {})
@@ -132,6 +145,8 @@ def build_field_report(
                 last = answered[-1]
                 dropoff[last] = dropoff.get(last, 0) + 1
 
+    report.devices = dict(sorted(devices.items(), key=lambda kv: -kv[1]))
+    report.place_checks = dict(sorted(places.items(), key=lambda kv: -kv[1]))
     report.dispositions = counts
     judged = counts["complete"] + counts["terminate"]
     if judged:

@@ -326,7 +326,10 @@ def test_entry_captures_query_params(client):
         .filter(RespondentSessionDB.id == session_id)
         .first()
     )
-    assert session.entry_params == {"pid": "P123", "rid": "R9"}
+    # The panel's own params survive alongside the paradata now captured at
+    # entry (device, a hashed address): a redirect template reads them back.
+    assert session.entry_params["pid"] == "P123"
+    assert session.entry_params["rid"] == "R9"
     db.close()
 
 
@@ -922,3 +925,48 @@ def test_jump_on_a_real_link_is_refused(client):
         f"/api/r/{token}/sessions/{sid}/jump", json={"qid": "Q3"}
     )
     assert resp.status_code == 403
+
+
+def test_a_phone_and_a_stated_place_are_recorded_at_entry(client, monkeypatch) -> None:
+    """Both questions a client asks of every study and nobody can answer
+    afterwards: what were they on, and were they where they said they were.
+    The place check is a FLAG — the interview is never dropped for it."""
+    import src.engines.fielding.paradata as paradata
+
+    test_client, SessionLocal = client[0], client[1]
+    _make_study(SessionLocal)
+    zip_survey = _sample_survey("study_f1")
+    zip_survey.questions.append(
+        Question(qid="Q4", text="What is your ZIP code?", type=QuestionType.OPEN_TEXT,
+                 required=False)
+    )
+    zip_survey.blocks[0].question_ids.append("Q4")
+    _make_questionnaire(SessionLocal, survey=zip_survey)
+    token = test_client.post("/api/studies/study_f1/fielding/links", json={}).json()["token"]
+
+    # The server's own location database says this connection is in California.
+    monkeypatch.setattr(paradata, "locate", lambda ip: {"postal": "90210", "region": "California"})
+
+    iphone = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+              "AppleWebKit/605.1 Mobile/15E148")
+    entry = test_client.get(
+        f"/api/r/{token}", headers={"User-Agent": iphone, "X-Forwarded-For": "203.0.113.9"}
+    )
+    session_id = entry.json()["session_id"]
+
+    db = SessionLocal()
+    stored = db.query(RespondentSessionDB).filter_by(id=session_id).first()
+    assert stored.entry_params["device"] == "mobile"
+    assert "203.0.113.9" not in str(stored.entry_params)  # the address itself is not kept
+    db.close()
+
+    # They say they are in New York; the connection says California.
+    test_client.post(
+        f"/api/r/{token}/sessions/{session_id}/answers",
+        json={"answers": {"Q1": 30, "Q2": 1, "Q4": "11042"}, "current_page": 1},
+    )
+    db = SessionLocal()
+    stored = db.query(RespondentSessionDB).filter_by(id=session_id).first()
+    assert stored.entry_params["place_check"] == "mismatch"
+    assert stored.status_code is None  # flagged, not screened out
+    db.close()

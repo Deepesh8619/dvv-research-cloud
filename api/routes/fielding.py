@@ -29,10 +29,12 @@ with later tasks (quota engine / vendor redirect protocol are explicitly T10).
 
 import json
 import logging
+import os
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from api.auth import UserRole, get_current_user, require_role
 from api.db import (
@@ -681,6 +683,55 @@ def _resolve_session(db: Session, link, session_id: str):
     return session
 
 
+def _check_stated_place(db: Session, session, survey: SurveyDefinition, answers: dict) -> None:
+    """Does where they SAY they are agree with where the connection is?
+
+    Recorded as a flag on the session and never acted on: a VPN, a work laptop
+    and a neighbouring postcode are all ordinary, and silently dropping those
+    interviews would be worse than the fraud it is meant to catch. Only checked
+    while the answer is still "unknown", so it costs one comparison per session.
+    """
+    from src.engines.fielding.paradata import place_verdict, stated_place
+
+    params = dict(session.entry_params or {})
+    if params.get("place_check") in ("match", "mismatch"):
+        return
+    stated = stated_place(survey, answers)
+    if not stated:
+        return
+    verdict, why = place_verdict(stated, params.get("geo") or {})
+    if verdict == "unknown":
+        return
+    params["place_check"], params["place_check_detail"] = verdict, why
+    session.entry_params = params
+    flag_modified(session, "entry_params")
+    db.commit()
+
+
+def _paradata_at_entry(request: Request) -> dict:
+    """Device and (where a location database exists) place, at the moment of entry.
+
+    The address itself is not kept — a salted hash stands in for it, so two
+    sessions from one connection can be recognised without storing where anyone
+    lives. DVV_STORE_RAW_IP=1 keeps it in full for a client whose own rules
+    require that.
+    """
+    from api.config import JWT_SECRET
+    from src.engines.fielding.paradata import client_ip, device_of, hashed_ip, locate
+
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    ip = client_ip(headers, getattr(request.client, "host", None))
+    salt = os.getenv("DVV_IP_SALT") or JWT_SECRET
+    found = {
+        "device": device_of(headers.get("user-agent")),
+        "ip_hash": hashed_ip(ip, salt),
+        "geo": locate(ip),
+    }
+    if os.getenv("DVV_STORE_RAW_IP", "").strip() in ("1", "true", "yes"):
+        found["ip"] = ip
+    return {k: v for k, v in found.items() if v}
+
+
 @router.get("/r/{token}", response_model=RespondentEntryResponse)
 def enter_survey(token: str, request: Request, db: Session = Depends(get_db)):
     """Respondent entry: create a session and return the compiled SurveyJS JSON.
@@ -695,6 +746,10 @@ def enter_survey(token: str, request: Request, db: Session = Depends(get_db)):
         return RespondentEntryResponse(session_id="", status="closed", surveyjs_json={})
 
     entry_params = dict(request.query_params)
+    # What the interview was taken ON, and roughly where from. A grid that
+    # fails on phones, or a respondent nowhere near the area the sample was
+    # drawn on, are both invisible afterwards unless recorded now.
+    entry_params.update(_paradata_at_entry(request))
 
     # Soft-launch hold: once the launch batch is complete, stop admitting NEW
     # respondents so a scripting error surfaces at n=50 instead of n=800 — the
@@ -804,6 +859,7 @@ def submit_answers(
     touch_respondent_session(db, session_id, current_page=body.current_page)
 
     answers = get_session_answers_map(db, session_id)
+    _check_stated_place(db, session, survey, answers)
     for question in survey.questions:
         if question.terminate_if is None:
             continue

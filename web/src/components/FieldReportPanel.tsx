@@ -55,6 +55,18 @@ function Breakdown({
   )
 }
 
+/** A {key: n} tally as Breakdown rows, biggest first. "mismatch" is a FLAG:
+ *  a VPN or a work laptop looks the same, so nobody is dropped for it. */
+const PARADATA_LABELS: Record<string, string> = {
+  mismatch: 'mismatch (flagged only)',
+}
+
+function counts(tally: Record<string, number> | undefined) {
+  return Object.entries(tally ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, n]) => ({ key: PARADATA_LABELS[key] ?? key, n }))
+}
+
 function pct(n: number, of: number): string {
   return of > 0 ? `${Math.round((100 * n) / of)}%` : '—'
 }
@@ -458,6 +470,21 @@ export default function FieldReportPanel({
           empty="Nobody abandoned mid-survey."
         />
       </div>
+
+      {(report.devices || report.place_checks) && (
+        <div className="grid gap-5 sm:grid-cols-3">
+          <Breakdown
+            title="Answered on"
+            rows={counts(report.devices)}
+            empty="No device recorded yet."
+          />
+          <Breakdown
+            title="Where they said they are"
+            rows={counts(report.place_checks)}
+            empty="Nothing to compare — no location question, or no location database."
+          />
+        </div>
+      )}
 
       {report.questions && <Responses report={report} />}
     </div>

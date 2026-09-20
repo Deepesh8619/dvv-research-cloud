@@ -733,6 +733,10 @@ export interface FieldReport {
   overquota_by_cell: Array<{ cell: string; n: number }>
   median_loi_sec: number | null
   dropoff_by_question: Array<{ qid: string; n: number }>
+  /** What they answered on: mobile / tablet / desktop / unknown. */
+  devices?: Record<string, number>
+  /** Stated place vs the connection's: match / mismatch / unknown. A flag only. */
+  place_checks?: Record<string, number>
   /** One topline card per question, counted over completes only. */
   questions?: QuestionSummary[]
 }
