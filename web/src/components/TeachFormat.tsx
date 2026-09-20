@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import axios from 'axios'
 import { PatternKind, Question, correctionsApi } from '../api/client'
 import { typeLabel } from '../labels/questionTypes'
+import { unreadFragments } from './review/unreadFragments'
 
 /**
  * Bind a convention this document uses to what it means, once, for this format.
@@ -25,37 +26,13 @@ interface Props {
   profileLabel?: string | null
   question: Question
   onTaught?: () => void
-}
-
-/** Brackets and case are noise when comparing a directive to its citation. */
-function normalise(text: string): string {
-  return text.replace(/[[\]]/g, '').trim().toLowerCase()
-}
-
-/** Fragments in this question that the parsers read but could not interpret.
- *
- * Anything already cited in `extraction_evidence` is excluded: it WAS
- * understood, and offering it as "unread" would tell a founder the system
- * still needs teaching about something it has already learned. */
-function unrecognisedFragments(question: Question): string[] {
-  const validation = (question.validation ?? {}) as Record<string, unknown>
-  const directives = Array.isArray(validation.scripter_directives)
-    ? (validation.scripter_directives as unknown[]).map(String)
-    : []
-  const rows = validation.unrecognised_rows
-  const rowLabels =
-    rows && typeof rows === 'object' && !Array.isArray(rows)
-      ? Object.keys(rows as Record<string, unknown>)
-      : []
-  const cited = Object.values(question.extraction_evidence ?? {}).map(normalise)
-  // Deduplicate: the same directive often appears on several questions, and a
-  // repeated entry in the picker looks like two different things.
-  return Array.from(new Set([...directives, ...rowLabels]))
-    .filter(Boolean)
-    .filter((fragment) => {
-      const needle = normalise(fragment)
-      return needle !== '' && !cited.some((c) => c.includes(needle))
-    })
+  /**
+   * Requested from elsewhere on the review screen — an unread fragment's
+   * "Teach this" button, or the blank-question triage — so the founder never
+   * retypes a fragment they can already see. `nonce` only needs to change; it
+   * exists so clicking the same fragment twice in a row still reopens.
+   */
+  openRequest?: { fragment: string; nonce: number } | null
 }
 
 export default function TeachFormat({
@@ -64,6 +41,7 @@ export default function TeachFormat({
   profileLabel,
   question,
   onTaught,
+  openRequest,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [kinds, setKinds] = useState<PatternKind[]>([])
@@ -75,7 +53,7 @@ export default function TeachFormat({
   const [taught, setTaught] = useState<string | null>(null)
   const [appliedMsg, setAppliedMsg] = useState<string | null>(null)
 
-  const candidates = unrecognisedFragments(question)
+  const candidates = unreadFragments(question)
 
   useEffect(() => {
     if (!open || kinds.length > 0) return
@@ -84,6 +62,14 @@ export default function TeachFormat({
       .then((r) => setKinds(r.data.kinds))
       .catch(() => setError('Could not load the pattern types.'))
   }, [open, kinds.length])
+
+  useEffect(() => {
+    if (!openRequest) return
+    setOpen(true)
+    if (openRequest.fragment) setFragment(openRequest.fragment)
+    // Only the nonce needs to be a dependency — see the prop's doc comment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openRequest?.nonce])
 
   const selected = kinds.find((k) => k.kind === kind)
   // randomize_signal carries no meaning beyond its own presence.
