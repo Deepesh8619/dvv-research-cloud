@@ -3,7 +3,7 @@ import { Link, NavLink, useNavigate, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import CopilotDrawer from './CopilotDrawer'
 import { FOUNDER_ROLES, WRITE_ROLES } from '../auth/roles'
-import { ChatIcon, DocChartIcon, FolderIcon, GridIcon, LogOutIcon, PlusIcon, SearchIcon, ShieldIcon } from './Icons'
+import { ChatIcon, DocChartIcon, FolderIcon, GridIcon, LogOutIcon, MenuIcon, PlusIcon, SearchIcon, ShieldIcon } from './Icons'
 
 // `roles` restricts an entry to those roles; omitted means everyone signed in.
 // Mirrors the SERVER-side gate — hiding a link is presentation, not access
@@ -60,6 +60,7 @@ export default function Shell() {
   const [query, setQuery] = useState('')
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showCopilot, setShowCopilot] = useState(false)
+  const [showNav, setShowNav] = useState(false)  // the drawer, below md only
 
   const onSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -79,13 +80,25 @@ export default function Shell() {
   return (
     <div className="min-h-screen bg-slate-100">
       {/* Top bar */}
-      <header className="fixed top-0 inset-x-0 h-14 bg-primary-500 z-40 flex items-center px-4 gap-6 shadow">
+      <header className="fixed top-0 inset-x-0 h-14 bg-primary-500 z-40 flex items-center px-4 gap-3 sm:gap-6 shadow">
+        <button
+          type="button"
+          onClick={() => setShowNav((v) => !v)}
+          aria-label={showNav ? 'Close menu' : 'Open menu'}
+          aria-expanded={showNav}
+          className="md:hidden -ml-2 h-10 w-10 shrink-0 flex items-center justify-center rounded-md text-white hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+        >
+          <MenuIcon className="w-5 h-5" open={showNav} />
+        </button>
         <Link to="/dashboard" className="flex items-center gap-2.5 shrink-0">
           <div className="w-8 h-8 rounded bg-white/10 flex items-center justify-center">
             <DocChartIcon className="w-5 h-5 text-white" />
           </div>
           <div className="leading-tight">
-            <span className="text-white font-semibold text-[15px] tracking-tight">DVV Research Cloud</span>
+            <span className="hidden sm:inline text-white font-semibold text-[15px] tracking-tight">
+              DVV Research Cloud
+            </span>
+            <span className="sm:hidden text-white font-semibold text-[15px] tracking-tight">DVV</span>
           </div>
         </Link>
 
@@ -101,7 +114,7 @@ export default function Shell() {
           </div>
         </form>
 
-        <div className="flex items-center gap-4 ml-auto shrink-0">
+        <div className="flex items-center gap-2 sm:gap-4 ml-auto shrink-0">
           <button
             type="button"
             onClick={() => setShowCopilot((v) => !v)}
@@ -110,7 +123,7 @@ export default function Shell() {
           >
             Copilot
           </button>
-          <span className="text-[11px] font-medium text-white/70 border border-white/20 rounded px-2 py-0.5 uppercase tracking-wider">
+          <span className="hidden sm:inline text-[11px] font-medium text-white/70 border border-white/20 rounded px-2 py-0.5 uppercase tracking-wider">
             MVP
           </span>
           <div className="relative">
@@ -143,8 +156,21 @@ export default function Shell() {
         </div>
       </header>
 
-      {/* Left rail */}
-      <aside className="fixed left-0 top-14 bottom-0 w-56 bg-white border-r border-slate-200 z-30">
+      {/* Left rail — a fixed column from md up, a drawer below it. A 224px
+          column on a 375px screen leaves no room for the page it navigates. */}
+      {showNav && (
+        <button
+          type="button"
+          aria-label="Close menu"
+          onClick={() => setShowNav(false)}
+          className="md:hidden fixed inset-0 top-14 z-30 bg-slate-900/40"
+        />
+      )}
+      <aside
+        className={`fixed left-0 top-14 bottom-0 w-56 bg-white border-r border-slate-200 z-30 transition-transform duration-200 ease-out md:translate-x-0 ${
+          showNav ? 'translate-x-0 shadow-xl' : '-translate-x-full'
+        }`}
+      >
         <nav className="p-3 space-y-0.5">
           {NAV.filter(
             ({ roles }) =>
@@ -154,6 +180,7 @@ export default function Shell() {
               key={to}
               to={to}
               end={to === '/projects'}
+              onClick={() => setShowNav(false)}
               className={({ isActive }) =>
                 `relative flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 ${
                   isActive
@@ -183,8 +210,8 @@ export default function Shell() {
       <CopilotDrawer open={showCopilot} onClose={() => setShowCopilot(false)} />
 
       {/* Content */}
-      <main className="pl-56 pt-14">
-        <div className="p-8 max-w-[1400px]">
+      <main className="md:pl-56 pt-14">
+        <div className="p-4 sm:p-6 md:p-8 max-w-[1400px]">
           <Outlet />
         </div>
       </main>
