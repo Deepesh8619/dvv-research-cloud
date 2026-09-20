@@ -70,6 +70,30 @@ def _find(by_qid: dict[str, Question], qid: str | None) -> Question | None:
     return next((q for k, q in by_qid.items() if k.upper() == wanted), None)
 
 
+# "[INSERT Q7 #1 RANK]", "...their TOP choice", "the LEAST believable one".
+_PIPE_POSITION = re.compile(
+    r"#\s*(?P<n>\d+)|\b(?P<nth>\d+)(?:st|nd|rd|th)\b|\b(?P<first>top|first|most)\b"
+    r"|\b(?P<last>last|least|bottom)\b",
+    re.I,
+)
+
+
+def _pipe_position(body: str) -> int | None:
+    """Which place in a ranking a pipe wants: 1 for the top, -1 for the last."""
+    found = _PIPE_POSITION.search(body or "")
+    if not found:
+        return None
+    if found.group("last"):
+        return -1
+    if found.group("first"):
+        return 1
+    return int(found.group("n") or found.group("nth"))
+
+
+def _rank_variable(qid: str, position: int) -> str:
+    return f"{qid}_rank{'last' if position < 0 else position}"
+
+
 def _pipe_marker(source: Question, body: str) -> str:
     """{Q7} for a question; {Q2c.1} for ONE row of a grid named in the pipe.
 
@@ -77,6 +101,14 @@ def _pipe_marker(source: Question, body: str) -> str:
     whole grid's answer is a map no sentence can hold. SurveyJS prints a cell's
     column LABEL for {Q2c.1}, which is what the sentence needs.
     """
+    if source.type is QuestionType.RANK:
+        # A ranking's answer is an ordered list. SurveyJS prints the WHOLE list
+        # for {Q7} and has no way to say "the one they put first" — a question
+        # about their top choice named every brand they ranked. The link
+        # computes the position as they answer; see `pipe_variables`.
+        position = _pipe_position(body)
+        if position is not None:
+            return "{" + _rank_variable(source.qid, position) + "}"
     if source.type is QuestionType.GRID_SINGLE and source.rows:
         lowered = body.casefold()
         for row in sorted(source.rows, key=lambda r: -len(r.label or "")):
@@ -103,8 +135,10 @@ def _resolve_pipes(text: str, pipes: list[dict], by_qid: dict[str, Question]) ->
         for group in _BRACKETED.findall(text):
             body = _normalize(group[1:-1])
             if body == wanted or (wanted and wanted in body) or source.casefold() in body:
-                text = text.replace(group, _pipe_marker(question, group[1:-1]), 1)
-                break
+                # EVERY occurrence: a question that names the brand twice
+                # ("You mentioned X ... what draws you to X?") had the second
+                # one stripped, leaving the sentence with a hole in it.
+                text = text.replace(group, _pipe_marker(question, group[1:-1]))
     return text
 
 
@@ -482,7 +516,12 @@ def compile_to_surveyjs(survey: SurveyDefinition) -> dict[str, Any]:
     being ours and starts being the public's.
     """
     pages = [_compile_block(block, survey) for block in survey.blocks]
-    return {"title": survey.title, "pages": pages}
+    compiled = {"title": survey.title, "pages": pages}
+    variables = pipe_variables(compiled)
+    if variables:
+        # Read by the respondent page, not by SurveyJS itself.
+        compiled["pipeVariables"] = variables
+    return compiled
 
 
 def _shuffled_choices(question: Question, choices: list[dict]) -> list[dict]:
@@ -496,6 +535,30 @@ def _shuffled_choices(question: Question, choices: list[dict]) -> list[dict]:
     for slot, choice in zip(movable, picked, strict=True):
         out[slot] = choice
     return out
+
+
+_RANK_VARIABLE = re.compile(r"\{([A-Za-z][\w]*)_rank(last|\d+)\}")
+
+
+def pipe_variables(compiled: dict[str, Any]) -> list[dict[str, Any]]:
+    """The per-respondent values a piped ranking needs, from the compiled text.
+
+    Each is "position N of question Q, as the label the respondent read". The
+    respondent page computes them as answers change and hands them to SurveyJS
+    as variables, which is the only way one place in a ranking can be piped.
+    """
+    wanted: dict[str, dict[str, Any]] = {}
+    for page in compiled.get("pages") or []:
+        for element in page.get("elements") or []:
+            for text in (element.get("title"), element.get("html")):
+                for qid, place in _RANK_VARIABLE.findall(text or ""):
+                    name = f"{qid}_rank{place}"
+                    wanted[name] = {
+                        "name": name,
+                        "qid": qid,
+                        "position": -1 if place == "last" else int(place),
+                    }
+    return sorted(wanted.values(), key=lambda v: v["name"])
 
 
 def display_warnings(survey: SurveyDefinition) -> list[dict[str, str]]:

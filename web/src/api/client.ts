@@ -344,6 +344,14 @@ export interface Question {
 }
 
 /** One question's place in the instrument: its kind, and what it connects to. */
+/** A value the link computes per respondent: one place in a ranking. */
+export interface PipeVariable {
+  name: string
+  qid: string
+  /** 1 = their top choice; -1 = their last. */
+  position: number
+}
+
 export interface QuestionMapEntry {
   bucket: string
   reason: string
