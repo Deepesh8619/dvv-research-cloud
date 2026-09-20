@@ -5,7 +5,6 @@ import {
   Question,
   QuestionMapEntry,
   QuestionnaireStatus,
-  QUESTION_TYPES,
   questionnaireApi,
   QuestionOption,
   QuestionSplitItem,
@@ -22,18 +21,10 @@ import TeachFormat from '../components/TeachFormat'
 import { useLabel } from '../labels/LabelContext'
 import { BucketBar, ConnectionsPanel, IssuesPanel, ProgressRing } from '../components/review/QuestionMap'
 import { bucketInfo } from '../lib/buckets'
-import { typeHint, typeLabel } from '../labels/questionTypes'
+import { isConstantSumQuestion, TYPE_CHOICES, typeHint, typeLabel } from '../labels/questionTypes'
 import { canCorrect as hasCorrectRole, canWrite as hasWriteRole } from '../auth/roles'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
-
-// The type picker offers "Adds up to (constant sum)" right next to "Number" —
-// it is a UI-only pseudo-type layered on QUESTION_TYPES (the real wire
-// vocabulary, shared with the builder), never added there, since it saves as
-// numeric + rows + validation.sum rather than a type of its own.
-const TYPE_CHOICES: string[] = QUESTION_TYPES.flatMap((t) =>
-  t === 'numeric' ? [t, 'constant_sum'] : [t],
-)
 
 // --- Small presentational helpers -------------------------------------------
 
@@ -234,13 +225,6 @@ interface DetailState {
   terminateIf: FlatRouting
   showIfVerbatim: string | null
   terminateIfVerbatim: string | null
-}
-
-// A numeric question WITH rows is what the backend calls a constant sum (see
-// src/engines/questionnaire/constant_sum.py) — a numeric question with no
-// rows is just a plain number and stays that way.
-function isConstantSumQuestion(q: Question): boolean {
-  return q.type === 'numeric' && (q.rows?.length ?? 0) > 0
 }
 
 function buildDetailState(q: Question): DetailState {

@@ -1,3 +1,5 @@
+import { QUESTION_TYPES } from '../api/client'
+
 /**
  * Plain-language names for question types.
  *
@@ -44,4 +46,22 @@ export function typeLabel(type: string | null | undefined): string {
 
 export function typeHint(type: string | null | undefined): string {
   return QUESTION_TYPE_LABELS[type ?? '']?.hint ?? ''
+}
+
+/**
+ * The type picker's full option list: every wire type, plus "Adds up to
+ * (constant sum)" layered in right after "Number" — a UI-only pseudo-type,
+ * never added to QUESTION_TYPES itself, since it saves as numeric + rows +
+ * validation.sum rather than a type of its own. Shared so the review screen
+ * and the builder can never drift on what constant-sum is or where it sits.
+ */
+export const TYPE_CHOICES: string[] = QUESTION_TYPES.flatMap((t) =>
+  t === 'numeric' ? [t, 'constant_sum'] : [t],
+)
+
+/** A numeric question WITH rows is what the backend calls a constant sum (see
+    src/engines/questionnaire/constant_sum.py) — a numeric question with no
+    rows is just a plain number and stays that way. */
+export function isConstantSumQuestion(q: { type: string; rows?: unknown[] | null }): boolean {
+  return q.type === 'numeric' && (q.rows?.length ?? 0) > 0
 }
