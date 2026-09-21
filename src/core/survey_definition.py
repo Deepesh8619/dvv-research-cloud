@@ -129,7 +129,7 @@ def _as_number(value: Any) -> float | None:
     return None
 
 
-def _as_selected_set(answer: Any) -> set[Any]:
+def selected_codes(answer: Any) -> set[Any]:
     """Normalise a stored answer into a set of chosen codes.
 
     A single-select stores one scalar code; a multi-select stores a list. Both
@@ -166,6 +166,10 @@ def _hashable_set(values: Any) -> set[Any]:
         except TypeError:
             continue  # a nested structure is not a code; it cannot match one
     return out
+
+
+#: The old private name, kept for callers inside this module.
+_as_selected_set = selected_codes
 
 
 def evaluate(expression: Expression, answers: dict[str, Any]) -> bool:

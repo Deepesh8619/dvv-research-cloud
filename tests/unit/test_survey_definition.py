@@ -334,3 +334,42 @@ def test_no_answer_shape_can_raise_out_of_a_routing_comparison():
             True,
             False,
         )
+
+
+def test_a_mask_against_a_grid_question_survives_the_grid_answer():
+    """The second half of the same production bug. Routing was fixed first;
+    the MASK path still did its own `{chosen}` and raised
+    "unhashable type: 'dict'" — which a respondent met as a server error at
+    question 27 of 68, on a rank question masked by an awareness grid.
+
+    Both now read an answer the same way, because two readings is how the
+    first fix missed the second path."""
+    from src.engines.fielding.dryrun import _mask_allowed_codes
+
+    aware = Question(
+        qid="Q5", text="Which pharmacies have you heard of?", type=QuestionType.GRID_SINGLE,
+        rows=[Option(code=1, label="CVS"), Option(code=2, label="Walgreens")],
+        cols=[Option(code=1, label="Yes"), Option(code=2, label="No")],
+    )
+    ranked = Question(
+        qid="Q27", text="Rank your top 3", type=QuestionType.RANK,
+        options=[Option(code=1, label="CVS"), Option(code=2, label="Walgreens")],
+        validation={"techniques": {"masks": [{"mode": "selected", "source_qid": "Q5"}]}},
+    )
+    by_qid = {"Q5": aware, "Q27": ranked}
+
+    assert _mask_allowed_codes(ranked, {"Q5": {"1": 1, "2": 2}}, by_qid) == {1, 2}
+    assert _mask_allowed_codes(ranked, {"Q5": [1]}, by_qid) == {1}
+    assert _mask_allowed_codes(ranked, {"Q5": 2}, by_qid) == {2}
+
+
+def test_one_reading_of_an_answer_is_shared_by_routing_and_masks():
+    """Two copies of "what did they choose" is what let the same crash live in
+    two places; the second was found only after a respondent met it."""
+    import inspect
+
+    from src.core.survey_definition import selected_codes
+    from src.engines.fielding import dryrun
+
+    assert "selected_codes(chosen)" in inspect.getsource(dryrun._mask_allowed_codes)
+    assert selected_codes({"1": [3, 4]}) == {3, 4}
