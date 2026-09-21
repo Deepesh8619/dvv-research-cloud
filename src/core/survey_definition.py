@@ -135,12 +135,37 @@ def _as_selected_set(answer: Any) -> set[Any]:
     A single-select stores one scalar code; a multi-select stores a list. Both
     are treated uniformly as "the set of codes this respondent chose" so the
     ``in``/``selected`` ops work regardless of question type.
+
+    A GRID stores ``{row: column}``, and a condition is allowed to name the
+    grid without naming a row — "ASK IF Q6 = 1" against a brand-usage grid
+    means "any row answered 1". Such an answer used to reach ``{answer}`` and
+    raise ``TypeError: unhashable type: 'dict'``, which surfaced to a
+    respondent as a server error mid-interview and made the pre-link check
+    refuse to run at all. Reading it as the codes chosen across every row
+    matches what a scripter writing that line means, and no answer shape can
+    raise here any more: anything unhashable is dropped rather than thrown.
     """
     if answer is None:
         return set()
+    if isinstance(answer, dict):
+        values: list[Any] = []
+        for value in answer.values():
+            values.extend(value if isinstance(value, (list, tuple, set)) else [value])
+        return _hashable_set(values)
     if isinstance(answer, (list, tuple, set)):
-        return set(answer)
-    return {answer}
+        return _hashable_set(answer)
+    return _hashable_set([answer])
+
+
+def _hashable_set(values: Any) -> set[Any]:
+    """The hashable members of `values`. A routing comparison is over codes."""
+    out: set[Any] = set()
+    for value in values:
+        try:
+            out.add(value)
+        except TypeError:
+            continue  # a nested structure is not a code; it cannot match one
+    return out
 
 
 def evaluate(expression: Expression, answers: dict[str, Any]) -> bool:

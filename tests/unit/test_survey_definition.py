@@ -306,3 +306,31 @@ def test_numeric_comparison_does_not_fall_back_to_string_order() -> None:
 
     assert evaluate(Expression(op="lt", qid="Y", value=25), {"Y": "100"}) is False
     assert evaluate(Expression(op="gt", qid="Y", value=25), {"Y": "100"}) is True
+
+
+def test_a_condition_on_a_grid_without_a_row_reads_every_row():
+    """A scripter writes "ASK IF Q6=1" against a brand-usage grid meaning "any
+    row". The grid's {row: column} answer used to reach a set() and raise
+    TypeError: unhashable type: 'dict' — which a respondent met as a server
+    error mid-interview, and which stopped the pre-link check running at all."""
+    answers = {"Q6": {"1": 2, "2": 5}}
+    assert evaluate(Expression(op="in", qid="Q6", values=[5, 9]), answers) is True
+    assert evaluate(Expression(op="in", qid="Q6", values=[7, 9]), answers) is False
+    assert evaluate(Expression(op="selected", qid="Q6", value=2), answers) is True
+    assert evaluate(Expression(op="selected", qid="Q6", value=3), answers) is False
+
+
+def test_a_multi_answer_grid_row_is_read_the_same_way():
+    """A multi-select grid stores a LIST per row; those codes count too."""
+    answers = {"Q7": {"1": [3, 4], "2": [9]}}
+    assert evaluate(Expression(op="selected", qid="Q7", value=4), answers) is True
+    assert evaluate(Expression(op="selected", qid="Q7", value=5), answers) is False
+
+
+def test_no_answer_shape_can_raise_out_of_a_routing_comparison():
+    """Whatever ends up stored, routing returns a verdict rather than a 500."""
+    for stored in [{"a": {"nested": 1}}, [[1, 2]], [{"x": 1}], {"1": None}]:
+        assert evaluate(Expression(op="selected", qid="Q1", value=1), {"Q1": stored}) in (
+            True,
+            False,
+        )
