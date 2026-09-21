@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import re
+from concurrent.futures.process import BrokenProcessPool
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -257,10 +258,32 @@ def _preflight(db: Session, study_id: str) -> dict:
     if payload is None:
         raise HTTPException(status_code=409, detail="The questionnaire is still being read")
     survey = SurveyDefinition.from_json(payload)
-    return run_heavy_detached(
-        db, preflight, survey, approved is not None, _BLOCKING_FLAGS,
-        set(current.approved_qids or []),
-    )
+    try:
+        return run_heavy_detached(
+            db, preflight, survey, approved is not None, _BLOCKING_FLAGS,
+            set(current.approved_qids or []),
+        )
+    except BrokenProcessPool as exc:
+        # The worker was killed — on a small box that means it ran out of
+        # memory on a long questionnaire. An operational cause deserves an
+        # operational sentence, not "Internal Server Error".
+        logger.exception("[%s] the pre-link check worker died", study_id)
+        raise HTTPException(
+            status_code=503,
+            detail="The pre-link check ran out of room on this server. Try again; "
+                   "if it keeps happening the server needs more memory.",
+        ) from exc
+    except Exception as exc:
+        # Anything else: name the KIND of failure so the next report is
+        # actionable, and keep the detail in the log. A reviewer being told
+        # only "could not run" has nowhere to go, and neither does the
+        # engineer they bring it to.
+        logger.exception("[%s] the pre-link check failed", study_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"The pre-link check failed with {type(exc).__name__} on the server. "
+                   f"The full reason is in the server log.",
+        ) from exc
 
 
 @router.get("/studies/{study_id}/fielding/preflight")

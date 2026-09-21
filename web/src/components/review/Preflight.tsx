@@ -45,8 +45,13 @@ export default function Preflight({
       // Say WHY. "Could not run the pre-link check." on its own sent someone
       // to the developer to find out what the server had already said.
       .catch((err) => {
-        const detail = err?.response?.data?.detail
-        const why = typeof detail === 'string' ? detail : detail?.error
+        const data = err?.response?.data
+        const detail = typeof data === 'string' ? data : data?.detail
+        // A 502 from the proxy carries no JSON at all; the status is then the
+        // only fact there is, and it is worth more than a bare "could not".
+        const why =
+          (typeof detail === 'string' ? detail : detail?.error) ||
+          (err?.response?.status ? `the server returned ${err.response.status}` : '')
         !cancelled &&
           setError(
             why

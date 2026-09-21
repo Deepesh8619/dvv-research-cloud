@@ -970,3 +970,47 @@ def test_a_phone_and_a_stated_place_are_recorded_at_entry(client, monkeypatch) -
     assert stored.entry_params["place_check"] == "mismatch"
     assert stored.status_code is None  # flagged, not screened out
     db.close()
+
+
+def test_a_pre_link_check_that_cannot_run_says_what_kind_of_failure_it_was(
+    client, monkeypatch
+) -> None:
+    """Seen in production: "Could not run the pre-link check." and nothing more,
+    which tells a reviewer nothing and the engineer they bring it to no more.
+    The KIND of failure is named; the detail stays in the server log."""
+    import api.routes.fielding as fielding_routes
+
+    test_client, SessionLocal = client[0], client[1]
+    _make_study(SessionLocal)
+    _make_questionnaire(SessionLocal)
+
+    def explode(*_args, **_kwargs):
+        raise TypeError("unhashable type: 'dict'")
+
+    monkeypatch.setattr(fielding_routes, "run_heavy_detached", explode)
+    failed = test_client.get("/api/studies/study_f1/fielding/preflight")
+    assert failed.status_code == 500
+    assert "TypeError" in failed.json()["detail"]
+    assert "server log" in failed.json()["detail"]
+
+
+def test_a_pre_link_check_killed_for_memory_is_told_as_an_operational_problem(
+    client, monkeypatch
+) -> None:
+    """A worker killed on a small box is not a bug in the questionnaire, and a
+    reviewer should not go looking for one."""
+    from concurrent.futures.process import BrokenProcessPool
+
+    import api.routes.fielding as fielding_routes
+
+    test_client, SessionLocal = client[0], client[1]
+    _make_study(SessionLocal)
+    _make_questionnaire(SessionLocal)
+
+    def die(*_args, **_kwargs):
+        raise BrokenProcessPool("worker died")
+
+    monkeypatch.setattr(fielding_routes, "run_heavy_detached", die)
+    out = test_client.get("/api/studies/study_f1/fielding/preflight")
+    assert out.status_code == 503
+    assert "ran out of room" in out.json()["detail"]
