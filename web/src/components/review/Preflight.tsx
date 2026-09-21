@@ -42,7 +42,18 @@ export default function Preflight({
     fieldingApi
       .preflight(studyId)
       .then((res) => !cancelled && setResult(res.data))
-      .catch(() => !cancelled && setError('Could not run the pre-link check.'))
+      // Say WHY. "Could not run the pre-link check." on its own sent someone
+      // to the developer to find out what the server had already said.
+      .catch((err) => {
+        const detail = err?.response?.data?.detail
+        const why = typeof detail === 'string' ? detail : detail?.error
+        !cancelled &&
+          setError(
+            why
+              ? `Could not run the pre-link check — ${why}`
+              : 'Could not run the pre-link check.',
+          )
+      })
     return () => {
       cancelled = true
     }

@@ -13,6 +13,11 @@ data/*.csv
 .DS_Store
 node_modules/
 web/node_modules/
+# Without these (no trailing slash) a node_modules SYMLINK is not ignored — a
+# worktree pointing at the main checkout's modules got committed that way, and
+# it came back as a self-referencing link that broke every npm command.
+node_modules
+web/node_modules
 web/dist/
 dvv_research.db
 studies/
