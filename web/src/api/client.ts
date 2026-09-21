@@ -774,6 +774,14 @@ export interface QuestionSummary {
   links?: QuestionLinks
 }
 
+/** A grid a mask reads, with the columns that mean "this row counts".
+ *  The browser cannot derive this: SurveyJS cannot express "rows answered Yes". */
+export interface GridMaskSource {
+  name: string
+  qid: string
+  positive: number[]
+}
+
 /** What the questionnaire states about how this question connects. */
 export interface QuestionLinks {
   asked_if: string[]

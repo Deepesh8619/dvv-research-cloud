@@ -26,7 +26,6 @@ from src.core.survey_definition import (
     Question,
     QuestionType,
     SurveyDefinition,
-    selected_codes,
 )
 from src.engines.fielding.decisions import (
     STATUS_COMPLETE,
@@ -39,6 +38,7 @@ from src.engines.fielding.decisions import (
     terminating_question,
     unsatisfiable_conditions,
 )
+from src.engines.questionnaire.grid_masks import mask_codes
 
 DEFAULT_RESPONDENTS = 500
 MAX_RESPONDENTS = 5000
@@ -127,10 +127,13 @@ def _mask_allowed_codes(
         chosen = answers.get(against)
         if chosen is None:
             continue
-        # A grid answer is {row: column}; `{chosen}` raised
-        # "unhashable type: 'dict'" here and a respondent met it as a server
-        # error mid-interview. One reading of an answer, shared with routing.
-        picked = selected_codes(chosen)
+        # What the respondent PICKED at the source. For a grid that is the
+        # rows answered with an affirmative column — not the column codes,
+        # which is what a plain "codes present" reading returns and which
+        # would mask the list against the wrong numbers entirely.
+        picked = mask_codes(source, chosen)
+        if picked is None:
+            continue
         offered = {o.code for o in question.options}
         return picked & offered if mode == "selected" else offered - picked
     return None

@@ -6,7 +6,7 @@ import { useParams } from 'react-router-dom'
 import { Model } from 'survey-core'
 import { BorderlessLight } from 'survey-core/themes'
 import { Survey } from 'survey-react-ui'
-import { PipeVariable, errorMessage, fieldingApi } from '../api/client'
+import { GridMaskSource, PipeVariable, errorMessage, fieldingApi } from '../api/client'
 import { Theme, themeFor } from '../api/themes'
 import {
   ArrowRightIcon,
@@ -115,6 +115,30 @@ function truncate(text: string, max: number): string {
  * a question about "your top choice" named every brand they ranked. The
  * compiler asks for `{Q7_rank1}`; this fills it in as they answer.
  */
+/** The rows of a grid the respondent "picked", as a plain list of codes.
+ *
+ * A mask sourced from a grid ("only the pharmacies they have heard of") has
+ * no expression SurveyJS can evaluate: a grid answer is {row: column} and
+ * there is no way to say "the rows whose cell says Yes". Before this, such a
+ * mask compiled to `{Q5} = {item}` — an object against a code, never true —
+ * and the masked question offered NOTHING. The server says which columns are
+ * affirmative; this publishes the picked rows for `contains` to test.
+ */
+export function applyGridMaskVariables(survey: Model, sources: GridMaskSource[]): void {
+  for (const source of sources) {
+    const answer = survey.getQuestionByName(source.qid)?.value as
+      | Record<string, unknown>
+      | undefined
+    const positive = new Set(source.positive.map(String))
+    const picked: number[] = []
+    for (const [row, value] of Object.entries(answer ?? {})) {
+      const chosen = Array.isArray(value) ? value : [value]
+      if (chosen.some((v) => positive.has(String(v)))) picked.push(Number(row))
+    }
+    survey.setVariable(source.name, picked)
+  }
+}
+
 export function applyPipeVariables(survey: Model, variables: PipeVariable[]): void {
   for (const v of variables) {
     const question = survey.getQuestionByName(v.qid)
@@ -211,6 +235,8 @@ export default function RespondentPage() {
           (res.data.surveyjs_json as { questionSymbols?: Record<string, string> })
             .questionSymbols ?? {},
         )
+        const gridMasks = (res.data.surveyjs_json as { gridMaskSources?: GridMaskSource[] })
+          .gridMaskSources ?? []
 
         // One question per page: this is what makes the per-page answer POST (and
         // therefore the server-side terminate check) fire mid-survey.
@@ -262,6 +288,7 @@ export default function RespondentPage() {
         survey.onValueChanged.add((sender) => {
           setPosition(positionOf(sender))
           applyPipeVariables(sender, pipeVariables)
+          applyGridMaskVariables(sender, gridMasks)
         })
 
         // Final page + finish: POST the last page's answers, then mark complete.
@@ -287,6 +314,7 @@ export default function RespondentPage() {
         // Dev builds only: the live model, for inspecting it from the console.
         if (import.meta.env.DEV) (window as unknown as { __dvvSurvey: Model }).__dvvSurvey = survey
         applyPipeVariables(survey, pipeVariables)
+        applyGridMaskVariables(survey, gridMasks)
         setModel(survey)
         setTitle(respondentTitle(survey.title))
         setTheme(surveyTheme)
