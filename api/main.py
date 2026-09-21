@@ -104,27 +104,19 @@ async def health():
     production incident where all 80 questions failed extraction — is caught at
     deploy via the health check, not at the first client upload (T16 preflight).
 
-    Also reports the commit the running instance was built from. "Is my fix
-    live yet?" was previously unanswerable without opening the Render dashboard
-    — and on a free plan that redeploys on every push, it is the first thing
-    worth checking when behaviour does not match the code in front of you.
-    Railway injects RAILWAY_GIT_COMMIT_SHA (Render: RENDER_GIT_COMMIT); locally it is absent and
-    the field reads "unknown".
+    Also reports the commit the running instance was built from — read from a
+    file inside the image, not from the environment, because the environment
+    version of this answered with yesterday's commit while serving today's
+    code. See src/utils/build_info.py for why that matters more than it looks.
     """
-    import os
-
     from src.ai.router import llm_key_presence
+    from src.utils.build_info import build_commit
 
-    commit = (
-        os.environ.get("RAILWAY_GIT_COMMIT_SHA")
-        or os.environ.get("RENDER_GIT_COMMIT")
-        or os.environ.get("GIT_COMMIT")
-        or ""
-    )
+    commit = build_commit()
     return {
         "status": "ok",
         "service": "dvv-research-api",
-        "commit": commit[:12] or "unknown",
+        "commit": commit,
         # State + date only: the client name is not for a public endpoint.
         "licence": (
             {"state": LICENCE.state(), "expires": LICENCE.expires.isoformat()}

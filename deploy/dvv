@@ -30,8 +30,17 @@ fi
 dc() { docker compose "$@"; }
 
 build_app() {  # always stamps the image with the commit it was built from
-  GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) \
+  # Written into the build context so `COPY . .` carries it INSIDE the image.
+  # The old route was a build ARG turned into an ENV, which compose
+  # substitution and `env_file:` can each override — and it did go stale,
+  # reporting the previous day's commit while serving new code.
+  git rev-parse --short HEAD > ../.build-commit 2>/dev/null || echo unknown > ../.build-commit
+  GIT_COMMIT=$(cat ../.build-commit) \
     dc up -d --build "$@"
+}
+
+reported_commit() {  # what the RUNNING app says it is, from outside the build
+  health | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p'
 }
 
 health() {  # 0 when the app answers /api/health from inside its container
@@ -124,6 +133,17 @@ case "${1:-}" in
     build_app app
     if wait_healthy; then
       echo "Upgraded $(git rev-parse --short "$previous") -> $(git rev-parse --short HEAD). $(health)"
+      # Verify the CONTAINER is the build we just made. A rebuilt image that
+      # was not recreated, or a stale stamp, is otherwise silent: the deploy
+      # reads as successful and the version you check afterwards is a lie.
+      expected=$(git rev-parse --short HEAD)
+      running=$(reported_commit)
+      if [ "$running" != "$expected" ]; then
+        echo
+        echo "WARNING: the app reports commit '$running' but '$expected' was just built."
+        echo "The new image may not be the one running. Check: docker compose ps, then"
+        echo "  docker compose up -d --force-recreate app"
+      fi
       # A parser fix only changes the NEXT extraction. Studies already in this
       # database keep whatever the old parser wrote, and nothing announces it —
       # a questionnaire missing its screen-outs looks exactly like one that

@@ -33,3 +33,8 @@ deploy/backups/
 
 # AWS provisioning output: per-client secrets
 deploy/aws/out/
+
+# Written by deploy/dvv immediately before a build and carried INTO the image
+# by `COPY . .`, so /api/health reports the code it actually contains.
+# Never committed: it describes one build on one machine.
+.build-commit

@@ -37,13 +37,28 @@ def test_every_build_goes_through_the_stamping_helper():
     """A bare `dc up -d --build` would produce an unstamped image."""
     body = DVV.read_text()
     helper = body[body.index("build_app() {") : body.index("health() {")]
-    assert "GIT_COMMIT=$(git rev-parse --short HEAD" in helper
+    # The commit is written into the BUILD CONTEXT so `COPY . .` carries it
+    # inside the image. The env var is still passed for images built before
+    # this change, but it is no longer what the running app trusts — it went
+    # stale in production and reported the previous day's commit.
+    assert "> ../.build-commit" in helper
+    assert "git rev-parse --short HEAD" in helper
     others = [
         line.strip()
         for line in body.splitlines()
         if "up -d --build" in line and "build_app()" not in line
     ]
     assert others == ["dc up -d --build \"$@\""], others
+
+
+def test_an_upgrade_that_did_not_take_says_so():
+    """A rebuilt image that was not recreated is otherwise silent: the deploy
+    reads as successful and the version checked afterwards is a lie."""
+    body = DVV.read_text()
+    assert "reported_commit()" in body
+    upgrade = body[body.index("  upgrade)") :]
+    assert "$running" in upgrade and "$expected" in upgrade
+    assert "WARNING" in upgrade
 
 
 def test_root_is_refused_when_the_checkout_belongs_to_someone_else():
