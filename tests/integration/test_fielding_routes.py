@@ -1014,3 +1014,53 @@ def test_a_pre_link_check_killed_for_memory_is_told_as_an_operational_problem(
     out = test_client.get("/api/studies/study_f1/fielding/preflight")
     assert out.status_code == 503
     assert "ran out of room" in out.json()["detail"]
+
+
+def test_a_rank_masked_by_an_awareness_grid_is_reachable_on_a_test_link(client) -> None:
+    """The shape that broke in production, driven the way a tester drove it.
+
+    A rank question masked by an awareness GRID — "rank your top 3 of the
+    pharmacies you have heard of" — which is the shape that produced
+    "Server error: TypeError: unhashable type: 'dict'" on a live study.
+
+    Checked against the bug: with the fix reverted, the dry run below raises
+    that exact TypeError, and this test fails. A regression test nobody has
+    seen fail is a guess about what it covers.
+    """
+    test_client, SessionLocal = client[0], client[1]
+    _make_study(SessionLocal)
+
+    survey = _sample_survey("study_f1")
+    aware = Question(
+        qid="Q5", text="Which of these pharmacies have you heard of?",
+        type=QuestionType.GRID_SINGLE,
+        rows=[Option(code=1, label="CVS"), Option(code=2, label="Walgreens")],
+        cols=[Option(code=1, label="Yes"), Option(code=2, label="No")],
+    )
+    ranked = Question(
+        qid="Q6", text="Rank your top 3", type=QuestionType.RANK,
+        options=[Option(code=1, label="CVS"), Option(code=2, label="Walgreens")],
+        # Asked only of people who know at least one — a condition that names
+        # the grid without naming a row, which is how scripters write it.
+        show_if=Expression(op="selected", qid="Q5", value=1),
+        validation={"techniques": {"masks": [{"mode": "selected", "source_qid": "Q5"}]}},
+    )
+    survey.questions.extend([aware, ranked])
+    survey.blocks[0].question_ids.extend(["Q5", "Q6"])
+    _make_questionnaire(SessionLocal, survey=survey)
+
+    # The dry run is where it bites: every synthetic respondent answers the
+    # grid as {row: column}, and the mask on the rank question then reads it.
+    simulated = test_client.post("/api/studies/study_f1/fielding/dry-run", json={"n": 20})
+    assert simulated.status_code == 200, simulated.text
+    assert simulated.json()["n_respondents"] == 20
+
+    # And a tester walking the link answers that grid the same way.
+    link = test_client.post("/api/studies/study_f1/fielding/links",
+                            json={"test": True}).json()
+    session_id = test_client.get(f"/api/r/{link['token']}").json()["session_id"]
+    answered = test_client.post(
+        f"/api/r/{link['token']}/sessions/{session_id}/answers",
+        json={"answers": {"Q1": 30, "Q2": 1, "Q5": {"1": 1, "2": 2}}, "current_page": 1},
+    )
+    assert answered.status_code == 200, answered.text
