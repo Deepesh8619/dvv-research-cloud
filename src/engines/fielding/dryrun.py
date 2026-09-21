@@ -21,7 +21,13 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.core.survey_definition import Option, Question, QuestionType, SurveyDefinition
+from src.core.survey_definition import (
+    Option,
+    Question,
+    QuestionType,
+    SurveyDefinition,
+    selected_codes,
+)
 from src.engines.fielding.decisions import (
     STATUS_COMPLETE,
     STATUS_OVERQUOTA,
@@ -121,7 +127,10 @@ def _mask_allowed_codes(
         chosen = answers.get(against)
         if chosen is None:
             continue
-        picked = set(chosen) if isinstance(chosen, list) else {chosen}
+        # A grid answer is {row: column}; `{chosen}` raised
+        # "unhashable type: 'dict'" here and a respondent met it as a server
+        # error mid-interview. One reading of an answer, shared with routing.
+        picked = selected_codes(chosen)
         offered = {o.code for o in question.options}
         return picked & offered if mode == "selected" else offered - picked
     return None
