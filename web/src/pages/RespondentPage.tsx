@@ -1,4 +1,5 @@
 import 'survey-core/defaultV2.min.css'
+import QuestionSymbol from '../components/respondent/symbols'
 
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
@@ -126,16 +127,17 @@ export function applyPipeVariables(survey: Model, variables: PipeVariable[]): vo
   }
 }
 
-function positionOf(survey: Model): { at: number; of: number } {
+function positionOf(survey: Model): { at: number; of: number; qid: string } {
   const info = survey.getProgressInfo()
   const of = info.questionCount || 1
   // The question ON SCREEN. Counting answers instead said "2 of 7" the moment
   // one statement of a six-row grid was answered, while still on question 1.
   const current = survey.currentSingleQuestion
   const answerable = survey.getAllQuestions(true).filter((q) => q.getType() !== 'html')
+  const qid = current?.name ?? ''
   const index = current ? answerable.indexOf(current) : -1
-  if (index >= 0) return { at: Math.min(index + 1, of), of }
-  return { at: Math.min(info.answeredQuestionCount + 1, of), of }
+  if (index >= 0) return { at: Math.min(index + 1, of), of, qid }
+  return { at: Math.min(info.answeredQuestionCount + 1, of), of, qid }
 }
 
 export default function RespondentPage() {
@@ -148,7 +150,9 @@ export default function RespondentPage() {
   // Where the respondent is, kept in state because SurveyJS mutates its model
   // in place: reading currentPageNo during render shows the page they were on
   // last time React happened to draw.
-  const [position, setPosition] = useState({ at: 1, of: 1 })
+  const [position, setPosition] = useState({ at: 1, of: 1, qid: '' })
+  // {qid: symbol name}, read from the questionnaire's own wording on the server.
+  const [symbols, setSymbols] = useState<Record<string, string>>({})
   // The blocks the script was written in: the progress bar's segments.
   const [sections, setSections] = useState(1)
   // Live refs the async event handlers read (state would be stale in closures).
@@ -203,6 +207,10 @@ export default function RespondentPage() {
         const survey = new Model(res.data.surveyjs_json)
         const pipeVariables = (res.data.surveyjs_json as { pipeVariables?: PipeVariable[] })
           .pipeVariables ?? []
+        setSymbols(
+          (res.data.surveyjs_json as { questionSymbols?: Record<string, string> })
+            .questionSymbols ?? {},
+        )
 
         // One question per page: this is what makes the per-page answer POST (and
         // therefore the server-side terminate check) fire mid-survey.
@@ -638,6 +646,7 @@ export default function RespondentPage() {
 
       <div className="dvv-survey max-w-[640px] mx-auto px-4 sm:px-0 pt-2">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/70 p-5 sm:p-8">
+          <QuestionSymbol name={symbols[position.qid]} accent={theme.accent} />
           {model && <Survey model={model} />}
         </div>
         <p className="mt-6 text-center text-xs font-medium tracking-wide text-slate-400">

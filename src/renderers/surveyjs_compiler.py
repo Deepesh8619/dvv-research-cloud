@@ -28,6 +28,7 @@ from src.core.survey_definition import (
 )
 from src.engines.questionnaire.grid_subquestions import without_question_label
 from src.engines.questionnaire.prose_directives import is_derived_wording, is_terminal_option
+from src.engines.questionnaire.symbols import symbols_for_survey
 
 # Square brackets are a SCRIPTING convention, not respondent language. Across
 # every instrument we have — client documents and public federal ones alike —
@@ -517,6 +518,10 @@ def compile_to_surveyjs(survey: SurveyDefinition) -> dict[str, Any]:
     """
     pages = [_compile_block(block, survey) for block in survey.blocks]
     compiled = {"title": survey.title, "pages": pages}
+    # One mark per question, read from its own wording. Sent as a map rather
+    # than per element so it costs nothing in SurveyJS's own model — the
+    # respondent page draws it above the card.
+    compiled["questionSymbols"] = symbols_for_survey(survey)
     variables = pipe_variables(compiled)
     if variables:
         # Read by the respondent page, not by SurveyJS itself.
