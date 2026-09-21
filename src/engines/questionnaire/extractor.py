@@ -76,6 +76,7 @@ from src.engines.questionnaire.section_paths import (
 )
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
 from src.engines.questionnaire.study_overview import parse_overview
+from src.engines.questionnaire.swallowed_options import repair_swallowed_options
 from src.engines.questionnaire.table_questions import question_from_tables
 from src.engines.questionnaire.verification import (
     covers_the_question,
@@ -1307,6 +1308,9 @@ def extract_survey_definition(
     apply_carousels(survey)
     # "___ % item" lines that must total 100: a number box per item.
     apply_constant_sums(survey)
+    # "… either in-person or through online/delivery) Yes" with "No" as the only
+    # answer: the first option was written on the question's own line.
+    repair_swallowed_options(survey)
     # "[SHOW Q26 LIST]", "each of these brands": a list stated once and used
     # again. Filled before loops, which copy each template's list.
     fill_lists(survey)
