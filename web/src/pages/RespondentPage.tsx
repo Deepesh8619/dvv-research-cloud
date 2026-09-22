@@ -623,6 +623,14 @@ export default function RespondentPage() {
       {isTest && (
         <div className="sticky top-0 z-30 bg-amber-100 border-b border-amber-300 px-4 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-amber-900">
           <span className="font-semibold">Test link — answers are not real data</span>
+          {position.qid && (
+            <span
+              className="rounded bg-amber-200/70 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-amber-900"
+              title="The question's name in the data file"
+            >
+              {position.qid}
+            </span>
+          )}
           <select
             value=""
             disabled={jumping || !model}

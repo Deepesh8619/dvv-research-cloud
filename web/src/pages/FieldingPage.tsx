@@ -826,9 +826,19 @@ export default function FieldingPage() {
 
   return (
     <div>
-      <Link to={`/projects/${studyId}`} className="mb-2 inline-block text-sm text-slate-500 hover:text-slate-700">
-        ← Back to project
-      </Link>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <Link to={`/projects/${studyId}`} className="text-sm text-slate-500 hover:text-slate-700">
+          ← Back to project
+        </Link>
+        {/* Fielding and the questionnaire are read against each other all day:
+            a link goes wrong, you fix the script, you come back. */}
+        <Link
+          to={`/projects/${studyId}/questionnaire`}
+          className="text-sm font-medium text-primary-500 hover:text-primary-600"
+        >
+          ← Questionnaire
+        </Link>
+      </div>
       <PageHeader
         title="Field monitor"
         description="Create fielding links, watch responses live, manage quotas, and materialize completes into analysis."
