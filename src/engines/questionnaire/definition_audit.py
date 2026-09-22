@@ -107,7 +107,10 @@ def _is_prose(text: str) -> bool:
 #: once PER ITEM. Held as a single answer it is one column where there should
 #: be one per pharmacy, and the respondent is asked about all of them at once.
 _PER_ITEM = re.compile(
-    r"\b(?:for |with |about )?each of (?:these|the following|those)\b|"
+    r"\b(?:for |with |about )?each of (?:these|the following|those|them)\b|"
+    # "have you personally used each one?" — the list is named earlier in the
+    # sentence ("these pharmacies"), and "each one" is what makes it per-item.
+    r"\beach one\b|"
     r"\bfor each\b|\bper (?:brand|item|statement)\b",
     re.I,
 )

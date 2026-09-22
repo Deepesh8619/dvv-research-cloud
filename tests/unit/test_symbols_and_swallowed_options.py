@@ -130,3 +130,23 @@ def test_the_question_is_read_before_its_answer_labels():
     owned = Question(qid="Q4", text="Which of the following do you own?", type=QuestionType.MULTI,
                      options=[Option(code=1, label="Smartphone"), Option(code=2, label="Laptop")])
     assert symbol_for(owned) == "device"
+
+
+def test_a_swallowed_answer_is_given_back_even_when_the_type_is_wrong():
+    """Q4a of the live study: text ending "…online/delivery) Yes", one answer
+    "No", and typed grid_single with neither rows nor columns. The repair was
+    skipping it on type, so the question kept "No" as its only answer."""
+    q = Question(qid="Q4a", text=PHARMACY, type=QuestionType.GRID_SINGLE,
+                 options=[Option(code=2, label="No")])
+    assert repair_swallowed_options(_survey(q)) == ["Q4a"]
+    assert q.type is QuestionType.SINGLE
+    assert [(o.code, o.label) for o in q.options] == [(1, "Yes"), (2, "No")]
+
+
+def test_a_real_grid_is_never_taken_apart_by_that_repair():
+    q = Question(qid="Q13", text="When did you last use each? Yes",
+                 type=QuestionType.GRID_SINGLE,
+                 rows=[Option(code=1, label="CVS")],
+                 cols=[Option(code=1, label="Recently"), Option(code=2, label="No")])
+    assert repair_swallowed_options(_survey(q)) == []
+    assert q.type is QuestionType.GRID_SINGLE

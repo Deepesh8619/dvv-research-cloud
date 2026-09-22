@@ -62,6 +62,7 @@ from src.engines.questionnaire.learned import LearnedPattern, learned_hidden_var
 from src.engines.questionnaire.list_sources import fill_lists, points_at_a_list
 from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import detect_techniques
+from src.engines.questionnaire.per_item import apply as apply_per_item_grids
 from src.engines.questionnaire.profiles import detect_profile
 from src.engines.questionnaire.prose_directives import (
     ProseFields,
@@ -1352,6 +1353,10 @@ def extract_survey_definition(
     # "… either in-person or through online/delivery) Yes" with "No" as the only
     # answer: the first option was written on the question's own line.
     repair_swallowed_options(survey)
+    # "How familiar are you with EACH of these pharmacies?" answered Yes/No:
+    # a grid whose items were lost, not a single question. Before fill_lists,
+    # which is what then supplies its rows.
+    apply_per_item_grids(survey)
     # "[SHOW Q26 LIST]", "each of these brands": a list stated once and used
     # again. Filled before loops, which copy each template's list.
     fill_lists(survey)
