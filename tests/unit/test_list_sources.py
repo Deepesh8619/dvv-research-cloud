@@ -329,3 +329,48 @@ def test_a_scale_is_never_borrowed_as_the_list():
     fill_lists(survey)
     assert [o.label for o in survey["Q8"].options] == [
         "Amazon Pharmacy", "Capsule", "CVS", "Walgreens"]
+
+
+def test_a_grid_written_as_COLUMNS_and_ROWS_headings_is_read_as_a_grid():
+    """Q18a of the Vivo wave-2 document writes its grid as labelled lists of
+    plain paragraphs instead of a table. Those column lines were being read as
+    the question's own answer options, so the grid arrived with no rows and no
+    columns and a respondent saw the wording and nothing else."""
+    from src.engines.questionnaire.table_questions import labelled_sections
+
+    rows, cols = labelled_sections([
+        "COLUMNS",
+        "Never in the past year",
+        "Rarely (a few times in the past year)",
+        "Sometimes (about every few months)",
+        "ROWS",
+        "Picked up in-person at a retail pharmacy",
+        "Received via mail-order pharmacy",
+    ])
+    assert [o.label for o in cols][:2] == ["Never in the past year",
+                                           "Rarely (a few times in the past year)"]
+    assert [o.code for o in cols] == [1, 2, 3]   # positional, as a scripter reads them
+    assert [o.label for o in rows] == ["Picked up in-person at a retail pharmacy",
+                                       "Received via mail-order pharmacy"]
+
+
+def test_a_document_that_does_not_use_that_convention_gets_nothing():
+    from src.engines.questionnaire.table_questions import labelled_sections
+
+    assert labelled_sections(["Q1. What is your age?", "______"]) == ([], [])
+
+
+def test_one_stray_prose_option_no_longer_throws_the_scale_away():
+    """"How much do you like this ad?" over a 1..5 strip. A single option read
+    out of the prose was enough to fail the whole shape — which discarded the
+    SCALE too and left the question with no answers at all."""
+    from src.core.survey_definition import Option as O
+    from src.engines.questionnaire.table_questions import question_from_tables
+
+    scale = [["1=Do not like it at all", "2=Do not like very much",
+              "3=Neither like nor dislike", "4=Like it somewhat", "5=Like it a great deal"]]
+    shape = question_from_tables([scale], [O(code=1, label="[SHOW AD]")])
+    assert shape is not None
+    assert [o.label for o in shape.cols] == [
+        "Do not like it at all", "Do not like very much", "Neither like nor dislike",
+        "Like it somewhat", "Like it a great deal"]
