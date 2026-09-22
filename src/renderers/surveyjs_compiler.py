@@ -26,6 +26,7 @@ from src.core.survey_definition import (
     QuestionType,
     SurveyDefinition,
 )
+from src.engines.questionnaire.grid_masks import affirmative_codes, variable_name
 from src.engines.questionnaire.grid_subquestions import without_question_label
 from src.engines.questionnaire.prose_directives import is_derived_wording, is_terminal_option
 from src.engines.questionnaire.symbols import symbols_for_survey
@@ -150,6 +151,36 @@ def _for_respondent(text: str, pipes: list[dict], by_qid: dict[str, Question]) -
     return _STRANDED_PUNCTUATION.sub(r"\1", _WHITESPACE.sub(" ", stripped)).strip()
 
 
+def _grid_mask_sources(survey: SurveyDefinition) -> list[dict[str, Any]]:
+    """Every grid a mask reads, with the columns that mean "this row counts".
+
+    The browser cannot work this out from the model: SurveyJS has no way to
+    say "the rows of Q5 whose cell says Yes" in a condition. So the server
+    says which columns are affirmative and the page turns the grid's answer
+    into a plain list of row codes, which `contains` can then test. One
+    reading, decided in one place — see grid_masks.
+    """
+    by_qid = {q.qid: q for q in survey.questions}
+    wanted: dict[str, dict[str, Any]] = {}
+    for question in survey.questions:
+        for mask in _techniques(question).get("masks") or []:
+            if mask.get("mode") == "full_list":
+                continue
+            against = (
+                mask.get("exclude_qid") if mask.get("mode") == "list_except"
+                else mask.get("source_qid")
+            )
+            source = _find(by_qid, against)
+            if source is None or source.type is not QuestionType.GRID_SINGLE:
+                continue
+            wanted[source.qid] = {
+                "name": variable_name(source.qid),
+                "qid": source.qid,
+                "positive": affirmative_codes(source),
+            }
+    return sorted(wanted.values(), key=lambda v: v["name"])
+
+
 def _choices_visible_if(mask: dict, by_qid: dict[str, Question]) -> str | None:
     """A per-choice condition that narrows a masked list to what was answered.
 
@@ -167,6 +198,12 @@ def _choices_visible_if(mask: dict, by_qid: dict[str, Question]) -> str | None:
         return None
     against = source.qid  # the parser upper-cases what it reads ("Q2B" is "Q2b")
     keeps_what_was_chosen = mode == "selected"
+    if source.type is QuestionType.GRID_SINGLE:
+        # A grid's answer is {row: column}: `{Q5} = {item}` compared an object
+        # to a code, was never true, and left the masked question with NO
+        # options at all. The page publishes the picked rows as a variable.
+        operator = "contains" if keeps_what_was_chosen else "notcontains"
+        return f"{{{variable_name(against)}}} {operator} {{item}}"
     if source.type in _MULTI_VALUED:
         operator = "contains" if keeps_what_was_chosen else "notcontains"
         return f"{{{against}}} {operator} {{item}}"
@@ -522,6 +559,10 @@ def compile_to_surveyjs(survey: SurveyDefinition) -> dict[str, Any]:
     # than per element so it costs nothing in SurveyJS's own model — the
     # respondent page draws it above the card.
     compiled["questionSymbols"] = symbols_for_survey(survey)
+    grid_masks = _grid_mask_sources(survey)
+    if grid_masks:
+        # Read by the respondent page, not by SurveyJS itself.
+        compiled["gridMaskSources"] = grid_masks
     variables = pipe_variables(compiled)
     if variables:
         # Read by the respondent page, not by SurveyJS itself.

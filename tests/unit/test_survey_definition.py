@@ -19,6 +19,7 @@ from src.core.survey_definition import (
     QuotaSheet,
     SurveyDefinition,
     evaluate,
+    selected_codes,
 )
 
 
@@ -337,13 +338,15 @@ def test_no_answer_shape_can_raise_out_of_a_routing_comparison():
 
 
 def test_a_mask_against_a_grid_question_survives_the_grid_answer():
-    """The second half of the same production bug. Routing was fixed first;
-    the MASK path still did its own `{chosen}` and raised
-    "unhashable type: 'dict'" — which a respondent met as a server error at
-    question 27 of 68, on a rank question masked by an awareness grid.
+    """The second half of the same production bug: the MASK path did its own
+    `{chosen}` and raised "unhashable type: 'dict'", which a respondent met as
+    a server error at question 27 of 68.
 
-    Both now read an answer the same way, because two readings is how the
-    first fix missed the second path."""
+    Not crashing was only half of it. The first fix made this return the
+    COLUMN codes — {1, 2} for "Yes to CVS, No to Walgreens" — which is the
+    answer to a different question and masks the list against numbers that
+    mean nothing to it. It returns the ROWS the respondent picked now, which
+    is what "only the brands they have heard of" has always meant."""
     from src.engines.fielding.dryrun import _mask_allowed_codes
 
     aware = Question(
@@ -358,18 +361,28 @@ def test_a_mask_against_a_grid_question_survives_the_grid_answer():
     )
     by_qid = {"Q5": aware, "Q27": ranked}
 
-    assert _mask_allowed_codes(ranked, {"Q5": {"1": 1, "2": 2}}, by_qid) == {1, 2}
+    assert _mask_allowed_codes(ranked, {"Q5": {"1": 1, "2": 2}}, by_qid) == {1}  # CVS only
+    assert _mask_allowed_codes(ranked, {"Q5": {"1": 1, "2": 1}}, by_qid) == {1, 2}
     assert _mask_allowed_codes(ranked, {"Q5": [1]}, by_qid) == {1}
     assert _mask_allowed_codes(ranked, {"Q5": 2}, by_qid) == {2}
 
 
-def test_one_reading_of_an_answer_is_shared_by_routing_and_masks():
-    """Two copies of "what did they choose" is what let the same crash live in
-    two places; the second was found only after a respondent met it."""
-    import inspect
+def test_routing_and_masks_read_a_grid_as_the_two_different_questions_they_ask():
+    """These deliberately differ, and an earlier version of this test asserted
+    they should not — wrongly.
 
-    from src.core.survey_definition import selected_codes
-    from src.engines.fielding import dryrun
+    Routing asks what was ANSWERED: "ASK IF Q5=1" against a usage grid means
+    some row was answered 1, so the codes present are what matters. A mask
+    asks which ROWS were picked: "only the brands they know" is about CVS and
+    Walgreens, not about the Yes column. Same data, two questions; one shared
+    reading gets one of them wrong."""
+    from src.engines.questionnaire.grid_masks import mask_codes
 
-    assert "selected_codes(chosen)" in inspect.getsource(dryrun._mask_allowed_codes)
-    assert selected_codes({"1": [3, 4]}) == {3, 4}
+    grid = Question(
+        qid="Q5", text="heard of?", type=QuestionType.GRID_SINGLE,
+        rows=[Option(code=1, label="CVS"), Option(code=2, label="Walgreens")],
+        cols=[Option(code=1, label="Yes"), Option(code=2, label="No")],
+    )
+    answer = {"1": 1, "2": 2}  # Yes to CVS, No to Walgreens
+    assert selected_codes(answer) == {1, 2}      # routing: these codes were answered
+    assert mask_codes(grid, answer) == {1}       # masking: this row was picked
