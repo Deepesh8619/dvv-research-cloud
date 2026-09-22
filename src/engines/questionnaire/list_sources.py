@@ -35,19 +35,77 @@ from src.engines.questionnaire.carousel import coded, list_for
 from src.engines.questionnaire.prose_directives import is_terminal_option
 
 _CHOICE_TYPES = {QuestionType.SINGLE, QuestionType.MULTI, QuestionType.DROPDOWN, QuestionType.RANK}
-# "each of these brands", "the following skincare brands", "these statements"
+# "each of these brands", "the following skincare brands", "these statements",
+# "these pharmacies", "the following ways of getting prescriptions".
+#
+# The noun is NOT a fixed list. It used to be (brands|statements|stores|
+# products), which is a skincare-and-advertising view of the world: a
+# healthcare study asking about "these pharmacies" matched nothing, so eight
+# questions fielded with no answers at all on a live pharmacy study. Whatever
+# the document calls the things it is listing, the question after it says
+# "these <that word>" — that is the rule, and it holds in every category.
 _POINTS_AT_A_LIST = re.compile(
-    r"\b(?:each of )?(?:these|the following|those)\b[^.?]{0,30}"
-    r"\b(brands?|statements?|stores?|products?)\b",
+    r"\b(?:each|any|one|all) of these\b|\b(?:these|those|the following)\b",
     re.I,
 )
+#: Where the noun phrase ends. Everything from here on is the rest of the
+#: sentence, not the name of the thing being listed — matching "you" against
+#: earlier wording would find a "list" in almost any question.
+_PHRASE_ENDS = frozenset({
+    "you", "your", "yours", "have", "has", "had", "do", "does", "did", "would",
+    "will", "are", "is", "was", "were", "can", "could", "should", "may",
+    "which", "who", "that", "what", "when", "where", "how", "why",
+    "of", "in", "for", "to", "and", "or", "with", "from", "by", "about",
+    "the", "a", "an", "if", "any", "best", "most", "least", "please",
+    # Words that follow "these" without naming a list of answers.
+    "question", "questions", "screen", "screens", "page", "pages", "people",
+    "respondent", "respondents", "same", "other", "others", "option",
+    "options", "answer", "answers", "ones", "one",
+})
 _MIN_LIST = 3
+#: Words that make an answer a point on a SCALE rather than a thing in a list.
+#: A scale question mentions the same noun ("How familiar are you with each of
+#: these pharmacies?") and sits nearer, so without this the borrowed "list" is
+#: Yes/No/Not sure — which is worse than an empty question, because it looks
+#: answerable and writes the wrong columns into the data file.
+_SCALE_WORD = re.compile(
+    r"^\s*(yes|no|not sure|don'?t know|maybe|n/?a|none|never|always|sometimes|often|rarely)\b"
+    r"|\b(very|somewhat|extremely|slightly|not at all|neither|strongly|"
+    r"likely|unlikely|satisfied|dissatisfied|familiar|agree|disagree|"
+    r"more than|less than|within the past|i'?ve heard|i know)\b",
+    re.I,
+)
 _WRITE_IN = re.compile(r"\(\s*specify\s*\)|\bnot listed\b|^another\b", re.I)
+
+
+def pointed_nouns(text: str) -> list[str]:
+    """The things a wording points back at: "these pharmacies" -> [pharmacies].
+
+    Reads the words just after "these"/"the following"/"those", nearest first,
+    so "these skincare brands" answers "brands" before "skincare" and either
+    can find the earlier question that listed them.
+    """
+    found: list[str] = []
+    for match in _POINTS_AT_A_LIST.finditer(text or ""):
+        window = (text or "")[match.end() : match.end() + 40]
+        phrase: list[str] = []
+        # Two letters is enough: "of", "in", "to" END a noun phrase, and a
+        # tokenizer that cannot see them reads "ways of getting prescriptions"
+        # as one long name.
+        for word in re.findall(r"[A-Za-z][A-Za-z-]+", window):
+            if word.lower() in _PHRASE_ENDS:
+                break  # the noun phrase is over: "these pharmacies HAVE you…"
+            phrase.append(word.lower())
+        # "these skincare brands" names brands, of which skincare is the kind.
+        for word in reversed(phrase[:3]):
+            if word not in found:
+                found.append(word)
+    return found
 
 
 def points_at_a_list(text: str) -> bool:
     """True when the wording rates several things ("each of these brands")."""
-    return bool(_POINTS_AT_A_LIST.search(text or ""))
+    return bool(pointed_nouns(text))
 
 
 def _items(source: Question) -> list[Option]:
@@ -160,15 +218,38 @@ def _named_source(q: Question, by_upper: dict[str, Question]) -> Question | None
     return None
 
 
+def _stems(noun: str) -> set[str]:
+    """The forms of a noun a document might use: pharmacies / pharmacy."""
+    forms = {noun}
+    if noun.endswith("ies"):
+        forms.add(noun[:-3] + "y")
+    elif noun.endswith("es"):
+        forms.add(noun[:-2])
+    if noun.endswith("s"):
+        forms.add(noun[:-1])
+    return {f for f in forms if len(f) >= 3}
+
+
+def _looks_like_a_scale(question: Question) -> bool:
+    """True when this question's answers are degrees, not things."""
+    items = _items(question)
+    if len(items) < 2:
+        return False
+    scale_like = sum(1 for o in items if _SCALE_WORD.search(o.label or ""))
+    return scale_like >= max(2, len(items) // 2)
+
+
 def _nearest_list(q: Question, before: list[Question]) -> Question | None:
     """The closest earlier list of the kind the wording points at."""
-    pointed = _POINTS_AT_A_LIST.search(q.text or "")
-    if not pointed:
+    nouns = pointed_nouns(q.text or "")
+    if not nouns:
         return None
-    kind = pointed.group(1).lower().rstrip("s")  # brand / statement / store
-    for candidate in reversed(before):
-        if len(_items(candidate)) < _MIN_LIST:
-            continue
-        if kind in (candidate.text or "").lower():
-            return candidate
+    for noun in nouns:  # nearest word first: "these skincare BRANDS"
+        forms = _stems(noun)
+        for candidate in reversed(before):
+            if len(_items(candidate)) < _MIN_LIST or _looks_like_a_scale(candidate):
+                continue
+            text = (candidate.text or "").lower()
+            if any(form in text for form in forms):
+                return candidate
     return None

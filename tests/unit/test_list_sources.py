@@ -231,3 +231,101 @@ def test_the_last_place_in_a_ranking_is_piped_too():
                        {"source_qid": "Q8", "name": None, "verbatim": "INSERT Q8"}]}})
     compiled = compile_to_surveyjs(_survey(q8, q8a))
     assert compiled["pipeVariables"] == [{"name": "Q8_ranklast", "qid": "Q8", "position": -1}]
+
+
+def test_a_list_is_pointed_at_by_whatever_the_document_calls_it():
+    """The rule used to know four nouns — brands, statements, stores, products.
+
+    A live healthcare study asked about "these pharmacies" and matched none of
+    them, so eight questions fielded with nothing for a respondent to pick.
+    Whatever a document calls the things it lists, the question after it says
+    "these <that word>"; that holds in every category, and hard-coding the
+    category is how a parser silently only works for the last client.
+    """
+    pharmacies = [
+        Option(code=i, label=name) for i, name in enumerate(
+            ["Amazon Pharmacy", "Capsule", "CVS", "Walgreens", "Rite Aid"], start=1)
+    ]
+    listed = Question(
+        qid="Q3", text="Here is a list of different pharmacies. Which have you heard of?",
+        type=QuestionType.MULTI, options=pharmacies,
+    )
+    advertised = Question(
+        qid="Q4", text="And which, if any, of these pharmacies have you seen advertising for?",
+        type=QuestionType.MULTI, options=[],
+    )
+    preferred = Question(
+        qid="Q8", text="Which of these pharmacies would you prefer as your primary pharmacy?",
+        type=QuestionType.RANK, options=[],
+    )
+    survey = SurveyDefinition(
+        study_id="T", source="extracted", status="approved",
+        blocks=[Block(block_id="B", question_ids=["Q3", "Q4", "Q8"])],
+        questions=[listed, advertised, preferred],
+    )
+    fill_lists(survey)
+
+    assert [o.label for o in survey["Q4"].options] == [o.label for o in pharmacies]
+    assert [o.label for o in survey["Q8"].options] == [o.label for o in pharmacies]
+    # Borrowed, not stated: a person still confirms which list it is.
+    assert schema.FLAG_LIST_INHERITED in survey["Q4"].flags
+
+
+def test_the_noun_phrase_stops_where_the_sentence_carries_on():
+    """"these pharmacies have you seen" names pharmacies, not "have" or "you" —
+    matching those against earlier wording would find a "list" in almost any
+    question, and the wrong list decides the data columns."""
+    from src.engines.questionnaire.list_sources import pointed_nouns
+
+    assert pointed_nouns("of these pharmacies have you seen advertising?") == ["pharmacies"]
+    assert pointed_nouns("each of the following ways of getting prescriptions") == ["ways"]
+    # "skincare brands" is a kind of brand: the head noun is tried first.
+    assert pointed_nouns("Which of these skincare brands have you heard of?") == [
+        "brands", "skincare"]
+
+
+def test_wording_that_points_at_nothing_borrows_nothing():
+    from src.engines.questionnaire.list_sources import pointed_nouns
+
+    assert pointed_nouns("Please answer the following questions about your household") == []
+    assert pointed_nouns("Which of these do you prefer?") == []
+    assert pointed_nouns("What is your age?") == []
+
+
+def test_a_scale_is_never_borrowed_as_the_list():
+    """Caught before shipping, against the live study: "How likely are you to
+    recommend each of these pharmacies?" mentions pharmacies and sits nearer
+    than the list does, so the borrowed "pharmacies" were Yes / No / Not sure.
+
+    That is worse than an empty question — it looks answerable and writes the
+    wrong columns into the data file."""
+    listed = Question(
+        qid="Q3", text="Here is a list of different pharmacies. Which have you heard of?",
+        type=QuestionType.MULTI,
+        options=[Option(code=i, label=n) for i, n in enumerate(
+            ["Amazon Pharmacy", "Capsule", "CVS", "Walgreens"], start=1)],
+    )
+    aware_of_one = Question(
+        qid="Q3b", text="You mentioned being aware of CVS. Have you heard of CVS Specialty?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=1, label="Yes"), Option(code=2, label="No"),
+                 Option(code=3, label="Not sure")],
+    )
+    likelihood = Question(
+        qid="Q7", text="How likely are you to recommend each of these pharmacies?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=1, label="Very likely"), Option(code=2, label="Somewhat likely"),
+                 Option(code=3, label="Not at all likely")],
+    )
+    preferred = Question(
+        qid="Q8", text="Which of these pharmacies would you prefer as your primary pharmacy?",
+        type=QuestionType.RANK, options=[],
+    )
+    survey = SurveyDefinition(
+        study_id="T", source="extracted", status="approved",
+        blocks=[Block(block_id="B", question_ids=["Q3", "Q3b", "Q7", "Q8"])],
+        questions=[listed, aware_of_one, likelihood, preferred],
+    )
+    fill_lists(survey)
+    assert [o.label for o in survey["Q8"].options] == [
+        "Amazon Pharmacy", "Capsule", "CVS", "Walgreens"]

@@ -1364,6 +1364,12 @@ export default function QuestionnairePage() {
     <div>
       {/* Header */}
       <div className="mb-6">
+        <Link
+          to={`/projects/${studyId}/fielding`}
+          className="float-right text-sm font-medium text-primary-500 hover:text-primary-600"
+        >
+          Field monitor →
+        </Link>
         <Link to={`/projects/${studyId}`} className="text-sm text-slate-500 hover:text-slate-700">
           ← Back to project
         </Link>
@@ -1523,8 +1529,16 @@ export default function QuestionnairePage() {
             </div>
           )}
           {approvedOk && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3 mb-4 text-sm text-emerald-700">
-              Questionnaire approved.
+            <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3 mb-4 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-sm text-emerald-700">
+                Questionnaire approved. The data map is fixed — fielding is the next step.
+              </span>
+              <Link
+                to={`/projects/${studyId}/fielding`}
+                className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+              >
+                Go to fielding →
+              </Link>
             </div>
           )}
 
