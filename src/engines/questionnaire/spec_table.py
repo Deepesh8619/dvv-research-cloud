@@ -29,6 +29,7 @@ import re
 from dataclasses import dataclass, field
 
 from src.core.survey_definition import Expression, Option, QuestionType
+from src.engines.questionnaire import option_directives
 from src.engines.questionnaire.learned import (
     LearnedPattern,
     learned_field,
@@ -215,6 +216,12 @@ class SpecTableFields:
     # Labels we did not recognise, kept so an unknown client convention is
     # visible (and teachable via the correction loop) rather than silently lost.
     extras: dict[str, str] = field(default_factory=dict)
+    #: "[IF GOOGLE ADS CURRENT USER]" under answer 1: which answers carry a
+    #: base of their own, and whether the wording named its source question.
+    option_bases: list[dict] = field(default_factory=list)
+    #: "[INSERT ... FROM DA_PLATFORM_USAGE 9-15]": the list continues with
+    #: another question's codes. Read by the pass that fills lists.
+    list_from: list[dict] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
     # field -> the exact row or fragment that decided it, so the review UI can
     # cite the source rather than asking a reviewer to trust the parse.
@@ -423,6 +430,10 @@ def parse_spec_table(
     options: list[Option] = []
     row_items: list[Option] = []
     unlabelled: list[str] = []
+    #: The answer a bracketed directive would belong to, and what was found.
+    last_option: Option | None = None
+    option_bases: list[dict] = []
+    list_sources_found: list[dict] = []
     seen_qid_row = False
     in_row_list = False
     in_list = False
@@ -456,6 +467,7 @@ def parse_spec_table(
             if value:
                 target = row_items if in_row_list else options
                 target.append(Option(code=int(cells[0]), label=value))
+                last_option = target[-1]
             continue
 
         name = _field_for(cells[0], patterns)
@@ -470,6 +482,19 @@ def parse_spec_table(
             # A labelled row whose label we do not recognise yet.
             extras[cells[0]] = _value_of(row)
         elif seen_qid_row and len(cells) == 1:
+            # A bracketed line UNDER an answer belongs to that answer:
+            # "1: Google Ads" then "[IF GOOGLE ADS CURRENT USER]". Read as an
+            # answer of its own it became a punch code in the data file and a
+            # choice on the respondent's screen.
+            directive = option_directives.read(cells[0])
+            if directive and last_option is not None and directive["kind"] == "base":
+                option_directives.attach(last_option, cells[0])
+                option_bases.append({"code": last_option.code, "verbatim": directive["verbatim"],
+                                     "resolved": last_option.show_if is not None})
+                continue
+            if directive and directive["kind"] == "list_from":
+                list_sources_found.append(directive)
+                continue
             low = cells[0].lower()
             if not any(low.startswith(m) for m in _LIST_MARKERS):
                 unlabelled.append(cells[0])
@@ -499,6 +524,8 @@ def parse_spec_table(
         randomize=found.get("randomize") or None,
         notes=notes or None,
         extras=extras,
+        option_bases=option_bases,
+        list_from=list_sources_found,
     )
     fields.qtype, type_evidence = _infer_type(
         found.get("type", ""), options, text, patterns
