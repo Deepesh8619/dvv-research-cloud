@@ -1103,3 +1103,80 @@ def test_the_wave_is_identified_by_filename_and_version(client) -> None:
     assert body["source_filename"] == "Wave 2 QRE.docx"
     assert body["version"] == 1
     assert body["created_at"]
+
+
+# --- reading the document beside the extraction ------------------------------
+
+
+def _real_docx_bytes() -> bytes:
+    """A genuine .docx, since the renderer actually opens the file."""
+    import io
+
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph("Q1. What is your age?")
+    struck = doc.add_paragraph()
+    run = struck.add_run("Q2. Which pharmacy did you use last?")
+    run.font.strike = True
+    doc.add_paragraph("Q3. How satisfied were you?")
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    return buffer.getvalue()
+
+
+def test_the_document_can_be_read_beside_what_we_extracted(client) -> None:
+    """A reviewer comparing our reading to the source needs to SEE the source.
+
+    Colour and strikethrough are carrying information the parser drops on
+    purpose — a struck-out question is this wave's edit, and a highlight after
+    an option label is how these documents point at a hidden variable.
+    """
+    test_client, SessionLocal, _ = client
+    _make_study(SessionLocal)
+    test_client.post(
+        "/api/studies/study_q1/questionnaire/upload",
+        files={"file": ("Wave 2 QRE.docx", _real_docx_bytes(), "application/octet-stream")},
+    )
+    _wait_draft(test_client)
+
+    resp = test_client.get("/api/studies/study_q1/questionnaire/source/rendered")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["filename"] == "Wave 2 QRE.docx"
+    assert body["n_blocks"] >= 2
+    # The struck-out question is SHOWN — that is what a reviewer is looking for.
+    assert "Q2. Which pharmacy did you use last?" in body["html"]
+    assert 'id="b0"' in body["html"]
+
+
+def test_reading_a_pdf_side_by_side_says_so_rather_than_failing(client) -> None:
+    test_client, SessionLocal, _ = client
+    _make_study(SessionLocal)
+    _upload(test_client, filename="screener.pdf")
+    _wait_draft(test_client)
+
+    resp = test_client.get("/api/studies/study_q1/questionnaire/source/rendered")
+    assert resp.status_code == 415
+    assert "pdf" in resp.json()["detail"].lower()
+
+
+def test_a_document_that_cannot_be_opened_says_which_it_is(client) -> None:
+    """The bytes are not a Word file. That is a fact about the file."""
+    test_client, SessionLocal, _ = client
+    _make_study(SessionLocal)
+    _upload(test_client)  # uploads b"dummy-bytes"
+    _wait_draft(test_client)
+
+    resp = test_client.get("/api/studies/study_q1/questionnaire/source/rendered")
+    assert resp.status_code == 422
+    assert "could not be opened" in resp.json()["detail"].lower()
+
+
+def test_reading_says_what_to_do_when_nothing_was_archived(client) -> None:
+    test_client, SessionLocal, _ = client
+    _make_study(SessionLocal)
+
+    resp = test_client.get("/api/studies/study_q1/questionnaire/source/rendered")
+    assert resp.status_code == 404

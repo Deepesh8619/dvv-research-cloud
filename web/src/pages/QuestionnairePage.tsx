@@ -19,6 +19,7 @@ import CorrectionBox from '../components/CorrectionBox'
 import ExtractionProvenance from '../components/ExtractionProvenance'
 import TeachFormat from '../components/TeachFormat'
 import ReadPanel from '../components/review/ReadPanel'
+import SourcePane from '../components/review/SourcePane'
 import Lessons from '../components/review/Lessons'
 import { useLabel } from '../labels/LabelContext'
 import { BucketBar, ConnectionsPanel, IssuesPanel, ProgressRing } from '../components/review/QuestionMap'
@@ -1072,6 +1073,8 @@ export default function QuestionnairePage() {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [selectedQid, setSelectedQid] = useState<string | null>(null)
+  // The client's document, open beside our reading of it.
+  const [sourceOpen, setSourceOpen] = useState(false)
   // Bumped by the blank-question triage's "+ Options from…" link so the
   // Connections panel above (a sibling, owning its own add-link form) opens
   // it. Reset on every question switch so a stale bump never reopens it on
@@ -1542,15 +1545,29 @@ export default function QuestionnairePage() {
             </div>
           )}
 
-          <div className="grid grid-cols-5 gap-6">
+          <div className={`grid gap-6 ${sourceOpen ? 'grid-cols-8' : 'grid-cols-5'}`}>
             {/* List */}
             <div className="col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
               <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between">
                 <span className="text-sm font-semibold text-slate-800 tabular-nums">
                   {bucket === 'all' ? `${questions.length} questions` : `${visible.length} of ${questions.length}`}
                 </span>
+                <div className="flex items-center gap-2">
+                  {/* Reading the client's document is not a write action, and a
+                      read-only reviewer is exactly who checks our reading. */}
+                  <button
+                    onClick={() => setSourceOpen((open) => !open)}
+                    title="Open the client's document beside this — colour, highlights and strikethrough kept"
+                    className={`text-xs font-medium px-3 py-1.5 rounded-md border ${
+                      sourceOpen
+                        ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {sourceOpen ? 'Hide document' : 'Show document'}
+                  </button>
                 {canWrite && (
-                  <div className="flex items-center gap-2">
+                  <>
                     <button
                       onClick={handleRereadAll}
                       disabled={rereadingAll || questions.length === 0}
@@ -1575,8 +1592,9 @@ export default function QuestionnairePage() {
                     >
                       {approvingAll ? 'Finalizing…' : 'Finalize'}
                     </button>
-                  </div>
+                  </>
                 )}
+                </div>
               </div>
               {Object.keys(bucketCounts).length > 0 && (
                 <div className="border-b border-slate-100 bg-slate-50/60">
@@ -1673,6 +1691,21 @@ export default function QuestionnairePage() {
                 </div>
               )}
             </div>
+
+            {/* The document itself. Its own column and its own scroll: the two
+                readings do not run at the same speed, one being a card per
+                question and the other pages of prose. */}
+            {sourceOpen && (
+              <div className="col-span-3">
+                <div className="sticky top-4 h-[calc(100vh-7rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <SourcePane
+                    studyId={studyId!}
+                    sourceLocation={selected?.source_location}
+                    onClose={() => setSourceOpen(false)}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

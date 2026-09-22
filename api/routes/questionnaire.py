@@ -592,6 +592,65 @@ def download_questionnaire_source(
     )
 
 
+@router.get("/studies/{study_id}/questionnaire/source/rendered")
+def rendered_questionnaire_source(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The document as the client wrote it, for reading beside the extraction.
+
+    The parser keeps the meaning and drops the presentation, and the
+    presentation is carrying information: a highlight after an option label is
+    how these documents say "a hidden variable sits behind this one", and red
+    strikethrough is this wave's edits to last wave's script. A reviewer
+    comparing the two needs to see both.
+
+    Anchored to the loader's own block indices, so a question whose provenance
+    reads "para 47" scrolls to `#b47`.
+    """
+    questionnaire = _latest_questionnaire(db, study_id)
+    if not questionnaire:
+        raise HTTPException(
+            status_code=404, detail="No questionnaire has been uploaded for this project"
+        )
+    if not questionnaire.source_file_b64:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "This questionnaire was uploaded before documents were archived, "
+                "so there is no copy to show. Re-upload it to read it here."
+            ),
+        )
+    filename = questionnaire.source_filename or ""
+    if filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=415,
+            detail="Only Word documents can be read side by side; this one is a PDF.",
+        )
+
+    import tempfile
+    from pathlib import Path as _Path
+
+    from src.intake.document_html import render_docx
+
+    with tempfile.TemporaryDirectory() as folder:
+        path = _Path(folder) / "source.docx"
+        path.write_bytes(decompress_archived(questionnaire.source_file_b64))
+        try:
+            rendered = render_docx(path)
+        except Exception as exc:
+            # A document python-docx cannot open is a fact about the file, not
+            # a server fault — and the reviewer needs to know which.
+            logger.warning("could not render %s for reading: %s", questionnaire.id, exc)
+            raise HTTPException(
+                status_code=422,
+                detail="This document could not be opened for reading side by side.",
+            ) from exc
+
+    return {"filename": filename, **rendered.to_dict()}
+
+
 @router.post(
     "/studies/{study_id}/questionnaire/authored",
     response_model=QuestionnaireStatusResponse,
