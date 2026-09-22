@@ -162,3 +162,77 @@ def test_a_grid_with_no_rows_is_caught():
     ok = ExtractionResult(question=q, confidence={})
     _validate_question(ok, {})
     assert schema.FLAG_EMPTY_OPTIONS not in ok.flags
+
+
+def test_a_question_asked_about_each_thing_that_kept_only_one_answer_is_found():
+    """From the live pharmacy study: "How familiar are you with each of these
+    pharmacies?" came back as a single-choice question whose options were the
+    familiarity scale. The pharmacies were gone — no column for any of them,
+    and a respondent asked to rate thirteen with one click.
+
+    Nothing in the instrument says this is wrong: the question has a type,
+    options and a valid data column. Only the wording gives it away."""
+    flattened = Question(
+        qid="Q5", text="How familiar are you with each of these pharmacies?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=i, label=label) for i, label in enumerate(
+            ["I know a little", "I know some things", "I know them well"], start=1)],
+    )
+    survey = SurveyDefinition(
+        study_id="T", source="extracted", status="approved",
+        blocks=[Block(block_id="B", question_ids=["Q5"])], questions=[flattened],
+    )
+    assert [f.check for f in audit_definition(survey)] == ["per_item_question_flattened"]
+
+
+def test_a_grid_that_kept_its_items_is_not_flagged():
+    kept = Question(
+        qid="Q13", text="When did you last use each of these pharmacies?",
+        type=QuestionType.GRID_SINGLE,
+        rows=[Option(code=1, label="CVS"), Option(code=2, label="Walgreens")],
+        cols=[Option(code=1, label="This month"), Option(code=2, label="Longer ago")],
+    )
+    survey = SurveyDefinition(
+        study_id="T", source="extracted", status="approved",
+        blocks=[Block(block_id="B", question_ids=["Q13"])], questions=[kept],
+    )
+    assert audit_definition(survey) == []
+
+
+def test_a_mask_pointing_at_a_yes_no_question_cannot_be_narrowing_a_brand_list():
+    """Also live: thirteen pharmacy rows masked against a two-answer question.
+    Whatever that mask is doing, it is not what it says — and the reason is
+    that the source USED to be a per-pharmacy grid before extraction
+    flattened it."""
+    yes_no = Question(
+        qid="Q4a", text="Have you used these pharmacies?", type=QuestionType.SINGLE,
+        options=[Option(code=1, label="Yes"), Option(code=2, label="No")],
+    )
+    recency = Question(
+        qid="Q13", text="When did you last use each one?", type=QuestionType.GRID_SINGLE,
+        rows=[Option(code=i, label=f"Pharmacy {i}") for i in range(1, 14)],
+        cols=[Option(code=1, label="Recently"), Option(code=2, label="Longer ago")],
+        validation={"techniques": {"masks": [{"mode": "selected", "source_qid": "Q4a"}]}},
+    )
+    survey = SurveyDefinition(
+        study_id="T", source="extracted", status="approved",
+        blocks=[Block(block_id="B", question_ids=["Q4a", "Q13"])], questions=[yes_no, recency],
+    )
+    assert "mask_cannot_narrow" in [f.check for f in audit_definition(survey)]
+
+
+def test_a_mask_against_a_list_of_the_same_size_is_left_alone():
+    aware = Question(
+        qid="Q3", text="Which of these pharmacies have you heard of?", type=QuestionType.MULTI,
+        options=[Option(code=i, label=f"Pharmacy {i}") for i in range(1, 11)],
+    )
+    used = Question(
+        qid="Q4", text="Which have you used?", type=QuestionType.MULTI,
+        options=[Option(code=i, label=f"Pharmacy {i}") for i in range(1, 11)],
+        validation={"techniques": {"masks": [{"mode": "selected", "source_qid": "Q3"}]}},
+    )
+    survey = SurveyDefinition(
+        study_id="T", source="extracted", status="approved",
+        blocks=[Block(block_id="B", question_ids=["Q3", "Q4"])], questions=[aware, used],
+    )
+    assert "mask_cannot_narrow" not in [f.check for f in audit_definition(survey)]

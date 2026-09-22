@@ -184,6 +184,8 @@ export default function RespondentPage() {
   const terminatedRef = useRef(false)
   // Test-link jump-to-question (see api/routes/fielding.py jump_to_question).
   const [isTest, setIsTest] = useState(false)
+  // Read inside async handlers, where state would be the value they closed over.
+  const isTestRef = useRef(false)
   const [jumping, setJumping] = useState(false)
   const [jumpNote, setJumpNote] = useState<string | null>(null)
   const [jumpError, setJumpError] = useState<string | null>(null)
@@ -227,6 +229,7 @@ export default function RespondentPage() {
         }
         sessionIdRef.current = res.data.session_id
         setIsTest(!!res.data.is_test)
+        isTestRef.current = !!res.data.is_test
         const surveyTheme = themeFor(res.data.theme)
         const survey = new Model(res.data.surveyjs_json)
         const pipeVariables = (res.data.surveyjs_json as { pipeVariables?: PipeVariable[] })
@@ -327,28 +330,47 @@ export default function RespondentPage() {
     }
 
     // Posts sender.data to the server; returns true if the server terminated us.
+    //
+    // Tried twice. A deploy restarts the app for a few seconds, and a
+    // respondent who happens to answer during those seconds was being shown
+    // an error screen and lost — a paid-for interview thrown away by a
+    // routine upgrade. One retry rides over that; a second failure is real
+    // and is shown.
     const submitPage = async (sender: Model, pageNo: number): Promise<boolean> => {
       if (!token || terminatedRef.current) return terminatedRef.current
-      try {
-        const res = await fieldingApi.answers(
-          token,
-          sessionIdRef.current,
-          sender.data as Record<string, unknown>,
-          pageNo,
-        )
-        if (res.data.terminated) {
-          terminatedRef.current = true
-          setPhase('terminated') // unmounts <Survey/> -> survey halts immediately
-          goRedirect(res.data.redirect_url)
-          return true
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const res = await fieldingApi.answers(
+            token,
+            sessionIdRef.current,
+            sender.data as Record<string, unknown>,
+            pageNo,
+          )
+          if (res.data.terminated) {
+            terminatedRef.current = true
+            setPhase('terminated') // unmounts <Survey/> -> survey halts immediately
+            goRedirect(res.data.redirect_url)
+            return true
+          }
+          return false
+        } catch (err) {
+          if (attempt === 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, 900))
+            continue
+          }
+          // A respondent is told something they can act on. A TESTER is told
+          // what the server said — without it, "check your connection" sends
+          // a real defect back as a network complaint.
+          const status = (err as { response?: { status?: number } })?.response?.status
+          setError(
+            'We hit a problem saving your answers. Please check your connection.' +
+              (isTestRef.current && status ? ` (the server returned ${status})` : ''),
+          )
+          setPhase('error')
+          return false
         }
-        return false
-      } catch {
-        // A transient save failure must be visible, not silent.
-        setError('We hit a problem saving your answers. Please check your connection.')
-        setPhase('error')
-        return false
       }
+      return false
     }
 
     load()

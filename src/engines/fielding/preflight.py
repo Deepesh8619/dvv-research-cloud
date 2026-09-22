@@ -27,6 +27,7 @@ from typing import Any
 from src.core.survey_definition import QuestionType, SurveyDefinition
 from src.engines.fielding.dryrun import simulate
 from src.engines.questionnaire import schema
+from src.engines.questionnaire.definition_audit import audit_definition
 from src.renderers.surveyjs_compiler import display_warnings
 
 PASS, WARN, FAIL = "pass", "warn", "fail"
@@ -37,6 +38,22 @@ _UNCONFIRMED = {
     schema.FLAG_DERIVED_VARIABLE_UNCONFIRMED: "read as a hidden variable from its wording alone",
 }
 _DRY_RUN_N = 300
+
+
+#: A finding's check id, said as the thing a reviewer is looking for.
+_AUDIT_LABELS = {
+    "per_item_question_flattened": "Questions asked about EACH thing still have their items",
+    "mask_cannot_narrow": "Every mask points at the list it narrows",
+    "prose_as_option": "No paragraph is stored as an answer",
+    "scripter_tag_in_label": "No scripter tag is left in an answer label",
+    "base_stated_but_not_applied": "Every base the document states is applied",
+    "base_stated_in_words_only": "No base is left as prose",
+    "section_path_unapplied": "Every section path is applied",
+    "self_referential_base": "No question is its own base",
+    "exclusive_on_single": "No exclusive option on a single-choice question",
+    "option_base_unsupported": "Every option-level base is supported",
+    "screening_requirement_not_enforced": "Every screening requirement is enforced",
+}
 
 
 @dataclass
@@ -114,6 +131,17 @@ def preflight(
         Check("guesses", "Nothing the system inferred is left unconfirmed"), unconfirmed, WARN,
         "Each is " + " or ".join(sorted(set(_UNCONFIRMED.values()))) + ".",
     ))
+
+    # The defect fingerprints an extraction leaves behind. These were computed
+    # by a script nobody ran; a pattern that says "the per-pharmacy grid was
+    # flattened into one answer" belongs in front of the person about to open
+    # a link, not in a CLI. Warnings, not failures: each is a strong signal
+    # rather than a certainty, and a reviewer who has looked can proceed.
+    for finding in audit_definition(survey):
+        checks.append(_result(
+            Check(f"audit_{finding.check}", _AUDIT_LABELS.get(finding.check, finding.check)),
+            finding.qids, WARN, finding.detail,
+        ))
 
     warnings = display_warnings(survey)
     checks.append(_result(
