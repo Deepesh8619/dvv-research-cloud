@@ -533,6 +533,15 @@ export const codingApi = {
     ),
 }
 
+/** A questionnaire document rendered for reading side by side. */
+export interface RenderedSource {
+  filename: string
+  /** Server-built markup: every character of the document is escaped there,
+      and only tags and classes this app defines are emitted. */
+  html: string
+  n_blocks: number
+}
+
 export const questionnaireApi = {
   status: async (studyId: string) =>
     api.get<QuestionnaireStatus>(`/studies/${studyId}/questionnaire`),
@@ -552,6 +561,11 @@ export const questionnaireApi = {
       copy, so it still works after a restart has wiped the disk. */
   downloadSource: (studyId: string, fallbackName: string) =>
     downloadFile(`/studies/${studyId}/questionnaire/source`, fallbackName),
+
+  /** The same document rendered for READING beside the extraction: colour,
+      highlight and strikethrough kept, anchored to the parser's block ids. */
+  renderedSource: async (studyId: string) =>
+    api.get<RenderedSource>(`/studies/${studyId}/questionnaire/source/rendered`),
 
   upload: async (studyId: string, file: File, onProgress?: (pct: number) => void) => {
     const formData = new FormData()

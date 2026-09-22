@@ -57,3 +57,43 @@ input, textarea, select {
 @media (prefers-reduced-motion: reduce) {
   .dvv-rise, .dvv-pop, .dvv-cascade > * { animation: none; }
 }
+
+/* The client's document, rendered for reading beside our extraction. The
+   classes here are the ONLY ones src/intake/document_html.py emits; the
+   document's own text is escaped server-side and never becomes markup. */
+.dvv-src { line-height: 1.55; color: theme('colors.slate.800'); }
+.dvv-src .dvv-blk { margin: 0 0 0.5em; scroll-margin-block: 2rem; }
+.dvv-src h3.dvv-blk { font-weight: 700; margin-top: 1.1em; }
+.dvv-src .dvv-b { font-weight: 700; }
+.dvv-src .dvv-i { font-style: italic; }
+.dvv-src .dvv-u { text-decoration: underline; }
+/* Struck by hand, and Word's own tracked deletion: both mean "taken out of
+   the survey". Shown, because "the brand is missing" and "the brand was
+   struck out" are different problems and a reviewer must tell them apart. */
+.dvv-src .dvv-struck, .dvv-src .dvv-del { text-decoration: line-through; opacity: 0.55; }
+.dvv-src .dvv-ins { text-decoration: underline; text-decoration-style: dotted; }
+/* A paragraph struck out ENTIRELY — the parser dropped it. */
+.dvv-src .dvv-gone { opacity: 0.5; border-left: 2px solid theme('colors.red.300'); padding-left: 0.5rem; }
+.dvv-src .dvv-tbl { border-collapse: collapse; width: 100%; margin: 0.5em 0 0.9em; }
+.dvv-src .dvv-tbl td {
+  border: 1px solid theme('colors.slate.200');
+  padding: 0.25rem 0.4rem;
+  vertical-align: top;
+}
+/* Word's own highlight palette, which is a fixed list — these are the only
+   names the renderer will emit. */
+.dvv-src .dvv-hl-yellow { background: #fff59d; }
+.dvv-src .dvv-hl-green, .dvv-src .dvv-hl-darkGreen { background: #b9f6ca; }
+.dvv-src .dvv-hl-cyan, .dvv-src .dvv-hl-darkCyan { background: #b2ebf2; }
+.dvv-src .dvv-hl-magenta, .dvv-src .dvv-hl-darkMagenta { background: #f8bbd0; }
+.dvv-src .dvv-hl-blue, .dvv-src .dvv-hl-darkBlue { background: #bbdefb; }
+.dvv-src .dvv-hl-red, .dvv-src .dvv-hl-darkRed { background: #ffcdd2; }
+.dvv-src .dvv-hl-darkYellow { background: #ffe082; }
+.dvv-src .dvv-hl-darkGray, .dvv-src .dvv-hl-lightGray { background: #e0e0e0; }
+.dvv-src .dvv-hl-black { background: #cfd8dc; }
+/* The block the selected question was read from. */
+.dvv-src .dvv-here {
+  background: theme('colors.indigo.50');
+  box-shadow: -3px 0 0 theme('colors.indigo.400');
+  border-radius: 2px;
+}
