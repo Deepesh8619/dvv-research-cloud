@@ -100,6 +100,11 @@ _BLOCKING_FLAGS = frozenset(
         # question and must block whole-questionnaire approval too.
         "EXTRACTION_CONFIG_ERROR",
         "EXTRACTION_MODEL_ERROR",
+        # A MaxDiff/conjoint block: the platform cannot field it. Blocking so
+        # nobody finalises a questionnaire containing one by accident; clearable
+        # by approving the question, which is a reviewer saying "I know, it is
+        # being scripted elsewhere".
+        "TRADE_OFF_UNSUPPORTED",
     }
 )
 

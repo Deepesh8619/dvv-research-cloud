@@ -65,6 +65,13 @@ export const FLAG_INFO: Record<string, FlagInfo> = {
     blocking: false,
     severity: 'warn',
   },
+  TRADE_OFF_UNSUPPORTED: {
+    label: 'Trade-off exercise — not supported',
+    description:
+      'This is a MaxDiff or conjoint block: an experimental design, not a question. Each respondent should see a different subset of items generated from a balanced design, and the result is a utility model rather than counts — neither of which exists here. Fielded as it stands, every respondent would see the same static screen and the export could not be analysed. Script this block in a tool that does trade-off designs. Approving the question clears the flag and fields the rest of the survey without it.',
+    blocking: true,
+    severity: 'error',
+  },
   LIST_INHERITED: {
     label: 'List copied — check',
     description:

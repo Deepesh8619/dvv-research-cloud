@@ -28,6 +28,8 @@ from src.core.survey_definition import QuestionType, SurveyDefinition
 from src.engines.fielding.dryrun import simulate
 from src.engines.questionnaire import schema
 from src.engines.questionnaire.definition_audit import audit_definition
+from src.engines.questionnaire.trade_off import WHY as TRADE_OFF_WHY
+from src.engines.questionnaire.trade_off import technique as trade_off_technique
 from src.renderers.surveyjs_compiler import display_warnings
 
 PASS, WARN, FAIL = "pass", "warn", "fail"
@@ -110,7 +112,15 @@ def preflight(
         "These would reach a respondent with nothing to pick.",
     ))
 
-    blocked = [q.qid for q in survey.questions if blocking_flags & set(q.flags or ())]
+    # A trade-off exercise is reported on its own, below, because it needs a
+    # different sentence: not "confirm the routing" but "this cannot be
+    # fielded here". Questions carrying nothing else stay out of the generic
+    # count so the same question is not raised twice in two different ways.
+    trade_offs = {q.qid: t for q in survey.questions if (t := trade_off_technique(q))}
+    blocked = [
+        q.qid for q in survey.questions
+        if blocking_flags & (set(q.flags or ()) - {schema.FLAG_TRADE_OFF_UNSUPPORTED})
+    ]
     signed_off = approved_qids or set()
     open_flags = [qid for qid in blocked if qid not in signed_off]
     if open_flags:
@@ -125,6 +135,20 @@ def preflight(
             Check("flags", "No unresolved blocking flags"), blocked, WARN,
             "Approved with a routing flag still open — confirm the routing is what you meant.",
         ))
+
+    # Refused rather than guessed at: the platform has no experimental design
+    # generator, and a trade-off block fielded without one produces a file that
+    # looks like data and cannot be modelled. A reviewer who is scripting the
+    # exercise elsewhere clears it by approving the question.
+    open_trade_offs = [qid for qid in trade_offs if qid not in signed_off]
+    checks.append(_result(
+        Check("trade_off", "No question is a trade-off exercise this cannot field"),
+        open_trade_offs, FAIL,
+        "; ".join(
+            f"{qid} is {TRADE_OFF_WHY[trade_offs[qid]]}" for qid in sorted(open_trade_offs)[:2]
+        ) + " Script it in a tool that does trade-off designs, or approve the question "
+            "to field the rest without it.",
+    ))
 
     unconfirmed = [q.qid for q in survey.questions if _UNCONFIRMED.keys() & set(q.flags or ())]
     checks.append(_result(

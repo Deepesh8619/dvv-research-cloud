@@ -68,6 +68,12 @@ FLAG_DERIVED_VARIABLE_UNCONFIRMED = "DERIVED_VARIABLE_UNCONFIRMED"
 # ("each of these brands") but does not name. Usually right; the list decides
 # the data columns, so a reviewer confirms which one.
 FLAG_LIST_INHERITED = "LIST_INHERITED"
+# A MaxDiff or conjoint block: an experimental design, not a question. The
+# platform has no design generator and no utility model, so fielding it would
+# show every respondent the same static screen and export a file the analyst
+# cannot model. Blocking, and cleared only by a reviewer who has decided to
+# script the exercise elsewhere.
+FLAG_TRADE_OFF_UNSUPPORTED = "TRADE_OFF_UNSUPPORTED"
 
 
 # --- Extraction schema ------------------------------------------------------
