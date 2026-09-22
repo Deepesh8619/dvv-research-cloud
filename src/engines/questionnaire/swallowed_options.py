@@ -54,7 +54,15 @@ def repair_swallowed_options(survey: SurveyDefinition) -> list[str]:
 
 
 def _repair(question: Any) -> bool:
-    if question.type not in (QuestionType.SINGLE, QuestionType.MULTI):
+    if question.type is QuestionType.GRID_SINGLE:
+        # Typed a grid, holding one answer and neither rows nor columns: the
+        # shape of a yes/no question whose "Yes" was eaten by the wording.
+        # Q4a of the live pharmacy study is exactly this, and skipping it
+        # because of the type left the question with "No" as its only answer.
+        if question.rows or question.cols or len(question.options or []) != 1:
+            return False
+        question.type = QuestionType.SINGLE
+    elif question.type not in (QuestionType.SINGLE, QuestionType.MULTI):
         return False
     labels = [(o.label or "").strip().lower() for o in (question.options or [])]
     # Exactly one answer left standing: a longer list means the document's own
