@@ -271,6 +271,12 @@ def question_from_tables(
     )
     if not statements:
         statements = [o for o in prose_options if o.label.strip()]
+        if len(statements) < _MIN_GRID_ROWS:
+            # One stray option read out of the prose is not a statement list.
+            # It used to be enough to fail the whole shape, which threw the
+            # SCALE away too and left "How much do you like this ad?" with no
+            # answers at all on a live study.
+            statements = []
     if not statements:
         # "How likely are you to consider each of these brands?" over a 0-10
         # strip, and no list under it: the rows are a list stated EARLIER, and
@@ -287,3 +293,35 @@ def question_from_tables(
         cols=list(scale),
         evidence=f"a {len(scale)}-point scale table over {len(statements)} statements",
     )
+
+
+#: "COLUMNS" over the scale, "ROWS" over the statements — a grid written as
+#: labelled lists of plain paragraphs rather than as a table. Q18a of the Vivo
+#: wave-2 document is written this way, and its column list was read as the
+#: question's ANSWER options, leaving a grid with no rows and no columns.
+_SECTION_LABEL = re.compile(r"^\s*(columns?|scale|rows?|statements?|items?)\s*:?\s*$", re.I)
+_COLUMN_WORDS = frozenset({"column", "columns", "scale"})
+
+
+def labelled_sections(lines: list[str]) -> tuple[list[Option], list[Option]]:
+    """(rows, cols) from "ROWS"/"COLUMNS" headings over plain lines.
+
+    Codes are positional, the way a scripter reads them off the page: the
+    first line under COLUMNS is 1. Returns empty lists when the document does
+    not use this convention, which is most of the time.
+    """
+    rows: list[str] = []
+    cols: list[str] = []
+    target: list[str] | None = None
+    for line in lines:
+        label = _SECTION_LABEL.match(line or "")
+        if label:
+            target = cols if label.group(1).lower() in _COLUMN_WORDS else rows
+            continue
+        if target is None or not (line or "").strip():
+            continue
+        target.append(line.strip())
+    def coded(items: list[str]) -> list[Option]:
+        return [Option(code=i, label=text) for i, text in enumerate(items, start=1)]
+
+    return coded(rows), coded(cols)

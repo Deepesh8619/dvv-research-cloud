@@ -77,7 +77,7 @@ from src.engines.questionnaire.section_paths import (
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
 from src.engines.questionnaire.study_overview import parse_overview
 from src.engines.questionnaire.swallowed_options import repair_swallowed_options
-from src.engines.questionnaire.table_questions import question_from_tables
+from src.engines.questionnaire.table_questions import labelled_sections, question_from_tables
 from src.engines.questionnaire.verification import (
     covers_the_question,
     failed,
@@ -581,6 +581,37 @@ def _extract_via_spec_table(
 
 
 
+def _apply_labelled_sections(question: Question, chunk: QuestionChunk) -> bool:
+    """A grid written as "COLUMNS" / "ROWS" headings over plain lines.
+
+    Q18a of the Vivo wave-2 document is written this way. Its column list was
+    read as the question's own ANSWER options, so the grid arrived with no
+    rows and no columns — a respondent saw the wording and nothing else.
+    """
+    lines = [
+        line
+        for block in chunk.source_blocks
+        if block.block_type != "table"
+        for line in (block.text or "").splitlines()
+    ]
+    rows, cols = labelled_sections(lines)
+    if not cols:
+        return False
+    question.type = QuestionType.GRID_SINGLE
+    question.cols = cols
+    if rows:
+        question.rows = rows
+    # Those lines were being offered as this question's answers.
+    question.options = []
+    question.extraction_evidence["options"] = (
+        f"a COLUMNS list of {len(cols)} points"
+        + (f" over a ROWS list of {len(rows)}" if rows else ", its rows stated elsewhere")
+    )
+    if schema.FLAG_EMPTY_OPTIONS in question.flags:
+        question.flags.remove(schema.FLAG_EMPTY_OPTIONS)
+    return True
+
+
 def _apply_table_shape(question: Question, chunk: QuestionChunk) -> None:
     """Take a grid's rows and columns from the table's real cells.
 
@@ -591,6 +622,8 @@ def _apply_table_shape(question: Question, chunk: QuestionChunk) -> None:
     real 91-question instrument were in that state: typed correctly, and
     delivering nothing.
     """
+    if _apply_labelled_sections(question, chunk):
+        return
     tables = [b.rows for b in chunk.source_blocks if b.rows]
     if not tables:
         return
