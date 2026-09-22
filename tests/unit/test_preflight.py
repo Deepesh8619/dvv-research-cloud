@@ -63,3 +63,49 @@ def test_a_guess_the_system_made_is_a_warning_not_a_refusal():
     result = preflight(_survey(q), approved=True)
     assert result["ok"] is True
     assert _by_id(result)["guesses"]["qids"] == ["Q8"]
+
+
+def test_a_maxdiff_block_refuses_the_link_and_says_what_it_is():
+    survey = _survey(
+        Question(qid="Q1", text="Do you buy skincare?", options=YES_NO),
+        Question(qid="Q20", text="Which is most important?",
+                 source_text="[MAXDIFF EXERCISE — 12 SCREENS, 4 ITEMS PER SCREEN]",
+                 options=YES_NO),
+    )
+    result = preflight(survey, approved=True)
+    check = _by_id(result)["trade_off"]
+    assert check["status"] == "fail"
+    assert check["qids"] == ["Q20"]
+    # Named, not just refused: "there is a problem with Q20" sends a reviewer
+    # looking for a typo.
+    assert "MaxDiff" in check["detail"]
+    assert not result["ok"]
+
+
+def test_a_reviewer_who_approves_the_exercise_may_still_open_the_link():
+    """Cleared by a person deciding to script the block elsewhere."""
+    survey = _survey(
+        Question(qid="Q20", text="Which is most important?",
+                 source_text="[CONJOINT — 10 TASKS]", options=YES_NO),
+    )
+    result = preflight(survey, approved=True, approved_qids={"Q20"})
+    assert _by_id(result)["trade_off"]["status"] == "pass"
+
+
+def test_a_trade_off_is_not_also_reported_as_a_routing_flag():
+    """One question, one sentence — and the right sentence.
+
+    The generic blocking-flag check says "confirm the flagged routing", which
+    is not what is wrong with a MaxDiff block and would send a reviewer to
+    look at a condition that is fine.
+    """
+    survey = _survey(
+        Question(qid="Q20", text="Which is most important?",
+                 source_text="[MAXDIFF EXERCISE]", options=YES_NO,
+                 flags=[schema.FLAG_TRADE_OFF_UNSUPPORTED]),
+    )
+    result = preflight(survey, approved=True,
+                       blocking_flags=frozenset({schema.FLAG_TRADE_OFF_UNSUPPORTED}))
+    checks = _by_id(result)
+    assert checks["flags"]["qids"] == []
+    assert checks["trade_off"]["qids"] == ["Q20"]

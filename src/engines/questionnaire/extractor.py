@@ -79,6 +79,7 @@ from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_tab
 from src.engines.questionnaire.study_overview import parse_overview
 from src.engines.questionnaire.swallowed_options import repair_swallowed_options
 from src.engines.questionnaire.table_questions import labelled_sections, question_from_tables
+from src.engines.questionnaire.trade_off import apply as flag_trade_offs
 from src.engines.questionnaire.verification import (
     covers_the_question,
     failed,
@@ -1363,6 +1364,10 @@ def extract_survey_definition(
     # A question asked once per brand is not one question: held as one it is
     # eight columns with no way to tell one brand's answers from another's.
     expand_loops(survey)
+
+    # A MaxDiff or conjoint block is an experiment, not a question. Last, so
+    # every other pass has finished shaping the question it reads.
+    flag_trade_offs(survey)
 
     # What the document says about the STUDY, not about one question: sample
     # size, length of interview, the screening requirements, and the quota table
