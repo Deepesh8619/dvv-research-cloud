@@ -430,3 +430,49 @@ def test_a_directive_with_nested_brackets_is_still_a_directive() -> None:
     assert fields is not None
     assert [o.label for o in fields.options] == ["Don't Know"]
     assert any("ASK IF" in d for d in fields.directives)
+
+
+def test_an_unclosed_directive_does_not_swallow_the_question():
+    """One missing "]" turned a real question into display text.
+
+    "Q21d.[ASK Q21e IF USED VIVO AT Q13 (Q13.7=1-5) And where do you feel
+    VIVOHealth Pharmacy falls short? [OPEN END]" — the ASK bracket is never
+    closed, so a tag pattern that may cross "[" runs from "[ASK" to the "]" of
+    "[OPEN END]" and strips the entire sentence as a scripter tag. The wording
+    went to nothing, the type went unknown, and the question was stored as an
+    intro screen: present in the review queue, never asked, in a document a
+    client had signed off.
+    """
+    line = (
+        "Q21d.[ASK Q21e IF USED VIVO AT Q13 (Q13.7=1-5) And where do you feel "
+        "VIVOHealth Pharmacy falls short, if at all? [OPEN END]"
+    )
+    fields = parse_prose_question(line, candidate_qid="Q21d")
+
+    assert fields is not None
+    assert fields.qtype is QuestionType.OPEN_TEXT
+    # The sentence survives. The directive we could not parse stays visible in
+    # it on purpose — a directive nobody noticed is worse than an untidy one.
+    assert "falls short" in fields.text
+    assert "ASK Q21e" in fields.text
+
+
+def test_a_closed_directive_is_still_stripped_from_the_wording():
+    """The guard must not stop real tags being read."""
+    fields = parse_prose_question(
+        "Q7. How likely are you to recommend it? [OPEN END]", candidate_qid="Q7"
+    )
+    assert fields is not None
+    assert fields.qtype is QuestionType.OPEN_TEXT
+    assert "[OPEN END]" not in fields.text
+    assert fields.text.strip() == "How likely are you to recommend it?"
+
+
+def test_several_tags_on_one_line_are_all_still_stripped():
+    """"[SP] [RANDOMIZE]" is one trailing block, and stays one."""
+    fields = parse_prose_question(
+        "Q8. Which do you prefer? [SP] [RANDOMIZE]", candidate_qid="Q8"
+    )
+    assert fields is not None
+    assert "[SP]" not in fields.text and "[RANDOMIZE]" not in fields.text
+    assert fields.text.strip() == "Which do you prefer?"

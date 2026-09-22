@@ -117,7 +117,16 @@ _OPTION_LETTER_RE = re.compile(r"^\s*([A-Za-z])\s*[.):]\s+(?=\S)")
 # [EXCLUSIVE] [TERMINATE]" is three separate tags on one option, and reading
 # only [TERMINATE] left the anchor and the exclusivity in the label text where
 # nothing acts on them (and put the brackets in front of the respondent).
-_OPTION_TAG_RE = re.compile(r"\s*(?P<tags>\[[^\]]*\](?:\s*\[[^\]]*\])*)\s*$")
+# A tag body never contains another "[". Without that, one UNCLOSED bracket
+# swallows the question: "Q21d.[ASK Q21e IF USED VIVO AT Q13 (Q13.7=1-5) And
+# where do you feel VIVOHealth Pharmacy falls short? [OPEN END]" has no "]"
+# until the end, so "[^\]]*" ran from "[ASK" all the way to "END]" and the
+# whole sentence was stripped as if it were one scripter tag. The wording
+# went to nothing and the question was stored as display text — never asked,
+# in a document a client had signed off. Refusing to cross a "[" leaves the
+# unparseable directive visible in the wording, which is this module's rule
+# already: a directive nobody noticed is worse than an untidy one.
+_OPTION_TAG_RE = re.compile(r"\s*(?P<tags>\[[^\][]*\](?:\s*\[[^\][]*\])*)\s*$")
 
 # Type instructions, most specific first — "select all that apply" must beat a
 # bare "select".
