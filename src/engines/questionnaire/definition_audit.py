@@ -103,9 +103,87 @@ def _is_prose(text: str) -> bool:
     return len(text.split()) >= _PROSE_WORDS and has_sentence_break(text)
 
 
+#: "How familiar are you with each of these pharmacies?" — a question asked
+#: once PER ITEM. Held as a single answer it is one column where there should
+#: be one per pharmacy, and the respondent is asked about all of them at once.
+_PER_ITEM = re.compile(
+    r"\b(?:for |with |about )?each of (?:these|the following|those)\b|"
+    r"\bfor each\b|\bper (?:brand|item|statement)\b",
+    re.I,
+)
+
+
+def _flattened_grids(survey: SurveyDefinition) -> list[str]:
+    """Questions whose wording asks about EACH thing but hold one answer.
+
+    Seen on a live pharmacy study: "How familiar are you with each of these
+    pharmacies?" came back as a single-choice question whose options were the
+    familiarity scale. The pharmacies were gone — no rows, no columns for
+    them, and a respondent asked to rate all of them with one click.
+    """
+    flattened = []
+    for q in survey.questions:
+        if q.type not in (QuestionType.SINGLE, QuestionType.MULTI, QuestionType.DROPDOWN):
+            continue
+        if not _PER_ITEM.search(q.text or ""):
+            continue
+        if q.rows:  # it kept its items: nothing lost
+            continue
+        flattened.append(q.qid)
+    return flattened
+
+
+def _masks_that_cannot_narrow(survey: SurveyDefinition) -> list[str]:
+    """Masks whose source cannot possibly be the list they claim to narrow.
+
+    "Show the pharmacies they have heard of" pointing at a Yes/No question:
+    the source offers two answers and the list has thirteen rows, so whatever
+    the mask does it is not what it says. Found on a live study, where the
+    per-pharmacy grid had been flattened into a Yes/No question and the mask
+    still pointed at it.
+    """
+    by_qid = {q.qid.upper(): q for q in survey.questions}
+    wrong = []
+    for q in survey.questions:
+        own = len(q.options or q.rows or [])
+        for mask in ((q.validation or {}).get("techniques") or {}).get("masks") or []:
+            if mask.get("mode") == "full_list":
+                continue
+            against = mask.get("source_qid") or mask.get("exclude_qid") or ""
+            source = by_qid.get(str(against).upper())
+            if source is None:
+                continue
+            offered = len(source.options or source.rows or [])
+            if offered and own and offered < own / 2:
+                wrong.append(q.qid)
+    return wrong
+
+
 def audit_definition(survey: SurveyDefinition) -> list[Finding]:
     """Every defect fingerprint this definition still carries."""
     findings: list[Finding] = []
+
+    flattened = _flattened_grids(survey)
+    if flattened:
+        findings.append(
+            Finding(
+                "per_item_question_flattened",
+                sorted(set(flattened)),
+                "The wording asks about EACH of several things, but the question holds "
+                "one answer: the items are gone, and so are their data columns.",
+            )
+        )
+
+    unnarrowable = _masks_that_cannot_narrow(survey)
+    if unnarrowable:
+        findings.append(
+            Finding(
+                "mask_cannot_narrow",
+                sorted(set(unnarrowable)),
+                "A mask points at a question with far fewer answers than the list it "
+                "claims to narrow, so it is not narrowing what it says it does.",
+            )
+        )
 
     prose = [
         q.qid
