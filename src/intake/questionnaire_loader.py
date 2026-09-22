@@ -19,10 +19,15 @@ raised with clear messages, never swallowed.
 
 from __future__ import annotations
 
+import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
+
+from src.intake.revisions import live_cell_text, live_text
+
+logger = logging.getLogger(__name__)
 
 BlockType = Literal["paragraph", "table", "heading"]
 
@@ -43,6 +48,10 @@ class DocumentBlock:
     is_bold: bool = False
     is_heading: bool = False
     rows: list[list[str]] | None = None  # populated only for block_type == "table"
+    #: Text the document shows as taken out — struck through, or a Word
+    #: tracked deletion. Not part of `text`, and kept so a reviewer can tell
+    #: "the brand is missing" from "the brand was struck out in the document".
+    removed: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -273,6 +282,7 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
     body = document.element.body
     blocks: list[DocumentBlock] = []
     para_index = 0
+    struck_out: list[str] = []
 
     # Map child XML elements back to python-docx objects to walk in order.
     para_map = {p._p: p for p in document.paragraphs}
@@ -281,8 +291,13 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
     for child in body.iterchildren():
         if child in para_map:
             para: Paragraph = para_map[child]
-            text = para.text.strip()
+            text, removed = live_text(para)
             if not text:
+                # A line that is ENTIRELY struck out is gone from the survey —
+                # in the Vivo wave-2 document that is a whole question, which
+                # was being extracted and would have been fielded.
+                if removed:
+                    struck_out.extend(removed)
                 continue
             is_bold = _para_is_bold(para)
             is_heading = (para.style.name or "").lower().startswith("heading")
@@ -294,12 +309,15 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
                     page_number=None,
                     is_bold=is_bold,
                     is_heading=is_heading,
+                    removed=removed,
                 )
             )
             para_index += 1
         elif child in table_map:
             table: Table = table_map[child]
-            rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+            cells = [[live_cell_text(cell) for cell in row.cells] for row in table.rows]
+            rows = [[text for text, _ in row] for row in cells]
+            table_removed = [gone for row in cells for _, removes in row for gone in removes]
             # A Q-Name question table gets clean `Label: value` serialization
             # (merged-cell duplication + boilerplate removed); generic tables
             # (quota grids, outlines) keep the untouched pipe-join.
@@ -316,10 +334,16 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
                     is_bold=False,
                     is_heading=False,
                     rows=rows,
+                    removed=table_removed,
                 )
             )
             para_index += 1
 
+    if struck_out:
+        logger.info(
+            "%s: %d struck-out fragments left out of the questionnaire",
+            path.name, len(struck_out),
+        )
     return blocks
 
 

@@ -143,6 +143,16 @@ def preflight(
             finding.qids, WARN, finding.detail,
         ))
 
+    struck = (survey.metadata or {}).get("struck_out") or []
+    if struck:
+        sample = "; ".join(t[:40] for t in struck[:3])
+        checks.append(_result(
+            Check("struck_out", "Nothing struck out of the document is still in the survey"),
+            ["document"], WARN,
+            f"{len(struck)} fragment{'s' if len(struck) != 1 else ''} were struck through in "
+            f"the document and left out — e.g. {sample}. Confirm that is what the client meant.",
+        ))
+
     warnings = display_warnings(survey)
     checks.append(_result(
         Check("display", "Every pipe and mask has something to show"),

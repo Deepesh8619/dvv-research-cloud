@@ -1296,6 +1296,14 @@ def extract_survey_definition(
 
     survey = _assemble_survey(results, study_id, detection, reconcile_meta)
 
+    # What the document shows as taken out — struck through, or a Word tracked
+    # deletion. It is not in the survey, and a reviewer has to be told: "the
+    # brand is missing from Q3" and "the brand was struck out of Q3" are
+    # different problems with different fixes.
+    struck = [text for chunk in chunks for block in chunk.source_blocks for text in block.removed]
+    if struck:
+        survey.metadata["struck_out"] = struck[:200]
+
     # A recruitment path's header ("... (IF S0=1 AND S1=26-60) ASK P1-P3") states
     # the base for questions in OTHER chunks, so it can only be applied now that
     # the whole survey exists. Also emits the path as a HID_ variable.
