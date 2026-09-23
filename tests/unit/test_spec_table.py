@@ -619,3 +619,32 @@ def test_a_directive_with_no_code_beside_it_is_still_read():
     sources = {(d["source_qid"], tuple(d["codes"] or ())) for d in f.list_from}
     assert ("DA_PLATFORM_USAGE", (9, 15)) in sources
     assert ("DA_GOALS", ()) in sources
+
+
+def test_a_text_only_screen_is_display_text_not_a_question():
+    """"Q type: Text Only" is a transition screen the respondent READS.
+
+    Matching the bare word "text" typed it as an open end, so somebody who was
+    shown "In this next section, we'll focus on two digital advertising
+    platforms" was also shown a box to type into — and the data file carried a
+    column for an answer nobody was asked for.
+    """
+    f = parse_spec_table(_table([
+        ["Q Name", "TRANSITION_GA"],
+        ["In this next section, we'll focus on two platforms: Meta Ads and Google Ads."],
+        ["Show / HV", "Show respondent directly"],
+        ["Q type", "Text Only"],
+    ]))
+    assert f.qid == "TRANSITION_GA"
+    assert f.qtype is QuestionType.INFO
+
+
+def test_a_real_open_end_is_still_an_open_end():
+    """The guard must not cost us the verbatims it sits next to."""
+    for stated in ("Multi-line (large) Text OE", "Single-line Text OE", "Open end"):
+        f = parse_spec_table(_table([
+            ["Q Name", "Q9"],
+            ["Why do you say that?"],
+            ["Q type", stated],
+        ]))
+        assert f.qtype is QuestionType.OPEN_TEXT, f"{stated} read as {f.qtype}"

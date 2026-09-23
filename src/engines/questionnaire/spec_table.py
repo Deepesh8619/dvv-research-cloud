@@ -181,6 +181,18 @@ _CODE_SELECTED_RE = re.compile(r"\b(\d{1,3})\s+(?:is\s+)?(?:selected|chosen)\b",
 # type is never written "multi-line": "Std Multi-Response (MR)" is untouched.
 _LAYOUT_QUALIFIER = re.compile(r"\b(?:multi|single|one)[\s-]*line\b", re.I)
 
+# "Text Only", "Display text", "No response" — a screen the respondent READS.
+# A transition ("In this next section, we'll focus on two platforms...") is not
+# a question, and matching the bare word "text" typed it as an open end: the
+# respondent was shown a paragraph and a box to type into, and the data file
+# carried a column for an answer nobody was asked for. Checked before the type
+# words, because "Text Only" contains "text" and would otherwise win.
+_DISPLAY_ONLY = re.compile(
+    r"\btext\s*only\b|\bdisplay\s+(?:text|only)\b|\bno\s+response\b|"
+    r"\binfo(?:rmation)?\b|\bintro(?:duction)?\b|\btransition\b",
+    re.I,
+)
+
 _TYPE_WORDS = [
     ("multi", QuestionType.MULTI),
     ("multiple", QuestionType.MULTI),
@@ -345,6 +357,8 @@ def _infer_type(
     if taught is not None:
         return taught
     low = _LAYOUT_QUALIFIER.sub(" ", (stated or "").strip().lower())
+    if _DISPLAY_ONLY.search(low):
+        return QuestionType.INFO, f"Q type: {stated.strip()}"
     for word, qtype in _TYPE_WORDS:
         if word in low:
             return qtype, f"Q type: {stated.strip()}"
