@@ -499,3 +499,54 @@ def test_the_stated_part_of_a_numeric_screen_out_is_applied_and_the_gap_is_flagg
     # and not handed to a model that would overwrite the exact part.
     assert "terminate_gap" in fields.evidence
     assert "terminate" not in fields.missing
+
+
+def test_a_multi_line_text_box_is_an_open_end_not_a_multi_select():
+    """"Multi-line" is the size of the box, not the number of answers.
+
+    The Google Ads questionnaire writes "Q type: Multi-line (large) Text OE"
+    for its verbatims. Matching "multi" as a substring read the box size as
+    the response type, so eight open ends arrived as multi-selects with no
+    options — a question a respondent cannot answer, and a data column that
+    would never be filled.
+    """
+    f = parse_spec_table(_table([
+        ["Q Name", "MAXDIFF_OE"],
+        ["Why would this make you shift digital ad spend?"],
+        ["Q type", "Multi-line (large) Text OE"],
+    ]))
+    assert f.qid == "MAXDIFF_OE"
+    assert f.qtype is QuestionType.OPEN_TEXT
+
+
+def test_a_single_line_text_box_is_an_open_end_too():
+    f = parse_spec_table(_table([
+        ["Q Name", "Q9"],
+        ["What is your job title?"],
+        ["Q type", "Single-line Text OE"],
+    ]))
+    assert f.qtype is QuestionType.OPEN_TEXT
+
+
+def test_a_real_multi_response_type_is_untouched():
+    """The guard must not cost us the types it was protecting.
+
+    A response type is never written "multi-line", so removing that qualifier
+    cannot reach "Std Multi-Response (MR)".
+    """
+    for stated, expected in [
+        ("Std Multi-Response (MR)", QuestionType.MULTI),
+        ("Multi-Select", QuestionType.MULTI),
+        ("Multi punch", QuestionType.MULTI),
+        ("Std Single-Response (SR)", QuestionType.SINGLE),
+        ("Single punch", QuestionType.SINGLE),
+        ("Numeric OE", QuestionType.NUMERIC),
+    ]:
+        f = parse_spec_table(_table([
+            ["Q Name", "Q1"],
+            ["Pick one"],
+            ["1", "Yes"],
+            ["2", "No"],
+            ["Q type", stated],
+        ]))
+        assert f.qtype is expected, f"{stated} read as {f.qtype}"
