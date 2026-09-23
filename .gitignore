@@ -38,3 +38,6 @@ deploy/aws/out/
 # by `COPY . .`, so /api/health reports the code it actually contains.
 # Never committed: it describes one build on one machine.
 .build-commit
+
+# Knowledge graph output — generated, and large.
+graphify-out/
