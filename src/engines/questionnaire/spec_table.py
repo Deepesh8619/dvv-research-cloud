@@ -426,6 +426,36 @@ def _parse_numeric_terminate(
     return expression, unread
 
 
+def _read_directive(line, option, option_bases, list_sources) -> bool:
+    """Act on one bracketed directive. True when it was one."""
+    directive = option_directives.read(line)
+    if directive is None:
+        return False
+    if directive["kind"] == "base" and option is not None:
+        option_directives.attach(option, line)
+        option_bases.append({"code": option.code, "verbatim": directive["verbatim"],
+                             "resolved": option.show_if is not None})
+        return True
+    if directive["kind"] == "list_from":
+        list_sources.append(directive)
+        return True
+    return False
+
+
+def _split_trailing_directive(value: str, row: list[str]) -> tuple[str, str]:
+    """(the answer's label, the directive written under it in the same cell).
+
+    Word keeps both lines in one cell, and `_cells` joins them with a space to
+    make the row readable — which is right for every other row and wrong here,
+    because the second line is a rule about the answer rather than part of it.
+    """
+    for raw in row:
+        lines = [ln.strip() for ln in (raw or "").splitlines() if ln.strip()]
+        if len(lines) == 2 and lines[1].startswith("[") and value.startswith(lines[0]):
+            return lines[0], lines[1]
+    return value, ""
+
+
 def parse_spec_table(
     block: DocumentBlock, patterns: list[LearnedPattern] | None = None
 ) -> SpecTableFields | None:
@@ -461,6 +491,15 @@ def parse_spec_table(
             in_list = True
 
         if not cells or not cells[0]:
+            # A directive can sit in the value column with NO code beside it:
+            #     |    | [INSERT CURRENTLY USED BRANDS FROM DA_PLATFORM_USAGE 9-15] |
+            # Skipping every blank-code row dropped it, so a list that says
+            # where the rest of its items come from said nothing at all.
+            bracketed = next((c for c in cells[1:] if c.strip().startswith("[")), "")
+            if bracketed:
+                _read_directive(
+                    bracketed, last_option, option_bases, list_sources_found
+                )
             continue
 
         if _CODE_RE.match(cells[0]):
@@ -474,9 +513,18 @@ def parse_spec_table(
                 # what they see, so the number is the label.
                 value = cells[0].strip()
             if value:
+                # The directive may share the answer's own cell, on the line
+                # below it: "Google Ads⏎[IF GOOGLE ADS CURRENT USER]". Joined
+                # into the label it became part of what the respondent reads,
+                # and the base it states was never applied.
+                value, inline = _split_trailing_directive(value, row)
                 target = row_items if in_row_list else options
                 target.append(Option(code=int(cells[0]), label=value))
                 last_option = target[-1]
+                if inline:
+                    _read_directive(
+                        inline, last_option, option_bases, list_sources_found
+                    )
             continue
 
         name = _field_for(cells[0], patterns)
@@ -520,7 +568,32 @@ def parse_spec_table(
 
     # Two lists means a grid: the variable list is rated ON the response list.
     # One list is an ordinary answer list, exactly as before.
-    grid_rows, grid_cols = (row_items, options) if row_items and options else ([], [])
+    #
+    # The third case is what DA_GOAL_PLATFORM taught: a variable list whose
+    # RESPONSE list is a directive rather than codes —
+    #
+    #     Variable list:  1 Google Ads / 2 Meta Ads / 99 None of these
+    #     Response list:  [INSERT GOALS SELECTED AT DA_GOALS]
+    #
+    # "row_items and options" was false, so the assembly fell to ([], []) and
+    # three real rows were DISCARDED — and because nothing was recorded as
+    # missing, the question reported itself complete. A grid with no rows and
+    # no columns reached the reviewer looking like a question the parser had
+    # failed on, when in fact the document stated its rows plainly.
+    stated_shape = (found.get("type") or "").lower()
+    if row_items and options:
+        grid_rows, grid_cols = row_items, options
+    elif row_items and any(w in stated_shape for w in ("grid", "matrix", "carousel")):
+        # The rows are real; the columns come from the directive, which is
+        # recorded in `list_from` for the pass that fills lists.
+        grid_rows, grid_cols = row_items, []
+    elif row_items:
+        # Labelled "variable list" but nothing rates it and the type does not
+        # say grid: then that list IS the answer list.
+        options = options or row_items
+        grid_rows, grid_cols = [], []
+    else:
+        grid_rows, grid_cols = [], []
 
     fields = SpecTableFields(
         qid=qid,
@@ -548,7 +621,13 @@ def parse_spec_table(
         fields.evidence["type"] = (
             f"a variable list of {len(grid_rows)} rated on a "
             f"{len(grid_cols)}-point response list"
+            if grid_cols
+            else f"a variable list of {len(grid_rows)}, stated as a grid"
         )
+        if not grid_cols and "cols" not in fields.missing:
+            # Say so. A grid with rows and no columns is not complete, and
+            # reporting it as complete is how it reached a reviewer silently.
+            fields.missing.append("cols")
     numeric_entry = _NUMERIC_ENTRY_RE.search(table_text)
     stated_type = (found.get("type") or "").strip()
     if numeric_entry and not grid_rows and (

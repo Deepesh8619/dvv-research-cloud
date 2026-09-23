@@ -117,3 +117,29 @@ def test_only_a_real_hex_colour_reaches_the_style_attribute(tmp_path: Path):
     rendered = render_docx(path)
     assert "onload" not in rendered.html
     assert "style=" not in rendered.html
+
+
+def test_a_merged_cell_is_merged_not_repeated(tmp_path: Path):
+    """Word repeats a merged cell once per column it spans.
+
+    Rendered naively that showed every value of the Google Ads spec tables two
+    and three times over — and the document's real shape is the thing a
+    reviewer opens this pane to see.
+    """
+    from docx import Document
+
+    doc = Document()
+    table = doc.add_table(rows=2, cols=3)
+    table.cell(0, 0).merge(table.cell(0, 2)).text = "BEST PLATFORM FOR TOP GOALS"
+    table.cell(1, 0).text = "Variable list:"
+    table.cell(1, 1).text = "Google Ads"
+    table.cell(1, 2).text = "Meta Ads"
+    path = tmp_path / "m.docx"
+    doc.save(str(path))
+
+    html = render_docx(path).html
+
+    assert html.count("BEST PLATFORM FOR TOP GOALS") == 1
+    assert 'colspan="3"' in html
+    # The unmerged row keeps all three of its own cells.
+    assert html.count("<td>") == 3

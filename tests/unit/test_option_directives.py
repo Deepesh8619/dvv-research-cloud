@@ -60,3 +60,27 @@ def test_the_condition_lands_on_the_answer_above_it():
     unresolved = Option(code=2, label="Meta Ads")
     assert attach(unresolved, "[IF META ADS CURRENT USER]") == "base"
     assert unresolved.show_if is None  # kept for a reviewer, not invented
+
+
+def test_a_list_source_written_with_AT_is_read():
+    """"[INSERT GOALS SELECTED AT DA_GOALS]" says the same as FROM.
+
+    Only FROM was accepted, so a response list that named its source question
+    said nothing and the question was left with no columns at all.
+    """
+    found = read("[INSERT GOALS SELECTED AT DA_GOALS]")
+    assert found is not None
+    assert found["kind"] == "list_from"
+    assert found["source_qid"] == "DA_GOALS"
+
+
+def test_one_answer_piped_into_wording_is_not_a_list():
+    """"[INSERT RESPONSE FROM Q8]" puts ONE answer into the sentence.
+
+    Reading it as a list would claim this question's answers come from Q8 when
+    they do not — and widening FROM to AT/IN made that easier to hit, so the
+    distinction is pinned here.
+    """
+    assert read("[INSERT RESPONSE FROM Q8]") is None
+    assert read("[INSERT RATING FROM Q9]") is None
+    assert read("[INSERT SELECTION AT Q10]") is None

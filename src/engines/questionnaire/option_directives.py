@@ -48,11 +48,19 @@ BRACKETED = re.compile(r"^\s*[\[(]\s*(?P<body>.+?)\s*[\])]\s*$", re.S)
 _IS_BASE = re.compile(r"^(?:only\s+)?(?:ask\s+|show\s+|display\s+)?if\b", re.I)
 
 #: "[INSERT CURRENTLY USED BRANDS FROM DA_PLATFORM_USAGE 9-15]"
+#: "[INSERT CURRENTLY USED BRANDS FROM DA_PLATFORM_USAGE 9-15]", and the same
+#: thing said with AT: "[INSERT GOALS SELECTED AT DA_GOALS]". Only FROM was
+#: accepted, so a response list that named its source question said nothing and
+#: the question was left with no columns at all.
 _INSERT_FROM = re.compile(
-    r"\b(?:insert|show|pull|bring)\b.*?\bfrom\s+(?P<qid>[A-Za-z][A-Za-z0-9_]{1,40})"
+    r"\b(?:insert|show|pull|bring)\b.*?\b(?:from|at|in)\s+(?P<qid>[A-Za-z][A-Za-z0-9_]{1,40})"
     r"(?:\s+(?P<lo>\d{1,3})\s*[-–]\s*(?P<hi>\d{1,3}))?",
     re.I,
 )
+#: "[INSERT RESPONSE FROM Q8]" puts ONE earlier answer into the wording. That is
+#: a pipe, not a list, and reading it as a list would claim this question's
+#: answers come from Q8 when they do not.
+_ONE_ANSWER = re.compile(r"\binsert\s+(?:response|rating|selection|answer)\b", re.I)
 
 #: "IF Q13=1-5", "IF SELECTED AT Q7", "IF DA_USAGE 9-15". The leading keyword
 #: is stripped before this runs, so a two-character qid like "S7" is reachable
@@ -74,7 +82,7 @@ def read(line: str) -> dict[str, Any] | None:
     body = match.group("body").strip()
 
     insert = _INSERT_FROM.search(body)
-    if insert and not _IS_BASE.match(body):
+    if insert and not _IS_BASE.match(body) and not _ONE_ANSWER.search(body):
         codes = None
         if insert.group("lo") and insert.group("hi"):
             codes = [int(insert.group("lo")), int(insert.group("hi"))]
