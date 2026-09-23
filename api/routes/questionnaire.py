@@ -1535,6 +1535,22 @@ def _reread_diff(old: Question, new: Question) -> list[str]:
     return changed
 
 
+#: Flags that say "this is not an ordinary question". Losing one silently is
+#: how a derived variable or an unfieldable exercise gets turned back into
+#: something a respondent is asked.
+def _answer_surface(question: Question) -> int:
+    """How many answers this question offers, however they are arranged."""
+    return len(question.options or []) + len(question.rows or []) + len(question.cols or [])
+
+
+#: Codes from src/engines/questionnaire/schema.py, as strings for the same
+#: reason _BLOCKING_FLAGS above is.
+_PROTECTED_FLAGS = frozenset({
+    "DERIVED_VARIABLE",
+    "TRADE_OFF_UNSUPPORTED",
+})
+
+
 def _reread_is_regression(old: Question, new: Question) -> bool:
     """True when the re-read is worse than what is already stored.
 
@@ -1542,14 +1558,37 @@ def _reread_is_regression(old: Question, new: Question) -> bool:
     shape, or the wording itself means this re-read parsed the source WORSE
     than whatever produced the stored question (a different chunking, a table
     the rebuilt rows didn't fully capture) — never something to save over.
+
+    This used to catch only a drop to ZERO, which let three real regressions
+    through on the Google Ads study: DA_TOP_GOAL losing one option of nine,
+    HIDDEN_TOPBENEFIT turning from a declared hidden variable back into a
+    9-option question, and MAXDIFF_OE losing the flag that says the exercise
+    cannot be fielded. Shrinking, un-hiding and un-flagging are all "worse".
     """
-    if old.options and not new.options:
-        return True
-    if old.rows and not new.rows:
-        return True
-    if old.cols and not new.cols:
-        return True
     if old.text and not new.text:
+        return True
+    # Shrinkage, not only total loss. Nine options becoming eight is a
+    # respondent losing an answer and a data file losing a column.
+    #
+    # Only WITHIN the same type, though: a flat list becoming a grid moves its
+    # answers from `options` into `rows`/`cols`, which reads as options going
+    # to zero and is exactly the per-item repair working. Across a type change
+    # the honest comparison is the total answer surface.
+    if old.type is new.type:
+        for was, now in (
+            (old.options, new.options),
+            (old.rows, new.rows),
+            (old.cols, new.cols),
+        ):
+            if len(now or []) < len(was or []):
+                return True
+    elif _answer_surface(new) < _answer_surface(old):
+        return True
+    # A row nobody is asked becoming a question somebody is asked.
+    if old.type is QuestionType.INFO and new.type is not QuestionType.INFO:
+        return True
+    # `_apply_reread` replaces flags wholesale, so a dropped flag is silent.
+    if (set(old.flags or ()) - set(new.flags or ())) & _PROTECTED_FLAGS:
         return True
     return False
 
@@ -1707,6 +1746,17 @@ def reread_one_question(
     patterns = _patterns_for_survey(db, survey)
     reread = reread_question(question, patterns)
     if reread is None:
+        # Say WHICH refusal this is. "No source text" is untrue of a spec-table
+        # question and sends a reviewer looking for a missing excerpt.
+        if (question.extraction_method or "") == "spec_table":
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{qid} was read from a spec table, and re-read only replays the "
+                    "prose parser — it would read the question differently rather than "
+                    "better. Re-upload the document to pick up table-parser fixes."
+                ),
+            )
         raise HTTPException(
             status_code=422, detail=f"{qid} has no source text the current parser can read"
         )
