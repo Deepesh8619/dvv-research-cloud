@@ -1108,3 +1108,86 @@ def test_a_chunk_with_nothing_readable_still_falls_back_to_a_placeholder(monkeyp
     result = ex.extract_question(chunk)
     assert result.question.options == []
     assert result.flags
+
+
+# --- a list, and a variable, that the spec table states outright -------------
+
+
+def _spec(rows):
+    """One spec table through the whole structured path."""
+    from src.engines.questionnaire.extractor import _question_from_fields
+    from src.engines.questionnaire.spec_table import parse_spec_table
+    from src.intake.questionnaire_loader import DocumentBlock
+
+    block = DocumentBlock("table", "", 0, rows=rows)
+    fields = parse_spec_table(block)
+    return _question_from_fields(
+        fields,
+        QuestionChunk(chunk_text="", candidate_qid=fields.qid,
+                      source_blocks=[block], provenance="para 0"),
+    )
+
+
+def _row(label, value=None, width=3):
+    return [label] + [value] * (width - 1) if value is not None else [label] * width
+
+
+def test_a_response_list_taken_from_another_question_becomes_a_mask():
+    """"Response list: [INSERT SELECTIONS FROM DA_GOALS]" IS a mask.
+
+    The whole answer list is another question's selections. It was read and
+    then dropped, so the question reached a reviewer with no answers and
+    nothing said about why. Recording it as a mask is what lets the pass that
+    fills lists borrow the items, the compiler narrow them to what this
+    respondent chose, and the review UI show the link.
+    """
+    q = _spec([
+        _row("TOP DIGITAL ADVERTISING GOAL"),
+        _row("Q Name", "DA_TOP_GOAL"),
+        _row("What is the top business objective you focus on?"),
+        _row("", "Response list:"),
+        _row("", "[INSERT SELECTIONS FROM DA_GOALS]"),
+        ["Show / HV", "Show respondent directly", ""],
+        ["Q type", "Std Single-Response (SR)", "If Custom, specify:"],
+    ])
+    masks = (q.validation or {}).get("techniques", {}).get("masks") or []
+    assert [(m["source_qid"], m["mode"]) for m in masks] == [("DA_GOALS", "selected")]
+    # Still a respondent-facing question, not a hidden variable.
+    assert q.type is QuestionType.SINGLE
+    assert schema.FLAG_DERIVED_VARIABLE not in q.flags
+
+
+def test_a_table_that_says_hidden_variable_is_not_asked():
+    """"Show / HV: Hidden variable" is the document stating it outright.
+
+    HIDDEN_TOPBENEFIT holds a MaxDiff result computed by the programmer. Read
+    as a single-choice question it had no answers and looked like a parser
+    failure. A stated fact beats every wording heuristic — and the existing
+    signals (a HID_ prefix, taught phrases, derived wording) all missed it.
+    """
+    q = _spec([
+        _row("MAXDIFF TOP BENEFIT APPEAL"),
+        _row("Q Name", "HIDDEN_TOPBENEFIT"),
+        _row("Holds the most often selected Most Likely benefit"),
+        _row("", "Variable list: CODE TO MATCH MAXDIFF_APPEAL"),
+        ["Show / HV", "Hidden variable", "If not All, specify:"],
+        ["Q type", "Std Single-Response (SR)", "If Custom, specify:"],
+    ])
+    assert q.type is QuestionType.INFO
+    assert schema.FLAG_DERIVED_VARIABLE in q.flags
+    # Cite the cell, so a reviewer is not asked to trust the reading.
+    assert "Hidden variable" in q.extraction_evidence["derived"]
+
+
+def test_show_respondent_directly_is_never_read_as_hidden():
+    """The other value of that same cell. Getting this wrong hides a question."""
+    q = _spec([
+        _row("Q Name", "Q4"),
+        _row("How satisfied were you?"),
+        _row("1", "Very satisfied"),
+        _row("2", "Not satisfied"),
+        ["Show / HV", "Show respondent directly", ""],
+        ["Q type", "Std Single-Response (SR)", ""],
+    ])
+    assert q.type is QuestionType.SINGLE
+    assert schema.FLAG_DERIVED_VARIABLE not in q.flags
