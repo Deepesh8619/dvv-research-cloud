@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { RenderedSource, questionnaireApi } from '../../api/client'
+import { RenderedSource } from '../../api/client'
+import { blockIndexOf } from './useRenderedSource'
 
-/** "para 47" / "page 3, para 12" -> 47. The loader's own block index. */
-export function blockIndexOf(sourceLocation: string | null | undefined): number | null {
-  const match = /para\s+(\d+)/i.exec(sourceLocation || '')
-  return match ? Number(match[1]) : null
-}
+export { blockIndexOf }
 
 const ZOOM_STEPS = [0.75, 0.875, 1, 1.15, 1.35, 1.6, 2]
 const DEFAULT_ZOOM = 2 // index into ZOOM_STEPS -> 1.0
@@ -27,39 +24,21 @@ const DEFAULT_ZOOM = 2 // index into ZOOM_STEPS -> 1.0
  * extraction is one card per question and the source is pages of prose.
  */
 export default function SourcePane({
-  studyId,
+  doc,
+  error,
   sourceLocation,
   onClose,
 }: {
-  studyId: string
+  /** Fetched once by the page and shared with each question's source tile. */
+  doc: RenderedSource | null
+  error: string | null
   /** The selected question's provenance, e.g. "para 47". */
   sourceLocation: string | null | undefined
   onClose: () => void
 }) {
-  const [doc, setDoc] = useState<RenderedSource | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [zoom, setZoom] = useState(DEFAULT_ZOOM)
   const [follow, setFollow] = useState(true)
   const scroller = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    questionnaireApi
-      .renderedSource(studyId)
-      .then((res) => !cancelled && setDoc(res.data))
-      .catch((err) => {
-        const data = err?.response?.data
-        const detail = typeof data === 'string' ? data : data?.detail
-        !cancelled &&
-          setError(
-            (typeof detail === 'string' ? detail : detail?.error) ||
-              'Could not open the document for reading.',
-          )
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [studyId])
 
   const target = useMemo(() => blockIndexOf(sourceLocation), [sourceLocation])
 
