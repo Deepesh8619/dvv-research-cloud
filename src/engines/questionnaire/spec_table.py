@@ -172,6 +172,15 @@ _NUMERIC_BOUND_RE = re.compile(r"(?:^|[\s(,])[A-Za-z_]*\s*(<=|>=|<|>)\s*(\d+|\?\
 # "OR if 99 selected"
 _CODE_SELECTED_RE = re.compile(r"\b(\d{1,3})\s+(?:is\s+)?(?:selected|chosen)\b", re.I)
 
+# "Multi-line (large) Text OE", "Single-line Text OE". These say how BIG the
+# text box is, not how many answers there are — and matching "multi" or
+# "single" as a substring read the box size as the response type. Both are open
+# ends, and both arrived as a choice question with no options: a question a
+# respondent cannot answer and a data column that will never be filled. Removed
+# before the type words are read, so "Text OE" is what decides it. A response
+# type is never written "multi-line": "Std Multi-Response (MR)" is untouched.
+_LAYOUT_QUALIFIER = re.compile(r"\b(?:multi|single|one)[\s-]*line\b", re.I)
+
 _TYPE_WORDS = [
     ("multi", QuestionType.MULTI),
     ("multiple", QuestionType.MULTI),
@@ -335,7 +344,7 @@ def _infer_type(
     taught = learned_type(patterns, stated or "", text or "")
     if taught is not None:
         return taught
-    low = (stated or "").strip().lower()
+    low = _LAYOUT_QUALIFIER.sub(" ", (stated or "").strip().lower())
     for word, qtype in _TYPE_WORDS:
         if word in low:
             return qtype, f"Q type: {stated.strip()}"
