@@ -8,6 +8,7 @@ import {
   questionnaireApi,
   QuestionOption,
   QuestionSplitItem,
+  RenderedSource,
   UnresolvedQuestion,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -20,6 +21,8 @@ import ExtractionProvenance from '../components/ExtractionProvenance'
 import TeachFormat from '../components/TeachFormat'
 import ReadPanel from '../components/review/ReadPanel'
 import SourcePane from '../components/review/SourcePane'
+import SourceTile from '../components/review/SourceTile'
+import { useRenderedSource } from '../components/review/useRenderedSource'
 import Lessons from '../components/review/Lessons'
 import { useLabel } from '../labels/LabelContext'
 import { BucketBar, ConnectionsPanel, IssuesPanel, ProgressRing } from '../components/review/QuestionMap'
@@ -540,6 +543,9 @@ export function QuestionDetail({
   onApproved,
   onSplit,
   onRequestOptionsFrom,
+  renderedDoc,
+  nextLocation,
+  onOpenDocument,
 }: {
   studyId: string
   q: Question
@@ -555,6 +561,12 @@ export function QuestionDetail({
   /** Blank-answer triage's "+ Options from…" link — opens the add-link form
    * on the Connections panel above, which owns that state itself. */
   onRequestOptionsFrom?: () => void
+  /** The client's document, already fetched by the page. */
+  renderedDoc?: RenderedSource | null
+  /** Where the NEXT question starts, so this one knows where it ends. */
+  nextLocation?: string | null
+  /** Open the full document pane beside the review. */
+  onOpenDocument?: () => void
 }) {
   const [state, setState] = useState<DetailState>(() => buildDetailState(q))
   // What TeachFormat should open pre-filled with, requested from the read/
@@ -675,14 +687,21 @@ export function QuestionDetail({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      {/* Sticky: a long question's options run well past a screen, and the
+          reviewer scrolling them lost sight of WHICH question they were
+          approving and what it actually asks. */}
+      <div className="sticky top-0 z-10 -mx-6 -mt-6 mb-1 border-b border-slate-200 bg-white/95 px-6 py-3 backdrop-blur">
+        <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
           <h2 className="font-semibold text-slate-900">
             <span className="font-mono">{q.qid}</span>
           </h2>
           {q.approved && <span className="text-xs text-emerald-600">✓ approved</span>}
+          <span className="min-w-0 truncate text-sm text-slate-500" title={state.text}>
+            {state.text}
+          </span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           {canWrite && <RereadButton studyId={studyId} qid={q.qid} onChanged={onSaved} />}
           {canWrite && <SplitPanel studyId={studyId} q={q} onSplit={onSplit} />}
           {canCorrect && (
@@ -693,6 +712,7 @@ export function QuestionDetail({
               profileLabel={profile?.label}
             />
           )}
+        </div>
         </div>
       </div>
 
@@ -767,15 +787,17 @@ export function QuestionDetail({
         </div>
       )}
 
-      {/* Source excerpt — reviewers check extraction against origin */}
+      {/* What this question was read from, drawn as the document draws it —
+          a reviewer comparing a table in Word against a list of lines here is
+          re-associating every row by eye. */}
       {q.source_text && (
-        <div>
-          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Source text</span>
-          {q.source_location && <span className="text-xs text-slate-400 ml-2">{q.source_location}</span>}
-          <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-md p-3 mt-1 whitespace-pre-wrap">
-            {q.source_text}
-          </p>
-        </div>
+        <SourceTile
+          sourceText={q.source_text}
+          sourceLocation={q.source_location ?? null}
+          nextLocation={nextLocation ?? null}
+          doc={renderedDoc ?? null}
+          onOpenDocument={onOpenDocument}
+        />
       )}
 
       {/* Text */}
@@ -787,7 +809,10 @@ export function QuestionDetail({
           value={state.text}
           disabled={!canWrite}
           onChange={(e) => set('text', e.target.value)}
-          rows={2}
+          /* Grows with the wording. At rows={2} a real question ran past the
+             bottom of its own box and the reviewer approved what they could
+             see — which is the half of the sentence that fitted. */
+          rows={Math.min(10, Math.max(2, Math.ceil((state.text || '').length / 70) + 1))}
           className="w-full px-3 py-2 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:bg-slate-50"
         />
       </div>
@@ -1185,6 +1210,16 @@ export default function QuestionnairePage() {
     () => questions.find((q) => q.qid === selectedQid) ?? null,
     [questions, selectedQid],
   )
+  // One fetch per study, shared by the side pane and each question's own
+  // source tile — per-component it would pull the whole document again on
+  // every question click.
+  const rendered = useRenderedSource(studyId!, sourceOpen || selected !== null)
+  // A question runs from where it starts until the NEXT one starts.
+  const nextLocation = useMemo(() => {
+    if (!selected) return null
+    const i = questions.findIndex((q) => q.qid === selected.qid)
+    return i >= 0 ? questions[i + 1]?.source_location ?? null : null
+  }, [questions, selected])
 
   useEffect(() => setOptionsFromNonce(0), [selectedQid])
 
@@ -1676,6 +1711,9 @@ export default function QuestionnairePage() {
                   onApproved={onQuestionApproved}
                   onSplit={onQuestionSplit}
                   onRequestOptionsFrom={() => setOptionsFromNonce((n) => n + 1)}
+                  renderedDoc={rendered.doc}
+                  nextLocation={nextLocation}
+                  onOpenDocument={() => setSourceOpen(true)}
                 />
                 </div>
               ) : (
@@ -1699,7 +1737,8 @@ export default function QuestionnairePage() {
               <div className="col-span-3">
                 <div className="sticky top-4 h-[calc(100vh-7rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                   <SourcePane
-                    studyId={studyId!}
+                    doc={rendered.doc}
+                    error={rendered.error}
                     sourceLocation={selected?.source_location}
                     onClose={() => setSourceOpen(false)}
                   />

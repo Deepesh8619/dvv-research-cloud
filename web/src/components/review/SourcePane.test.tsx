@@ -1,11 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import SourcePane, { blockIndexOf } from './SourcePane'
-
-vi.mock('../../api/client', () => ({
-  questionnaireApi: { renderedSource: vi.fn() },
-}))
 
 const DOC = {
   filename: 'Wave 2 QRE.docx',
@@ -17,10 +13,7 @@ const DOC = {
 }
 
 async function renderPane(sourceLocation: string | null) {
-  const { questionnaireApi } = await import('../../api/client')
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(questionnaireApi.renderedSource as any).mockResolvedValue({ data: DOC })
-  render(<SourcePane studyId="s1" sourceLocation={sourceLocation} onClose={() => {}} />)
+  render(<SourcePane doc={DOC} error={null} sourceLocation={sourceLocation} onClose={() => {}} />)
   await waitFor(() => expect(screen.getByText(/Wave 2 QRE/)).toBeTruthy())
 }
 
@@ -51,12 +44,9 @@ describe('reading the document beside the extraction', () => {
   })
 
   it('says why when the document cannot be opened', async () => {
-    const { questionnaireApi } = await import('../../api/client')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(questionnaireApi.renderedSource as any).mockRejectedValue({
-      response: { data: { detail: 'This one is a PDF.' } },
-    })
-    render(<SourcePane studyId="s1" sourceLocation="para 1" onClose={() => {}} />)
+    render(
+      <SourcePane doc={null} error="This one is a PDF." sourceLocation="para 1" onClose={() => {}} />,
+    )
     await waitFor(() => expect(screen.getByText(/This one is a PDF/)).toBeTruthy())
   })
 })
