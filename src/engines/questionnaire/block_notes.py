@@ -144,6 +144,13 @@ def apply(survey: SurveyDefinition) -> dict[str, Any]:
 
     applied: dict[str, Any] = {
         "blocks": [{"label": b.label, "qids": b.question_ids} for b in built],
+        # Which blocks a RESPONDENT may be told the name of. A block label is
+        # usually a scripter's section header — "Screener", "PLATFORM USAGE" —
+        # written for the person building the survey, and putting that in front
+        # of a respondent is showing them the scaffolding. These are different:
+        # the note named them as the arms being compared, in words the
+        # respondent's own questions use.
+        "block_ids": [b.block_id for b in built],
     }
     if missing:
         # The note said GO_AI_GOOGLE and the document's own Q Name is

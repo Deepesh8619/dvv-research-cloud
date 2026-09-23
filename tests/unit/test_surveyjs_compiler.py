@@ -416,3 +416,64 @@ def test_a_mask_whose_source_is_not_in_the_survey_is_reported() -> None:
 def test_a_clean_survey_reports_nothing() -> None:
     q1 = _brands("Q1", "Which brands are you aware of?")
     assert display_warnings(_survey_of(q1)) == []
+
+
+# --- the parts the script names -------------------------------------------
+
+
+def _blocked_survey() -> SurveyDefinition:
+    yes_no = [Option(code=1, label="Yes"), Option(code=2, label="No")]
+    qids = ["S1", "GA1", "GA2", "M1", "M2", "Z9"]
+    questions = [Question(qid=q, text=f"{q}?", options=list(yes_no)) for q in qids]
+    survey = SurveyDefinition(
+        study_id="T",
+        questions=questions,
+        blocks=[
+            Block(block_id="blk_main", label="", question_ids=["S1"]),
+            Block(block_id="blk_google_ads", label="Google Ads", question_ids=["GA1", "GA2"]),
+            Block(block_id="blk_meta_ads", label="Meta Ads", question_ids=["M1", "M2"]),
+            Block(block_id="blk_rest", label="", question_ids=["Z9"]),
+        ],
+    )
+    survey.metadata["blocks_from_note"] = {
+        "block_ids": ["blk_google_ads", "blk_meta_ads"],
+    }
+    return survey
+
+
+def test_a_labelled_block_is_a_section_the_respondent_is_told_about():
+    """The two arms the study exists to compare.
+
+    A respondent carried from the Google Ads questions to the Meta Ads
+    questions with nothing said has no idea the subject changed, and answers
+    the second arm as if it were more of the first.
+    """
+    compiled = compile_to_surveyjs(_blocked_survey())
+    assert compiled["sections"] == [
+        {"page": "blk_google_ads", "label": "Google Ads"},
+        {"page": "blk_meta_ads", "label": "Meta Ads"},
+    ]
+
+
+def test_an_unlabelled_block_is_never_announced_as_a_section():
+    """"blk_main" is where everything else happens to sit.
+
+    Naming it would be telling the respondent about a thing that is not one —
+    and the section banner is only worth anything while it is rare.
+    """
+    compiled = compile_to_surveyjs(_blocked_survey())
+    named = {s["page"] for s in compiled["sections"]}
+    assert "blk_main" not in named and "blk_rest" not in named
+
+
+def test_a_scripters_own_section_header_is_not_shown_to_a_respondent():
+    """"Screener" and "Main" are the scaffolding, not the study.
+
+    A block label is usually a header written for the person building the
+    survey. Only a block the scripter note named as an arm of the comparison
+    is in words the respondent's own questions use — everything else would be
+    showing them how the script is organised.
+    """
+    compiled = compile_to_surveyjs(make_survey())
+    assert [b.label for b in make_survey().blocks] == ["Screener", "Main"]
+    assert "sections" not in compiled

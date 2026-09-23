@@ -559,6 +559,29 @@ def compile_to_surveyjs(survey: SurveyDefinition) -> dict[str, Any]:
     # than per element so it costs nothing in SurveyJS's own model — the
     # respondent page draws it above the card.
     compiled["questionSymbols"] = symbols_for_survey(survey)
+    # The parts of the study, as the SCRIPT names them. A block carries a
+    # label only when the document gave it one — "Google Ads", "Meta Ads" from
+    # the scripter note that groups them — and those are the two arms the study
+    # exists to compare. A respondent moved from one to the other with nothing
+    # said has no idea the subject changed, and answers the second arm as if it
+    # were more of the first.
+    #
+    # Only the blocks the NOTE named. A block label is otherwise a scripter's
+    # own section header — "Screener", "Main", "PLATFORM USAGE" — written for
+    # the person building the survey, and a respondent shown that is being
+    # shown the scaffolding. "blk_main", where everything else happens to sit,
+    # is not a section either.
+    from_note = (survey.metadata or {}).get("blocks_from_note") or {}
+    respondent_facing = set(from_note.get("block_ids") or ())
+    sections = [
+        {"page": block.block_id, "label": block.label}
+        for block in survey.blocks
+        if block.block_id in respondent_facing and (block.label or "").strip()
+    ]
+    if sections:
+        # Read by the respondent page, not by SurveyJS itself.
+        compiled["sections"] = sections
+
     grid_masks = _grid_mask_sources(survey)
     if grid_masks:
         # Read by the respondent page, not by SurveyJS itself.
