@@ -771,6 +771,20 @@ def reread_question(
     if not text.strip():
         return None
 
+    # A question read from a SPEC TABLE must not be re-read by the prose
+    # parser. This path replays `parse_prose_question` only — it never calls
+    # `parse_spec_table` — so on a "Q Name: / Q type:" document it does not
+    # re-apply the table rules, it applies DIFFERENT ones. Measured on the
+    # Google Ads study: HIDDEN_TOPBENEFIT came back as a 9-option question
+    # instead of the hidden variable the table declares, and DA_TOP_GOAL lost
+    # an option. Neither tripped the regression guard, so both would have been
+    # saved over.
+    #
+    # Refusing is the honest answer until re-read can run the spec-table path
+    # (roadmap 2.2). A spec-table study picks up parser fixes by re-upload.
+    if (question.extraction_method or "") == "spec_table":
+        return None
+
     table_rows = _rebuild_table_rows(text)
     blocks: list[DocumentBlock] = []
     if table_rows:
