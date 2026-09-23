@@ -147,6 +147,36 @@ def _paragraph_html(paragraph) -> tuple[str, bool]:
     return "".join(parts), live
 
 
+def _row_html(row) -> str:
+    """One table row, with merged cells merged rather than repeated.
+
+    python-docx hands back the SAME cell object once per grid column it spans,
+    so a two-column row of a merged header arrived as five identical <td>s and
+    the pane showed every value two and three times over. The document's real
+    shape is the thing a reviewer is here to see, so consecutive cells backed
+    by the same XML element become one <td colspan=n>.
+    """
+    cells: list[str] = []
+    span = 0
+    previous = None
+    for cell in row.cells:
+        if previous is not None and cell._tc is previous._tc:
+            span += 1
+            continue
+        if previous is not None:
+            cells.append(_cell_html(previous, span))
+        previous, span = cell, 1
+    if previous is not None:
+        cells.append(_cell_html(previous, span))
+    return "".join(cells)
+
+
+def _cell_html(cell, span: int) -> str:
+    inner = "".join(_paragraph_html(p)[0] for p in cell.paragraphs)
+    width = f' colspan="{span}"' if span > 1 else ""
+    return f"<td{width}>{inner or '&nbsp;'}</td>"
+
+
 def render_docx(path: str | Path) -> RenderedDocument:
     """Render a .docx for reading, anchored to the loader's block indices."""
     from docx import Document
@@ -179,15 +209,7 @@ def render_docx(path: str | Path) -> RenderedDocument:
                 out.append(f'<{tag} class="dvv-blk dvv-gone">{inner}</{tag}>')
         elif child in table_map:
             table: Table = table_map[child]
-            rows = []
-            for row in table.rows:
-                cells = []
-                for cell in row.cells:
-                    inner = "".join(
-                        _paragraph_html(p)[0] or "&nbsp;" for p in cell.paragraphs
-                    )
-                    cells.append(f"<td>{inner or '&nbsp;'}</td>")
-                rows.append(f"<tr>{''.join(cells)}</tr>")
+            rows = [f"<tr>{_row_html(row)}</tr>" for row in table.rows]
             out.append(
                 f'<table id="b{index}" class="dvv-blk dvv-tbl">{"".join(rows)}</table>'
             )

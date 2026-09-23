@@ -550,3 +550,72 @@ def test_a_real_multi_response_type_is_untouched():
             ["Q type", stated],
         ]))
         assert f.qtype is expected, f"{stated} read as {f.qtype}"
+
+
+def _merged(label, value=None, width=4):
+    """One spec-table row as Word serialises it: merged cells repeated."""
+    return [label] + [value] * (width - 1) if value is not None else [label] * width
+
+
+DA_GOAL_PLATFORM = [
+    _merged("BEST PLATFORM FOR TOP GOALS"),
+    _merged("Q Name", "DA_GOAL_PLATFORM"),
+    _merged("Which platform is best for achieving this goal?"),
+    _merged("", "Variable list:"),
+    _merged("1", "Google Ads\n[IF GOOGLE ADS CURRENT USER]"),
+    _merged("2", "Meta Ads\n[IF META ADS CURRENT USER]"),
+    _merged("", "[INSERT CURRENTLY USED BRANDS FROM DA_PLATFORM_USAGE 9-15]"),
+    _merged("99", "None of these"),
+    _merged("", "Response list:"),
+    _merged("", "[INSERT GOALS SELECTED AT DA_GOALS]"),
+    ["Among who", "All respondents", "", ""],
+    ["Q type", "Carousel VERT Grid (SR)", "If Custom, specify:", "If Custom, specify:"],
+]
+
+
+def test_a_variable_list_survives_a_response_list_that_is_a_directive():
+    """The rows were being thrown away, and the loss reported as complete.
+
+    "Response list: [INSERT GOALS SELECTED AT DA_GOALS]" states the columns as
+    a directive rather than as codes, so `row_items and options` was false and
+    the assembly fell back to no rows AND no columns. Three rows the document
+    states plainly were discarded, and nothing was recorded as missing — so a
+    grid with nothing in it reached the reviewer looking like a question the
+    parser had failed on.
+    """
+    f = parse_spec_table(_table(DA_GOAL_PLATFORM))
+    assert f.qid == "DA_GOAL_PLATFORM"
+    assert f.qtype is QuestionType.GRID_SINGLE
+    assert [o.code for o in f.rows] == [1, 2, 99]
+    # Honest about what is still unknown, rather than silently complete.
+    assert "cols" in f.missing
+    assert f.complete is False
+
+
+def test_a_directive_under_an_answer_in_the_same_cell_is_read():
+    """"Google Ads⏎[IF GOOGLE ADS CURRENT USER]" is an answer and a rule.
+
+    Word keeps both lines in one cell. Joined into the label, the bracket
+    became part of what the respondent reads and the base it states was never
+    applied.
+    """
+    f = parse_spec_table(_table(DA_GOAL_PLATFORM))
+    assert f.rows[0].label == "Google Ads"
+    assert f.rows[1].label == "Meta Ads"
+    codes = {b["code"]: b["verbatim"] for b in f.option_bases}
+    assert "GOOGLE ADS CURRENT USER" in codes[1]
+    assert "META ADS CURRENT USER" in codes[2]
+    # It names no question, so it is recorded for a person — never guessed at.
+    assert all(b["resolved"] is False for b in f.option_bases)
+
+
+def test_a_directive_with_no_code_beside_it_is_still_read():
+    """"|  | [INSERT ... FROM DA_PLATFORM_USAGE 9-15] |" has an empty code cell.
+
+    Every blank-code row was skipped, so a list saying where the rest of its
+    items come from said nothing at all.
+    """
+    f = parse_spec_table(_table(DA_GOAL_PLATFORM))
+    sources = {(d["source_qid"], tuple(d["codes"] or ())) for d in f.list_from}
+    assert ("DA_PLATFORM_USAGE", (9, 15)) in sources
+    assert ("DA_GOALS", ()) in sources
