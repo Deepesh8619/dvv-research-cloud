@@ -179,6 +179,13 @@ export default function RespondentPage() {
   const [symbols, setSymbols] = useState<Record<string, string>>({})
   // The blocks the script was written in: the progress bar's segments.
   const [sections, setSections] = useState(1)
+  // The named part being answered now, and whether it JUST changed. Moving
+  // between two arms of a comparison with nothing said is how a respondent
+  // answers the second as if it were more of the first.
+  const [section, setSection] = useState<{ label: string; fresh: boolean }>({
+    label: '',
+    fresh: false,
+  })
   // Live refs the async event handlers read (state would be stale in closures).
   const sessionIdRef = useRef<string>('')
   const terminatedRef = useRef(false)
@@ -278,12 +285,26 @@ export default function RespondentPage() {
           if (done > 0 && done < total) options.error = `Please rank all ${total} — ${total - done} left.`
         })
         setSections(Math.max(1, survey.visiblePages.length))
+        // The parts the SCRIPT names — "Google Ads", "Meta Ads" — keyed by
+        // page. Only blocks the document labelled; nothing else is a section.
+        const named: Record<string, string> = {}
+        const declared = (res.data.surveyjs_json?.sections || []) as {
+          page: string
+          label: string
+        }[]
+        for (const s of declared) named[s.page] = s.label
         setPosition(positionOf(survey))
 
         // Per-page incremental capture: POST accumulated answers on every advance.
         // Multi/checkbox/text don't auto-advance — their Next click fires this too.
+        const trackSection = (sender: Model) => {
+          const label = named[sender.currentPage?.name || ''] || ''
+          setSection((was) => ({ label, fresh: !!label && label !== was.label }))
+        }
+        trackSection(survey)
         survey.onCurrentPageChanged.add(async (sender) => {
           setPosition(positionOf(sender))
+          trackSection(sender)
           await submitPage(sender, sender.currentPageNo)
         })
 
@@ -695,7 +716,15 @@ export default function RespondentPage() {
           ))}
         </div>
         <div className="max-w-[640px] mx-auto px-4 sm:px-0 flex items-center justify-between py-3">
-          <span className="text-sm font-medium text-slate-500 truncate pr-3">{title}</span>
+          <span className="text-sm font-medium text-slate-500 truncate pr-3">
+            {title}
+            {section.label && (
+              <>
+                <span className="mx-1.5 text-slate-300">/</span>
+                <span className="text-slate-700">{section.label}</span>
+              </>
+            )}
+          </span>
           <span className="text-sm font-semibold text-slate-400 tabular-nums shrink-0">
             {position.at} / {position.of}
           </span>
@@ -703,6 +732,20 @@ export default function RespondentPage() {
       </div>
 
       <div className="dvv-survey max-w-[640px] mx-auto px-4 sm:px-0 pt-2">
+        {/* Said ONCE, on arriving. The two arms of a comparison run back to
+            back, and a respondent carried from one to the other with nothing
+            said answers the second as if it were more of the first. Repeating
+            it on every page of the section would be furniture nobody reads. */}
+        {section.fresh && (
+          <div
+            key={section.label}
+            className="dvv-rise mb-3 flex items-center gap-2 rounded-xl px-4 py-2.5"
+            style={{ background: `${theme.accent}14`, color: theme.accentDeep }}
+          >
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: theme.accent }} />
+            <span className="text-sm font-semibold">{section.label}</span>
+          </div>
+        )}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/70 p-5 sm:p-8">
           <QuestionSymbol name={symbols[position.qid]} accent={theme.accent} />
           {model && <Survey model={model} />}
