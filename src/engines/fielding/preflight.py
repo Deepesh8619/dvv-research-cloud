@@ -167,6 +167,39 @@ def preflight(
             finding.qids, WARN, finding.detail,
         ))
 
+    # A block rotation the document asks for and this platform cannot do.
+    # Fielded in fixed order every respondent meets the same block first, and
+    # the brand comparison the study exists to make carries an order effect
+    # nobody can separate out afterwards. The data looks complete and the
+    # finding is unsound — so the link is refused rather than the instruction
+    # quietly dropped.
+    from_note = (survey.metadata or {}).get("blocks_from_note") or {}
+    rotation = from_note.get("rotation_unsupported")
+    checks.append(_result(
+        Check("block_rotation", "No block rotation is asked for that cannot be done"),
+        ["document"] if rotation else [], FAIL,
+        f"The document asks for it — \u201c{rotation}\u201d — and this platform fields blocks "
+        "in a fixed order, so every respondent would meet the same one first. "
+        "Rotate it in the panel, or accept the order effect on purpose.",
+    ))
+
+    # The document's own note naming a question this survey does not have.
+    # One character in the instruction rather than in the question, and the
+    # block is short by one with nothing saying why.
+    absent = from_note.get("named_but_absent") or []
+    guess = from_note.get("did_you_mean") or {}
+    detail = "; ".join(
+        f"{name} — did the note mean {guess[name]}?" if name in guess else name
+        for name in absent
+    )
+    checks.append(_result(
+        Check("block_membership", "Every question a block names exists"),
+        list(absent), WARN,
+        f"A scripter note groups questions into blocks and names {detail}. "
+        "Confirm which question it meant — a block short by one is an arm of the "
+        "study that never runs.",
+    ))
+
     struck = (survey.metadata or {}).get("struck_out") or []
     if struck:
         sample = "; ".join(t[:40] for t in struck[:3])

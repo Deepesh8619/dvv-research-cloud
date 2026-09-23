@@ -46,6 +46,7 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.questionnaire import schema
+from src.engines.questionnaire.block_notes import apply as apply_block_notes
 from src.engines.questionnaire.carousel import apply as apply_carousels
 from src.engines.questionnaire.carousel import capture as capture_carousel
 from src.engines.questionnaire.constant_sum import apply as apply_constant_sums
@@ -1405,6 +1406,9 @@ def extract_survey_definition(
     # A MaxDiff or conjoint block is an experiment, not a question. Last, so
     # every other pass has finished shaping the question it reads.
     flag_trade_offs(survey)
+    # "Google Ads Block of questions: ..." — the study's own structure, stated
+    # in a scripter note. After every question exists, since it names them.
+    apply_block_notes(survey)
 
     # What the document says about the STUDY, not about one question: sample
     # size, length of interview, the screening requirements, and the quota table
