@@ -61,7 +61,7 @@ from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
 from src.engines.questionnaire.learned import LearnedPattern, learned_hidden_variable
 from src.engines.questionnaire.list_sources import fill_lists, points_at_a_list
 from src.engines.questionnaire.loops import expand_loops
-from src.engines.questionnaire.mr_techniques import detect_techniques
+from src.engines.questionnaire.mr_techniques import Mask, detect_techniques
 from src.engines.questionnaire.per_item import apply as apply_per_item_grids
 from src.engines.questionnaire.profiles import detect_profile
 from src.engines.questionnaire.prose_directives import (
@@ -453,6 +453,12 @@ def _randomize_from_cell(stated: str | None) -> bool:
     return bool(_RANDOMIZE_YES.search(text))
 
 
+#: "Show / HV: Hidden variable" — the spec table stating that this row is
+#: computed rather than asked. Deliberately narrow: "Show respondent directly"
+#: is the other value of that same cell and must never match.
+_HIDDEN_VARIABLE = re.compile(r"\bhidden\b.{0,12}\bvariable\b|\bHV\b\s*$", re.I)
+
+
 def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Question:
     """Build a Question from what the table itself stated."""
     validation: dict[str, Any] = {}
@@ -467,12 +473,43 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
         # "Allow 0-999": the bounds the compiler turns into a validator.
         validation.update(fields.numeric_range)
     techniques = detect_techniques(fields.text or "", fields.notes or "", fields.show or "")
+    # "Response list: [INSERT SELECTIONS FROM DA_GOALS]" — the whole answer
+    # list is another question's selections. That IS a mask, and saying so
+    # rather than inventing a second mechanism gets three things at once: the
+    # pass that fills lists borrows DA_GOALS' items, the compiler narrows them
+    # at run time to what this respondent actually chose, and the review UI
+    # shows the link. It was being read and then dropped, so the question
+    # reached a reviewer with no answers and nothing said about why.
+    for source in fields.list_from:
+        qid = (source.get("source_qid") or "").strip()
+        if not qid or qid.upper() == fields.qid.upper():
+            continue
+        if any(m.source_qid.upper() == qid.upper() for m in techniques.masks):
+            continue
+        techniques.masks.append(
+            Mask(source_qid=qid.upper(), mode="selected", verbatim=source.get("verbatim", ""))
+        )
     if techniques:
         validation["techniques"] = techniques.to_dict()
+
+    # The table SAYS so: "Show / HV: Hidden variable". A derived variable is
+    # computed by the programmer from other answers and is never put to a
+    # respondent, and the platform has no derivation engine — so the honest
+    # handling is to label it, exactly as for a HID_ qid. This one is stated
+    # outright and was still being read as a single-choice question with no
+    # answers, which is how HIDDEN_TOPBENEFIT reached the reviewer looking
+    # like a parser failure. A stated fact beats every wording heuristic.
+    stated_hidden = _HIDDEN_VARIABLE.search(fields.show or "")
+    flags = [schema.FLAG_AMBIGUOUS_ROUTING] if "terminate_gap" in fields.evidence else []
+    evidence = dict(fields.evidence)
+    if stated_hidden:
+        flags.append(schema.FLAG_DERIVED_VARIABLE)
+        evidence["derived"] = f"Show / HV: {(fields.show or '').strip()}"
+
     return Question(
         qid=fields.qid,
         text=fields.text or "",
-        type=fields.qtype or QuestionType.SINGLE,
+        type=QuestionType.INFO if stated_hidden else (fields.qtype or QuestionType.SINGLE),
         options=order_terminal_options(list(fields.options)),
         # A grid's two lists, kept apart: the variable list is what is rated,
         # the response list is the scale. Flattened into `options` they collided
@@ -486,9 +523,9 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
         source_location=chunk.provenance,
         validation=validation,
         extraction_method="spec_table",
-        extraction_evidence=dict(fields.evidence),
+        extraction_evidence=evidence,
         # A screen-out stated only in part stays in front of a reviewer.
-        flags=[schema.FLAG_AMBIGUOUS_ROUTING] if "terminate_gap" in fields.evidence else [],
+        flags=flags,
     )
 
 
