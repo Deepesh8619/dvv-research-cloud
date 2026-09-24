@@ -22,7 +22,7 @@ client questionnaires.
 
 | # | Task | Kind | Done when |
 |---|---|---|---|
-| 0.1 | **Fix the re-read hazard.** Refuse a prose re-read when the stored question has `extraction_method="spec_table"`; widen `_reread_is_regression` to catch shrinkage and type reversals, not only a drop to zero. | moat | `Re-read all` on the Google Ads study changes nothing it should not; `HIDDEN_TOPBENEFIT` stays `info`. |
+| 0.1 | ✅ **Done 2026-09-24 (#66).** **Fixed the re-read hazard.** Refuse a prose re-read when the stored question has `extraction_method="spec_table"`; widen `_reread_is_regression` to catch shrinkage and type reversals, not only a drop to zero. | moat | `Re-read all` on the Google Ads study changes nothing it should not; `HIDDEN_TOPBENEFIT` stays `info`. |
 | 0.2 | **Look at the three unviewed UI merges in a browser** (#61 source tile, #62 structure, #63 section banner). | — | Someone has seen each on a phone and a laptop. |
 | 0.3 | Commit `graphify-out/` to `.gitignore`. | — | Clean `git status` in every worktree. |
 
@@ -43,7 +43,7 @@ measured on extraction quality alone.
 
 | # | Task | Kind | Done when |
 |---|---|---|---|
-| 2.1 | **SPSS `.sav` export.** Output is `.xlsx` today; DP teams live in SPSS. | table stakes | A `.sav` opens in SPSS with labels and value labels intact. |
+| 2.1 | ~~SPSS `.sav` export~~ — **already existed**; the gap analysis was wrong. What was actually missing: declared missing values, so "99: Prefer not to answer" counted as a value and a 1-2 satisfaction scale averaged 25.75. **Done 2026-09-24.** | table stakes | ✅ missing codes declared, measure levels set, round-trip tested. |
 | 2.2 | **Re-read reaches the spec-table path.** Today a table-parser fix only lands on re-upload. | moat | A spec-table study picks up #58–#60 without re-uploading. |
 | 2.3 | **`Q21d` chunk boundary** — stop a question swallowing the placeholder and quota tables beside it. | moat | Vivo: questions with nothing to pick 1 → 0. |
 | 2.4 | **Block rotation**, implemented rather than refused. | moat | The Google Ads study fields 50/50 and preflight stops failing it. |
