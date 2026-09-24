@@ -80,6 +80,7 @@ building toward.
 | 5.1 | **Semantic comprehension checks** — does a pipe have something to fill it *at the point it fires*? Can a masked list be non-empty for a real respondent? Today the dry run simulates; it does not understand. | moat |
 | 5.2 | **UI generated from structure** — sections, progress treatment, question-type-aware layout, all derived from what the document states. Started (#63); barely begun. | moat |
 | 5.3 | **Correction loop expansion** — founders teaching the parser is the thing that makes every future document cheaper. | moat |
+| 5.5 | **Resolution memory.** The correction loop already makes the second document free, but only by LITERAL substring match, scoped to one client profile. It cannot match "this looks like the thing we resolved on Vivo wave 1". Record every resolution as a first-class record — what was unreadable, what it became, who decided, which document — embed it alongside `question`/`brief`/`verbatim` in the store that already exists, and query it wherever a parser gives up (`missing`, `unread_fragments`, an unresolved `[IF ...]` naming no question). Surface the nearest prior resolution as a SUGGESTION with its evidence and source, never applied: a retrieved resolution applied silently is the re-read hazard again. Needs no new datastore. Needs CROSS-STUDY scope, which runs into the per-client bundle — client A's resolutions must not reach client B — and that boundary is the hard part, not the retrieval. | moat |
 | 5.4 | Chunk-boundary understanding generally — the class of defect `Q21d` belongs to. | moat |
 
 ---
