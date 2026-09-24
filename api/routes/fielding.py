@@ -95,6 +95,9 @@ from src.core.survey_definition import (
 )
 from src.engines.fielding.decisions import QuotaCell
 from src.engines.fielding.dryrun import path_to, simulate
+from src.engines.fielding.rotation import arms as rotation_arms
+from src.engines.fielding.rotation import assign as assign_arm
+from src.engines.fielding.rotation import order_pages
 from src.renderers.surveyjs_compiler import compile_to_surveyjs, display_warnings
 
 logger = logging.getLogger(__name__)
@@ -809,10 +812,27 @@ def enter_survey(token: str, request: Request, db: Session = Depends(get_db)):
             redirect_url=_redirect_url(link, session),
         )
 
-    session = create_respondent_session(db, link.id, entry_params=entry_params)
-
     survey = SurveyDefinition.from_json(link.survey_json)
     surveyjs_json = compile_to_surveyjs(survey)
+
+    # Which block this respondent meets first, when the script asked for the
+    # blocks to be rotated. Assigned to the arm that is BEHIND rather than by a
+    # coin flip: on 500 respondents a fair coin lands 54/46 often enough to
+    # bias the very brand comparison the rotation exists to protect.
+    block_order = None
+    available = rotation_arms(survey)
+    if available:
+        counts: dict[str, int] = {}
+        for prior in list_respondent_sessions(db, link.id):
+            arm = getattr(prior, "block_order", None)
+            if arm:
+                counts[arm] = counts.get(arm, 0) + 1
+        block_order = assign_arm(counts, available)
+        surveyjs_json = order_pages(surveyjs_json, block_order)
+
+    session = create_respondent_session(
+        db, link.id, entry_params=entry_params, block_order=block_order
+    )
     return RespondentEntryResponse(
         session_id=session.id,
         status="open",

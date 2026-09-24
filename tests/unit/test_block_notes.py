@@ -66,16 +66,18 @@ def test_no_question_falls_out_of_every_block():
     assert placed == qids
 
 
-def test_a_rotation_this_platform_cannot_do_is_recorded_not_dropped():
+def test_the_rotation_is_recorded_so_it_can_be_applied():
     """The half of the instruction that decides whether the study is sound.
 
     Fielded in fixed order every respondent meets Google first, and the
     Google-versus-Meta difference the study is FOR carries an order effect
-    nobody can separate out afterwards.
+    nobody can separate out afterwards. The note is recorded here; entry
+    assigns each respondent an arm and the export carries which one they met.
     """
     survey = _survey(["GA_ONE", "GA_TWO", "GA_THREE", "META_ONE", "META_TWO"])
     applied = apply(survey)
-    assert "Rotate" in applied["rotation_unsupported"]
+    assert "Rotate" in applied["rotation"]
+    assert applied["block_ids"] == ["blk_google_ads", "blk_meta_ads"]
 
 
 def test_a_note_about_questions_this_survey_does_not_have_builds_nothing():

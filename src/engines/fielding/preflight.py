@@ -174,13 +174,18 @@ def preflight(
     # finding is unsound — so the link is refused rather than the instruction
     # quietly dropped.
     from_note = (survey.metadata or {}).get("blocks_from_note") or {}
-    rotation = from_note.get("rotation_unsupported")
+    rotation = from_note.get("rotation") or from_note.get("rotation_unsupported")
+    # Asked for, but fewer than two blocks were built from the note — so there
+    # is nothing to rotate between and every respondent meets the same order.
+    # The instruction exists because order biases a brand comparison, so a
+    # rotation that silently does not happen is worse than none.
+    unrotatable = bool(rotation) and len(from_note.get("block_ids") or []) < 2
     checks.append(_result(
-        Check("block_rotation", "No block rotation is asked for that cannot be done"),
-        ["document"] if rotation else [], FAIL,
-        f"The document asks for it — \u201c{rotation}\u201d — and this platform fields blocks "
-        "in a fixed order, so every respondent would meet the same one first. "
-        "Rotate it in the panel, or accept the order effect on purpose.",
+        Check("block_rotation", "Every block rotation the document asks for is applied"),
+        ["document"] if unrotatable else [], FAIL,
+        f"The document asks for it — \u201c{rotation}\u201d — but fewer than two of the "
+        "blocks it names could be built, so every respondent would meet the same one "
+        "first and the order effect would sit inside the comparison.",
     ))
 
     # The document's own note naming a question this survey does not have.
