@@ -886,6 +886,30 @@ def parse_prose_question(
             f"learned: {taught_hidden}" if taught_hidden
             else "an all-caps CODE instruction to the scripter"
         )
+    elif declared_free_text := next(
+        (
+            (qtype, directive)
+            for directive in directives
+            for pattern, qtype in _TYPE_PATTERNS
+            if qtype in (QuestionType.OPEN_TEXT, QuestionType.NUMERIC)
+            and pattern.search(directive)
+        ),
+        None,
+    ):
+        # The question's OWN directive outranks a shape found in the lines
+        # below it. Q21d says "[OPEN END]" and its chunk then runs on into a
+        # section header, a [PLACEHOLDER] table of campaign creative, a
+        # "PN. CODE POSITION EXPOSURE" note and a quota grid — and the quota
+        # grid's "n=166-167 | n=166-167 | n=166-167" reads as a scale row, so
+        # a verbatim was typed as a grid on the strength of another section's
+        # furniture.
+        #
+        # A question that states it collects typed text or a number cannot be
+        # a grid, whatever appears underneath it. The chunk boundary is still
+        # wrong — that is a separate defect — but a stated type is not a thing
+        # to overturn on a guess.
+        fields.qtype, deciding_directive = declared_free_text
+        fields.evidence["type"] = f"[{deciding_directive}]"
     elif scale_row:
         fields.qtype = QuestionType.GRID_SINGLE
         fields.evidence["type"] = scale_row

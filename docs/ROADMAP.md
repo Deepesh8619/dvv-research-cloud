@@ -45,7 +45,7 @@ measured on extraction quality alone.
 |---|---|---|---|
 | 2.1 | ~~SPSS `.sav` export~~ — **already existed**; the gap analysis was wrong. What was actually missing: declared missing values, so "99: Prefer not to answer" counted as a value and a 1-2 satisfaction scale averaged 25.75. **Done 2026-09-24.** | table stakes | ✅ missing codes declared, measure levels set, round-trip tested. |
 | 2.2 | **Re-read reaches the spec-table path.** Today a table-parser fix only lands on re-upload. | moat | A spec-table study picks up #58–#60 without re-uploading. |
-| 2.3 | **`Q21d` chunk boundary** — stop a question swallowing the placeholder and quota tables beside it. | moat | Vivo: questions with nothing to pick 1 → 0. |
+| 2.3 | ⚠️ **Partly done 2026-09-24.** The symptom is fixed — Vivo is now 0 and all three documents are at zero — but by a different route than this line assumed. `Q21d` declares `[OPEN END]`; a quota grid's `n=166-167 \| n=166-167 \| n=166-167` read as a scale row and re-typed it GRID_SINGLE before its own directive was consulted. A declared free-text type now outranks a shape found below it. **The chunk boundary is STILL wrong** — the chunk still swallows a section header, a placeholder table and a PN quota table — and a question there that does NOT declare its type would still be mis-read. | moat | ✅ Vivo 1 → 0. ❌ chunk boundary open. |
 | 2.4 | **Block rotation**, implemented rather than refused. | moat | The Google Ads study fields 50/50 and preflight stops failing it. |
 
 ## Tier 3 — Coverage. The four "no"s in a B3 room. (weeks each)
