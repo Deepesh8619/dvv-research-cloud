@@ -1582,7 +1582,15 @@ export default function QuestionnairePage() {
 
           <div className={`grid gap-6 ${sourceOpen ? 'grid-cols-8' : 'grid-cols-5'}`}>
             {/* List */}
-            <div className="col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
+            {/* Sticky, and no taller than the viewport: the detail column runs
+                for several screens, and a list that scrolls away with it means
+                choosing the next question is a scroll back to the top every
+                time. The list keeps its own scroll inside the card.
+
+                `self-start` is load-bearing, not cosmetic: a grid child
+                stretches to the row's height by default, and a box already as
+                tall as its row has nowhere to stick to. */}
+            <div className="col-span-2 sticky top-4 self-start flex max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between">
                 <span className="text-sm font-semibold text-slate-800 tabular-nums">
                   {bucket === 'all' ? `${questions.length} questions` : `${visible.length} of ${questions.length}`}
@@ -1646,7 +1654,7 @@ export default function QuestionnairePage() {
                   {reorderError}
                 </p>
               )}
-              <div key={bucket} data-question-list className="relative max-h-[70vh] overflow-y-auto dvv-cascade">
+              <div key={bucket} data-question-list className="dvv-cascade relative min-h-0 flex-1 overflow-y-auto">
                 {visible.map((q) => (
                   <QuestionRow
                     key={q.qid}
