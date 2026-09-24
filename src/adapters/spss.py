@@ -55,10 +55,36 @@ def sav_to_parquet(sav_path: str | Path, parquet_path: str | Path) -> DataMap:
     return datamap
 
 
+#: Our variable types as SPSS measure levels. Without these every column
+#: arrives "unknown" and SPSS guesses at the default analysis for it.
+_MEASURE = {
+    VarType.SINGLE: "nominal",
+    VarType.MULTI: "nominal",
+    VarType.NUMERIC: "scale",
+    VarType.TEXT: "nominal",
+    VarType.DATE: "scale",
+}
+
+
 def write_sav(
     df: pd.DataFrame, datamap: DataMap, path: str | Path
 ) -> None:
-    """Render a canonical study back to .sav (the industry interchange format)."""
+    """Render a canonical study back to .sav (the industry interchange format).
+
+    The codebook travels WITH the data: labels, value labels, measure levels
+    and — the one that changes numbers — declared missing values.
+
+    "99: Prefer not to answer" is an answer in the file and NOT one in a mean.
+    Undeclared, SPSS treats it as an ordinary value: a 1-2 satisfaction scale with
+    a handful of 99s averaged 25.75 in a real check of this function. The file
+    opened, the labels were right, and every mean computed from it was wrong —
+    which is worse than a file that fails to open.
+    """
+    missing_ranges = {
+        v.name: [{"lo": float(code), "hi": float(code)} for code in v.missing_values]
+        for v in datamap.variables
+        if v.missing_values and v.name in df.columns
+    }
     pyreadstat.write_sav(
         df,
         str(path),
@@ -68,4 +94,10 @@ def write_sav(
             for v in datamap.variables
             if v.values
         },
+        variable_measure={
+            v.name: _MEASURE.get(v.type, "nominal")
+            for v in datamap.variables
+            if v.name in df.columns
+        },
+        missing_ranges=missing_ranges or None,
     )

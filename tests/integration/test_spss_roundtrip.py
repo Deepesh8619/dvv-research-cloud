@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
+import pyreadstat
 import pytest
 
 from src.adapters.spss import read_sav, sav_to_parquet, write_sav
@@ -67,3 +68,75 @@ def test_datamap_json_roundtrip(sav_file):
     assert restored.names() == datamap.names()
     assert restored["q1"].values == datamap["q1"].values
     assert restored["q1"].type == datamap["q1"].type
+
+
+# --- the codebook has to travel WITH the data ------------------------------
+
+
+def _satisfaction_map() -> DataMap:
+    datamap = DataMap()
+    datamap.add(Variable(
+        name="Q1", label="How satisfied are you?", type=VarType.SINGLE,
+        values={1: "Very", 2: "Somewhat", 99: "Prefer not to answer"},
+        missing_values=[99],
+    ))
+    datamap.add(Variable(name="AGE", label="Age in years", type=VarType.NUMERIC))
+    return datamap
+
+
+def test_a_declared_missing_code_is_not_counted_as_a_value(tmp_path):
+    """The defect that changes numbers in a client deliverable.
+
+    "99: Prefer not to answer" is an answer in the file and NOT one in a mean.
+    Undeclared, SPSS treats it as an ordinary value — this exact frame averaged
+    25.75 on a 1-2 satisfaction scale. The file opened, the labels were right,
+    and every mean computed from it was wrong, which is worse than a file that
+    fails to open.
+    """
+    df = pd.DataFrame({"Q1": [1.0, 2.0, 99.0, 1.0], "AGE": [34.0, 52.0, 41.0, 29.0]})
+    path = tmp_path / "study.sav"
+
+    write_sav(df, _satisfaction_map(), path)
+
+    # Declared in the file itself, not merely dropped on write.
+    _, meta = pyreadstat.read_sav(str(path), user_missing=True)
+    assert meta.missing_ranges["Q1"] == [{"lo": 99.0, "hi": 99.0}]
+
+    # The analyst's view: 99 is absent, so the mean is of 1, 2, 1.
+    analysis, _ = pyreadstat.read_sav(str(path), user_missing=False)
+    assert analysis["Q1"].isna().sum() == 1
+    assert analysis["Q1"].mean() == pytest.approx(4 / 3)
+
+
+def test_the_value_is_still_there_when_asked_for(tmp_path):
+    """Declaring it missing must not DELETE it — "refused" is a real finding."""
+    df = pd.DataFrame({"Q1": [1.0, 2.0, 99.0, 1.0], "AGE": [34.0, 52.0, 41.0, 29.0]})
+    path = tmp_path / "study.sav"
+    write_sav(df, _satisfaction_map(), path)
+
+    raw, _ = pyreadstat.read_sav(str(path), user_missing=True)
+    assert list(raw["Q1"]) == [1.0, 2.0, 99.0, 1.0]
+
+
+def test_measure_levels_reach_the_file(tmp_path):
+    """Without these every column arrives "unknown" and SPSS guesses."""
+    df = pd.DataFrame({"Q1": [1.0, 2.0], "AGE": [34.0, 52.0]})
+    path = tmp_path / "study.sav"
+    write_sav(df, _satisfaction_map(), path)
+
+    _, meta = pyreadstat.read_sav(str(path))
+    assert meta.variable_measure["Q1"] == "nominal"
+    assert meta.variable_measure["AGE"] == "scale"
+
+
+def test_a_study_with_no_missing_codes_still_writes(tmp_path):
+    """missing_ranges=None rather than {} — pyreadstat rejects the empty dict."""
+    datamap = DataMap()
+    datamap.add(Variable(name="AGE", label="Age in years", type=VarType.NUMERIC))
+    path = tmp_path / "plain.sav"
+
+    write_sav(pd.DataFrame({"AGE": [34.0, 52.0]}), datamap, path)
+
+    back, meta = pyreadstat.read_sav(str(path))
+    assert list(back["AGE"]) == [34.0, 52.0]
+    assert meta.column_names_to_labels["AGE"] == "Age in years"
