@@ -52,6 +52,7 @@ from src.core.survey_definition import (
 )
 from src.engines.fielding.paradata import DEVICE_CODES
 from src.engines.fielding.paradata import summarise as summarise_paradata
+from src.engines.fielding.rotation import ROTATION_VARIABLE, rotating_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -469,6 +470,33 @@ def materialize_fielding(
     columns[PARA_PLACE] = _pandas_series(VarType.SINGLE, places)
     columns[PARA_COUNTRY] = _pandas_series(VarType.TEXT, countries)
     columns[PARA_REGION] = _pandas_series(VarType.TEXT, regions)
+
+    # Which block each respondent met FIRST, when the script rotated them.
+    #
+    # This is the column that makes the rotation worth doing. Rotating without
+    # recording it leaves the analyst exactly where fixed order left them: they
+    # can see the brand difference and cannot tell how much of it is order.
+    # Coded with value labels rather than stored as a block id, so it tabulates
+    # and filters like any other single-coded variable.
+    #
+    # Only emitted when the study actually rotates — nothing else gains a
+    # column full of blanks.
+    rotating = rotating_blocks(survey)
+    if rotating:
+        block_labels = {b.block_id: (b.label or b.block_id) for b in survey.blocks}
+        code_of = {block_id: index + 1 for index, block_id in enumerate(rotating)}
+        datamap.add(Variable(
+            name=ROTATION_VARIABLE,
+            label="Block order: which block was shown first",
+            type=VarType.SINGLE,
+            values={code: block_labels.get(block_id, block_id)
+                    for block_id, code in code_of.items()},
+            provenance="fielding",
+        ))
+        columns[ROTATION_VARIABLE] = _pandas_series(
+            VarType.SINGLE,
+            [code_of.get(getattr(s, "block_order", None)) for s in completes],
+        )
 
     df = pd.DataFrame(columns, columns=[v.name for v in datamap.variables])
     return datamap, df

@@ -582,6 +582,15 @@ def compile_to_surveyjs(survey: SurveyDefinition) -> dict[str, Any]:
         # Read by the respondent page, not by SurveyJS itself.
         compiled["sections"] = sections
 
+    # The pages a scripter note asked to rotate. Carried on the model so the
+    # entry point can order them per respondent without re-reading the note —
+    # and so a study that asked for no rotation carries nothing at all.
+    from src.engines.fielding.rotation import rotating_blocks
+
+    rotating = [b for b in rotating_blocks(survey) if any(p["name"] == b for p in pages)]
+    if len(rotating) >= 2:
+        compiled["rotatingPages"] = rotating
+
     grid_masks = _grid_mask_sources(survey)
     if grid_masks:
         # Read by the respondent page, not by SurveyJS itself.

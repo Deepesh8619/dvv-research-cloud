@@ -174,7 +174,9 @@ def apply(survey: SurveyDefinition) -> dict[str, Any]:
     if found.get("fix_internal_order"):
         applied["internal_order_fixed"] = True
     if found.get("rotate_verbatim"):
-        # Recorded, never pretended. Preflight refuses the link over it.
-        applied["rotation_unsupported"] = found["rotate_verbatim"]
+        # Applied at respondent entry: each one meets the arm that is behind,
+        # and which arm they met is delivered as HID_BLOCK_ORDER so the
+        # analyst can control for order. See engines/fielding/rotation.py.
+        applied["rotation"] = found["rotate_verbatim"]
     survey.metadata["blocks_from_note"] = applied
     return applied

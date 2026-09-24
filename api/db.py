@@ -264,6 +264,11 @@ class RespondentSessionDB(Base):
     fielding_link_id = Column(String, index=True)
     status_code = Column(Integer, nullable=True)  # None|10|20|30|40
     entry_params = Column(JSON, default=dict)
+    # Which block this respondent met FIRST, when the script asked for the
+    # blocks to be rotated. Its own column rather than a key in entry_params,
+    # which means "what the panel sent" — this is what WE decided, and the
+    # analyst has to be able to control for it.
+    block_order = Column(String, nullable=True)
     # The panel's respondent id, copied out of entry_params so the duplicate
     # check at entry is one indexed lookup instead of a scan of every session.
     # '' = entered without one. Added after the table shipped (_ensure_new_columns).
@@ -752,6 +757,8 @@ def _ensure_new_columns():
         },
         "respondent_sessions": {
             "pid": "VARCHAR",
+            # Which block the respondent met first, when the script rotates.
+            "block_order": "VARCHAR",
         },
     }
     inspector = inspect(engine)
@@ -1305,9 +1312,17 @@ def add_synthetic_sessions(
 
 
 def create_respondent_session(
-    db: Session, fielding_link_id: str, entry_params: dict | None = None
+    db: Session,
+    fielding_link_id: str,
+    entry_params: dict | None = None,
+    block_order: str | None = None,
 ) -> "RespondentSessionDB":
-    """Start a respondent session (status_code stays NULL until terminal)."""
+    """Start a respondent session (status_code stays NULL until terminal).
+
+    `block_order` is the rotating block this respondent meets first, when the
+    script asked for rotation. Recorded at entry, because it has to reach the
+    data file: a rotation the analyst cannot see is nearly as useless as none.
+    """
     from uuid import uuid4
 
     now = datetime.now().isoformat()
@@ -1317,6 +1332,7 @@ def create_respondent_session(
         status_code=None,
         entry_params=entry_params or {},
         pid=str((entry_params or {}).get("pid") or "").strip(),
+        block_order=block_order,
         current_page=0,
         started_at=now,
         last_seen_at=now,
