@@ -476,3 +476,23 @@ def test_several_tags_on_one_line_are_all_still_stripped():
     assert fields is not None
     assert "[SP]" not in fields.text and "[RANDOMIZE]" not in fields.text
     assert fields.text.strip() == "Which do you prefer?"
+
+
+def test_a_base_tag_is_a_label_not_part_of_the_sentence():
+    """"[BASE: ALL]" must not reach the respondent's screen.
+
+    In the questionnaires that open every question with one, leaving it in the
+    wording puts the scripter's tag on every single screen of the survey.
+    Unlike an unparsed condition — which stays visible on purpose, because a
+    directive nobody noticed is worse than an untidy one — the tag is still
+    kept in `directives` and in the source text, so a base naming a subgroup
+    remains auditable as a condition nobody applied.
+    """
+    f = parse_prose_question(
+        "[BASE: ALL] How satisfied are you with TMS outcomes?\n"
+        "Very satisfied\nNot satisfied",
+        "Q2",
+    )
+    assert f.text == "How satisfied are you with TMS outcomes?"
+    assert "BASE: ALL" in " ".join(f.directives)
+    assert [o.label for o in f.options] == ["Very satisfied", "Not satisfied"]
