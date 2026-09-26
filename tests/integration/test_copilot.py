@@ -272,3 +272,82 @@ def test_the_copilot_searches_what_people_typed_behind_the_data_rule(client, mon
     assert result["newly_indexed"] == 2 and result["not_yet_indexed"] == 0
     assert [a["qid"] for a in result["answers"]] == ["Q3", "Q3"]
     assert any("burnt" in a["said"] for a in result["answers"])
+
+
+def test_every_declared_tool_has_an_implementation(client, monkeypatch):  # noqa: F811
+    """A tool the model can call but the server cannot run fails in front of a user.
+
+    The declaration (src/ai/copilot.TOOLS) and the dispatch table are two lists
+    edited by hand in two files. Nothing joined them, so adding a tool to one
+    and forgetting the other produced "unknown tool" — at the only moment it
+    matters, mid-answer.
+    """
+    from src.ai.copilot import TOOL_NAMES
+
+    session_factory = client[1]
+    _make_study(session_factory)
+    # Build the real executor the endpoint builds, and read its dispatch table.
+    import api.routes.copilot as croutes
+    from api.auth import UserRole
+    from api.db import UserDB
+
+    db = session_factory()
+    try:
+        execute, _proposals = croutes.make_executor(
+            db, UserDB(id="u1", email="t@x.com", name="T", role=UserRole.OWNER.value,
+                       is_active=True)
+        )
+        # Called with no arguments every tool errors — on a missing project, a
+        # missing id, a permission. Only "unknown tool" means it does not exist.
+        missing = {
+            name for name in TOOL_NAMES
+            if execute(name, {}).get("error") == f"unknown tool {name}"
+        }
+    finally:
+        db.close()
+    assert missing == set()
+
+
+def test_the_copilot_diagnoses_a_questionnaire_that_came_out_wrong(client, monkeypatch):  # noqa: F811
+    """"The questionnaire was not detected, none of them were identified."
+
+    The useless answer is "I cannot see the problem, try re-uploading". The
+    document is kept, so the copilot can read it again with today's parsers and
+    say what is actually wrong — and the fix it offers is a card, like every
+    other action it can take.
+    """
+    import base64
+    import gzip
+
+    import api.routes.questionnaire as qroutes
+    from api.db import QuestionnaireDB
+    from src.intake.questionnaire_loader import DocumentBlock
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+
+    # The study keeps the document it was extracted from — that is what makes
+    # re-reading it possible at all. The bytes are never parsed here: load_docx
+    # is stubbed below, because what is under test is the comparison, not docx.
+    db = sf()
+    row = db.query(QuestionnaireDB).filter_by(study_id="study_f1").first()
+    row.source_file_b64 = base64.b64encode(gzip.compress(b"the document")).decode()
+    db.commit()
+    db.close()
+    blocks = [DocumentBlock("paragraph", f"Q{i}. Question {i}?", i) for i in range(1, 6)]
+    monkeypatch.setattr(qroutes, "load_docx", lambda path: blocks)
+
+    _script(monkeypatch,
+            ("tool", "extraction_diagnosis", {"study_id": "study_f1"}),
+            ("tool", "propose_reextract", {"study_id": "study_f1"}),
+            ("text", "The document numbers nothing. Ready to read it again."))
+    resp = test_client.post("/api/copilot", json={"message": "none of the questions "
+                                                  "were detected",
+                                                  "study_id": "study_f1"}).json()
+    assert resp["tools_used"] == ["extraction_diagnosis", "propose_reextract"]
+    # The fix is offered, never taken: one card, nothing changed.
+    card = resp["proposals"][0]
+    assert card["method"] == "POST"
+    assert card["path"] == "/studies/study_f1/questionnaire/reextract"
+    assert "keeps" in card["detail"] or "kept" in card["detail"]

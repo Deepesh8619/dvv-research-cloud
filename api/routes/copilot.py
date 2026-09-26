@@ -161,6 +161,37 @@ def make_executor(db: Session, user: UserDB):
                  "counts": fielding_link_counts(db, ln.id)} for ln in links],
         }
 
+    def extraction_diagnosis(args):
+        """Why a project holds fewer questions than its document has.
+
+        Deliberately does NOT require an approved questionnaire: a study is
+        broken here long before anybody approves it, and "no approved
+        questionnaire yet" is the least useful thing to say to somebody looking
+        at one question where their document has eighty.
+        """
+        from api.routes.questionnaire import diagnose_extraction
+
+        s = study(args)
+        return diagnose_extraction(s.id, db=db, user=user)
+
+    def propose_reextract(args):
+        s = study(args)
+        report = extraction_diagnosis(args)
+        if not report.get("can_reextract"):
+            raise _ToolError(
+                "this project's document was not archived, so it has to be uploaded again"
+            )
+        found = report.get("questions_the_parser_finds_now")
+        stored = report.get("questions_stored")
+        return propose(
+            "reextract",
+            f"Read {s.client_name or s.id}'s questionnaire document again",
+            "Extracts the uploaded document with today's parsers"
+            + (f", which read {found} questions where this version has {stored}"
+               if isinstance(found, int) and isinstance(stored, int) else "")
+            + ". Saved as a new version — the current one and its approvals are kept.",
+            "POST", f"/studies/{s.id}/questionnaire/reextract")
+
     def qc_findings(args):
         s = study(args)
         if not s.crosscheck_json:
@@ -369,6 +400,8 @@ def make_executor(db: Session, user: UserDB):
                                                          str(a.get("qid", ""))),
         "search_verbatims": search_verbatims,
         "qc_findings": qc_findings,
+        "extraction_diagnosis": extraction_diagnosis,
+        "propose_reextract": propose_reextract,
         "study_brief": study_brief,
         "field_report": field_report,
         "soft_launch_check": soft_launch_check,
