@@ -54,6 +54,17 @@ _BASE_IN_WORDS = re.compile(
     r"\b[A-Za-z]{1,6}\d+[A-Za-z]?\b[^\]]*\]",
     re.I,
 )
+# "[BASE: THOSE WHO PRESCRIBE SPRAVATO]" — the convention of the unnumbered
+# questionnaires, which state every base this way and name no question at all.
+# Both patterns above need a qid to fire, so these were invisible to the audit
+# AND unreadable to the parser: the question went to everybody with nothing
+# said. A base naming a SUBGROUP is the finding; "[BASE: ALL]" is not one.
+_BASE_TAG = re.compile(r"\[\s*BASE\s*[:\-]\s*(?P<who>[^\]]+)\]", re.I)
+_BASE_IS_EVERYONE = re.compile(
+    r"^(?:all|total(?:\s+sample)?|everyone|all\s+respondents|general\s+population)"
+    r"\s*\.?$",
+    re.I,
+)
 
 
 @dataclass
@@ -277,6 +288,12 @@ def audit_definition(survey: SurveyDefinition) -> list[Finding]:
         else:
             stated_not_applied.append(q.qid)
 
+    def _states_base_in_words(source: str) -> bool:
+        if _BASE_IN_WORDS.search(source):
+            return True
+        tag = _BASE_TAG.search(source)
+        return bool(tag and not _BASE_IS_EVERYONE.match(tag.group("who").strip()))
+
     stated_in_words = [
         q.qid
         for q in survey.questions
@@ -285,7 +302,7 @@ def audit_definition(survey: SurveyDefinition) -> list[Finding]:
         and q.qid not in stated_not_applied
         and q.qid not in option_level
         and not _BASE_STATED.search(q.source_text or "")
-        and _BASE_IN_WORDS.search(q.source_text or "")
+        and _states_base_in_words(q.source_text or "")
     ]
     if stated_in_words:
         findings.append(

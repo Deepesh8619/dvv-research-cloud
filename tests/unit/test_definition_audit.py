@@ -236,3 +236,32 @@ def test_a_mask_against_a_list_of_the_same_size_is_left_alone():
         blocks=[Block(block_id="B", question_ids=["Q3", "Q4"])], questions=[aware, used],
     )
     assert "mask_cannot_narrow" not in [f.check for f in audit_definition(survey)]
+
+
+def test_a_base_tag_naming_a_subgroup_is_reported_but_base_all_is_not():
+    """The unnumbered questionnaires state every base as "[BASE: ...]".
+
+    Both existing base checks need a qid to fire, and these tags name no
+    question at all, so a question the document plainly restricts went to
+    everybody with nothing said about it — the silent kind of failure. The
+    finding is a SUBGROUP base; "[BASE: ALL]" is the absence of a condition and
+    must stay quiet, or every question in the document reports itself.
+    """
+    subgroup = Question(
+        qid="Q3",
+        text="What drives your choice?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=1, label="Efficacy")],
+        source_text="[BASE: THOSE WHO USE SPRAVATO] What drives your choice?",
+    )
+    everyone = Question(
+        qid="Q2",
+        text="How satisfied are you?",
+        type=QuestionType.SINGLE,
+        options=[Option(code=1, label="Very satisfied")],
+        source_text="[BASE: ALL] How satisfied are you?",
+    )
+    findings = {
+        f.check: f.qids for f in audit_definition(_survey(everyone, subgroup))
+    }
+    assert findings.get("base_stated_in_words_only") == ["Q3"]

@@ -328,6 +328,12 @@ _INSTRUCTION_RE = re.compile(
 _SECTION_ROUTING_RE = re.compile(r"\bASK\s+[A-Z]{0,3}\d", re.I)
 
 
+# The body of a "[BASE: ...]" tag, as bracket_bodies hands it over (no
+# brackets). See questionnaire_loader._BASE_TAG_RE for where these open a
+# question rather than annotate one.
+_BASE_TAG_BODY = re.compile(r"^\s*BASE\s*[:\-]", re.IGNORECASE)
+
+
 @dataclass
 class ProseFields:
     """What a prose question's own text states. `missing` drives escalation."""
@@ -642,6 +648,17 @@ def parse_prose_question(
 
     for body in inline_bases:
         directives.append(body.strip())
+        if _BASE_TAG_BODY.match(body):
+            # "[BASE: ALL]" opening the question in an unnumbered document. It
+            # is a LABEL, never part of the sentence: leaving it in the wording
+            # puts "[BASE: ALL]" on the respondent's screen, and every question
+            # in these documents carries one. It stays in `directives` and in
+            # source_text, so a base naming a subgroup ("[BASE: THOSE WHO
+            # PRESCRIBE SPRAVATO]") is still auditable as a condition nobody
+            # applied — see definition_audit.base_stated_in_words_only.
+            question_text = _strip_bracket(question_text, body)
+            instruction_text = _strip_bracket(instruction_text, body)
+            continue
         if show_if is None and not _TERMINATE_TAG.search(body):
             routing = parse_routing(body)
             if routing is not None and qid.upper() not in {

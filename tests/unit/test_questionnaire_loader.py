@@ -469,3 +469,51 @@ def test_uppercase_sub_question_suffix_is_a_boundary() -> None:
     chunks = segment_into_questions(blocks)
     # Suffix case is preserved as written — it is the data map's variable name.
     assert [c.candidate_qid for c in chunks] == ["D4", "D4A", "A1a"]
+
+
+def test_base_tag_opens_a_question_when_nothing_is_numbered() -> None:
+    """A questionnaire that numbers nothing and states a base per question.
+
+    The healthcare/pharma convention. It matched no boundary rule — not a
+    question label, not SECTION, not an instruction — so a whole instrument
+    arrived as ONE headless chunk and the reviewer saw a single question whose
+    text was the entire document. Measured on a real uploaded study: 1 question.
+    """
+    blocks = [
+        DocumentBlock("paragraph", "Greenbrook TMS — TRD Treatment Landscape", 0),
+        DocumentBlock("paragraph", "The survey will take approximately 15 minutes.", 1),
+        DocumentBlock("paragraph", "[BASE: ALL] How many medications had they failed?", 2),
+        DocumentBlock("paragraph", "After 1 antidepressant treatment", 3),
+        DocumentBlock("paragraph", "After 2 antidepressant treatments", 4),
+        DocumentBlock("paragraph", "[BASE: ALL] How satisfied are you with TMS?", 5),
+        DocumentBlock("paragraph", "Very satisfied", 6),
+        DocumentBlock("paragraph", "[BASE: THOSE WHO USE SPRAVATO] What drives the choice?", 7),
+        DocumentBlock("paragraph", "Efficacy", 8),
+    ]
+    chunks = segment_into_questions(blocks)
+    # The preamble keeps its own headless chunk; each base tag opens a question
+    # and is NUMBERED, because a qid is the address review and approval use and
+    # "UNKNOWN_3" is not one a reviewer can find in the document.
+    assert [c.candidate_qid for c in chunks] == [None, "Q1", "Q2", "Q3"]
+    assert "Very satisfied" in chunks[2].chunk_text
+    assert "Very satisfied" not in chunks[3].chunk_text
+
+
+def test_base_tag_under_a_numbered_question_is_not_a_boundary() -> None:
+    """The rule that keeps every document that works today working.
+
+    In a NUMBERED questionnaire the same tag annotates the question above it.
+    Promoting it to a boundary there would split one question into two and
+    orphan its options — so the promotion is gated on the document naming
+    nothing at all. All three real client documents are numbered and contain no
+    base-tag-opened lines, so none of them can change behaviour.
+    """
+    blocks = [
+        DocumentBlock("paragraph", "Q5. How satisfied are you?", 0),
+        DocumentBlock("paragraph", "[BASE: THOSE WHO USE SPRAVATO]", 1),
+        DocumentBlock("paragraph", "Very satisfied", 2),
+        DocumentBlock("paragraph", "Not satisfied", 3),
+    ]
+    chunks = segment_into_questions(blocks)
+    assert [c.candidate_qid for c in chunks] == ["Q5"]
+    assert "Not satisfied" in chunks[0].chunk_text

@@ -106,6 +106,19 @@ _BOILERPLATE_CELLS = frozenset(
 # question table, not the preceding one.
 _NOTE_RE = re.compile(r"^\s*SCRIPTER\s*NOTE\b", re.IGNORECASE)
 
+# Some questionnaires — routinely the healthcare/pharma ones — number nothing.
+# Every question simply opens with the base it is asked on:
+#
+#     [BASE: ALL] Thinking about the patients with TRD you treat...
+#     [BASE: THOSE WHO PRESCRIBE SPRAVATO] What drives your choice?
+#
+# In a NUMBERED document that same tag is a directive belonging to the question
+# above it, so treating it as a boundary would shred the documents that work
+# today. It is promoted to a boundary only for a document that carries no
+# numbering at all (see `_is_unnumbered`), where it is the only thing marking
+# where one question ends and the next begins.
+_BASE_TAG_RE = re.compile(r"^\s*\[\s*BASE\s*[:\-]", re.IGNORECASE)
+
 # Bracketed directives NEST — real ones do, routinely:
 #
 #     [ASK IF (K2_b=1 (yes) OR [K14a=2 (no) or refused]) AND (D3 = 1 or 2)]
@@ -231,11 +244,26 @@ def _serialize_qname_table(rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
-def _detect_label(text: str) -> tuple[bool, str | None]:
+def _is_unnumbered(blocks: list[DocumentBlock]) -> bool:
+    """True when nothing in the document names a question.
+
+    A document with even one `Q5.` label or one `Q Name:` table is numbered, and
+    its base tags stay directives. Only a document with no names anywhere has to
+    fall back to base tags to find its question boundaries.
+    """
+    return not any(
+        _QID_RE.match(b.text) or _table_qid(b) is not None for b in blocks
+    )
+
+
+def _detect_label(text: str, base_tags_open_questions: bool = False) -> tuple[bool, str | None]:
     """Return (is_boundary, candidate_qid) for a block's leading text.
 
     A question label yields its qid (e.g. "Q5"); a SECTION/instruction boundary
     is a boundary with no qid. Anything else is not a boundary.
+
+    `base_tags_open_questions` is set only for an unnumbered document, where a
+    leading `[BASE: ...]` tag is what opens each question.
     """
     m = _QID_RE.match(text)
     if m:
@@ -244,6 +272,8 @@ def _detect_label(text: str) -> tuple[bool, str | None]:
         prefix, number, suffix = m.groups()
         return True, prefix.upper() + number + suffix
     if _SECTION_RE.match(text) or _INSTRUCTION_RE.match(text):
+        return True, None
+    if base_tags_open_questions and _BASE_TAG_RE.match(text):
         return True, None
     return False, None
 
@@ -560,6 +590,12 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
     current: list[DocumentBlock] = []
     current_qid: str | None = None
     seen_label = False
+    # An unnumbered, base-tagged document. Its questions get sequential Q1..Qn
+    # here rather than all arriving as UNKNOWN: a qid is the address the review
+    # UI, approval and the data column all use, and "UNKNOWN_7" is not one a
+    # reviewer can match back to the document they are reading.
+    base_tags_open = _is_unnumbered(blocks)
+    base_counter = 0
 
     def flush() -> None:
         if not current:
@@ -592,7 +628,10 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
             seen_label = True
             continue
 
-        is_boundary, qid = _detect_label(block.text)
+        is_boundary, qid = _detect_label(block.text, base_tags_open)
+        if is_boundary and qid is None and base_tags_open and _BASE_TAG_RE.match(block.text):
+            base_counter += 1
+            qid = f"Q{base_counter}"
         if is_boundary:
             carried = _trailing_routing_directives(current)
             flush()
