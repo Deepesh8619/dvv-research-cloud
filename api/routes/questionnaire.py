@@ -65,6 +65,7 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.fielding.materialize import plan_datamap
+from src.engines.questionnaire.extraction_diagnosis import diagnose
 from src.engines.questionnaire.extractor import extract_survey_definition, reread_question
 from src.engines.rag.store import ensure_index
 from src.intake.questionnaire_loader import (
@@ -1805,6 +1806,123 @@ def reread_all_questions(
         _persist_reread(db, questionnaire, survey, updated)
 
     return {"n_questions": len(survey.questions), "n_updated": len(updated), "updated": updated}
+
+
+def _archived_source(db: Session, questionnaire, folder: Path) -> Path:
+    """Write a study's archived document into `folder` and return the path."""
+    if not questionnaire.source_file_b64:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "The document itself was not archived for this questionnaire, so it "
+                "cannot be re-read here. Upload it again to make this available."
+            ),
+        )
+    name = questionnaire.source_filename or f"{questionnaire.id}.docx"
+    path = folder / f"{questionnaire.id}{Path(name).suffix.lower() or '.docx'}"
+    path.write_bytes(decompress_archived(questionnaire.source_file_b64))
+    return path
+
+
+@router.get("/studies/{study_id}/questionnaire/diagnosis")
+def diagnose_extraction(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """Why does this study hold fewer questions than its document has? (Authenticated)
+
+    Re-segments the ARCHIVED document with today's parser and compares. That
+    comparison is the only thing that can tell a reviewer their study is broken
+    in a way that has already been fixed: an extraction is a snapshot taken by
+    the parser of the day it ran, and every fix since reaches the study only on
+    re-extraction. Reports; changes nothing.
+    """
+    import tempfile
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    if not questionnaire.source_file_b64:
+        return {
+            "questions_stored": len(survey.questions),
+            "can_reextract": False,
+            "findings": [],
+            "note": (
+                "The document itself was not archived for this study, so what the "
+                "parser would make of it today cannot be checked here. Upload it "
+                "again to compare."
+            ),
+        }
+
+    with tempfile.TemporaryDirectory() as folder:
+        path = _archived_source(db, questionnaire, Path(folder))
+        try:
+            blocks = load_pdf(path) if path.suffix == ".pdf" else load_docx(path)
+        except Exception as exc:
+            logger.warning("could not re-read %s: %s", questionnaire.id, exc)
+            raise HTTPException(
+                status_code=422,
+                detail="This document could not be opened to check it.",
+            ) from exc
+        chunks = segment_into_questions(blocks)
+
+    return diagnose(survey.questions, chunks, blocks, can_reextract=True)
+
+
+@router.post("/studies/{study_id}/questionnaire/reextract")
+def reextract_questionnaire(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Extract the archived document again with today's parsers. (Owner/Analyst)
+
+    The only way a parser fix reaches a study already in the database. Unlike a
+    re-read — which replays each stored question's own text, and so can never
+    recover a question the segmenter never separated — this starts from the
+    document.
+
+    It creates a NEW questionnaire version rather than overwriting. The older
+    one keeps its definition and its per-question approvals, so re-extracting
+    cannot destroy a review somebody spent hours on; it supersedes it, and the
+    previous version is still there to compare against.
+    """
+    questionnaire = _latest_questionnaire(db, study_id)
+    fresh = create_questionnaire(
+        db,
+        study_id,
+        source_filename=questionnaire.source_filename or f"{questionnaire.id}.docx",
+        version=(questionnaire.version or 1) + 1,
+    )
+    # The archive is re-pointed at the new row so the next re-extract can start
+    # from the document too; the old row keeps its own copy.
+    set_questionnaire_source_archive(db, fresh.id, questionnaire.source_file_b64)
+
+    # The study's own upload directory, exactly where upload puts it — not a
+    # temp dir, which the extraction thread outlives and so would never clean.
+    path = _archived_source(db, questionnaire, _questionnaire_dir(study_id))
+    threading.Thread(
+        target=_run_extraction,
+        args=(
+            fresh.id,
+            study_id,
+            path,
+            _definition_path(study_id, fresh.id),
+            questionnaire.source_filename or "questionnaire.docx",
+        ),
+        daemon=True,
+    ).start()
+
+    return {
+        "questionnaire_id": fresh.id,
+        "version": fresh.version,
+        "status": "processing",
+        "superseded": questionnaire.id,
+        "message": (
+            f"Re-extracting {questionnaire.source_filename or 'the document'} as "
+            f"version {fresh.version}. The previous version and its approvals are kept."
+        ),
+    }
 
 
 @router.post("/studies/{study_id}/questionnaire/apply-teaching")

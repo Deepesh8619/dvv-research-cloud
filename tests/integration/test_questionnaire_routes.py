@@ -1180,3 +1180,116 @@ def test_reading_says_what_to_do_when_nothing_was_archived(client) -> None:
 
     resp = test_client.get("/api/studies/study_q1/questionnaire/source/rendered")
     assert resp.status_code == 404
+
+
+def test_diagnosis_reads_the_document_again_and_names_the_gap(client):
+    """The reviewer's question is "why is there one question here?".
+
+    The answer has to come from reading the SAME document with today's parser,
+    because a study can be broken in a way that is already fixed and nothing in
+    the stored definition can say so.
+    """
+    test_client, session_factory, state = client
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    # The document the study was extracted from, as the parser reads it TODAY:
+    # four questions, where the stored fixture has two.
+    from src.intake.questionnaire_loader import (
+        DocumentBlock,
+    )
+    from src.intake.questionnaire_loader import (
+        segment_into_questions as real_segment,
+    )
+
+    blocks = [
+        DocumentBlock("paragraph", f"Q{i}. Question {i}?", i) for i in range(1, 5)
+    ]
+    # The fixture stubs the loader out for upload; the diagnosis has to use the
+    # REAL segmenter, since re-segmenting is the whole mechanism under test.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(qroutes, "load_docx", lambda path: blocks)
+        mp.setattr(qroutes, "segment_into_questions", real_segment)
+        body = test_client.get("/api/studies/study_q1/questionnaire/diagnosis").json()
+
+    assert body["questions_stored"] == 2
+    assert body["questions_the_parser_finds_now"] == 4
+    assert "numbered" in body["document_convention"]
+    assert any("Re-extracting would pick up" in f for f in body["findings"])
+    assert body["can_reextract"] is True
+
+
+def test_diagnosis_works_before_anything_is_approved(client):
+    """A study is broken here long before anybody approves it.
+
+    Requiring an approved questionnaire would make the check unavailable
+    exactly when it is needed.
+    """
+    test_client, session_factory, state = client
+    _make_study(session_factory)
+    _upload(test_client)
+    body = _wait_draft(test_client)
+    assert body["status"] != "approved"
+
+    resp = test_client.get("/api/studies/study_q1/questionnaire/diagnosis")
+    assert resp.status_code == 200
+    assert resp.json()["questions_stored"] == 2
+
+
+def test_reextract_keeps_the_version_it_supersedes(client):
+    """Re-extraction must never destroy a review somebody spent hours on.
+
+    It is the only way a parser fix reaches a study already in the database, so
+    it has to be safe enough to run on a study under review: a NEW version, with
+    the old definition and its per-question approvals still there.
+    """
+    from api.db import QuestionnaireDB
+
+    test_client, session_factory, state = client
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+    test_client.post("/api/studies/study_q1/questionnaire/questions/Q1/approve")
+
+    db = session_factory()
+    before = db.query(QuestionnaireDB).filter_by(study_id="study_q1").one()
+    before_id, before_approved = before.id, list(before.approved_qids or [])
+    db.close()
+    assert before_approved == ["Q1"]
+
+    resp = test_client.post("/api/studies/study_q1/questionnaire/reextract")
+    assert resp.status_code == 200
+    assert resp.json()["superseded"] == before_id
+    assert resp.json()["version"] == 2
+    _wait_draft(test_client)
+
+    db = session_factory()
+    kept = db.query(QuestionnaireDB).filter_by(id=before_id).one()
+    rows = db.query(QuestionnaireDB).filter_by(study_id="study_q1").all()
+    db.close()
+    assert list(kept.approved_qids or []) == before_approved
+    assert kept.definition_json  # the superseded definition is still readable
+    assert len(rows) == 2
+
+
+def test_reextract_needs_the_archived_document(client):
+    """Without the document there is nothing to read again — say that plainly."""
+    from api.db import QuestionnaireDB
+
+    test_client, session_factory, state = client
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    db = session_factory()
+    row = db.query(QuestionnaireDB).filter_by(study_id="study_q1").one()
+    row.source_file_b64 = None
+    db.commit()
+    db.close()
+
+    resp = test_client.post("/api/studies/study_q1/questionnaire/reextract")
+    assert resp.status_code == 404
+    assert "uploaded again" in resp.json()["detail"].lower() or "upload it again" in (
+        resp.json()["detail"].lower()
+    )
