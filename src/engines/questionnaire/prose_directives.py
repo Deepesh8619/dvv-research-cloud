@@ -42,6 +42,7 @@ from src.engines.questionnaire.learned import (
     learned_type,
 )
 from src.engines.questionnaire.routing_prose import parse_routing
+from src.engines.questionnaire.select_limits import read_limits
 from src.intake.questionnaire_loader import (
     bracket_bodies,
     is_directive_only,
@@ -351,6 +352,9 @@ class ProseFields:
     # Directives we recognised but do not model yet — kept visible, never
     # silently dropped, so an unhandled convention is discoverable.
     directives: list[str] = field(default_factory=list)
+    # How many options the respondent may tick: {"min_select", "max_select"}.
+    # Empty for the overwhelming majority of questions, which say nothing.
+    select_limits: dict[str, int] = field(default_factory=dict)
     # Sampling targets found in the option list ("TARGET 50/50 GENDER SPLIT").
     # Not answers, and not noise either: they are the quota this study needs.
     quota_hints: list[str] = field(default_factory=list)
@@ -947,6 +951,23 @@ def parse_prose_question(
         )
         if type_evidence:
             fields.evidence["type"] = type_evidence
+
+    # "Select up to 2." A cap is a fact about the ANSWER, and it also settles
+    # the type: a question that lets somebody tick two is a multi-punch, and a
+    # cap of one is a single. Read after the type so an explicit declaration
+    # ("[SP]") still wins, but before escalation, so a capped question does not
+    # cost a model call to type something the sentence already says.
+    limits = read_limits(instruction_text)
+    if limits:
+        fields.select_limits = limits
+        ceiling = limits.get("max_select")
+        if fields.qtype is None and ceiling:
+            fields.qtype = (
+                QuestionType.MULTI if ceiling > 1 else QuestionType.SINGLE
+            )
+            fields.evidence["type"] = f"select up to {ceiling}"
+            if "type" in fields.missing:
+                fields.missing.remove("type")
 
     if range_terminate is not None:
         fields.terminate_if = range_terminate

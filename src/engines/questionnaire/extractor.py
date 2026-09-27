@@ -698,6 +698,9 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
         validation["scripter_directives"] = fields.directives
     if fields.randomize:
         validation["randomize"] = True
+    # "Select up to 2." A cap nobody records is a cap nobody enforces, and the
+    # question looks right on screen because the sentence is still in it.
+    validation.update(fields.select_limits)
     # MR techniques the question declares about itself. Recorded structurally
     # so the review UI can show them and the data cross-check can verify a mask
     # actually held — a mis-scripted mask is invisible in the output otherwise.
@@ -728,6 +731,16 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
         extraction_evidence=dict(fields.evidence),
     )
     _apply_table_shape(question, chunk)
+    # Never a select cap on a grid, and only settled HERE: a grid written as a
+    # Word table is still typed `multi`/`single` while its prose is read, and
+    # only becomes a grid once the table's shape is applied. A cap counts
+    # answers to ONE list; a grid's answer is one per row, so a cap kept on it
+    # says the whole grid takes that many answers in total — which is not what
+    # the question asks. Seen on a real client grid ("Select one answer per
+    # row", which arrived here as a cap of 1).
+    if question.type is QuestionType.GRID_SINGLE and question.validation:
+        for key in ("min_select", "max_select"):
+            question.validation.pop(key, None)
     return question
 
 

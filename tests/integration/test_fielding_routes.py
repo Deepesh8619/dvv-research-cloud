@@ -1064,3 +1064,76 @@ def test_a_rank_masked_by_an_awareness_grid_is_reachable_on_a_test_link(client) 
         json={"answers": {"Q1": 30, "Q2": 1, "Q5": {"1": 1, "2": 2}}, "current_page": 1},
     )
     assert answered.status_code == 200, answered.text
+
+
+def _capped_survey(study_id="study_f1", **validation):
+    """One multi-punch that states how many answers it allows."""
+    survey = _sample_survey(study_id)
+    survey.questions.append(
+        Question(
+            qid="Q9",
+            text="Which have you used? Select up to 2.",
+            type=QuestionType.MULTI,
+            options=[Option(code=i, label=f"Brand {i}") for i in (1, 2, 3, 4)],
+            validation=validation,
+        )
+    )
+    survey.blocks[0].question_ids.append("Q9")
+    return survey
+
+
+def test_a_page_over_the_cap_is_refused_and_stores_nothing(client):
+    """The cap is enforced on the server, not only in the browser.
+
+    SurveyJS holds it for a respondent using the survey we served, so anything
+    that gets here is a client that is not ours. It is refused rather than
+    trimmed to fit: keeping the first two of four picks an answer the
+    respondent never gave, and in the tabs that is indistinguishable from one
+    they did.
+    """
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf, survey=_capped_survey(max_select=2))
+    token = _create_link(test_client).json()["token"]
+    sid = test_client.get(f"/api/r/{token}").json()["session_id"]
+
+    resp = test_client.post(
+        f"/api/r/{token}/sessions/{sid}/answers",
+        json={"answers": {"Q9": [1, 2, 3]}, "current_page": 1},
+    )
+    assert resp.status_code == 400
+    assert "at most 2" in resp.json()["detail"]
+    assert test_client.get(f"/api/r/{token}/sessions/{sid}").json()["answers"] == {}
+
+    ok = test_client.post(
+        f"/api/r/{token}/sessions/{sid}/answers",
+        json={"answers": {"Q9": [1, 2]}, "current_page": 1},
+    )
+    assert ok.status_code == 200
+    assert test_client.get(f"/api/r/{token}/sessions/{sid}").json()["answers"] == {"Q9": [1, 2]}
+
+
+def test_a_contradictory_cap_never_strands_a_respondent(client):
+    """A minimum above the maximum rejects every possible answer.
+
+    Enforcing it would trap anybody who reached the question with no way to
+    finish. Preflight fails the link over it instead — the place where a person
+    can still fix it — so the respondent is let through.
+    """
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf, survey=_capped_survey(min_select=3, max_select=2))
+    # Preflight refuses this link — that is the check working. Forced open here
+    # to prove what happens to the respondent if somebody overrides it anyway.
+    refused = _create_link(test_client)
+    assert refused.status_code != 200
+    token = test_client.post(
+        "/api/studies/study_f1/fielding/links", json={"force": True}
+    ).json()["token"]
+    sid = test_client.get(f"/api/r/{token}").json()["session_id"]
+
+    resp = test_client.post(
+        f"/api/r/{token}/sessions/{sid}/answers",
+        json={"answers": {"Q9": [1, 2, 3]}, "current_page": 1},
+    )
+    assert resp.status_code == 200
