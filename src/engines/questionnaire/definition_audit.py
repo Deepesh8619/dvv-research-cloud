@@ -368,6 +368,43 @@ def audit_definition(survey: SurveyDefinition) -> list[Finding]:
                 )
             )
 
+    # Two values of one hidden variable claiming the SAME derivation. Whoever
+    # scripts it has to pick, and whichever they pick the other value is never
+    # produced — a region, a segment or a user class that is simply absent from
+    # the data, with nothing to say it should have been there. Found in a real
+    # client document: HID_GEO_REGION gives Northeast and South the identical
+    # rule "HID_GEO_DIVISION = 1,2".
+    clashing: list[str] = []
+    for q in survey.questions:
+        rules = [(o.definition or "").strip().lower() for o in q.options or []]
+        stated = [r for r in rules if r]
+        if len(stated) > 1 and len(set(stated)) == 1:
+            # ONE text repeated across every value is a pointer for the whole
+            # variable — "Based on C_ZIP" against all nine census divisions —
+            # not nine rules that happen to agree. Reported it would be a
+            # finding on every well-written variable of that shape.
+            continue
+        seen: dict[str, str] = {}
+        for option in q.options or []:
+            rule = (option.definition or "").strip().lower()
+            if not rule:
+                continue
+            if rule in seen:
+                clashing.append(
+                    f"{q.qid}: \"{seen[rule]}\" and \"{option.label}\" are both "
+                    f"defined as {option.definition}"
+                )
+            seen[rule] = option.label
+    if clashing:
+        findings.append(
+            Finding(
+                "derivation_defined_twice",
+                sorted({c.split(":")[0] for c in clashing}),
+                "Two values of a hidden variable claim the same derivation, so "
+                "one of them can never be produced: " + "; ".join(clashing),
+            )
+        )
+
     quotas = brief.get("quotas") or []
     if quotas:
         stated = StudyOverview(

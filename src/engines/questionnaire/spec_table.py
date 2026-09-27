@@ -138,6 +138,43 @@ def _value_of(row: list[str]) -> str:
     return ""
 
 
+#: The header of the column a hidden variable states its derivation in.
+_DEFINITION_HEADER = re.compile(r"^\s*definitions?\s*:?\s*$", re.I)
+
+
+def _definition_column(rows: list[list[str]]) -> int | None:
+    """Which column holds "Definition:", if this table has one.
+
+    A hidden variable's spec table carries `Label: | Definition:` over its
+    codes, and the definition cell is the derivation — "HID_GEO_DIVISION =
+    1,2". Found by its header rather than by position, because the label
+    occupies a merged cell and the column index differs per table.
+    """
+    for row in rows:
+        found = [i for i, cell in enumerate(row) if _DEFINITION_HEADER.match(cell or "")]
+        if found:
+            return max(found)
+    return None
+
+
+def _definition_in(row: list[str], column: int | None) -> str | None:
+    """The derivation this option row states, or None.
+
+    Never the label: a merged label cell repeats across columns, so a row whose
+    definition column holds the same text as its label is a table with no
+    definitions at all, and reading it would give every option a "derivation"
+    that is just its own name.
+    """
+    if column is None or column >= len(row):
+        return None
+    value = (row[column] or "").strip()
+    if not value or _TEMPLATE_PROMPT.match(value):
+        return None
+    if any(value == (cell or "").strip() for cell in row[1:column]):
+        return None
+    return value
+
+
 _CODE_RE = re.compile(r"^\d{1,3}$")
 
 # Screen-out wording varies by client: TERMINATE / TERM / SCREEN OUT / SCREENOUT.
@@ -492,6 +529,7 @@ def parse_spec_table(
     in_list = False
 
     table_text = "\n".join(" ".join(_cells(row)) for row in rows)
+    definition_col = _definition_column(rows)
     for row in rows:
         cells = _cells(row)
 
@@ -533,7 +571,13 @@ def parse_spec_table(
                 # and the base it states was never applied.
                 value, inline = _split_trailing_directive(value, row)
                 target = row_items if in_row_list else options
-                target.append(Option(code=int(cells[0]), label=value))
+                target.append(
+                    Option(
+                        code=int(cells[0]),
+                        label=value,
+                        definition=_definition_in(row, definition_col),
+                    )
+                )
                 last_option = target[-1]
                 if inline:
                     _read_directive(
