@@ -1139,6 +1139,16 @@ def test_a_contradictory_cap_never_strands_a_respondent(client):
     assert resp.status_code == 200
 
 
+def _maxdiff_radios(page):
+    """The screen's two radio lists, from inside the panel that holds them."""
+    return [
+        element
+        for group in page["elements"]
+        for element in (group.get("elements") or [group])
+        if element.get("type") == "radiogroup"
+    ]
+
+
 def _maxdiff_survey(study_id="study_f1"):
     survey = _sample_survey(study_id)
     survey.questions.append(
@@ -1168,7 +1178,9 @@ def test_a_respondent_is_dealt_a_version_and_sees_its_items(client):
     screens = [p for p in entry["surveyjs_json"]["pages"] if "maxdiffScreen" in p]
     assert len(screens) == 12
     for page in screens:
-        for element in page["elements"]:
+        radios = _maxdiff_radios(page)
+        assert len(radios) == 2  # best and worst, together on one screen
+        for element in radios:
             assert len(element["choices"]) == 4
 
 
@@ -1211,7 +1223,7 @@ def test_an_answer_naming_an_item_that_was_never_shown_is_refused(client):
     sid = entry["session_id"]
 
     first = next(p for p in entry["surveyjs_json"]["pages"] if "maxdiffScreen" in p)
-    shown = [c["value"] for c in first["elements"][0]["choices"]]
+    shown = [c["value"] for c in _maxdiff_radios(first)[0]["choices"]]
     unshown = next(code for code in range(1, 21) if code not in shown)
 
     bad = test_client.post(
@@ -1241,7 +1253,7 @@ def test_the_same_item_cannot_be_both_best_and_worst(client):
     entry = test_client.get(f"/api/r/{token}").json()
     sid = entry["session_id"]
     first = next(p for p in entry["surveyjs_json"]["pages"] if "maxdiffScreen" in p)
-    shown = [c["value"] for c in first["elements"][0]["choices"]]
+    shown = [c["value"] for c in _maxdiff_radios(first)[0]["choices"]]
 
     resp = test_client.post(
         f"/api/r/{token}/sessions/{sid}/answers",

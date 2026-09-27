@@ -139,3 +139,62 @@ def test_several_stated_n_values_are_not_guessed_between():
         "Early Gen Z/College (Ages 18-22)",
     ]
     assert overview.quotas[0].target_n == 400
+
+
+def _with_quotas(*groups, questions=()):
+    survey = SurveyDefinition(
+        study_id="t",
+        blocks=[Block(block_id="b1", question_ids=[q.qid for q in questions])],
+        questions=list(questions),
+    )
+    survey.metadata["study_overview"] = {
+        "quotas": [{"group": g, "definition": d} for g, d in groups]
+    }
+    return survey
+
+
+def test_a_quota_nothing_in_the_survey_can_measure_is_reported():
+    """A quota is a promise about who the sample will contain, and filling it
+    means being able to tell mid-field which cell a respondent falls in.
+
+    "Micro: 2-9 Employees" needs a question that asks how many employees.
+    Without one the cell cannot be counted, so it cannot be capped — and the
+    first anybody knows is at delivery, when the client counts the groups they
+    were promised.
+    """
+    from src.core.survey_definition import Option
+
+    survey = _with_quotas(
+        ("Micro", "2-9 Employees"),
+        questions=[
+            Question(qid="Q1", text="What is your role?", type=QuestionType.SINGLE,
+                     options=[Option(code=1, label="Owner")]),
+        ],
+    )
+    checks = {f.check for f in audit_definition(survey)}
+    assert "quota_group_not_measurable" in checks
+
+
+def test_a_quota_the_survey_does_ask_about_is_not_reported():
+    from src.core.survey_definition import Option
+
+    survey = _with_quotas(
+        ("Micro", "2-9 Employees"),
+        questions=[
+            Question(
+                qid="Q1", text="How many employees?", type=QuestionType.SINGLE,
+                options=[Option(code=1, label="2-9"), Option(code=2, label="10-99")],
+            ),
+        ],
+    )
+    checks = {f.check for f in audit_definition(survey)}
+    assert "quota_group_not_measurable" not in checks
+
+
+def test_a_quota_group_naming_no_number_is_left_alone():
+    """"Decision makers" may well be measured by a question this cannot see,
+    and a check that cries wolf on half a quota table is one a reviewer learns
+    to skip. Verified against the three real client documents: silent on all."""
+    survey = _with_quotas(("Decision makers", ""), ("Total N", ""))
+    checks = {f.check for f in audit_definition(survey)}
+    assert "quota_group_not_measurable" not in checks

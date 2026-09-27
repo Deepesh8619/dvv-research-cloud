@@ -21,8 +21,10 @@ from dataclasses import dataclass, field
 from src.core.survey_definition import QuestionType, SurveyDefinition
 from src.engines.questionnaire.prose_directives import has_sentence_break, is_note_line
 from src.engines.questionnaire.study_overview import (
+    QuotaTarget,
     StudyOverview,
     unenforced_requirements,
+    unmeasurable_quotas,
 )
 
 # A recruitment path header: "... (IF S0=1 AND S1=26-60) ASK P1-P3".
@@ -363,6 +365,30 @@ def audit_definition(survey: SurveyDefinition) -> list[Finding]:
                     "instrument screens on it: " + "; ".join(unmet) + ". Either the "
                     "screen-out is missing, or it is handled by a quota — worth one "
                     "look before a single respondent is paid for.",
+                )
+            )
+
+    quotas = brief.get("quotas") or []
+    if quotas:
+        stated = StudyOverview(
+            quotas=[
+                QuotaTarget(
+                    group=str(q.get("group") or ""),
+                    definition=str(q.get("definition") or ""),
+                )
+                for q in quotas
+            ]
+        )
+        blind = unmeasurable_quotas(stated, survey)
+        if blind:
+            findings.append(
+                Finding(
+                    "quota_group_not_measurable",
+                    [],
+                    "The study promises quota groups the instrument cannot sort "
+                    "anybody into: " + "; ".join(blind) + ". A cell nobody can "
+                    "count cannot be capped, and the first anybody knows is at "
+                    "delivery, when the client counts the groups they bought.",
                 )
             )
 

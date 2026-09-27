@@ -361,6 +361,55 @@ def unenforced_requirements(overview: StudyOverview, survey: SurveyDefinition) -
     return unmatched
 
 
+#: A quota row naming the study total rather than a cell of it.
+_TOTAL_ROW = re.compile(r"^\s*total\b", re.I)
+
+
+def unmeasurable_quotas(overview: StudyOverview, survey: SurveyDefinition) -> list[str]:
+    """Quota groups nothing in the instrument could sort a respondent into.
+
+    A quota is a promise about who the sample will contain, and filling it
+    depends on being able to tell, mid-field, which cell each respondent falls
+    in. "Micro: 2-9 Employees" needs a question that asks how many employees.
+    Without one the cell cannot be counted, so it cannot be capped — and the
+    first anybody knows is at delivery, when the client counts the groups they
+    were promised and finds the sample is not what they bought.
+
+    Matched on the NUMBERS the group names, against the numbers the instrument
+    asks or routes on, for the same reason the screening check is: the wording
+    never matches and the number usually does.
+
+    A group naming no number at all is NOT reported. "Decision makers" may well
+    be measured by a question this cannot see, and a check that cries wolf on
+    half a quota table is one a reviewer learns to skip.
+    """
+    asked: set[int] = set()
+    for question in survey.questions:
+        for expression in (question.terminate_if, question.show_if):
+            asked |= _numbers_in(expression)
+        for option in question.options or []:
+            asked |= _numbers_in(option.show_if)
+            asked |= {
+                int(n.replace(",", ""))
+                for n in _FIRST_NUMBER.findall(option.label or "")
+            }
+        asked |= {
+            int(n.replace(",", ""))
+            for n in _FIRST_NUMBER.findall(question.text or "")
+        }
+
+    unmatched: list[str] = []
+    for quota in overview.quotas:
+        if _TOTAL_ROW.match(quota.group):
+            continue  # the study's total, not a cell of it
+        stated = f"{quota.group} {quota.definition}"
+        numbers = {int(n.replace(",", "")) for n in _FIRST_NUMBER.findall(stated)}
+        if not numbers or (numbers & asked):
+            continue
+        unmatched.append(quota.group.strip())
+    return unmatched
+
+
 def _codes_in(expression: Expression | None, qid: str) -> set[int]:
     """Codes a condition tests against its own question."""
     if expression is None:
