@@ -78,6 +78,13 @@ class StudyOverview:
     markets: str | None = None
     sample_size: int | None = None
     loi_minutes: int | None = None
+    # What every answer in the study is ABOUT — "as it relates to your patients
+    # at Greenbrook only". Not a routing condition and never enforceable as one:
+    # it is a limit on meaning, and the only thing that can honour it is the
+    # respondent reading it. Recorded so preflight can check they will.
+    scope_statements: list[str] = field(default_factory=list)
+    # Terms the document defines up front and uses in question wording later.
+    definitions: list[str] = field(default_factory=list)
     screening_requirements: list[str] = field(default_factory=list)
     quotas: list[QuotaTarget] = field(default_factory=list)
     programming_notes: list[str] = field(default_factory=list)
@@ -88,6 +95,8 @@ class StudyOverview:
             "sample_size": self.sample_size,
             "loi_minutes": self.loi_minutes,
             "screening_requirements": list(self.screening_requirements),
+            "scope_statements": list(self.scope_statements),
+            "definitions": list(self.definitions),
             "quotas": [q.to_dict() for q in self.quotas],
             "programming_notes": list(self.programming_notes),
         }
@@ -95,7 +104,8 @@ class StudyOverview:
     def is_empty(self) -> bool:
         return not any(
             (self.markets, self.sample_size, self.loi_minutes,
-             self.screening_requirements, self.quotas, self.programming_notes)
+             self.screening_requirements, self.quotas, self.programming_notes,
+             self.scope_statements, self.definitions)
         )
 
 
@@ -117,11 +127,64 @@ def _heading(text: str) -> str | None:
 _OVERVIEW_SIGNALS = ("STUDY OVERVIEW", "SCREENING REQUIREMENTS", "QUOTAS",
                      "RESEARCH OBJECTIVES", "RESEARCH METHODOLOGY")
 
+# Plenty of documents open with the same facts written as sentences to the
+# respondent rather than as headings to the scripter:
+#
+#     The survey will take approximately 15 minutes to complete.
+#     Please answer all questions as it relates to your practice at Greenbrook only.
+#
+# Requiring headings meant none of that was read — on a real study the whole
+# opening was kept as one display blob and the 15 minutes, the scope and the
+# definition of the condition being studied were facts nothing had.
+_PROSE_LOI = re.compile(
+    r"\b(?:take|takes|taking|last|lasts|requires?)\b[^.]{0,40}?"
+    r"(?:approximately|about|around|roughly|up\s+to)?\s*"
+    r"(?P<n>\d{1,3})\s*(?:-|to|–)?\s*(?:\d{1,3})?\s*minutes?\b",
+    re.I,
+)
+# "Please answer only about X", "as it relates to your patients at Y only" — a
+# limit on what every answer in the study MEANS. A respondent who never reads it
+# answers a different question from the one the client asked, and the data looks
+# exactly the same either way.
+_SCOPE = re.compile(
+    r"^[^.]*\b(?:please\s+)?(?:answer|respond|consider|think)\b[^.]*"
+    r"\b(?:only|as\s+it\s+relates\s+to|with\s+respect\s+to|in\s+relation\s+to)\b[^.]*",
+    re.I,
+)
+# "commonly referred to as treatment-resistant depression or TRD" — a term the
+# document defines up front and then uses in question wording for the rest of
+# the study.
+_DEFINITION = re.compile(
+    r"[^.]*\b(?:referred\s+to\s+as|defined\s+as|means|i\.e\.|that\s+is,)\b[^.]*",
+    re.I,
+)
+
+
+# "N=1,200 from Consumer Panel", "Teens (ages 13-17): N=400" — the commonest
+# way a document writes sample, and neither a "Sample Size:" key nor a quota
+# table. A labelled one is a quota group; a bare one is the study's size.
+_N_EQUALS = re.compile(r"\bN\s*=\s*(?P<n>\d[\d,]*)\b", re.I)
+_LABELLED_N = re.compile(
+    r"^(?P<group>[^:]{2,60}):\s*N\s*=\s*(?P<n>\d[\d,]*)\s*$", re.I
+)
+
 
 def looks_like_overview(blocks) -> bool:
-    """True when these blocks open a document with a study overview."""
-    text = " ".join((getattr(b, "text", "") or "") for b in blocks).upper()
-    return sum(signal in text for signal in _OVERVIEW_SIGNALS) >= 2
+    """True when these blocks open a document with a study overview.
+
+    Either the headings a programming document uses, or the facts a prose
+    preamble states. A document says what it says; requiring it to say so under
+    a heading read nothing on the ones that do not.
+    """
+    text = " ".join((getattr(b, "text", "") or "") for b in blocks)
+    if sum(signal in text.upper() for signal in _OVERVIEW_SIGNALS) >= 2:
+        return True
+    return bool(
+        _PROSE_LOI.search(text)
+        or _SCOPE.search(text)
+        or _KEY_VALUE.search(text)
+        or _N_EQUALS.search(text)
+    )
 
 
 def parse_overview(blocks) -> StudyOverview:
@@ -164,10 +227,67 @@ def parse_overview(blocks) -> StudyOverview:
 
             if section == "SCREENING REQUIREMENTS":
                 overview.screening_requirements.append(line)
-            elif section == "GENERAL PROGRAMMING NOTES":
+                continue
+            if section == "GENERAL PROGRAMMING NOTES":
                 overview.programming_notes.append(line)
+                continue
 
+            # Prose forms, read only OUTSIDE a heading: under SCREENING
+            # REQUIREMENTS a sentence is a requirement, and reading it twice
+            # would report the same line as two different kinds of thing.
+            if section is None:
+                _read_prose(line, overview)
+
+    _read_total_sample(blocks, overview)
     return overview
+
+
+def _read_total_sample(blocks, overview: StudyOverview) -> None:
+    """The study's size from a bare "N=1,200", but ONLY when it is unambiguous.
+
+    A document stating one N is stating its sample. Bubble's states four —
+    a panel figure, three age cells and a CRM range — and which of those is
+    "the" sample size is a question the document does not answer. Picking the
+    first would store a number that is confidently wrong, and a wrong fact in a
+    schema is worse than a missing one: it reads as policy rather than a guess.
+    The cells are still captured as quota groups, which is what they are.
+    """
+    if overview.sample_size is not None:
+        return
+    bare: set[int] = set()
+    for block in blocks:
+        for line in (getattr(block, "text", "") or "").splitlines():
+            if _LABELLED_N.match(line.strip()):
+                continue
+            for found in _N_EQUALS.finditer(line):
+                bare.add(int(found.group("n").replace(",", "")))
+    if len(bare) == 1:
+        overview.sample_size = bare.pop()
+
+
+def _read_prose(line: str, overview: StudyOverview) -> None:
+    """The same facts, written as sentences to a respondent."""
+    labelled = _LABELLED_N.match(line)
+    if labelled:
+        overview.quotas.append(
+            QuotaTarget(
+                group=labelled.group("group").strip(),
+                definition="",
+                target_n=int(labelled.group("n").replace(",", "")),
+            )
+        )
+        return
+    if overview.loi_minutes is None:
+        loi = _PROSE_LOI.search(line)
+        if loi:
+            overview.loi_minutes = int(loi.group("n"))
+    scope = _SCOPE.search(line)
+    if scope:
+        overview.scope_statements.append(scope.group(0).strip())
+        return  # a scope sentence is not also a definition
+    definition = _DEFINITION.search(line)
+    if definition and len(definition.group(0).split()) > 4:
+        overview.definitions.append(definition.group(0).strip())
 
 
 def _quota_rows(rows: list[list[str]]) -> list[QuotaTarget]:

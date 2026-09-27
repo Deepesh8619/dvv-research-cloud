@@ -67,6 +67,16 @@ _BASE_IS_EVERYONE = re.compile(
 )
 
 
+def _gist(text: str) -> str:
+    """Letters and digits only, lowercased.
+
+    A scope sentence is reproduced in the intro screen with different
+    punctuation and spacing often enough that comparing the raw strings
+    reported a sentence as missing while it sat on the first page.
+    """
+    return "".join(ch for ch in (text or "").lower() if ch.isalnum())
+
+
 @dataclass
 class Finding:
     check: str
@@ -353,6 +363,35 @@ def audit_definition(survey: SurveyDefinition) -> list[Finding]:
                     "instrument screens on it: " + "; ".join(unmet) + ". Either the "
                     "screen-out is missing, or it is handled by a quota — worth one "
                     "look before a single respondent is paid for.",
+                )
+            )
+
+    # A scope statement limits what every answer in the study MEANS — "as it
+    # relates to your patients at Greenbrook only". Nothing can enforce it;
+    # the only thing that honours it is the respondent reading it. So the one
+    # check worth making is that it still reaches them: an intro tidied up, or
+    # retyped as something not respondent-facing, and every answer is about
+    # something wider than the client asked about — with data that looks
+    # exactly the same either way.
+    stated_scope = brief.get("scope_statements") or []
+    if stated_scope:
+        shown = " ".join(
+            (q.text or "") for q in survey.questions
+            if q.type is QuestionType.INFO
+        ).lower()
+        unshown = [
+            scope for scope in stated_scope
+            if _gist(scope) not in _gist(shown)
+        ]
+        if unshown:
+            findings.append(
+                Finding(
+                    "scope_not_shown_to_respondent",
+                    [],
+                    "The document limits what the study is asking about and the "
+                    "respondent is never told: " + "; ".join(unshown) + ". Every "
+                    "answer would be about something wider than the client asked "
+                    "for, and the data cannot show it.",
                 )
             )
 

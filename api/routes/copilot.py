@@ -228,6 +228,11 @@ def make_executor(db: Session, user: UserDB):
             "sample_size": brief.get("sample_size"),
             "loi_minutes": brief.get("loi_minutes"),
             "screening_requirements": brief.get("screening_requirements") or [],
+            # What the study is asking ABOUT, and the terms it defined up front.
+            # A respondent question ("does this include X?") is usually answered
+            # by one of these, and they are the document's own words.
+            "scope": brief.get("scope_statements") or [],
+            "definitions": brief.get("definitions") or [],
             "quotas": brief.get("quotas") or [],
             "note": "Quota groups are as written in the document. They are NOT the "
                     "quota cells this link enforces — a cell needs a condition "
