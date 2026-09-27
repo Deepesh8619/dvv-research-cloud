@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from api.auth import UserRole, get_current_user, require_role
+from api.config import STUDIES_DIR
 from api.db import (
     UserDB,
     add_synthetic_sessions,
@@ -483,7 +484,23 @@ def list_links(
     return FieldingLinkListResponse(
         study_id=study_id,
         links=[_link_response(ln, fielding_link_counts(db, ln.id)) for ln in links],
+        delivery_formats=_delivery_on_disk(study_id),
     )
+
+
+def _delivery_on_disk(study_id: str) -> list[str]:
+    """Which delivery files a previous materialize actually left behind.
+
+    Asked of the filesystem rather than remembered, because the file is the
+    only thing that matters: a flag saying the export ran, over a file the
+    disk no longer holds, offers a download that 404s.
+    """
+    folder = STUDIES_DIR / study_id
+    return [
+        fmt
+        for fmt in ("sav", "xlsx")
+        if (folder / f"{study_id}_responses.{fmt}").is_file()
+    ]
 
 
 @router.post(

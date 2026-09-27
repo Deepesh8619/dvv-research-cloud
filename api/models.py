@@ -358,6 +358,12 @@ class FieldingLinkListResponse(BaseModel):
 
     study_id: str
     links: list[FieldingLinkResponse] = []
+    #: Delivery files that EXIST for this study right now ("sav", "xlsx").
+    #: Reported here because the page had no other way to learn it: the
+    #: download buttons were drawn from the materialize RESPONSE, so they
+    #: appeared once and were gone on the next page load, with the files still
+    #: sitting on disk and no way to reach them.
+    delivery_formats: list[str] = []
 
 
 class RespondentEntryResponse(BaseModel):

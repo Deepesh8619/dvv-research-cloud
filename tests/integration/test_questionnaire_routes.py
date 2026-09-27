@@ -1293,3 +1293,33 @@ def test_reextract_needs_the_archived_document(client):
     assert "uploaded again" in resp.json()["detail"].lower() or "upload it again" in (
         resp.json()["detail"].lower()
     )
+
+
+def test_the_questionnaire_downloads_as_a_workbook(client):
+    """Everything in it is already known; what it could not do is leave the
+    screen. Built from the stored definition and the same audit that gates
+    fielding — two readings of one questionnaire that disagree would be worse
+    than one reading."""
+    import io
+
+    from openpyxl import load_workbook
+
+    test_client, session_factory, state = client
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    resp = test_client.get("/api/studies/study_q1/questionnaire/workbook")
+    assert resp.status_code == 200
+    assert "spreadsheetml" in resp.headers["content-type"]
+    assert "survey_questionnaire.xlsx" in resp.headers["content-disposition"]
+
+    workbook = load_workbook(io.BytesIO(resp.content))
+    assert workbook.sheetnames == [
+        "Summary", "Questions", "Answers", "Routing", "Checks", "Flow",
+    ]
+    qids = [r[1] for r in workbook["Questions"].iter_rows(min_row=2, values_only=True)]
+    assert qids == ["Q1", "Q2"]
+    # The checks travel with it: a workbook showing the instrument but not what
+    # is wrong with it is the more dangerous half of the picture.
+    assert workbook["Checks"].max_row > 1

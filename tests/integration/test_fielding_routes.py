@@ -1261,3 +1261,40 @@ def test_the_same_item_cannot_be_both_best_and_worst(client):
     )
     assert resp.status_code == 400
     assert "both best and worst" in resp.json()["detail"]
+
+
+def test_delivery_files_are_reported_from_disk_not_from_memory(client, tmp_path, monkeypatch):
+    """The download buttons were drawn from the materialize RESPONSE, so they
+    appeared once and were gone on the next page load — with the files still
+    sitting on disk and no way to reach them.
+
+    Asked of the filesystem rather than remembered, because the file is the
+    only thing that matters: a flag saying the export ran, over a file the disk
+    no longer holds, offers a download that 404s.
+    """
+    import api.routes.fielding as froutes
+
+    # Into tmp_path, not the real studies directory: an earlier cut of this
+    # wrote delivery files into the repo and every later test in the suite
+    # then saw a study with deliveries it never materialized.
+    monkeypatch.setattr(froutes, "STUDIES_DIR", tmp_path)
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+
+    body = test_client.get("/api/studies/study_f1/fielding/links").json()
+    assert body["delivery_formats"] == []
+
+    folder = tmp_path / "study_f1"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "study_f1_responses.sav").write_bytes(b"x")
+    body = test_client.get("/api/studies/study_f1/fielding/links").json()
+    # "sav" — the name the API actually uses. The page was testing for "spss",
+    # so the SPSS button never appeared at all, not even right after a
+    # materialize, and that is the primary client deliverable.
+    assert body["delivery_formats"] == ["sav"]
+
+    (folder / "study_f1_responses.xlsx").write_bytes(b"x")
+    body = test_client.get("/api/studies/study_f1/fielding/links").json()
+    assert body["delivery_formats"] == ["sav", "xlsx"]

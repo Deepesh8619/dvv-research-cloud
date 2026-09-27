@@ -267,12 +267,14 @@ function LinkCard({
   qidOptions,
   canWrite,
   onChanged,
+  deliveryOnDisk,
 }: {
   studyId: string
   link: FieldingLink
   qidOptions: string[]
   canWrite: boolean
   onChanged: () => void
+  deliveryOnDisk: string[]
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -281,9 +283,16 @@ function LinkCard({
   const [showReport, setShowReport] = useState(false)
   const [showLive, setShowLive] = useState(false)
   const [showSoftLaunch, setShowSoftLaunch] = useState(link.soft_launch_reached)
-  const [delivery, setDelivery] = useState<string[]>([])
+  const [delivery, setDelivery] = useState<string[]>(deliveryOnDisk)
   const [populateN, setPopulateN] = useState(200)
   const [populateMsg, setPopulateMsg] = useState<string | null>(null)
+
+  // The files a previous materialize left on disk, refreshed whenever the
+  // parent reloads. Without this the buttons lived only in the state set by
+  // the materialize call, so a page reload hid files that were still there.
+  useEffect(() => {
+    setDelivery((current) => (current.length ? current : deliveryOnDisk))
+  }, [deliveryOnDisk])
 
   const publicUrl = `${window.location.origin}${link.respondent_path}`
   const c = link.counts
@@ -449,7 +458,7 @@ function LinkCard({
       {delivery.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className="text-xs text-slate-500">Deliver to the client:</span>
-          {delivery.includes('spss') && (
+          {delivery.includes('sav') && (
             <button
               type="button"
               onClick={() => studiesApi.download(studyId, 'spss', `${studyId}.sav`)}
@@ -758,6 +767,7 @@ export default function FieldingPage() {
   const canWrite = hasWriteRole(user?.role)
 
   const [links, setLinks] = useState<FieldingLink[] | null>(null)
+  const [deliveryOnDisk, setDeliveryOnDisk] = useState<string[]>([])
   const [qidOptions, setQidOptions] = useState<string[]>([])
   const [canCreate, setCanCreate] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -770,6 +780,10 @@ export default function FieldingPage() {
       const res = await fieldingApi.listLinks(studyId)
       setLinks(res.data.links)
       linksRef.current = res.data.links
+      // Delivery files that exist RIGHT NOW. Drawn from the materialize
+      // response alone, the buttons appeared once and were gone on the next
+      // page load, with the files still on disk and no way to reach them.
+      setDeliveryOnDisk(res.data.delivery_formats ?? [])
       setLoadError(null)
     } catch (err) {
       setLinks(null)
@@ -880,6 +894,7 @@ export default function FieldingPage() {
             qidOptions={qidOptions}
             canWrite={canWrite}
             onChanged={load}
+            deliveryOnDisk={deliveryOnDisk}
           />
         ))}
       </div>
