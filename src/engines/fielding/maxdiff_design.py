@@ -114,32 +114,45 @@ class MaxDiffDesign:
         }
 
 
-def check_parameters(n_items: int, n_screens: int, items_per_screen: int) -> list[str]:
-    """Why this design cannot be built, or is not worth building. Empty is fine.
+#: A problem that makes the design impossible, versus one that makes it weak.
+FATAL, ADVISORY = "fatal", "advisory"
+
+
+def check_parameters(
+    n_items: int, n_screens: int, items_per_screen: int
+) -> list[tuple[str, str]]:
+    """(severity, why) for each problem with these parameters. Empty is fine.
+
+    Two severities, because the two are genuinely different and conflating them
+    refused a perfectly fieldable exercise: a screen that cannot be built is
+    impossible, while a design too thin to read is a research judgement whose
+    answer might legitimately be "we know, field it anyway".
 
     Returned rather than raised so preflight can show every problem at once,
     the way every other check in this codebase does.
     """
-    problems: list[str] = []
+    problems: list[tuple[str, str]] = []
     if items_per_screen < 2:
-        problems.append("a screen needs at least 2 items for a best/worst choice")
+        problems.append((FATAL, "a screen needs at least 2 items for a best/worst choice"))
     if n_items < items_per_screen:
-        problems.append(
+        problems.append((
+            FATAL,
             f"only {n_items} items for a screen of {items_per_screen} — a screen "
-            "cannot show an item twice"
-        )
+            "cannot show an item twice",
+        ))
     if n_screens < 1:
-        problems.append("a MaxDiff exercise needs at least one screen")
+        problems.append((FATAL, "a MaxDiff exercise needs at least one screen"))
     if problems:
         return problems
 
     per_item = n_screens * items_per_screen / n_items
     if per_item < MIN_APPEARANCES_PER_ITEM:
-        problems.append(
+        problems.append((
+            ADVISORY,
             f"each item is seen about {per_item:.1f} times per respondent; below "
             f"{MIN_APPEARANCES_PER_ITEM} the utilities are too thin to read. "
-            f"{_screens_needed(n_items, items_per_screen)} screens would fix it"
-        )
+            f"{_screens_needed(n_items, items_per_screen)} screens would fix it",
+        ))
     return problems
 
 
@@ -330,8 +343,8 @@ def build(
 ) -> MaxDiffDesign:
     """Generate the design. Raises on parameters that cannot produce screens."""
     fatal = [
-        p for p in check_parameters(n_items, n_screens, items_per_screen)
-        if "times per respondent" not in p  # thin, but buildable
+        why for severity, why in check_parameters(n_items, n_screens, items_per_screen)
+        if severity == FATAL
     ]
     if fatal:
         raise ValueError("; ".join(fatal))

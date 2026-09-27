@@ -38,6 +38,12 @@ class QuestionType(StrEnum):
     OPEN_TEXT = "open_text"
     DROPDOWN = "dropdown"
     RANK = "rank"
+    # A best-worst exercise: each respondent sees a different SUBSET of the
+    # items on each of several screens and picks the best and worst of that
+    # subset. `options` holds the items; `validation["maxdiff"]` holds the
+    # design (screens, items per screen, versions). One question, many screens,
+    # and no two respondents see the same ones.
+    MAXDIFF = "maxdiff"
     INFO = "info"  # non-question display content
 
 

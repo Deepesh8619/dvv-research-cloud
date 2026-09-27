@@ -26,6 +26,9 @@ from typing import Any
 
 from src.core.survey_definition import QuestionType, SurveyDefinition
 from src.engines.fielding.dryrun import simulate
+from src.engines.fielding.maxdiff_design import FATAL as MAXDIFF_FATAL
+from src.engines.fielding.maxdiff_screens import problems as maxdiff_problems
+from src.engines.fielding.maxdiff_screens import questions_in as maxdiff_questions
 from src.engines.questionnaire import schema
 from src.engines.questionnaire.constraint_audit import audit_constraints
 from src.engines.questionnaire.definition_audit import audit_definition
@@ -112,6 +115,42 @@ def preflight(
         Check("answers", "Every question has answers to choose from"), empty, FAIL,
         "These would reach a respondent with nothing to pick.",
     ))
+
+    # A best-worst exercise is many screens built from a design, so the two
+    # ways it fails are its own: a design nobody can build, and an exercise
+    # sharing a page with other questions — which the compiler leaves as
+    # display text rather than silently splitting somebody's page, so the
+    # exercise would simply never be asked.
+    broken: list[str] = []
+    broken_detail: list[str] = []
+    thin: list[str] = []
+    thin_detail: list[str] = []
+    for question in maxdiff_questions(survey):
+        for severity, why in maxdiff_problems(question):
+            if severity == MAXDIFF_FATAL:
+                broken.append(question.qid)
+                broken_detail.append(f"{question.qid} {why}")
+            else:
+                thin.append(question.qid)
+                thin_detail.append(f"{question.qid} {why}")
+        if not any(block.question_ids == [question.qid] for block in survey.blocks):
+            broken.append(question.qid)
+            broken_detail.append(
+                f"{question.qid} shares its page with other questions — a "
+                "best-worst exercise needs a page of its own, one screen at a time"
+            )
+    if broken:
+        checks.append(_result(
+            Check("maxdiff", "Every best-worst exercise can be fielded"),
+            sorted(set(broken)), FAIL, "; ".join(broken_detail)[:400],
+        ))
+    if thin:
+        # How much a study can ask of a respondent is the researcher's call, so
+        # this is said out loud and not enforced.
+        checks.append(_result(
+            Check("maxdiff_depth", "Best-worst exercises show each item often enough"),
+            sorted(set(thin)), WARN, "; ".join(thin_detail)[:400],
+        ))
 
     # A constraint a respondent cannot satisfy fails in the worst place: they
     # meet it, cannot get past it, and abandon. That arrives as drop-off on a
