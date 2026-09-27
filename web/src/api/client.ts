@@ -562,6 +562,12 @@ export const questionnaireApi = {
   downloadSource: (studyId: string, fallbackName: string) =>
     downloadFile(`/studies/${studyId}/questionnaire/source`, fallbackName),
 
+  /** The questionnaire as a workbook — questions, answers, routing, the
+      checks and the flow — for a scripter, a client sign-off or a wave
+      comparison happening away from this screen. */
+  downloadWorkbook: (studyId: string, fallbackName: string) =>
+    downloadFile(`/studies/${studyId}/questionnaire/workbook`, fallbackName),
+
   /** The same document rendered for READING beside the extraction: colour,
       highlight and strikethrough kept, anchored to the parser's block ids. */
   renderedSource: async (studyId: string) =>
@@ -906,7 +912,9 @@ export const fieldingApi = {
 
   // --- Management (authenticated) ---
   listLinks: async (studyId: string) =>
-    api.get<{ study_id: string; links: FieldingLink[] }>(`/studies/${studyId}/fielding/links`),
+    api.get<{ study_id: string; links: FieldingLink[]; delivery_formats?: string[] }>(
+      `/studies/${studyId}/fielding/links`,
+    ),
 
   // `theme` (T24) is stamped into this link's pinned snapshot only.
   /** Everything re-checked before a link may be created. */

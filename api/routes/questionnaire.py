@@ -1869,6 +1869,58 @@ def diagnose_extraction(
     return diagnose(survey.questions, chunks, blocks, can_reextract=True)
 
 
+@router.get("/studies/{study_id}/questionnaire/workbook")
+def questionnaire_workbook(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The questionnaire as an .xlsx somebody can read away from the screen.
+
+    Everything in it is already known — preflight runs these checks before a
+    link can be made, and the review page shows every question. What it could
+    not do is leave the screen, and a scripter working in another tool, a
+    client signing off, or a PM checking this wave against the last one all
+    want the instrument as a file.
+
+    Built from the stored definition and the same audit that gates fielding,
+    never by re-reading the document: two readings of one questionnaire that
+    disagree is worse than one reading.
+    """
+    import tempfile
+
+    from src.engines.fielding.preflight import preflight
+    from src.renderers.questionnaire_workbook import build_workbook
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    report = preflight(
+        survey,
+        approved=questionnaire.status == "approved",
+        blocking_flags=_BLOCKING_FLAGS,
+        approved_qids=set(questionnaire.approved_qids or []),
+    )
+    brief = (survey.metadata or {}).get("study_overview") or {}
+
+    with tempfile.TemporaryDirectory() as folder:
+        path = build_workbook(
+            survey, Path(folder) / "questionnaire.xlsx",
+            checks=report.get("checks") or [], brief=brief,
+        )
+        content = path.read_bytes()
+
+    name = (questionnaire.source_filename or study_id).rsplit(".", 1)[0]
+    return Response(
+        content=content,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": f'attachment; filename="{name}_questionnaire.xlsx"'
+        },
+    )
+
+
 @router.post("/studies/{study_id}/questionnaire/reextract")
 def reextract_questionnaire(
     study_id: str,

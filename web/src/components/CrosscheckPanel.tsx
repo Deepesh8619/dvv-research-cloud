@@ -151,6 +151,22 @@ export default function CrosscheckPanel({
               >
                 Download
               </button>
+              {/* The instrument as a workbook: questions, answers, routing,
+                  the checks and the flow. For the people who need it off this
+                  screen — a scripter in another tool, a client signing off, a
+                  PM setting this wave beside the last one. */}
+              <button
+                type="button"
+                onClick={() =>
+                  questionnaireApi.downloadWorkbook(
+                    studyId,
+                    `${questionnaire.source_filename.replace(/\.[^.]+$/, '')}_questionnaire.xlsx`,
+                  )
+                }
+                className="text-xs font-medium text-primary-600 hover:underline"
+              >
+                Analysis (.xlsx)
+              </button>
             </>
           ) : (
             <dd className="text-slate-400">None uploaded</dd>
