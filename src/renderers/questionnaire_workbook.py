@@ -140,6 +140,7 @@ def build_workbook(
 
     answers = _sheet(workbook, "Answers", [
         "Question ID", "Code", "Answer", "Row / item", "Attributes", "Shown if",
+        "Derived when",
     ])
     for question in questions:
         for option in question.options or []:
@@ -151,9 +152,13 @@ def build_workbook(
             _row(answers, [
                 question.qid, option.code, option.label, "",
                 ", ".join(attributes), _condition(option.show_if),
+                # For a hidden variable this is the derivation, in the
+                # document's own words. It is the only place the rule is
+                # written down, and whoever scripts it works from this cell.
+                option.definition or "",
             ])
         for row in question.rows or []:
-            _row(answers, [question.qid, row.code, row.label, "ROW", "", ""])
+            _row(answers, [question.qid, row.code, row.label, "ROW", "", "", ""])
 
     routing = _sheet(workbook, "Routing", [
         "Question ID", "Rule", "As written in the document", "As programmed",

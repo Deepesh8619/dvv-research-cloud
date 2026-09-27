@@ -256,6 +256,13 @@ class Option:
     # Written constantly in real questionnaires and modelled nowhere, so the
     # option was shown to everybody — including people the script excluded.
     show_if: Expression | None = None
+    # How a HIDDEN variable takes this value, in the document's own words:
+    # "HID_GEO_DIVISION = 1,2", "DA_PLATFORM_USAGE 1, 2, 3, or 4 = 3-5". The
+    # spec tables state it in a `Definition:` column beside the label and it
+    # was being dropped, so the one place the derivation is written down
+    # reached nobody. Kept verbatim and never executed — a rule compiled wrong
+    # puts numbers in a banner variable that nobody authored.
+    definition: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         raw = asdict(self)
