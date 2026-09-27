@@ -133,9 +133,19 @@ def _screen_page(
     question: Question, block_page: dict[str, Any], screen: int, title: str
 ) -> dict[str, Any]:
     best, worst = field_names(question.qid, screen)
+    # Wrapped in a panel because the respondent page runs SurveyJS in
+    # `questionPerPage`, which renders ONE question at a time — and that split
+    # the screen in half: the respondent picked a best, advanced, and was asked
+    # for the worst of a list they could no longer see. Best and worst are a
+    # single simultaneous judgement over one set of four; separated, they are
+    # two different questions and the utilities are not what the exercise
+    # measured. A panel is one element, so the pair stays together.
     page: dict[str, Any] = {
         "name": page_name(block_page["name"], screen),
-        "elements": [
+        "elements": [{
+            "type": "panel",
+            "name": f"{page_name(block_page['name'], screen)}_pair",
+            "elements": [
             {
                 "type": "radiogroup",
                 "name": best,
@@ -161,7 +171,8 @@ def _screen_page(
                     }
                 ],
             },
-        ],
+            ],
+        }],
         "title": title,
         # Read by the respondent page; SurveyJS ignores what it does not know.
         "maxdiffScreen": {"qid": question.qid, "index": screen},
@@ -251,7 +262,15 @@ def apply_version(
             )
         labels = {o.code: o.label for o in question.options or []}
         choices = [{"value": code, "text": labels.get(code, str(code))} for code in codes]
-        for element in page["elements"]:
-            if element.get("type") == "radiogroup":
-                element["choices"] = list(choices)
+        for element in _radiogroups(page["elements"]):
+            element["choices"] = list(choices)
     return compiled
+
+
+def _radiogroups(elements: list[dict[str, Any]]):
+    """The screen's two radio lists, wherever the panel puts them."""
+    for element in elements:
+        if element.get("type") == "panel":
+            yield from _radiogroups(element.get("elements") or [])
+        elif element.get("type") == "radiogroup":
+            yield element

@@ -18,6 +18,16 @@ from src.engines.fielding.maxdiff_screens import (
 from src.renderers.surveyjs_compiler import compile_to_surveyjs
 
 
+def _radios(page):
+    """The screen's two radio lists, from inside the panel that holds them."""
+    return [
+        element
+        for group in page["elements"]
+        for element in (group.get("elements") or [group])
+        if element.get("type") == "radiogroup"
+    ]
+
+
 def _exercise(n_items=20, screens=12, per_screen=4, versions=10, alone=True):
     question = Question(
         qid="Q20",
@@ -55,7 +65,7 @@ def test_the_choices_compile_empty_so_a_missed_version_fails_loudly():
     assert all(
         element["choices"] == []
         for page in compiled["pages"]
-        for element in page["elements"]
+        for element in _radios(page)
     )
 
 
@@ -63,12 +73,12 @@ def test_applying_a_version_fills_every_screen():
     survey = _exercise()
     compiled = apply_version(compile_to_surveyjs(survey), survey, version=3)
     for page in compiled["pages"]:
-        for element in page["elements"]:
+        for element in _radios(page):
             assert len(element["choices"]) == 4
             assert len({c["value"] for c in element["choices"]}) == 4
     # Best and worst offer the same four items — it is one screen.
-    first = compiled["pages"][0]["elements"]
-    assert first[0]["choices"] == first[1]["choices"]
+    best, worst = _radios(compiled["pages"][0])
+    assert best["choices"] == worst["choices"]
 
 
 def test_two_respondents_do_not_see_the_same_screens():
@@ -77,7 +87,7 @@ def test_two_respondents_do_not_see_the_same_screens():
     a = apply_version(compile_to_surveyjs(survey), survey, version=0)
     b = apply_version(compile_to_surveyjs(survey), survey, version=1)
     same = [
-        a["pages"][i]["elements"][0]["choices"] == b["pages"][i]["elements"][0]["choices"]
+        _radios(a["pages"][i])[0]["choices"] == _radios(b["pages"][i])[0]["choices"]
         for i in range(12)
     ]
     assert not all(same)
@@ -85,7 +95,7 @@ def test_two_respondents_do_not_see_the_same_screens():
 
 def test_the_screen_refuses_the_same_item_as_best_and_worst():
     compiled = compile_to_surveyjs(_exercise())
-    worst = compiled["pages"][0]["elements"][1]
+    worst = _radios(compiled["pages"][0])[1]
     assert worst["name"] == "Q20_s1_worst"
     assert worst["validators"][0]["expression"] == (
         "{Q20_s1_worst} empty or {Q20_s1_worst} <> {Q20_s1_best}"
@@ -134,3 +144,20 @@ def test_applying_a_version_raises_rather_than_serving_an_empty_screen():
     survey.questions[0].options = []
     with pytest.raises(ValueError, match="no items to show"):
         apply_version(compiled, survey, version=0)
+
+
+def test_both_halves_of_a_screen_stay_on_one_page():
+    """The respondent page runs SurveyJS in `questionPerPage`, which renders ONE
+    question at a time — and that split the screen in half: they picked a best,
+    advanced, and were asked for the worst of a list they could no longer see.
+
+    Best and worst are a single simultaneous judgement over one set of four.
+    Separated they are two different questions, and the utilities are not what
+    the exercise measured. A panel is one element, so the pair stays together.
+    """
+    page = compile_to_surveyjs(_exercise())["pages"][0]
+    assert [e["type"] for e in page["elements"]] == ["panel"]
+    assert [e["name"] for e in page["elements"][0]["elements"]] == [
+        "Q20_s1_best",
+        "Q20_s1_worst",
+    ]

@@ -251,7 +251,15 @@ export default function RespondentPage() {
         // One question per page: this is what makes the per-page answer POST (and
         // therefore the server-side terminate check) fire mid-survey.
         survey.questionsOnPageMode = 'questionPerPage'
-        survey.goNextPageAutomatic = true // auto-advance on radio/dropdown select
+        // NOT auto-advance. A single-select used to move on the instant a radio
+        // was touched, which took the answer away before the respondent had
+        // finished reading the options — a mis-tap was committed and the only
+        // way back was a Previous button they had already been moved past.
+        // It also cost them the one thing a research instrument owes them: a
+        // moment to change their mind. Two question types had already been
+        // exempted one at a time (steppers, constant-sum) because it broke them
+        // outright; the pattern was the giveaway that the default was wrong.
+        survey.goNextPageAutomatic = false
         survey.showProgressBar = 'top'
         survey.progressBarType = 'questions'
         survey.showQuestionNumbers = 'off'
@@ -264,16 +272,6 @@ export default function RespondentPage() {
         // partial ranking without filling in the rest.
         for (const q of survey.getAllQuestions()) {
           if (q.getType() === 'ranking') (q as unknown as { selectToRankEnabled: boolean }).selectToRankEnabled = true
-          // A stepper writes on every tap; auto-advance would leave after the
-          // first "+" and nobody could ever enter 2.
-          // Constant-sum boxes too: filling the last box finished the survey
-          // before anyone could check the numbers.
-          const typed =
-            q.getType() === 'multipletext' ||
-            (q.getType() === 'text' && (q as unknown as { inputType: string }).inputType === 'number')
-          if (typed) {
-            ;(q as unknown as { supportGoNextPageAutomatic: () => boolean }).supportGoNextPageAutomatic = () => false
-          }
         }
         // A required ranking is a full ranking: stopping at #2 of 7 leaves the
         // data file with five blanks the analyst cannot tell from "skipped".
