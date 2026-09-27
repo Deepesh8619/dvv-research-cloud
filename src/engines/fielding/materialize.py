@@ -84,6 +84,9 @@ PARA_DEVICE = "vDevice"
 PARA_PLACE = "vPlaceCheck"
 PARA_COUNTRY = "vCountry"
 PARA_REGION = "vRegion"
+PARA_CITY = "vCity"
+PARA_POSTAL = "vPostcode"
+PARA_IP_HASH = "vConnection"
 
 
 @dataclass
@@ -378,6 +381,15 @@ def _paradata_variables() -> list[Variable]:
                  type=VarType.TEXT, provenance="fielding_paradata"),
         Variable(name=PARA_REGION, label="Region (from connection)",
                  type=VarType.TEXT, provenance="fielding_paradata"),
+        Variable(name=PARA_CITY, label="City (from connection)",
+                 type=VarType.TEXT, provenance="fielding_paradata"),
+        Variable(name=PARA_POSTAL, label="Postcode (from connection)",
+                 type=VarType.TEXT, provenance="fielding_paradata"),
+        # The connection as a salted hash, never an address. Two interviews
+        # from one connection are the commonest duplicate there is, and
+        # nothing downstream could see them without a column to compare.
+        Variable(name=PARA_IP_HASH, label="Connection (hashed)",
+                 type=VarType.TEXT, provenance="fielding_paradata"),
     ]
 
 
@@ -478,12 +490,16 @@ def materialize_fielding(
 
     starts, ends, durations, dispositions = [], [], [], []
     devices, places, countries, regions = [], [], [], []
+    cities, postcodes, connections = [], [], []
     for s in completes:
         para = summarise_paradata(getattr(s, "entry_params", None) or {})
         devices.append(para["device"])
         places.append(para["place"])
         countries.append(para["country"])
         regions.append(para["region"])
+        cities.append(para.get("city"))
+        postcodes.append(para.get("postal"))
+        connections.append(para.get("ip_hash"))
         start = _parse_iso(getattr(s, "started_at", None))
         end = _parse_iso(getattr(s, "completed_at", None))
         starts.append(start.isoformat() if start else None)
@@ -498,6 +514,9 @@ def materialize_fielding(
     columns[PARA_PLACE] = _pandas_series(VarType.SINGLE, places)
     columns[PARA_COUNTRY] = _pandas_series(VarType.TEXT, countries)
     columns[PARA_REGION] = _pandas_series(VarType.TEXT, regions)
+    columns[PARA_CITY] = _pandas_series(VarType.TEXT, cities)
+    columns[PARA_POSTAL] = _pandas_series(VarType.TEXT, postcodes)
+    columns[PARA_IP_HASH] = _pandas_series(VarType.TEXT, connections)
 
     # Which block each respondent met FIRST, when the script rotated them.
     #

@@ -202,4 +202,15 @@ def summarise(entry_params: dict[str, Any]) -> dict[str, Any]:
         "place_label": place,
         "country": (entry_params.get("geo") or {}).get("country"),
         "region": (entry_params.get("geo") or {}).get("region"),
+        # Looked up with the rest and then dropped, so the data file carried
+        # country and region and nothing finer. Every study a client runs
+        # expects city and postcode beside them — they are how a regional quota
+        # is checked after the fact, and the file is the only place to check it.
+        "city": (entry_params.get("geo") or {}).get("city"),
+        "postal": (entry_params.get("geo") or {}).get("postal"),
+        # The connection, as a salted hash. Two interviews from one connection
+        # are the commonest duplicate there is, and without this column nobody
+        # downstream can see them. The address itself is never stored unless a
+        # client's own rules demand it (DVV_STORE_RAW_IP).
+        "ip_hash": entry_params.get("ip_hash"),
     }
