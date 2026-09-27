@@ -592,6 +592,72 @@ def _infer_type(
     return None, ""
 
 
+# "1Acne or breakouts", "2Redness or rosacea" — a numbered answer list whose
+# separator did not survive whatever produced the document. Found on two real
+# questions, and the respondent was being shown the digit: the code pattern
+# needs a separator and a space, so nothing stripped it and the label kept it.
+# An UPPER-case letter after the digit, which is what a mangled code leaves
+# behind. A label that genuinely opens with a number carries on in lower case —
+# "1st choice", "2x per week", "1 in 5" — and splitting those produced the
+# labels "st choice" and "x per week", with the first option lost entirely.
+_GLUED_CODE_RE = re.compile(r"^(?P<code>\d{1,3})(?=[A-Z])")
+
+
+def _adopt_glued_codes(options: list[Option], written_codes: list[int | None]) -> None:
+    """Split "1Acne" into code 1 and label "Acne" — but only for a whole list.
+
+    Never per option, because "10 or more" is a perfectly ordinary label and
+    splitting it alone yields code 1 and the label "0 or more". The split is
+    taken only when EVERY option starts with a glued digit AND those digits run
+    consecutively from the first one, which an answer list does and a list of
+    quantities does not.
+    """
+    if len(options) < 2 or any(c is not None for c in written_codes):
+        return
+    found = [_GLUED_CODE_RE.match(o.label or "") for o in options]
+    if not all(found):
+        return
+    codes = [int(m.group("code")) for m in found]
+    if codes != list(range(codes[0], codes[0] + len(codes))):
+        return
+    for option, match, code in zip(options, found, codes, strict=True):
+        option.label = (option.label or "")[match.end() :].strip()
+        written_codes[options.index(option)] = code
+
+
+def _parallel_to_next(line: str, body_lines: list[str], position: int) -> bool:
+    """Is this line the FIRST of a list rather than the tail of a wrapped stem?
+
+    A stem that wraps does not look like the line under it; the first item of a
+    list looks exactly like the second. Compared on the leading character class
+    alone, which is all that distinguishes them reliably:
+
+        Rank these          <- stem
+        1st choice          <- absorbed into the stem, and lost
+        2nd choice
+
+    Without this the option list starts one item short, and the missing answer
+    is sitting in the question's own wording where nobody reads it as an answer.
+    """
+    following = next(
+        (
+            nxt
+            for nxt in body_lines[position + 1 :]
+            if nxt.strip() and not is_directive_only(nxt)
+        ),
+        None,
+    )
+    if following is None:
+        return False
+    return (line[:1].isdigit() and following[:1].isdigit()) or (
+        line[:1].isalpha()
+        and following[:1].isalpha()
+        and line[:1].isupper() == following[:1].isupper()
+        and len(line) < 40
+        and len(following) < 40
+    )
+
+
 def parse_prose_question(
     chunk_text: str,
     candidate_qid: str | None,
@@ -680,7 +746,7 @@ def parse_prose_question(
                 question_text = _strip_bracket(question_text, body)
                 instruction_text = _strip_bracket(instruction_text, body)
 
-    for line in body_lines:
+    for position, line in enumerate(body_lines):
         if is_directive_only(line):
             for raw in bracket_bodies(line):
                 body = raw.strip()
@@ -764,6 +830,7 @@ def parse_prose_question(
             and not _OPTION_LETTER_RE.match(line)
             and not _STEM_CONTINUES_RE.search(question_text)
             and any(c.islower() for c in question_text)
+            and not _parallel_to_next(line, body_lines, position)
         ):
             # The stem wrapped. Finish reading it before the option list starts.
             # ONE line only, and only for a stem that is addressed to the
@@ -873,6 +940,7 @@ def parse_prose_question(
     # Adopt the written codes only when EVERY option states one and they are
     # distinct. A partial list (wrapped option text, an unnumbered "Other")
     # keeps positional numbering rather than mixing two schemes.
+    _adopt_glued_codes(options, written_codes)
     if (
         options
         and len(written_codes) == len(options)

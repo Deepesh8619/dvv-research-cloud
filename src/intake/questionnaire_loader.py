@@ -52,6 +52,13 @@ class DocumentBlock:
     #: tracked deletion. Not part of `text`, and kept so a reviewer can tell
     #: "the brand is missing" from "the brand was struck out in the document".
     removed: list[str] = field(default_factory=list)
+    #: The document formatted this paragraph as a numbered or bulleted list
+    #: item. Word keeps that numbering in the XML, so the number never appears
+    #: in `text` — which is why an answer list can arrive as bare lines with no
+    #: visible codes at all. It is the document's own statement that a line is
+    #: an ITEM rather than a sentence, and on the three real client documents it
+    #: separates the answer list from the scripter notes sitting beside it.
+    is_list_item: bool = False
 
 
 @dataclass
@@ -331,6 +338,7 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
                 continue
             is_bold = _para_is_bold(para)
             is_heading = (para.style.name or "").lower().startswith("heading")
+            is_list_item = _is_list_paragraph(para)
             blocks.append(
                 DocumentBlock(
                     block_type="heading" if is_heading else "paragraph",
@@ -340,6 +348,7 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
                     is_bold=is_bold,
                     is_heading=is_heading,
                     removed=removed,
+                    is_list_item=is_list_item,
                 )
             )
             para_index += 1
@@ -375,6 +384,30 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
             path.name, len(struck_out),
         )
     return blocks
+
+
+def _is_list_paragraph(paragraph) -> bool:
+    """Did the document format this paragraph as a list item?
+
+    Two ways Word records it, and a document uses one or the other. The three
+    real client questionnaires carry `w:numPr` directly on the paragraph; a
+    document built from Word's own "List Number" / "List Bullet" styles carries
+    it on the STYLE instead, and checking only the paragraph found nothing at
+    all there.
+    """
+    if paragraph._p.xpath(".//w:numPr"):
+        return True
+    style = paragraph.style
+    while style is not None:
+        name = (style.name or "").lower()
+        if name.startswith(("list number", "list bullet", "list paragraph")):
+            return True
+        if getattr(style, "element", None) is not None and style.element.xpath(
+            ".//w:numPr"
+        ):
+            return True
+        style = getattr(style, "base_style", None)
+    return False
 
 
 def _para_is_bold(paragraph) -> bool:
