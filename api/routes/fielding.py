@@ -874,6 +874,35 @@ def _exclusive_only(survey: SurveyDefinition, qid: str, value):
     return [picked[-1]] if picked else value
 
 
+def _over_cap(survey: SurveyDefinition, qid: str, value) -> str | None:
+    """The message for a page that ticks more options than the question allows.
+
+    Not trimmed to fit, the way a co-selected EXCLUSIVE option is. Exclusivity
+    has one safe resolution — the exclusive choice wins — and a cap has none:
+    keeping the first two of four picks an answer the respondent did not give,
+    and it would land in the tabs indistinguishable from one they did.
+
+    A contradictory cap is ignored here on purpose. A minimum above the maximum
+    rejects every possible answer, and a respondent stuck behind one can never
+    finish; preflight fails the link over it instead, which is the place where
+    a person can still fix it.
+    """
+    if not isinstance(value, list):
+        return None
+    question = next((q for q in survey.questions if q.qid == qid), None)
+    if question is None:
+        return None
+    limits = question.validation or {}
+    ceiling, floor = limits.get("max_select"), limits.get("min_select")
+    if not isinstance(ceiling, int) or ceiling <= 0:
+        return None
+    if isinstance(floor, int) and floor > ceiling:
+        return None
+    if len(value) > ceiling:
+        return f"{qid} allows at most {ceiling} answer{'s' if ceiling > 1 else ''}."
+    return None
+
+
 @router.post("/r/{token}/sessions/{session_id}/answers")
 def submit_answers(
     token: str,
@@ -896,6 +925,18 @@ def submit_answers(
 
     # Server-authoritative view of what the respondent was actually asked.
     survey = SurveyDefinition.from_json(link.survey_json)
+
+    over = [
+        message
+        for qid, value in (body.answers or {}).items()
+        if (message := _over_cap(survey, qid, value))
+    ]
+    if over:
+        # Nothing on this page is stored. A browser running the compiled survey
+        # cannot get here — SurveyJS holds the cap — so this is a client that
+        # is not the one we served, and accepting part of its page would leave
+        # the session half-answered.
+        raise HTTPException(status_code=400, detail=" ".join(over))
 
     for qid, value in (body.answers or {}).items():
         upsert_respondent_answer(db, session_id, qid, _exclusive_only(survey, qid, value))

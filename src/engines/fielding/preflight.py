@@ -27,6 +27,7 @@ from typing import Any
 from src.core.survey_definition import QuestionType, SurveyDefinition
 from src.engines.fielding.dryrun import simulate
 from src.engines.questionnaire import schema
+from src.engines.questionnaire.constraint_audit import audit_constraints
 from src.engines.questionnaire.definition_audit import audit_definition
 from src.engines.questionnaire.trade_off import WHY as TRADE_OFF_WHY
 from src.engines.questionnaire.trade_off import technique as trade_off_technique
@@ -111,6 +112,30 @@ def preflight(
         Check("answers", "Every question has answers to choose from"), empty, FAIL,
         "These would reach a respondent with nothing to pick.",
     ))
+
+    # A constraint a respondent cannot satisfy fails in the worst place: they
+    # meet it, cannot get past it, and abandon. That arrives as drop-off on a
+    # page, which reads as a boring question rather than a bug, and the
+    # interview is already paid for.
+    constraint_issues = audit_constraints(survey)
+    impossible = sorted({i.qid for i in constraint_issues if i.severity == FAIL})
+    if impossible:
+        checks.append(_result(
+            Check("constraints", "Every question can actually be answered"),
+            impossible, FAIL,
+            "; ".join(
+                f"{i.qid}: {i.detail}" for i in constraint_issues if i.severity == FAIL
+            )[:400],
+        ))
+    else:
+        checks.append(Check("constraints", "Every question can actually be answered"))
+    loose = [i for i in constraint_issues if i.severity == WARN]
+    if loose:
+        checks.append(_result(
+            Check("constraint_wording", "Answer limits match the answer lists"),
+            sorted({i.qid for i in loose}), WARN,
+            "; ".join(f"{i.qid}: {i.detail}" for i in loose)[:400],
+        ))
 
     # A trade-off exercise is reported on its own, below, because it needs a
     # different sentence: not "confirm the routing" but "this cannot be

@@ -379,12 +379,33 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
     elif qtype == QuestionType.MULTI:
         element["type"] = "checkbox"
         element["choices"] = _choices(question.options, by_qid)
+        # "Select up to 2." Stated in the wording and, until this, enforced
+        # nowhere — so the respondent could tick the whole list. The server
+        # rejects an over-cap page too (api/routes/fielding.py): this stops a
+        # respondent making the mistake, that stops a client that does not.
+        limits = question.validation or {}
+        if isinstance(limits.get("max_select"), int) and limits["max_select"] > 0:
+            element["maxSelectedChoices"] = limits["max_select"]
+        if isinstance(limits.get("min_select"), int) and limits["min_select"] > 0:
+            element["minSelectedChoices"] = limits["min_select"]
     elif qtype == QuestionType.DROPDOWN:
         element["type"] = "dropdown"
         element["choices"] = _choices(question.options, by_qid)
     elif qtype == QuestionType.RANK:
         element["type"] = "ranking"
         element["choices"] = _choices(question.options, by_qid)
+        # "Rank your top three." over eleven brands — the respondent was being
+        # made to order all eleven, because a plain ranking has no notion of a
+        # top N. That is not what the question asks, and ranks 4-11 are data
+        # the document never asked anyone for. Select-to-rank gives them the
+        # three the wording says.
+        #
+        # ONLY when the document states a cap smaller than the list: a ranking
+        # with no cap keeps exactly the interaction it has today.
+        top_n = (question.validation or {}).get("max_select")
+        if isinstance(top_n, int) and 0 < top_n < len(question.options or []):
+            element["selectToRankEnabled"] = True
+            element["maxSelectedChoices"] = top_n
     elif qtype == QuestionType.GRID_SINGLE:
         element["type"] = "matrix"
         element["columns"] = _choices(question.cols or [], by_qid)
