@@ -266,6 +266,14 @@ def _is_answer_blank(line: str) -> bool:
 # comes last. Anywhere in the line: the all-caps test below is what keeps a
 # respondent's question out.
 # "SAMPLE SPLIT", "RANDOMLY ASSIGN": the scripter assigns it — nobody is asked.
+# A note that declares the variable outright, rather than leaving it to be
+# inferred from shouting. "[PN: HIDDEN VARIABLE]", "[HV]", "[NOT ASKED —
+# COMPUTED]". `HIDDEN` alone is deliberately enough inside a bracket: nothing
+# else in a scripter directive says it.
+_STATED_HIDDEN = re.compile(
+    r"\bhidden\b|\bHV\b|\bnot\s+asked\b|\bderived\s+variable\b", re.I
+)
+
 _DERIVED_RE = re.compile(
     r"(?<!ZIP )(?<!POSTAL )(?<!AREA )(?<!PROMO )\b(RE)?CODE\b|\bSPLIT\b|\bRANDOMLY ASSIGN"
 )
@@ -965,8 +973,20 @@ def parse_prose_question(
         fields.evidence["base"] = f"[{show_if_verbatim}]"
     if randomize_evidence:
         fields.evidence["randomize"] = randomize_evidence
+    # A scripter note that SAYS SO: "[PN: HIDDEN VARIABLE. COMPUTE FROM S3]".
+    # A stated fact outranks every wording heuristic, and it is the only signal
+    # that works for a variable whose name gives nothing away — "AGE" is a
+    # question in one study and a hidden recode in the next, and the only thing
+    # that distinguishes them is the note beside it.
+    stated_hidden = next(
+        (d for d in directives if _STATED_HIDDEN.search(d)), None
+    )
     taught_hidden = question_text and learned_hidden_variable(patterns, question_text)
-    if question_text and (taught_hidden or is_derived_wording(question_text, patterns)):
+    if stated_hidden:
+        fields.derived = True
+        fields.qtype = QuestionType.INFO
+        fields.evidence["derived"] = f"[{stated_hidden}]"
+    elif question_text and (taught_hidden or is_derived_wording(question_text, patterns)):
         # Scripter-computed, not asked. Labelled the same way the extractor
         # labels a HID_ variable, so the review UI says "needs manual setup".
         fields.derived = True
