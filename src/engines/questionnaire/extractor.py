@@ -707,11 +707,25 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     techniques = detect_techniques(fields.text or "", *fields.directives)
     if techniques:
         validation["techniques"] = techniques.to_dict()
+    flags: list[str] = []
+    if fields.derived:
+        # The prose parser recognised a scripter-computed variable and typed it
+        # `info`, and the FLAG was then dropped on the floor. Everything
+        # downstream keys on the flag, not on the type: materialize decides
+        # whether to emit a column by it, the review UI says "needs manual
+        # setup" by it, the buckets group by it. So the detection worked and
+        # nothing acted on it — on the Bubble document that is eleven hidden
+        # variables typed correctly and labelled nowhere, and the coded ones
+        # (`CODE SAMPLE SOURCE` with its values under it) lost their column
+        # entirely.
+        flags.append(schema.FLAG_DERIVED_VARIABLE)
+
     question = Question(
         qid=fields.qid,
         text=fields.text or "",
         type=fields.qtype or QuestionType.SINGLE,
         options=order_terminal_options(list(fields.options)),
+        flags=flags,
         required=False,
         # The field fielding actually reads. It was being recorded only in
         # `validation`, which nothing downstream consults — so a question the
