@@ -517,3 +517,33 @@ def test_base_tag_under_a_numbered_question_is_not_a_boundary() -> None:
     chunks = segment_into_questions(blocks)
     assert [c.candidate_qid for c in chunks] == ["Q5"]
     assert "Not satisfied" in chunks[0].chunk_text
+
+
+def test_word_list_formatting_is_captured(tmp_path) -> None:
+    """Word keeps list numbering in the XML, so the number never appears in the
+    paragraph text — an answer list can arrive as bare lines with no visible
+    codes at all. It is the document's own statement that a line is an ITEM
+    rather than a sentence.
+
+    Measured on the three real client documents: 322 of 598, 323 of 495 and 29
+    of 55 paragraphs carry it, and it separates the answer list from the
+    scripter notes beside it. Captured here; nothing reads it as a rule yet,
+    because measuring showed a blanket "not a list item means not an option"
+    would have destroyed two real answer lists that were typed plainly.
+    """
+    from docx import Document
+
+    document = Document()
+    document.add_paragraph("Q1. Which do you use?")
+    document.add_paragraph("Alpha", style="List Number")
+    document.add_paragraph("Beta", style="List Number")
+    document.add_paragraph("[PN: RANDOMIZE]")
+    path = tmp_path / "lists.docx"
+    document.save(path)
+
+    blocks = load_docx(path)
+    listed = {b.text: b.is_list_item for b in blocks}
+    assert listed["Alpha"] is True
+    assert listed["Beta"] is True
+    assert listed["Q1. Which do you use?"] is False
+    assert listed["[PN: RANDOMIZE]"] is False
