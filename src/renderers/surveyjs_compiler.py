@@ -391,6 +391,13 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
     elif qtype == QuestionType.DROPDOWN:
         element["type"] = "dropdown"
         element["choices"] = _choices(question.options, by_qid)
+    elif qtype == QuestionType.MAXDIFF:
+        # Never reached through a normal page: the block is replaced by one page
+        # per screen. Compiled as display text so a MaxDiff sharing a page with
+        # other questions — which preflight refuses — cannot silently field a
+        # broken exercise as an answer list.
+        element["type"] = "html"
+        element["html"] = f"<p>{element.pop('title', '')}</p>"
     elif qtype == QuestionType.RANK:
         element["type"] = "ranking"
         element["choices"] = _choices(question.options, by_qid)
@@ -575,6 +582,12 @@ def compile_to_surveyjs(survey: SurveyDefinition) -> dict[str, Any]:
     being ours and starts being the public's.
     """
     pages = [_compile_block(block, survey) for block in survey.blocks]
+    # A MaxDiff question is many screens, one per page — its choices are filled
+    # in per respondent at entry, because which items somebody sees is their
+    # design version. See engines/fielding/maxdiff_screens.
+    from src.engines.fielding.maxdiff_screens import expand_pages
+
+    pages = expand_pages(survey, pages)
     compiled = {"title": survey.title, "pages": pages}
     # One mark per question, read from its own wording. Sent as a map rather
     # than per element so it costs nothing in SurveyJS's own model — the

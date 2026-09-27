@@ -269,6 +269,11 @@ class RespondentSessionDB(Base):
     # which means "what the panel sent" — this is what WE decided, and the
     # analyst has to be able to control for it.
     block_order = Column(String, nullable=True)
+    # Which MaxDiff design version this respondent was dealt. Recorded for the
+    # same reason the rotation arm is: the analysis has to know which items the
+    # person was actually shown, and a design nobody can reconstruct afterwards
+    # is not a design.
+    maxdiff_version = Column(Integer, nullable=True)
     # The panel's respondent id, copied out of entry_params so the duplicate
     # check at entry is one indexed lookup instead of a scan of every session.
     # '' = entered without one. Added after the table shipped (_ensure_new_columns).
@@ -759,6 +764,8 @@ def _ensure_new_columns():
             "pid": "VARCHAR",
             # Which block the respondent met first, when the script rotates.
             "block_order": "VARCHAR",
+            # Which MaxDiff design version they were dealt.
+            "maxdiff_version": "INTEGER",
         },
     }
     inspector = inspect(engine)
@@ -1316,12 +1323,17 @@ def create_respondent_session(
     fielding_link_id: str,
     entry_params: dict | None = None,
     block_order: str | None = None,
+    maxdiff_version: int | None = None,
 ) -> "RespondentSessionDB":
     """Start a respondent session (status_code stays NULL until terminal).
 
     `block_order` is the rotating block this respondent meets first, when the
     script asked for rotation. Recorded at entry, because it has to reach the
     data file: a rotation the analyst cannot see is nearly as useless as none.
+
+    `maxdiff_version` is which design version a best-worst exercise dealt them,
+    and is recorded for the same reason — it is the only record of which items
+    this person was ever shown.
     """
     from uuid import uuid4
 
@@ -1333,6 +1345,7 @@ def create_respondent_session(
         entry_params=entry_params or {},
         pid=str((entry_params or {}).get("pid") or "").strip(),
         block_order=block_order,
+        maxdiff_version=maxdiff_version,
         current_page=0,
         started_at=now,
         last_seen_at=now,

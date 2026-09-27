@@ -1137,3 +1137,115 @@ def test_a_contradictory_cap_never_strands_a_respondent(client):
         json={"answers": {"Q9": [1, 2, 3]}, "current_page": 1},
     )
     assert resp.status_code == 200
+
+
+def _maxdiff_survey(study_id="study_f1"):
+    survey = _sample_survey(study_id)
+    survey.questions.append(
+        Question(
+            qid="Q20",
+            text="Which of these matters most?",
+            type=QuestionType.MAXDIFF,
+            options=[Option(code=i, label=f"Item {i}") for i in range(1, 21)],
+            validation={
+                "maxdiff": {"screens": 12, "items_per_screen": 4, "versions": 10}
+            },
+        )
+    )
+    survey.blocks.append(Block(block_id="blk_md", question_ids=["Q20"]))
+    return survey
+
+
+def test_a_respondent_is_dealt_a_version_and_sees_its_items(client):
+    """The exercise arrives as twelve screens with four items each, and which
+    four is this respondent's design version — not the same four for everyone."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf, survey=_maxdiff_survey())
+    token = _create_link(test_client).json()["token"]
+
+    entry = test_client.get(f"/api/r/{token}").json()
+    screens = [p for p in entry["surveyjs_json"]["pages"] if "maxdiffScreen" in p]
+    assert len(screens) == 12
+    for page in screens:
+        for element in page["elements"]:
+            assert len(element["choices"]) == 4
+
+
+def test_versions_are_dealt_by_least_fill_not_at_random(client):
+    """The design's balance is a property of the SAMPLE. A version that ends up
+    with half the respondents of another undoes it."""
+    from api.db import RespondentSessionDB
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf, survey=_maxdiff_survey())
+    token = _create_link(test_client).json()["token"]
+
+    for _ in range(20):
+        test_client.get(f"/api/r/{token}")
+
+    db = sf()
+    dealt = [
+        s.maxdiff_version
+        for s in db.query(RespondentSessionDB).all()
+        if s.maxdiff_version is not None
+    ]
+    db.close()
+    assert len(dealt) == 20
+    counts = {v: dealt.count(v) for v in set(dealt)}
+    # Ten versions, twenty respondents: exactly two each, by construction.
+    assert sorted(counts.values()) == [2] * 10
+
+
+def test_an_answer_naming_an_item_that_was_never_shown_is_refused(client):
+    """The browser only ever offered four items, so this cannot be a mistake
+    the respondent made — it is a client we did not serve. A utility model fed
+    one of these ranks an item on evidence that does not exist.
+    """
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf, survey=_maxdiff_survey())
+    token = _create_link(test_client).json()["token"]
+    entry = test_client.get(f"/api/r/{token}").json()
+    sid = entry["session_id"]
+
+    first = next(p for p in entry["surveyjs_json"]["pages"] if "maxdiffScreen" in p)
+    shown = [c["value"] for c in first["elements"][0]["choices"]]
+    unshown = next(code for code in range(1, 21) if code not in shown)
+
+    bad = test_client.post(
+        f"/api/r/{token}/sessions/{sid}/answers",
+        json={"answers": {"Q20_s1_best": unshown, "Q20_s1_worst": shown[0]}},
+    )
+    assert bad.status_code == 400
+    assert "not on this screen" in bad.json()["detail"]
+    assert test_client.get(f"/api/r/{token}/sessions/{sid}").json()["answers"] == {}
+
+    good = test_client.post(
+        f"/api/r/{token}/sessions/{sid}/answers",
+        json={"answers": {"Q20_s1_best": shown[0], "Q20_s1_worst": shown[1]}},
+    )
+    assert good.status_code == 200
+    assert test_client.get(f"/api/r/{token}/sessions/{sid}").json()["answers"] == {
+        "Q20_s1_best": shown[0],
+        "Q20_s1_worst": shown[1],
+    }
+
+
+def test_the_same_item_cannot_be_both_best_and_worst(client):
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf, survey=_maxdiff_survey())
+    token = _create_link(test_client).json()["token"]
+    entry = test_client.get(f"/api/r/{token}").json()
+    sid = entry["session_id"]
+    first = next(p for p in entry["surveyjs_json"]["pages"] if "maxdiffScreen" in p)
+    shown = [c["value"] for c in first["elements"][0]["choices"]]
+
+    resp = test_client.post(
+        f"/api/r/{token}/sessions/{sid}/answers",
+        json={"answers": {"Q20_s1_best": shown[0], "Q20_s1_worst": shown[0]}},
+    )
+    assert resp.status_code == 400
+    assert "both best and worst" in resp.json()["detail"]

@@ -103,8 +103,8 @@ def test_versions_are_separate_designs():
 
 
 def test_parameters_that_cannot_make_a_screen_are_refused():
-    assert check_parameters(n_items=3, n_screens=10, items_per_screen=4)
-    assert check_parameters(n_items=20, n_screens=10, items_per_screen=1)
+    assert [s for s, _ in check_parameters(3, 10, 4)] == ["fatal"]
+    assert [s for s, _ in check_parameters(20, 10, 1)] == ["fatal"]
     with pytest.raises(ValueError, match="cannot show an item twice"):
         build(n_items=3, n_screens=10, items_per_screen=4)
 
@@ -113,8 +113,12 @@ def test_a_design_too_thin_to_read_is_warned_about_but_still_built():
     """Too few screens is a research judgement, not an impossibility — so it is
     reported with the number that would fix it, and still generated."""
     problems = check_parameters(n_items=20, n_screens=4, items_per_screen=4)
-    assert any(str(MIN_APPEARANCES_PER_ITEM) in p for p in problems)
-    assert any("15 screens would fix it" in p for p in problems)
+    # ADVISORY, not fatal: how many screens a study can ask of a respondent is
+    # a research judgement, and refusing the link over it would overrule the
+    # person who wrote the questionnaire.
+    assert [s for s, _ in problems] == ["advisory"]
+    assert any(str(MIN_APPEARANCES_PER_ITEM) in why for _, why in problems)
+    assert any("15 screens would fix it" in why for _, why in problems)
     assert build(n_items=20, n_screens=4, items_per_screen=4).n_screens == 4
 
 

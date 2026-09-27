@@ -95,6 +95,11 @@ from src.core.survey_definition import (
 )
 from src.engines.fielding.decisions import QuotaCell
 from src.engines.fielding.dryrun import path_to, simulate
+from src.engines.fielding.maxdiff_screens import apply_version as apply_maxdiff_version
+from src.engines.fielding.maxdiff_screens import design_for as maxdiff_design
+from src.engines.fielding.maxdiff_screens import field_names as maxdiff_fields
+from src.engines.fielding.maxdiff_screens import items_shown as maxdiff_items_shown
+from src.engines.fielding.maxdiff_screens import questions_in as maxdiff_questions
 from src.engines.fielding.rotation import arms as rotation_arms
 from src.engines.fielding.rotation import assign as assign_arm
 from src.engines.fielding.rotation import order_pages
@@ -830,8 +835,29 @@ def enter_survey(token: str, request: Request, db: Session = Depends(get_db)):
         block_order = assign_arm(counts, available)
         surveyjs_json = order_pages(surveyjs_json, block_order)
 
+    # Which MaxDiff design version this respondent is dealt. Least fill again,
+    # not a random draw: the design's balance is a property of the SAMPLE, and
+    # a version that ends up with half the respondents of another undoes it.
+    maxdiff_version = None
+    exercises = maxdiff_questions(survey)
+    if exercises:
+        n_versions = max(
+            (d.n_versions for q in exercises if (d := maxdiff_design(q))), default=0
+        )
+        if n_versions:
+            seen: dict[str, int] = {}
+            for prior in list_respondent_sessions(db, link.id):
+                dealt = getattr(prior, "maxdiff_version", None)
+                if dealt is not None:
+                    seen[str(dealt)] = seen.get(str(dealt), 0) + 1
+            maxdiff_version = int(
+                assign_arm(seen, [str(v) for v in range(n_versions)])
+            )
+            surveyjs_json = apply_maxdiff_version(surveyjs_json, survey, maxdiff_version)
+
     session = create_respondent_session(
-        db, link.id, entry_params=entry_params, block_order=block_order
+        db, link.id, entry_params=entry_params, block_order=block_order,
+        maxdiff_version=maxdiff_version,
     )
     return RespondentEntryResponse(
         session_id=session.id,
@@ -903,6 +929,41 @@ def _over_cap(survey: SurveyDefinition, qid: str, value) -> str | None:
     return None
 
 
+def _maxdiff_refusals(db, survey, session, answers: dict) -> list[str]:
+    """Best/worst answers that this respondent's own screens cannot justify.
+
+    Two things are checked, and neither is reachable through the survey we
+    served: an item that was not on that screen, and the same item picked as
+    both best and worst.
+    """
+    exercises = {q.qid: q for q in maxdiff_questions(survey)}
+    if not exercises:
+        return []
+    version = getattr(session, "maxdiff_version", None)
+    if version is None:
+        return []
+
+    problems: list[str] = []
+    for qid, question in exercises.items():
+        design = maxdiff_design(question)
+        if design is None:
+            continue
+        for screen in range(design.n_screens):
+            best_field, worst_field = maxdiff_fields(qid, screen)
+            best, worst = answers.get(best_field), answers.get(worst_field)
+            if best is None and worst is None:
+                continue
+            shown = maxdiff_items_shown(question, version, screen)
+            for field, value in ((best_field, best), (worst_field, worst)):
+                if value is not None and value not in shown:
+                    problems.append(f"{field}: that item was not on this screen.")
+            if best is not None and best == worst:
+                problems.append(
+                    f"{best_field}: the same item cannot be both best and worst."
+                )
+    return problems
+
+
 @router.post("/r/{token}/sessions/{session_id}/answers")
 def submit_answers(
     token: str,
@@ -925,6 +986,15 @@ def submit_answers(
 
     # Server-authoritative view of what the respondent was actually asked.
     survey = SurveyDefinition.from_json(link.survey_json)
+
+    refused = _maxdiff_refusals(db, survey, session, body.answers or {})
+    if refused:
+        # Nothing on the page is stored. A best/worst answer naming an item the
+        # respondent was never shown cannot be a mistake they made — the browser
+        # only ever offered them four — so it is a client we did not serve, and
+        # a utility model fed one of these would rank an item on evidence that
+        # does not exist.
+        raise HTTPException(status_code=400, detail=" ".join(refused))
 
     over = [
         message
