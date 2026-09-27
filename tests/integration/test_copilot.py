@@ -351,3 +351,17 @@ def test_the_copilot_diagnoses_a_questionnaire_that_came_out_wrong(client, monke
     assert card["method"] == "POST"
     assert card["path"] == "/studies/study_f1/questionnaire/reextract"
     assert "keeps" in card["detail"] or "kept" in card["detail"]
+
+
+def test_the_copilot_is_told_not_to_do_its_own_arithmetic(client, monkeypatch):  # noqa: F811
+    """A number the model worked out reads exactly like one the tables produced.
+
+    The prompt already required every FACT to come from a tool, which left a
+    gap: rows come back and the model does the percentage itself. Nobody
+    reading the answer can tell a computed number from an invented one, and on
+    a research deliverable that is the difference between a finding and a
+    guess.
+    """
+    from src.ai.copilot import SYSTEM_PROMPT
+
+    assert "Never work a number out yourself" in SYSTEM_PROMPT
