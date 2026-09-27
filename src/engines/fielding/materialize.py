@@ -306,6 +306,34 @@ def _specs_for_question(question: Question) -> list[_ColumnSpec]:
     return []
 
 
+def uncomputed_derived(survey) -> list[str]:
+    """Derived variables that will deliver a column with nothing in it.
+
+    Three kinds reach the data file and only two carry a value. A `HID_*` with
+    a base we parsed is computed per respondent from that condition; a rotation
+    arm is recorded at entry. A CODED hidden variable — "CODE AGE - BASED ON
+    RESPONSES AT S1", with its bands underneath — gets a column, because the
+    banner is cut by it and a missing column is worse, but the DERIVATION is
+    prose the document wrote for a human scripter and nothing here computes it.
+
+    So that column arrives empty, for every respondent — and an empty column is
+    the failure this codebase keeps meeting, because it looks like data. The
+    analyst cuts by age band, gets a table of blanks, and reads it as a
+    fielding problem rather than as a variable nobody ever wrote the rule for.
+
+    Reported, never guessed at. Inventing a derivation from "BASED ON
+    RESPONSES AT S1" would put numbers in that column that nobody authored.
+    """
+    return sorted(
+        q.qid
+        for q in survey.questions
+        if q.type is QuestionType.INFO
+        and _is_derived(q)
+        and q.options
+        and not (q.qid.upper().startswith("HID_") and q.show_if is not None)
+    )
+
+
 def _is_derived(question: Question) -> bool:
     """A variable the script computes rather than asks."""
     return question.qid.upper().startswith("HID_") or "DERIVED_VARIABLE" in (

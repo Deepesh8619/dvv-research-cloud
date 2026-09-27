@@ -26,6 +26,7 @@ from typing import Any
 
 from src.core.survey_definition import QuestionType, SurveyDefinition
 from src.engines.fielding.dryrun import simulate
+from src.engines.fielding.materialize import uncomputed_derived
 from src.engines.fielding.maxdiff_design import FATAL as MAXDIFF_FATAL
 from src.engines.fielding.maxdiff_screens import problems as maxdiff_problems
 from src.engines.fielding.maxdiff_screens import questions_in as maxdiff_questions
@@ -115,6 +116,20 @@ def preflight(
         Check("answers", "Every question has answers to choose from"), empty, FAIL,
         "These would reach a respondent with nothing to pick.",
     ))
+
+    # A derived variable whose column will arrive empty. It is not a reason to
+    # refuse the link — the study fields perfectly well and somebody computes
+    # the variable in the tab spec or in SPSS — but nobody should find out at
+    # delivery, by cutting a banner and getting a table of blanks.
+    uncomputed = uncomputed_derived(survey)
+    if uncomputed:
+        checks.append(_result(
+            Check("derived", "Every hidden variable has something that fills it"),
+            uncomputed, WARN,
+            "The document states how these are derived in words written for a "
+            "scripter, and nothing here computes them — their columns ship "
+            "empty unless somebody writes the rule.",
+        ))
 
     # A best-worst exercise is many screens built from a design, so the two
     # ways it fails are its own: a design nobody can build, and an exercise
