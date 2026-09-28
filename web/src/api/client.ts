@@ -765,6 +765,9 @@ export interface FieldReport {
 export interface LiveResponses {
   columns: string[]
   total: number
+  /** False when the offline location database is not installed on the server,
+      so the country/city/postcode columns cannot be filled for anybody. */
+  location_available?: boolean
   rows: Array<{
     id: string
     status: string

@@ -14,6 +14,7 @@ the fresh full dataset. Zero completes -> 422, not a crash.
 """
 
 import logging
+import os
 
 import polars as pl
 from fastapi import APIRouter, Depends, HTTPException
@@ -422,6 +423,15 @@ def live_responses(
         qid for qid in survey.question_order()
         if by_qid.get(qid) and by_qid[qid].type.value != "info"
     ]
+    # The system variables, FIRST, because they are the context the answers are
+    # read against. The first hour of field is spent asking who these people
+    # are, not what they said: how fast did they go, what were they on, where
+    # is the connection, has this connection been here before. They were only
+    # in the delivery file, which is written after fielding — the one moment
+    # they cannot help.
+    #
+    # Same summariser the delivery file uses, so the two cannot disagree.
+    order = [*_SYSTEM_COLUMNS, *order]
     sessions = sorted(
         list_respondent_sessions(db, link_id),
         key=lambda s: s.last_seen_at or s.started_at or "",
@@ -432,13 +442,56 @@ def live_responses(
     rows = []
     for session in sessions[:limit]:
         given = answers.get(session.id, {})
+        shown = {
+            qid: _display(by_qid.get(qid), given[qid]) for qid in order if qid in given
+        }
+        shown.update(_system_values(session))
         rows.append({
             "id": session.id[:8],
             "status": _STATUS_LABELS.get(session.status_code, "in progress"),
             "started_at": session.started_at,
             "last_seen_at": session.last_seen_at,
-            "answers": {
-                qid: _display(by_qid.get(qid), given[qid]) for qid in order if qid in given
-            },
+            "answers": shown,
         })
-    return {"columns": order, "rows": rows, "total": len(sessions)}
+    return {
+        "columns": order,
+        "rows": rows,
+        "total": len(sessions),
+        # Whether the location columns can ever be filled. Without the offline
+        # database they are blank for everybody, and a blank that means "not
+        # configured" looks exactly like a blank that means "we could not tell"
+        # — so it is said outright rather than left to be inferred.
+        "location_available": bool(os.environ.get("DVV_GEOIP_DB")),
+    }
+
+
+#: System variables shown beside the answers, in the order a person reads them.
+_SYSTEM_COLUMNS = [
+    "vDurationSec", "vDevice", "vCountry", "vRegion", "vCity",
+    "vPostcode", "vConnection",
+]
+
+
+def _system_values(session) -> dict[str, str]:
+    """What the interview itself says about this respondent."""
+    from src.engines.fielding.materialize import _parse_iso
+    from src.engines.fielding.paradata import summarise as summarise_paradata
+
+    para = summarise_paradata(getattr(session, "entry_params", None) or {})
+    started = _parse_iso(getattr(session, "started_at", None))
+    finished = _parse_iso(getattr(session, "completed_at", None))
+    duration = (
+        str(int((finished - started).total_seconds()))
+        if started and finished else ""
+    )
+    return {
+        "vDurationSec": duration,
+        "vDevice": para.get("device_label") or "",
+        "vCountry": para.get("country") or "",
+        "vRegion": para.get("region") or "",
+        "vCity": para.get("city") or "",
+        "vPostcode": para.get("postal") or "",
+        # Shortened: it is here so two rows can be COMPARED, and a full hash
+        # is forty characters of noise in a table somebody scans.
+        "vConnection": (para.get("ip_hash") or "")[:8],
+    }
