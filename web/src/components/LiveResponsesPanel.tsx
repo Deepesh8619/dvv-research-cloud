@@ -13,6 +13,22 @@ const STATUS_STYLE: Record<string, string> = {
   'in progress': 'bg-sky-50 text-sky-700 ring-sky-200',
 }
 
+/** The interview's own variables, shown before the answers they give context to. */
+const SYSTEM_COLUMNS = new Set([
+  'vDurationSec', 'vDevice', 'vCountry', 'vRegion', 'vCity', 'vPostcode', 'vConnection',
+])
+
+/** Readable headings — "vDurationSec" is the data file's name, not a person's. */
+const SYSTEM_LABEL: Record<string, string> = {
+  vDurationSec: 'Length (s)',
+  vDevice: 'Device',
+  vCountry: 'Country',
+  vRegion: 'Region',
+  vCity: 'City',
+  vPostcode: 'Postcode',
+  vConnection: 'Connection',
+}
+
 function ago(iso: string | null): string {
   if (!iso) return '—'
   const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000)
@@ -86,6 +102,14 @@ export default function LiveResponsesPanel({ studyId, linkId }: { studyId: strin
           {data.rows.length < data.total && ` · newest ${data.rows.length} shown`}
         </span>
         {updated && <span className="text-xs text-slate-400">updated {updated.toLocaleTimeString()}</span>}
+        {data.location_available === false && (
+          /* A blank meaning "not configured" looks exactly like a blank meaning
+             "we could not tell", so it is said rather than left to be guessed. */
+          <span className="text-xs text-amber-600">
+            Country, city and postcode need the offline location database on the
+            server (DVV_GEOIP_DB) — they stay blank without it.
+          </span>
+        )}
       </div>
 
       {data.rows.length === 0 ? (
@@ -101,8 +125,15 @@ export default function LiveResponsesPanel({ studyId, linkId }: { studyId: strin
                 <th className="px-3 py-2 font-medium">Status</th>
                 <th className="px-3 py-2 font-medium">Last seen</th>
                 {data.columns.map((qid) => (
-                  <th key={qid} className="whitespace-nowrap px-3 py-2 font-mono font-medium">
-                    {qid}
+                  <th
+                    key={qid}
+                    className={
+                      SYSTEM_COLUMNS.has(qid)
+                        ? 'whitespace-nowrap bg-slate-100/70 px-3 py-2 font-medium text-slate-600'
+                        : 'whitespace-nowrap px-3 py-2 font-mono font-medium'
+                    }
+                  >
+                    {SYSTEM_LABEL[qid] ?? qid}
                   </th>
                 ))}
               </tr>
@@ -122,7 +153,15 @@ export default function LiveResponsesPanel({ studyId, linkId }: { studyId: strin
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-500">{ago(row.last_seen_at)}</td>
                   {data.columns.map((qid) => (
-                    <td key={qid} className="max-w-[220px] truncate px-3 py-2 text-slate-700" title={row.answers[qid]}>
+                    <td
+                      key={qid}
+                      className={`max-w-[220px] truncate px-3 py-2 ${
+                        SYSTEM_COLUMNS.has(qid)
+                          ? 'bg-slate-50/60 font-mono text-xs text-slate-500'
+                          : 'text-slate-700'
+                      }`}
+                      title={row.answers[qid]}
+                    >
                       {row.answers[qid] ?? <span className="text-slate-300">—</span>}
                     </td>
                   ))}

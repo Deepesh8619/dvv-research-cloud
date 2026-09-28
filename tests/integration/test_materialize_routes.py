@@ -418,7 +418,14 @@ def test_live_responses_show_labels_newest_first(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 2
-    assert body["columns"] == ["Q1", "Q2", "Q3", "Q4"]
+    # The interview's own variables come FIRST — they are the context the
+    # answers are read against, and the first hour of field is spent asking who
+    # these people are before what they said.
+    assert body["columns"][:7] == [
+        "vDurationSec", "vDevice", "vCountry", "vRegion", "vCity",
+        "vPostcode", "vConnection",
+    ]
+    assert body["columns"][7:] == ["Q1", "Q2", "Q3", "Q4"]
     statuses = sorted(r["status"] for r in body["rows"])
     assert statuses == ["complete", "screened out"]
     complete = next(r for r in body["rows"] if r["status"] == "complete")
@@ -453,3 +460,56 @@ def test_respondent_answers_follow_the_data_rule(client):
     assert test_client.get(
         f"/api/studies/study_m1/fielding/links/{link['id']}/responses"
     ).status_code == 200
+
+
+def test_live_data_carries_the_interview_s_own_variables(client):
+    """Device, length, place and connection, beside the answers.
+
+    They were only in the delivery file, which is written AFTER fielding — the
+    one moment they cannot help. The first hour is spent asking who these people
+    are: how fast did they go, what were they on, where is the connection, has
+    this connection been here before.
+    """
+    from api.db import RespondentSessionDB
+
+    test_client, sf, _ = client
+    _seed(sf)
+    link = test_client.post("/api/studies/study_m1/fielding/links").json()
+    _run_respondent(test_client, link["token"], age=30, coffee=1, brands=[1, 2])
+
+    # Paradata is stamped at entry by the respondent route; set it directly so
+    # the test does not depend on a user-agent or on the location database.
+    db = sf()
+    session = db.query(RespondentSessionDB).first()
+    session.entry_params = {
+        "device": "mobile", "ip_hash": "9f2c1a7b55aa", "place_check": "match",
+        "geo": {"country": "United States", "region": "New York",
+                "city": "Queens", "postal": "11375"},
+    }
+    db.commit()
+    db.close()
+
+    body = test_client.get(
+        f"/api/studies/study_m1/fielding/links/{link['id']}/responses"
+    ).json()
+    row = body["rows"][0]["answers"]
+    assert row["vDevice"] == "mobile"
+    assert row["vCity"] == "Queens"
+    assert row["vPostcode"] == "11375"
+    # Shortened: it is here so two rows can be COMPARED, and a full hash is
+    # forty characters of noise in a table somebody scans.
+    assert row["vConnection"] == "9f2c1a7b"
+
+
+def test_live_data_says_when_location_cannot_be_filled(client, monkeypatch):
+    """A blank meaning "not configured" looks exactly like a blank meaning "we
+    could not tell". The offline database is absent on a real deployment right
+    now, so the panel says so instead of showing empty cells."""
+    monkeypatch.delenv("DVV_GEOIP_DB", raising=False)
+    test_client, sf, _ = client
+    _seed(sf)
+    link = test_client.post("/api/studies/study_m1/fielding/links").json()
+    body = test_client.get(
+        f"/api/studies/study_m1/fielding/links/{link['id']}/responses"
+    ).json()
+    assert body["location_available"] is False
