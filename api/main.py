@@ -189,7 +189,21 @@ def mount_web(target: FastAPI, dist: Path) -> None:
     index.html. Unknown /api paths stay a JSON 404, never the app shell.
     """
     root = dist.resolve()
-    target.mount("/assets", StaticFiles(directory=root / "assets"), name="assets")
+    target.mount(
+        "/assets",
+        StaticFiles(directory=root / "assets"),
+        name="assets",
+    )
+
+    # index.html must NEVER be cached, and everything under /assets always can.
+    # Vite content-hashes the bundle, so a new build is a new filename — but the
+    # only thing that NAMES that filename is index.html. Served without a
+    # cache-control header it was cached heuristically, so a browser kept
+    # loading the previous bundle and a deploy simply did not arrive: an
+    # auto-advance fix shipped, verified in the served bundle, and the person
+    # testing it still had the old one. Worse for a respondent mid-interview,
+    # who has no reason to reload anything.
+    _SHELL_HEADERS = {"Cache-Control": "no-cache, must-revalidate"}
 
     @target.get("/{path:path}", include_in_schema=False)
     async def spa(path: str):
@@ -198,7 +212,7 @@ def mount_web(target: FastAPI, dist: Path) -> None:
         file = (root / path).resolve()
         if path and file.is_file() and root in file.parents:  # no ../ escapes
             return FileResponse(file)
-        return FileResponse(root / "index.html")
+        return FileResponse(root / "index.html", headers=_SHELL_HEADERS)
 
 
 web_build_path = Path(__file__).parent.parent / "web" / "dist"

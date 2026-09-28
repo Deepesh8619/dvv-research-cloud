@@ -517,7 +517,9 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
         # on code, and the grid emitted no data columns at all.
         rows=list(fields.rows) or None,
         cols=list(fields.cols) or None,
-        required=False,
+        required=_default_required(
+            QuestionType.INFO if stated_hidden else fields.qtype
+        ),
         randomize_options=_randomize_from_cell(fields.randomize),
         terminate_if=fields.terminate_if,
         source_text=chunk.chunk_text,
@@ -687,6 +689,27 @@ def _apply_table_shape(question: Question, chunk: QuestionChunk) -> None:
     question.extraction_evidence["options"] = shape.evidence
 
 
+def _default_required(qtype: QuestionType | None) -> bool:
+    """Must a respondent answer this before moving on?
+
+    Every deterministic path was setting `required=False`, and the compiler
+    emits `isRequired` straight from it — so on the three real client documents
+    0%, 6% and 0% of asked questions had to be answered. A respondent could
+    click through an entire interview answering nothing, and the file comes
+    back full of holes that look exactly like questions people declined.
+
+    In market research a question is required unless the document says
+    otherwise; the way out is a "Don't know" or "Prefer not to answer" ANSWER,
+    not a skipped question — which is why a required question with neither is
+    now warned about at preflight.
+
+    An open end is the exception both ways round: "anything else you would like
+    to add?" genuinely has nothing to add, and forcing text there buys a file
+    full of "n/a" and "none".
+    """
+    return qtype not in (None, QuestionType.INFO, QuestionType.OPEN_TEXT)
+
+
 def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     """Build a Question from what a prose question's own directives state."""
     validation: dict[str, Any] = {}
@@ -726,7 +749,7 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
         type=fields.qtype or QuestionType.SINGLE,
         options=order_terminal_options(list(fields.options)),
         flags=flags,
-        required=False,
+        required=_default_required(fields.qtype),
         # The field fielding actually reads. It was being recorded only in
         # `validation`, which nothing downstream consults — so a question the
         # parser correctly read as "[PN: RANDOMIZE]" was still fielded in fixed
