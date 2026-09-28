@@ -108,13 +108,16 @@ def audit_constraints(survey: SurveyDefinition) -> list[ConstraintIssue]:
                         f"{high if high is not None else '∞'} — the way out is refused",
                     ))
 
-        # ponytail: "a required question with no way out" belongs here — it is
-        # why surveys lose people, and a respondent with no honest answer
-        # guesses. It is NOT checked, because `Question.required` cannot carry
-        # it yet: it defaults True but every deterministic extractor sets it
-        # False, so the check would be silent on the questions that matter and
-        # arbitrary on the ones a model happened to type. Add it when `required`
-        # is read from the document instead of defaulted.
+        # ponytail: "a required question with no way out" belongs here in
+        # principle — somebody who cannot answer guesses, and the guess is
+        # indistinguishable from an answer. TRIED and removed: now that
+        # `required` is real it fires on 25, 21 and 18 questions across the
+        # three client documents, and the ones it names are exhaustive by
+        # construction ("Are you the parent of any teenagers? Yes/No", three
+        # mutually-exclusive self-descriptions). Whether not-knowing is
+        # PLAUSIBLE is the actual test and it is not in the option list. A
+        # check that names 40% of a questionnaire is one a reviewer learns to
+        # scroll past, which costs more than it finds.
     return issues
 
 

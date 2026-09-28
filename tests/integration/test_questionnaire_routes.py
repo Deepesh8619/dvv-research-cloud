@@ -9,7 +9,9 @@ hand-built SurveyDefinition, and the loader/segmenter are patched to no-ops so
 the real file-parsing path is never entered.
 """
 
+import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1323,3 +1325,36 @@ def test_the_questionnaire_downloads_as_a_workbook(client):
     # The checks travel with it: a workbook showing the instrument but not what
     # is wrong with it is the more dangerous half of the picture.
     assert workbook["Checks"].max_row > 1
+
+
+def test_the_app_shell_is_never_cached(client):
+    """Vite content-hashes the bundle, so a new build is a new filename — and
+    the only thing that NAMES that filename is index.html.
+
+    Served without a cache-control header it was cached heuristically, so a
+    browser kept loading the previous bundle and a deploy simply did not
+    arrive: an auto-advance fix shipped, was verified in the served bundle,
+    and the person testing it still had the old one. Worse for a respondent
+    mid-interview, who has no reason to reload anything.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.main import mount_web
+
+    dist = Path(tempfile.mkdtemp())
+    (dist / "assets").mkdir()
+    (dist / "index.html").write_text("<html><body>app</body></html>")
+    (dist / "assets" / "index-abc123.js").write_text("console.log(1)")
+
+    app = FastAPI()
+    mount_web(app, dist)
+    with TestClient(app) as web:
+        shell = web.get("/projects/x/fielding")
+        assert shell.status_code == 200
+        assert "no-cache" in shell.headers.get("cache-control", "")
+
+        # A hashed asset is safe to cache — its name changes when it does.
+        asset = web.get("/assets/index-abc123.js")
+        assert asset.status_code == 200
+        assert "no-cache" not in asset.headers.get("cache-control", "")
