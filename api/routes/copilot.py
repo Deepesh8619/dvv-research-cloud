@@ -330,6 +330,11 @@ def make_executor(db: Session, user: UserDB):
         return {k: report[k] for k in ("n_respondents", "passed", "dispositions",
                                        "never_fired", "impossible", "questions_never_shown")}
 
+    #: Cells sent back to the model for one table. Enough to read a crossbreak
+    #: and small enough that a long table does not crowd out everything else in
+    #: the turn.
+    _MAX_TABLE_ROWS = 40
+
     def ask_data(args):
         s = study(args)
         try:
@@ -337,7 +342,25 @@ def make_executor(db: Session, user: UserDB):
                                      db=db, user=user)
         except HTTPException as exc:
             raise _ToolError(str(exc.detail)) from exc
-        return {"answer": answer.message.content}
+
+        # The NUMBERS, not only the sentence about them. The data engine
+        # computes a real table — columns, rows, counts — and this tool used to
+        # return `answer.message.content` alone, so a crosstab arrived as
+        # "awareness is higher among 18-34s than 35+" with the cells discarded.
+        # The model then said so, correctly and uselessly: "the tool returned
+        # the direction only, no cell counts or percentages."
+        tables = [
+            {
+                "columns": result.get("columns"),
+                "rows": (result.get("rows") or [])[:_MAX_TABLE_ROWS],
+                "row_count": result.get("row_count"),
+                "truncated": bool(result.get("truncated"))
+                or len(result.get("rows") or []) > _MAX_TABLE_ROWS,
+            }
+            for result in (answer.tool_results or [])
+            if result.get("columns") and result.get("rows")
+        ]
+        return {"answer": answer.message.content, "tables": tables}
 
     # --- action tools: proposals only -----------------------------------------
 

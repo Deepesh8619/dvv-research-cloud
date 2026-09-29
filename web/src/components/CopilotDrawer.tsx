@@ -28,6 +28,90 @@ export function studyFromPath(pathname: string): string | null {
 }
 
 /** Bold (**x**) and "- " bullets rendered as elements, never as raw HTML. */
+/** A markdown pipe-table, as rows of cells. Null when these lines are not one. */
+function parseTable(lines: string[]): string[][] | null {
+  const cells = (line: string) =>
+    line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim())
+  if (lines.length < 2) return null
+  const header = cells(lines[0])
+  // The second line of a markdown table is the ---|--- rule; without it this is
+  // prose that happens to contain a pipe.
+  if (!/^[\s|:-]+$/.test(lines[1]) || cells(lines[1]).length !== header.length) return null
+  const body = lines.slice(2).filter((l) => l.includes('|')).map(cells)
+  return body.length ? [header, ...body] : null
+}
+
+const asNumber = (cell: string) => {
+  const n = Number(String(cell).replace(/[%,\s]/g, ''))
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * A table, and a bar for each row when the table is one label and one number.
+ *
+ * A crossbreak IS the answer — a sentence about its direction is not — and in a
+ * narrow panel a row of bars is read faster than the digits beside them. No
+ * charting library: a div with a width is enough and cannot break the panel.
+ */
+function DataTable({ rows }: { rows: string[][] }) {
+  const [header, ...body] = rows
+  const numeric = header.map((_, col) =>
+    body.every((r) => r[col] !== undefined && asNumber(r[col]) !== null),
+  )
+  // Which column the bars are about. A percentage if the table has one — it is
+  // what a crossbreak is read on, and a base or an unweighted n beside it is
+  // context rather than the comparison. Otherwise the only numeric column, and
+  // if there are several with no percentage among them, no bars: guessing which
+  // of three numbers matters would draw a chart of the wrong thing.
+  const percentCol = header.findIndex((h, i) => numeric[i] && /%|pct|percent/i.test(h))
+  const chartCol =
+    percentCol >= 0 ? percentCol : numeric.filter(Boolean).length === 1 ? numeric.indexOf(true) : -1
+  const peak =
+    chartCol >= 0 ? Math.max(...body.map((r) => Math.abs(asNumber(r[chartCol]) ?? 0)), 1) : 1
+
+  return (
+    <div className="my-2 overflow-x-auto rounded-md border border-slate-200">
+      <table className="w-full text-xs">
+        <thead className="bg-slate-50 text-left text-slate-500">
+          <tr>
+            {header.map((cell, i) => (
+              <th key={i} className={`px-2 py-1.5 font-medium ${numeric[i] ? 'text-right' : ''}`}>
+                {cell}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {body.map((row, r) => (
+            <tr key={r}>
+              {row.map((cell, c) => (
+                <td key={c} className={`px-2 py-1.5 ${numeric[c] ? 'text-right tabular-nums' : ''}`}>
+                  {c === chartCol ? (
+                    <span className="flex items-center justify-end gap-1.5">
+                      <span
+                        aria-hidden
+                        className="h-1.5 rounded-sm bg-primary-400"
+                        style={{
+                          width: `${Math.round(
+                            (Math.abs(asNumber(cell) ?? 0) / peak) * 56,
+                          )}px`,
+                        }}
+                      />
+                      {cell}
+                    </span>
+                  ) : (
+                    cell
+                  )}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function Formatted({ text }: { text: string }) {
   const inline = (line: string) =>
     line.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
@@ -37,13 +121,47 @@ function Formatted({ text }: { text: string }) {
         <Fragment key={i}>{part}</Fragment>
       ),
     )
+  // Pipe-table blocks come out as a real table; everything else as before. A
+  // crosstab printed as "| Age band | Aware n |" was reaching the panel as raw
+  // pipes, which is the shape it arrives in and not one anybody can read.
+  const blocks: Array<{ table: string[][] } | { text: string[] }> = []
+  let run: string[] = []
+  const flushText = () => {
+    if (run.length) blocks.push({ text: run })
+    run = []
+  }
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].includes('|')) {
+      let end = i
+      while (end + 1 < lines.length && lines[end + 1].includes('|')) end += 1
+      const table = parseTable(lines.slice(i, end + 1))
+      if (table) {
+        flushText()
+        blocks.push({ table })
+        i = end
+        continue
+      }
+    }
+    run.push(lines[i])
+  }
+  flushText()
+
   return (
     <div className="space-y-1">
-      {text.split('\n').map((line, i) => {
-        const bullet = line.match(/^\s*[-•*]\s+(.*)/)
-        if (bullet) return <div key={i} className="pl-3 -indent-3">• {inline(bullet[1])}</div>
-        return line.trim() ? <p key={i}>{inline(line)}</p> : <div key={i} className="h-1" />
-      })}
+      {blocks.map((block, b) =>
+        'table' in block ? (
+          <DataTable key={b} rows={block.table} />
+        ) : (
+          <Fragment key={b}>
+            {block.text.map((line, i) => {
+              const bullet = line.match(/^\s*[-•*]\s+(.*)/)
+              if (bullet) return <div key={i} className="pl-3 -indent-3">• {inline(bullet[1])}</div>
+              return line.trim() ? <p key={i}>{inline(line)}</p> : <div key={i} className="h-1" />
+            })}
+          </Fragment>
+        ),
+      )}
     </div>
   )
 }
