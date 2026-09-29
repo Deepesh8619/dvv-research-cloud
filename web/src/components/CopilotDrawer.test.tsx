@@ -94,4 +94,54 @@ describe('CopilotDrawer', () => {
     expect(screen.getByText('bold').tagName).toBe('STRONG')
     expect(container).toBeTruthy()
   })
+
+  it('renders a crosstab as a table, not as raw pipes', async () => {
+    // A crossbreak IS the answer. It was arriving as "| Age band | Aware % |"
+    // in the panel — the shape it is sent in, and not one anybody can read.
+    await ask(
+      'Awareness by age:\n\n' +
+        '| Age band | Aware % |\n' +
+        '|---|---|\n' +
+        '| 18-34 | 68.6 |\n' +
+        '| 35-54 | 55.0 |\n\n' +
+        'Higher among 18-34s.',
+    )
+    const cell = await screen.findByText('18-34')
+    expect(cell.closest('table')).not.toBeNull()
+    expect(screen.getByText('Age band').tagName).toBe('TH')
+    // The prose around it survives.
+    expect(screen.getByText('Higher among 18-34s.')).toBeTruthy()
+    // And nobody sees the markup.
+    expect(screen.queryByText(/\|---\|/)).toBeNull()
+  })
+
+  it('leaves prose that merely contains a pipe alone', async () => {
+    await ask('Use the a|b convention for that variable.')
+    const line = await screen.findByText(/a\|b convention/)
+    expect(line.closest('table')).toBeNull()
+  })
+
+  it('bars the percentage column, not the base beside it', async () => {
+    // A crossbreak carries several numbers per row. The percentage is what it
+    // is read on; an n and a base are context. Charting "Base" would draw a
+    // picture of the sample rather than of the finding.
+    await ask(
+      '| Age band | Aware n | Aware % | Base |\n|---|---|---|---|\n' +
+        '| 18-34 | 48 | 68.6 | 70 |\n| 55+ | 4 | 40.0 | 10 |',
+    )
+    await screen.findByText('18-34')
+    const bars = document.querySelectorAll('span[aria-hidden]')
+    expect(bars.length).toBe(2)
+    // Widths follow 68.6 and 40.0, not 70 and 10.
+    const widths = [...bars].map((b) => parseInt((b as HTMLElement).style.width, 10))
+    expect(widths[0]).toBeGreaterThan(widths[1])
+    expect(widths[1] / widths[0]).toBeCloseTo(40.0 / 68.6, 1)
+  })
+
+  it('draws no bars when several numbers compete and none is a percentage', async () => {
+    // Guessing which of three numbers matters would chart the wrong thing.
+    await ask('| Brand | Starts | Completes | Terminates |\n|---|---|---|---|\n| Alpha | 90 | 60 | 30 |')
+    await screen.findByText('Alpha')
+    expect(document.querySelectorAll('span[aria-hidden]').length).toBe(0)
+  })
 })
