@@ -128,10 +128,14 @@ find, which is the whole argument for citations over guesses.
 - Audit log of every correction and search
 - UI label overrides with a safe fallback (the app never depends on an override
   existing)
-- Deployed on Neon Postgres + Render + Vercel
+- Deployed as one Compose stack per client (Caddy + FastAPI + Postgres),
+  hosted by us on AWS Lightsail. The Render and Vercel deployments this
+  line used to name are gone — their services stayed connected to the repo
+  after `render.yaml` was deleted, so every push failed a deploy nobody
+  wanted and emailed about it.
 
 **Test and quality gates**
-- 691 Python tests, 8 frontend tests (vitest + Testing Library)
+- 1463 Python tests, 95 frontend tests (vitest + Testing Library)
 - `ruff` clean, `tsc` clean
 - Every parser rule has a test naming the real client convention it came from
 - Routing tests assert through `evaluate()`, not the shape of the expression:
