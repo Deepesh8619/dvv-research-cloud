@@ -14,6 +14,7 @@ local model when its bundle runs one.
 """
 
 import os
+import re
 from collections.abc import Callable
 from datetime import date
 
@@ -161,6 +162,31 @@ def _providers() -> list[tuple[str, str, str | None, str]]:
     return out
 
 
+#: Sent back when the model answered without looking anything up. Phrased as an
+#: instruction rather than a scolding, because the next turn is the model's.
+_NUDGE = (
+    "You answered without calling any tool. Every fact about this platform — a "
+    "count, an incidence, a question's wording, a status — must come from a tool "
+    "call in your reply. Call the tools you need now. If nothing here can answer "
+    "the question, say that plainly instead of estimating."
+)
+_UNGROUNDED = (
+    "I could not look that up, so I am not going to guess at it. The figures I "
+    "would need come from this project's own records and the lookup did not run. "
+    "Worth retrying — if it keeps happening the model backend is not able to call "
+    "tools, which is a server setting rather than anything about your study."
+)
+#: A reply carrying a number or an id is making a claim about the data. A
+#: greeting or a "what can you do" answer carries neither, which is what keeps
+#: the check off the messages that legitimately need no lookup.
+_ASSERTS_DATA = re.compile(r"\d|\b[A-Z]{1,4}\d{1,3}[a-z]?\b")
+
+
+def _asserts_data(reply: str, today: str) -> bool:
+    """Does this answer state something only the platform's data could supply?"""
+    return bool(_ASSERTS_DATA.search((reply or "").replace(today, "")))
+
+
 def run_copilot(
     message: str,
     history: list[dict],
@@ -171,7 +197,8 @@ def run_copilot(
     timeout: int = 60,
 ) -> tuple[str, list[dict], str]:
     """Answer one message. Returns (reply, tool results, provider that answered)."""
-    prompt = SYSTEM_PROMPT.format(today=date.today().isoformat(), user=user, role=role,
+    today = date.today().isoformat()
+    prompt = SYSTEM_PROMPT.format(today=today, user=user, role=role,
                                   page=f"\n{page}" if page else "")
     failures = []
     for label, url, key_env, model in _providers():
@@ -183,6 +210,23 @@ def run_copilot(
             reply, results = _run_agent_loop(chat, label, message, "", execute, history,
                                              timeout, None, None, system_prompt=prompt,
                                              max_turns=MAX_TURNS, known_tools=TOOL_NAMES)
+            # An answer that looked nothing up and still quotes figures is the
+            # model answering from its own head. The prompt has always asked for
+            # grounding and nothing enforced it, so "the Greenbrook study has an
+            # incidence of about 62% with 340 completes" shipped to the user
+            # exactly like a real reading — the most expensive kind of wrong,
+            # because it is specific and confident and there is no tell.
+            if not results and _asserts_data(reply, today):
+                reply, results = _run_agent_loop(
+                    chat, label, message, "", execute,
+                    [*(history or []), {"role": "assistant", "content": reply},
+                     {"role": "user", "content": _NUDGE}],
+                    timeout, None, None, system_prompt=prompt,
+                    max_turns=MAX_TURNS, known_tools=TOOL_NAMES,
+                )
+                if not results and _asserts_data(reply, today):
+                    # Twice asked, twice invented. Say so rather than pass it on.
+                    return _UNGROUNDED, [], label
             return reply, results, label
         except (BackendUnavailable, ModelOutputError) as exc:
             failures.append(f"{label}: {exc}")
