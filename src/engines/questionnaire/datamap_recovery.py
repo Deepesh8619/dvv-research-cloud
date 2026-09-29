@@ -28,6 +28,7 @@ Deterministic; no model is called.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from src.core.models import DataMap, Variable
@@ -79,6 +80,42 @@ class Reconciliation:
         }
 
 
+#: A punch column of a multi-select: the stem is the question, the digits are
+#: the code. `materialize` WRITES this convention ("{qid}r{code}, Decipher
+#: multi-punch naming so questionnaire<->data linking works for free") and the
+#: linker reads it; only recovery did not.
+_PUNCH_COLUMN = re.compile(r"^(?P<stem>.+?)[rc_](?P<code>\d+)$", re.I)
+
+
+def _punch_stems(variables: list[Variable]) -> dict[str, str]:
+    """Column name -> the question it is one punch of, where there is one.
+
+    Only where a `question_ref` is absent, because an adapter that supplies one
+    knows better than a naming convention does. And only for a stem with SEVERAL
+    such columns that is not itself a column: a lone `Q5r1` is not evidence of a
+    multi, and a file holding both `Q5` and `Q5r1` is describing two different
+    things.
+
+    Without this a 22-option multi-punch came back as 22 separate yes/no
+    questions, each labelled with one of its own OPTIONS — on a real client
+    study, 483 punch columns arriving as 483 questions from 46 real ones.
+    """
+    named = {v.name for v in variables}
+    candidates: dict[str, list[str]] = {}
+    for variable in variables:
+        if getattr(variable, "question_ref", None):
+            continue
+        found = _PUNCH_COLUMN.match(variable.name)
+        if found and found.group("stem") not in named:
+            candidates.setdefault(found.group("stem"), []).append(variable.name)
+    return {
+        name: stem
+        for stem, names in candidates.items()
+        if len(names) > 1
+        for name in names
+    }
+
+
 def questions_from_datamap(datamap: DataMap) -> list[DatamapQuestion]:
     """Group answerable columns into the questions they belong to.
 
@@ -86,16 +123,23 @@ def questions_from_datamap(datamap: DataMap) -> list[DatamapQuestion]:
     one question per column. Hidden variables, MaxDiff machinery, system fields
     and open-end companions are excluded — they were never asked.
     """
-    grouped: dict[str, list[Variable]] = {}
-    for variable in datamap.variables:
-        role = classify_variable(
-            variable.name,
-            variable.label or "",
-            getattr(variable, "question_ref", None),
+    answerable = [
+        variable
+        for variable in datamap.variables
+        if classify_variable(
+            variable.name, variable.label or "", getattr(variable, "question_ref", None)
         )
-        if role not in _ANSWERABLE:
-            continue
-        key = getattr(variable, "question_ref", None) or variable.name
+        in _ANSWERABLE
+    ]
+    stems = _punch_stems(answerable)
+
+    grouped: dict[str, list[Variable]] = {}
+    for variable in answerable:
+        key = (
+            getattr(variable, "question_ref", None)
+            or stems.get(variable.name)
+            or variable.name
+        )
         grouped.setdefault(key, []).append(variable)
 
     out: list[DatamapQuestion] = []
@@ -107,7 +151,10 @@ def questions_from_datamap(datamap: DataMap) -> list[DatamapQuestion]:
             text = getattr(variable, "question_text", None) or ""
             if text:
                 break
-        if not text:
+        if not text and len(variables) == 1:
+            # One column: its own label IS the question. Several columns: each
+            # label is an OPTION, and using the first would call the question
+            # "Bubble" because that is the first brand in the list.
             text = variables[0].label or ""
         out.append(DatamapQuestion(qid=qid, text=text, variables=list(variables)))
     return sorted(out, key=lambda q: q.qid)
