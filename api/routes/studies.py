@@ -1030,6 +1030,8 @@ def crosscheck_study(
     )
     from src.core.models import DataMap
     from src.core.survey_definition import SurveyDefinition
+    from src.engines.qc.base_gaps import find_audiences
+    from src.engines.qc.base_gaps import summarise as summarise_base_gaps
     from src.engines.qc.condition_audit import audit_conditions
     from src.engines.qc.discrepancy import check_against_questionnaire
     from src.engines.qc.variable_roles import ROLE_LABELS, summarize, unexplained
@@ -1143,6 +1145,9 @@ def crosscheck_study(
     # every "[IF S2 = 2]" in a document was read, compiled, and then never
     # compared to anybody.
     routing = cross_validate_routing(survey, link_report.links, parquet_path)
+    base_gap_summary = summarise_base_gaps(
+        find_audiences(survey, link_report.links, parquet_path)
+    )
 
     matched = {name for link in link_report.links for name in link.variable_names}
     by_qid = {q.qid: q for q in survey.questions}
@@ -1160,6 +1165,14 @@ def crosscheck_study(
         "unmatched_questions": link_report.unmatched_questions,
         "unmatched_variables": unexplained(datamap, matched),
         "conditions": condition_audit.to_dict(),
+        # Bases the DATA proves exist and the questionnaire never stated. The
+        # cross-check can only verify the logic extraction found, and on a real
+        # 79-question study that was six conditions — while the file showed
+        # eleven distinct answer populations. Reported per POPULATION rather
+        # than per question: thirty "this looks gated" lines is a wall a
+        # reviewer scrolls past, and "345 respondents answered B1 to B6 and
+        # nobody else did" is something somebody can act on.
+        "base_gaps": base_gap_summary,
         "routing": {
             "n_checked": sum(1 for r in routing if r.checked),
             "n_unchecked": sum(1 for r in routing if not r.checked),
