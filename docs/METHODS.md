@@ -21,9 +21,11 @@ has not seen the code and does not already know the jargon.
 | 9 | [Charts](#9-charts) | Why the model never touches pixels |
 | 10 | [Quality control](#10-quality-control) | Speeders, straightliners, data vs questionnaire |
 | 11 | [How the system learns](#11-how-the-system-learns) | The correction loop, recovery, re-extraction |
-| 12 | [Engineering techniques](#12-engineering-techniques) | Migrations, caching, licensing |
-| 13 | [What it deliberately does not do](#13-what-the-system-deliberately-does-not-do) | Decisions, not omissions |
-| 14 | [The measurement discipline](#14-the-measurement-discipline) | How claims here were checked |
+| 12 | [Machine learning and deep learning](#12-machine-learning-and-deep-learning) | Transformers, embeddings, hashing, clustering, local search — and what is *not* trained |
+| 13 | [Python techniques](#13-python-techniques) | Dataclasses, generators, processes, regex, validation, testing |
+| 14 | [Engineering techniques](#14-engineering-techniques) | Migrations, caching, licensing |
+| 15 | [What it deliberately does not do](#15-what-the-system-deliberately-does-not-do) | Decisions, not omissions |
+| 16 | [The measurement discipline](#16-the-measurement-discipline) | How claims here were checked |
 
 ---
 
@@ -864,7 +866,390 @@ to run on a study somebody has spent hours reviewing.
 
 ---
 
-## 12. Engineering techniques
+## 12. Machine learning and deep learning
+
+This section exists because "AI-powered" is usually left vague. Here is exactly
+which machine learning is used, which is not, and why.
+
+### 12.0 The honest headline: nothing here is trained
+
+There is no `scikit-learn`, no PyTorch, no TensorFlow, no `.fit()` anywhere in
+this codebase. The system **trains no model and fine-tunes no model**. It uses
+pre-trained models for *inference* — you hand them text, they hand back text or
+numbers — and everything else is deterministic code.
+
+**Why not train?** Three reasons, and they are the same reasons as everywhere
+else in this document:
+
+1. **You cannot audit a weight.** When a client asks why Q7 was read as a
+   multi-select, "the document says *Select all that apply* at line 412" is an
+   answer. "A model trained on 8,000 questionnaires assigned it probability
+   0.87" is not, and in research the provenance of a number is the product.
+2. **Training needs labelled data that does not exist.** Three real client
+   questionnaires is a measurement set, not a training set. A model fitted to
+   three documents would learn those three documents.
+3. **A client bundle ships to the client's own machine.** A trained artefact is
+   a thing to version, retrain, and explain the drift of — permanently, per
+   client.
+
+What the system does instead is **encode domain knowledge as rules**, learn
+through the correction loop (§11.1), and use general-purpose pre-trained models
+for the residue.
+
+### 12.1 Transformer language models
+
+**What a transformer is.** A neural network architecture that reads a sequence
+of *tokens* (word fragments) and predicts the next one. Its central mechanism is
+**attention**: when processing any token, the model computes how much every
+other token in the context should influence it. That is what lets it connect
+"it" in one sentence to a noun three sentences earlier — and, here, connect
+`[ASK IF S2=1]` to the question it governs.
+
+**Which ones:** Qwen 3 32B (32 billion parameters) as the main model, Llama 3.2
+3B locally. "32B" is the parameter count — roughly, the number of learned
+numbers inside it. Bigger generally means better reasoning and more cost.
+
+**How they are used here — inference only, three ways:**
+
+1. **Structured extraction.** Given a question's text and a JSON schema, return
+   the fields. Not "tell me about this question" — a schema the reply is parsed
+   against, where a reply that does not fit is a failure rather than a partial
+   success.
+2. **Tool calling (also: function calling).** The model is given machine-readable
+   descriptions of functions it may call, and it replies with a *structured call*
+   — `{"name": "study_overview", "arguments": {"study_id": "..."}}` — rather than
+   prose. The system executes it and feeds the result back. This is how the
+   copilot reaches real data.
+3. **Verbatim coding.** Proposing a codeframe, then classifying open ends
+   against it.
+
+**Tokens and why they matter commercially.** Models charge by token, and a token
+is about ¾ of a word. The whole deterministic-first design is visible in token
+counts: reading the structured parts of one 74-question document first took the
+model call from 451,400 tokens to 14,264 — about a 97% reduction.
+
+**Context window.** The maximum tokens a model can consider at once. This is why
+extraction works on *chunks*: a 90-question document in one prompt would be both
+expensive and worse, because attention is diluted across irrelevant text.
+
+**Temperature and non-determinism.** Models sample from a probability
+distribution, so the same prompt can give different answers. This is exactly why
+`extraction_method` is recorded per question, and why the regression measurement
+excludes LLM-touched rows — they flip run to run on identical code.
+
+### 12.2 Embedding models and vector search
+
+**What an embedding is.** A function that turns a piece of text into a fixed-
+length list of numbers — a *vector* — positioned so that texts meaning similar
+things sit near each other in that space. "What put you off?" and "reasons for
+not buying" land close together despite sharing no words.
+
+This is the key difference from keyword search. Keyword search matches
+characters; embedding search matches *meaning*. For verbatims — where every
+respondent phrases the same thought differently — that is the whole game.
+
+**The model:** `nomic-embed-text`, an Apache-2.0 open-weight encoder, run
+locally through Ollama. Local **by design**: the text being embedded is client
+question wordings and respondent verbatims, and that should not leave the
+client's machine.
+
+**Task prefixes.** This model is *trained* with `search_document:` and
+`search_query:` prefixes. Using them is not decoration — it is how the model
+distinguishes "this is a thing to be found" from "this is somebody looking".
+Omitting them measurably degrades retrieval, because the model was taught to
+expect them.
+
+**Cosine similarity.** To compare two vectors, take the cosine of the angle
+between them: 1.0 is identical direction, 0.0 unrelated. Direction rather than
+distance, because a longer text produces a longer vector and length is not
+meaning.
+
+Vectors are **L2-normalised** on storage — divided by their own length — which
+makes the cosine a plain dot product, so comparison is a multiply-and-add.
+
+**Brute-force search.** Every stored vector is compared against the query. With
+a few thousand chunks per study this is milliseconds and has no moving parts —
+no index to build, no index to go stale. Marked in the code with its upgrade
+path: move to pgvector if a study ever gets large enough to need one.
+
+### 12.3 Feature hashing — the no-model fallback
+
+When Ollama is unreachable, embeddings are still produced, with **no model at
+all**. The technique is the **hashing trick** (feature hashing), and it is worth
+understanding because it is a genuinely clever classical method:
+
+1. Take every word in the text, and every character *trigram* (three-letter
+   run) inside those words.
+2. Hash each one with blake2b into a fixed number of buckets.
+3. Count what lands in each bucket — words weighted 1.0, trigrams 0.5.
+4. Take the square root of each count, then L2-normalise.
+
+**Why hashing instead of a vocabulary?** A normal bag-of-words model needs a
+dictionary mapping every known word to a position, which must be built, stored
+and kept in sync. Hashing needs none: the hash *is* the position. Collisions
+happen and are tolerable, because a collision adds a little noise rather than
+losing a word.
+
+**Why character trigrams?** They survive typos and inflection. "moisturiser",
+"moisturizer" and "moisturising" share most of their trigrams while being three
+different words to an exact matcher. This is what makes the fallback tolerant of
+how respondents actually type.
+
+**Why the square root?** Sublinear scaling — the same damping idea behind TF-IDF.
+A word appearing ten times is more relevant than one appearing once, but not ten
+times more relevant, and without damping one repeated word dominates the vector.
+
+It is worse than a real embedding model. It also works offline, costs nothing,
+and means nothing silently stops being searchable.
+
+### 12.4 Fuzzy string matching
+
+When a question's id does not appear in the data file, the linker falls back to
+matching on *text*: the question's wording against the variable's label.
+
+**Levenshtein distance** — the minimum number of single-character insertions,
+deletions or substitutions to turn one string into another. "colour" to "color"
+is 1.
+
+**`token_sort_ratio`** (from `rapidfuzz`) — the specific scorer used. It splits
+both strings into words, sorts them alphabetically, rejoins and *then* compares.
+This makes it insensitive to word order, so "age of respondent" and "respondent
+age" score as near-identical. Scored 0–100, with an acceptance threshold.
+
+**Why `rapidfuzz` and not `fuzzywuzzy`:** it is a C++ implementation with no
+compiled Python dependency chain, which matters for a bundle that must install
+cleanly on a client's machine.
+
+**And the honest part:** every fuzzy link is surfaced for a human to confirm
+rather than quietly accepted. A wrong link silently checks the wrong column.
+
+### 12.5 Clustering — reading a PDF's columns
+
+PDF text has coordinates, not structure. To detect a two-column page, the left
+x-positions of text blocks are clustered.
+
+The algorithm is **sequential leader clustering** (single-pass greedy
+agglomerative): walk the sorted x-positions; put each into the first existing
+cluster whose mean it is within a threshold of, otherwise start a new one. The
+threshold is 15% of page width, so incidental indentation does not read as a
+second column.
+
+**Why not k-means?** k-means needs you to say *k* — how many clusters — in
+advance, and the number of columns is exactly what is unknown. A threshold-based
+method discovers the count from the data.
+
+### 12.6 Combinatorial optimisation — the MaxDiff design
+
+Building a balanced incomplete block design is a search problem: of all the ways
+to deal 20 items into 12 screens of 4, find one where pair co-occurrence is as
+even as possible.
+
+**The approach is local search (hill climbing):**
+
+1. **Construct** a starting design that is already frequency-balanced, by
+   dealing items round-robin so no item is used twice before all are used once.
+2. **Repair** any screen that got the same item twice, by trading within the
+   same version so no count changes.
+3. **Improve** by repeatedly proposing a random swap of two items between two
+   screens, keeping it if it lowers the cost, undoing it if not.
+
+**The cost function** is the sum of squared deviations of pair co-occurrence
+counts from perfectly even. Squared, so one badly-served pair matters more than
+several slightly-off ones.
+
+**Delta evaluation** is what makes it fast enough. Rescoring the whole design per
+candidate swap would be thousands of operations; instead only the pairs touching
+the two moved items change, so each swap is scored by computing the *difference*
+— about six pair updates. That is the difference between a few hundred attempts
+and enough of them to matter.
+
+**Determinism** comes from a seeded random number generator. Same parameters and
+seed, same design, every time — because a design that differed between the
+preflight check and the live link would make the check meaningless.
+
+### 12.7 Greedy balancing — least-fill assignment
+
+Used for rotation arms and MaxDiff versions: each new respondent takes whichever
+arm currently has fewest people.
+
+This is a **greedy online algorithm** — it decides with no knowledge of the
+future and never revisits. For balancing it is also optimal: the maximum
+difference between any two arms never exceeds one. A random draw, by contrast,
+is balanced only *in expectation*, and a fair coin on 500 respondents lands
+54/46 often enough to bias the comparison the rotation exists to protect.
+
+### 12.8 Set identity by checksum
+
+The base-gap detector needs to know whether two questions were answered by the
+*same* people, not merely the same number of people.
+
+Holding the respondent sets and intersecting them would be correct and slow.
+Instead each question's answering set is reduced to a pair — `(count, sum of row
+numbers)` — and sets with the same pair are treated as equal.
+
+This is a **fingerprint**: a cheap value that is equal when the inputs are equal.
+Different sets can collide in principle; in practice two different sets of 403
+respondents having the same row-number sum is vanishingly unlikely, and the
+consequence of a collision is two audiences reported as one — a merged finding,
+not a wrong one.
+
+---
+
+## 13. Python techniques
+
+The language features and library patterns the codebase leans on, and why each
+was chosen.
+
+### Data modelling
+
+**`@dataclass`** (48 modules). A decorator that generates `__init__`,
+`__repr__` and `__eq__` from type-annotated fields. Used instead of plain
+dictionaries so that a typo is an `AttributeError` at the line that made it,
+rather than a `None` discovered three layers later.
+
+**`@dataclass(frozen=True)`** (12 places). Immutable — assigning to a field
+raises. Used for things that must not change after construction: a generated
+MaxDiff design, a statistical guardrail. If a value is a *fact* rather than a
+*state*, freezing it means no later code can quietly edit it.
+
+**`StrEnum`** (12 places). An enum whose members *are* strings, so
+`QuestionType.MULTI == "multi"` is true and it serialises to JSON with no
+conversion. You get a closed set of valid values and a readable wire format at
+once — a typo'd `"mutli"` fails at the enum, not in the database.
+
+**`frozenset`** for constant sets. Immutable and hashable, so a module-level set
+of valid values cannot be mutated by accident from somewhere else.
+
+### Typing
+
+**`from __future__ import annotations`** — in nearly every module. Makes Python
+treat annotations as strings rather than evaluating them at import. Two
+benefits: forward references work (a class can reference itself), and circular
+imports between modules that only need each other's *types* stop being a
+problem.
+
+**`X | None`** rather than `Optional[X]` — the modern syntax, and it reads as
+what it is: this is an X or it is nothing.
+
+### Performance and laziness
+
+**Generators (`yield`)** (10 places). A function that produces values one at a
+time instead of building a list. Used for walking document blocks and for
+recursively finding radio groups inside nested panels: memory stays flat
+regardless of document size, and a caller that stops early does not pay for the
+rest.
+
+**`functools.lru_cache`**. Memoisation — remembers results by argument so a
+repeated call is free. Used on MaxDiff design generation, where building is
+deterministic but takes half a second, and every respondent entering the survey
+would otherwise rebuild the same design.
+
+**Walrus operator (`:=`)** (11 places). Assign inside an expression:
+
+```python
+if (match := pattern.search(text)):
+    use(match.group(1))
+```
+
+Avoids either calling `search` twice or declaring a variable one line early.
+Used in comprehension filters where the matched value is both the test and the
+result.
+
+### Concurrency and isolation
+
+**`ProcessPoolExecutor` with the `spawn` start method.** Heavy work runs in
+separate *processes*, not threads, because Python's Global Interpreter Lock means
+threads do not run CPU-bound work in parallel.
+
+`spawn` rather than `fork` specifically: `fork` duplicates the process including
+its threads and open database connections, and a forked child holding a copy of a
+lock that was held at fork time deadlocks. `spawn` starts a clean interpreter.
+
+**`threading.Thread(daemon=True)`** for background extraction. Here the work is
+I/O-bound — waiting on a model API — so the GIL is not the constraint; the thread
+is released while waiting. `daemon=True` means it does not keep the process alive
+at shutdown. The thread uses its **own database session**, because the request's
+session is closed by the time it runs.
+
+### Regular expressions
+
+Used far more than in typical application code, because scripter conventions
+*are* patterns. The specific features that earn their place:
+
+**`re.VERBOSE`** — allows whitespace and comments inside a pattern, so a complex
+one can be read:
+
+```python
+_SUFFIX_RE = re.compile(r"""
+    (?:                    # a sub-variable suffix is EITHER
+        [RC_]\d+           #   separator then digits  (Q5r1, Q5_1)
+      | (?<=\d)[A-Z]       #   OR one letter right after a digit (Q5a)
+    )$
+""", re.VERBOSE)
+```
+
+**Named groups** `(?P<stem>...)` — `match.group("stem")` instead of
+`match.group(1)`, so inserting a group does not silently renumber the rest.
+
+**Lookahead `(?=...)` and lookbehind `(?<!...)`** — assert context without
+consuming it. `(?<!ZIP )\b(RE)?CODE\b` matches "CODE" except after "ZIP",
+which keeps "ZIP CODE" out of the derived-variable detector.
+
+**Non-greedy `+?`** — match as little as possible. In `^(?P<stem>.+?)[rc_](\d+)$`
+it makes the stem stop at the *last* separator, so `Q2ar1` splits into `Q2a` and
+`1`, not `Q` and `ar1`.
+
+### Validation at the boundary
+
+**Pydantic** models every request and response. Validation happens once, at the
+HTTP edge, so code inside the system can assume its inputs are the shape they
+claim. A malformed request is rejected with a readable error rather than causing
+a `KeyError` somewhere deep.
+
+**FastAPI dependency injection** (`Depends`). A route declares what it needs — a
+database session, the current user, a required role — and the framework supplies
+it. Authorisation is then a *type signature*:
+
+```python
+user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST))
+```
+
+A route that forgets to check permissions is visibly different from one that
+does, which is much harder to get wrong than remembering an `if` at the top.
+
+### Persistence
+
+**SQLAlchemy ORM** for tables, with one deliberate exception: the
+`SurveyDefinition` is stored as a JSON **string in a TEXT column**, not as
+SQLAlchemy's JSON type. The dataclass already owns its own serialisation
+contract, and TEXT behaves identically on SQLite (tests) and Postgres
+(production), while the JSON type double-parses and differs subtly between them.
+
+**Defensive `ALTER TABLE`** at startup instead of a migration tool. A client
+bundle must survive an upgrade with nobody present who knows what a migration
+is.
+
+### Testing
+
+**pytest fixtures** — reusable setup declared as a function and requested by
+name as a parameter. A test that needs a database says so in its signature.
+
+**`monkeypatch`** — temporarily replaces an attribute for one test and restores
+it afterwards. Used to point the code at a temp directory or to stand in for a
+model API. The restoration matters: one test in this session wrote real files
+into the repo and every later test then saw them.
+
+**`unittest.mock.patch`** as a context manager — same idea, scoped to a block,
+used where a fake needs to be built inline.
+
+**Testing at the boundary, not the implementation.** Routing tests assert
+through `evaluate()` — does this condition actually fire for this respondent? —
+rather than checking the shape of the expression tree. A screen-out that does not
+fire is not a screen-out, however correct it looks.
+
+---
+
+## 14. Engineering techniques
 
 | Technique | What and why |
 |---|---|
@@ -877,7 +1262,7 @@ to run on a study somebody has spent hours reviewing.
 
 ---
 
-## 13. What the system deliberately does not do
+## 15. What the system deliberately does not do
 
 This list is as important as the rest, and every item is a decision rather than
 an omission.
@@ -902,7 +1287,7 @@ against real documents, and deleted.
 
 ---
 
-## 14. The measurement discipline
+## 16. The measurement discipline
 
 Three real client questionnaires and their three real data files are the
 measurement set for every parser change. A unit test proves a rule; these prove
