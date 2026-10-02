@@ -11,6 +11,13 @@ data. **What it is not:** a finished Decipher replacement. See
 
 ---
 
+## How it works
+
+[**docs/METHODS.md**](docs/METHODS.md) explains every technique, model and
+method in the system — from how a Word document is read to how a significance
+letter is computed — assuming no prior knowledge of market research or of this
+codebase. Start there to understand *why* the system is built the way it is.
+
 ## The path a study takes
 
 ```
