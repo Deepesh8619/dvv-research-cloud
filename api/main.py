@@ -124,7 +124,35 @@ async def health():
             else None
         ),
         "llm_keys": llm_key_presence(),
+        # WHICH model, not just whether a key exists. A provider deprecating a
+        # model is an email naming model ids, and the only way to answer "is
+        # that one of mine?" was to read the source of the version that happens
+        # to be deployed. Both are overridable by environment variable, so the
+        # answer is not knowable from the code alone.
+        "llm_models": _configured_models(),
     }
+
+
+def _configured_models() -> dict[str, str]:
+    """The model id each configured backend would actually call."""
+    import os
+
+    from src.ai.router import (
+        CEREBRAS_DEFAULT_MODEL,
+        GROQ_DEFAULT_MODEL,
+        bedrock_model,
+    )
+
+    models: dict[str, str] = {}
+    if os.environ.get("BEDROCK_API_KEY", "").strip():
+        models["bedrock"] = bedrock_model()
+    if os.environ.get("GROQ_API_KEY", "").strip():
+        models["groq"] = os.environ.get("COPILOT_GROQ_MODEL", GROQ_DEFAULT_MODEL)
+    if os.environ.get("CEREBRAS_API_KEY", "").strip():
+        models["cerebras"] = os.environ.get("CEREBRAS_MODEL", CEREBRAS_DEFAULT_MODEL)
+    models["local"] = os.environ.get("OLLAMA_EXTRACT_MODEL", "llama3.2:3b")
+    models["embeddings"] = os.environ.get("DVV_EMBED_MODEL", "nomic-embed-text")
+    return models
 
 
 # Import routes
