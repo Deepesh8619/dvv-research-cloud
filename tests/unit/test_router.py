@@ -64,26 +64,28 @@ def _tool_call_body(arguments: str) -> dict:
 # --- _extraction_chain: Ollama-first fallback ordering ----------------------
 
 
-def test_chain_is_ollama_first_then_configured_cloud(monkeypatch):
+def test_a_configured_cloud_excludes_the_local_model(monkeypatch):
+    """One brain per environment: a laptop with Ollama running must extract
+    with the same model the server does, not with llama3.2:3b."""
+    monkeypatch.delenv("DVV_EXTRACT_LOCAL", raising=False)
     monkeypatch.setenv("GROQ_API_KEY", "gk")
     monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
     monkeypatch.delenv("HF_TOKEN", raising=False)
     order = list(dict.fromkeys(c["backend"] for c in _extraction_chain()))
-    assert order == ["ollama", "groq", "cerebras"]
+    assert order == ["groq", "cerebras"]
 
 
-def test_chain_omits_cloud_backends_without_keys(monkeypatch):
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
-    monkeypatch.delenv("HF_TOKEN", raising=False)
-    # Ollama is always attempted (may be reachable locally; fails fast if not).
+def test_an_offline_install_extracts_locally(monkeypatch):
+    for var in ("BEDROCK_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "HF_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
     assert [c["backend"] for c in _extraction_chain()] == ["ollama"]
 
 
-def test_chain_includes_only_configured_cloud(monkeypatch):
+def test_the_local_model_leads_only_when_opted_in(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
+    monkeypatch.setenv("DVV_EXTRACT_LOCAL", "1")
     assert [c["backend"] for c in _extraction_chain()] == ["ollama", "cerebras"]
 
 
@@ -92,6 +94,7 @@ def test_chain_includes_only_configured_cloud(monkeypatch):
 
 def test_run_task_auto_falls_through_ollama_to_cerebras(monkeypatch):
     """Ollama unreachable -> chain escalates to the configured Cerebras backend."""
+    monkeypatch.setenv("DVV_EXTRACT_LOCAL", "1")
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
@@ -111,7 +114,8 @@ def test_run_task_auto_falls_through_ollama_to_cerebras(monkeypatch):
 
 
 def test_run_task_auto_prefers_ollama_when_it_answers(monkeypatch):
-    """A healthy local Ollama serves the request without touching the cloud."""
+    """Opted in, a healthy local Ollama serves the request without touching the cloud."""
+    monkeypatch.setenv("DVV_EXTRACT_LOCAL", "1")
     monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
 
     def fake_http_json(request, timeout):
@@ -425,6 +429,7 @@ def _timeouts_seen(monkeypatch, cloud_key: bool) -> dict[str, int]:
     """Run one extraction and record the timeout each backend was given."""
     for var in ("GROQ_API_KEY", "HF_TOKEN"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("DVV_EXTRACT_LOCAL", "1")
     if cloud_key:
         monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
     else:
@@ -501,7 +506,7 @@ def test_bedrock_leads_the_cloud_providers_when_its_key_is_set(monkeypatch):
     monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
     order = list(dict.fromkeys(c["backend"] for c in _extraction_chain()))
-    assert order == ["ollama", "bedrock", "groq"]
+    assert order == ["bedrock", "groq"]
 
 
 def test_bedrock_is_called_in_the_configured_region_with_its_key(monkeypatch):

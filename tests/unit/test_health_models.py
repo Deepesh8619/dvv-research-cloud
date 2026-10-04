@@ -37,3 +37,10 @@ def test_the_local_and_embedding_models_are_always_reported(monkeypatch):
     models = main._configured_models()
     assert models["local"] == "llama3.2:3b"
     assert models["embeddings"] == "nomic-embed-text"
+
+
+def test_the_extracting_model_is_reported(monkeypatch):
+    """Local and server must name the same brain, or their extractions differ."""
+    monkeypatch.delenv("DVV_EXTRACT_LOCAL", raising=False)
+    monkeypatch.setenv("BEDROCK_API_KEY", "k")
+    assert main._configured_models()["extraction"] == "bedrock/qwen.qwen3-32b-v1:0"

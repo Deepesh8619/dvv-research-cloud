@@ -65,7 +65,7 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.fielding.materialize import plan_datamap
-from src.engines.questionnaire.extraction_diagnosis import diagnose
+from src.engines.questionnaire.extraction_diagnosis import completeness_problems, diagnose
 from src.engines.questionnaire.extractor import extract_survey_definition, reread_question
 from src.engines.rag.store import ensure_index
 from src.intake.questionnaire_loader import (
@@ -240,6 +240,11 @@ def _save_definition(db: Session, questionnaire, survey: SurveyDefinition) -> No
 # --- Serialization helpers --------------------------------------------------
 
 
+def _completeness(survey: SurveyDefinition) -> list[str]:
+    """Document-level reasons this definition is not the whole questionnaire."""
+    return completeness_problems(survey.questions, survey.metadata.get("document_markers"))
+
+
 def _status_response(
     questionnaire,
     survey: SurveyDefinition | None,
@@ -273,7 +278,11 @@ def _status_response(
         source=survey.source if survey else None,
         # Read fresh, not from the snapshot taken at extraction: a definition
         # stored before that snapshot moved still reports what is true NOW.
-        validation_errors=survey.validate() if survey else metadata.get("validation_errors", []),
+        validation_errors=(
+            _completeness(survey) + survey.validate()
+            if survey
+            else metadata.get("validation_errors", [])
+        ),
         extraction_summary=metadata.get("extraction_summary", {}),
         # Only meaningful when status == 'error'; None otherwise. Names the root
         # cause (missing key, circuit-breaker abort) instead of a bare 'error'.
@@ -1288,6 +1297,12 @@ def approve_all(
             reasons.append(f"unresolved flags: {', '.join(blocking)}")
         if reasons:
             unresolved.append({"qid": q.qid, "reasons": reasons})
+
+    # Every per-question check above passes on a document that lost seventy of
+    # its eighty questions before review — the one that remains is fine.
+    incomplete = _completeness(survey)
+    if incomplete:
+        unresolved.insert(0, {"qid": "Document", "reasons": incomplete})
 
     if unresolved:
         raise HTTPException(

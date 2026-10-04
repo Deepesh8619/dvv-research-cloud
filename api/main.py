@@ -140,6 +140,7 @@ def _configured_models() -> dict[str, str]:
     from src.ai.router import (
         CEREBRAS_DEFAULT_MODEL,
         GROQ_DEFAULT_MODEL,
+        _extraction_chain,
         bedrock_model,
     )
 
@@ -152,6 +153,10 @@ def _configured_models() -> dict[str, str]:
         models["cerebras"] = os.environ.get("CEREBRAS_MODEL", CEREBRAS_DEFAULT_MODEL)
     models["local"] = os.environ.get("OLLAMA_EXTRACT_MODEL", "llama3.2:3b")
     models["embeddings"] = os.environ.get("DVV_EMBED_MODEL", "nomic-embed-text")
+    # The model that reads questionnaires here. Two environments that disagree
+    # on this extract the same document differently.
+    lead = _extraction_chain()[0]
+    models["extraction"] = f"{lead['backend']}/{lead['model']}"
     return models
 
 

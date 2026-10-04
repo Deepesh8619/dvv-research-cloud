@@ -45,6 +45,63 @@ def naming_convention(blocks) -> str:
     return "nothing recognisable — no numbering, no base tags, no spec tables"
 
 
+# How far short of the document's own question markers a definition may fall
+# before approval is refused. Not zero: a grid's lettered parts (Q2a., Q2b.)
+# are separate labels that legitimately become one question.
+_SHORTFALL_TOLERANCE = 0.25
+
+
+def document_markers(blocks) -> dict:
+    """Question markers counted straight off the document, before segmentation.
+
+    Independent of the segmenter's decisions on purpose. The failure this guards
+    is the segmenter producing ONE chunk from an eighty-question document — and
+    every check downstream of the segmenter then reads that one chunk, finds it
+    well-formed, and reports nothing missing. Counting labels in the raw blocks
+    is a second opinion the segmenter cannot talk itself out of.
+    """
+    labels: set[str] = set()
+    base_tags = 0
+    for b in blocks:
+        m = _QID_RE.match(b.text)
+        if m:
+            labels.add("".join(m.groups()).upper())
+        table = _table_qid(b)
+        if table:
+            labels.add(table.upper())
+        if _BASE_TAG_RE.match(b.text):
+            base_tags += 1
+    return {
+        # An unnumbered document marks questions only by base tags.
+        "expected_questions": len(labels) or base_tags,
+        "document_chars": sum(len(b.text) for b in blocks),
+    }
+
+
+def completeness_problems(questions: list[Question], markers: dict | None) -> list[str]:
+    """Why this definition cannot be the whole document, or [] when it can be."""
+    if not markers:
+        return []  # extracted before markers were recorded; diagnosis still works
+    problems: list[str] = []
+    chars = markers.get("document_chars") or 0
+    if chars:
+        engulfed = [
+            q.qid for q in questions if len(q.source_text or "") / chars >= _ENGULFED_SHARE
+        ]
+        if engulfed:
+            problems.append(
+                f"{', '.join(engulfed)} holds {int(_ENGULFED_SHARE * 100)}%+ of the "
+                "document's text — the document was never split into questions."
+            )
+    expected = markers.get("expected_questions") or 0
+    if expected and len(questions) < expected * (1 - _SHORTFALL_TOLERANCE):
+        problems.append(
+            f"The document marks {expected} questions; this definition holds "
+            f"{len(questions)}. Questions were lost before review."
+        )
+    return problems
+
+
 def _answerable(q: Question) -> bool:
     return q.type not in (QuestionType.INFO, QuestionType.OPEN_TEXT, QuestionType.NUMERIC)
 
