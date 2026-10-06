@@ -409,6 +409,20 @@ export interface QuestionnaireStatus {
     confidence: number
     signals?: Record<string, unknown>
   } | null
+  // The study's instructions as read before any question (study_understanding).
+  study_understanding?: StudyUnderstanding | null
+}
+
+export interface StudyUnderstanding {
+  summary?: string
+  audience?: string
+  groups?: { name: string; definition?: string; target?: string; measured_by?: string[]; evidence: string }[]
+  rules?: { instruction: string; meaning: string; applies_to?: string[]; evidence: string }[]
+  hidden_variables?: { name: string; meaning: string; built_from?: string[]; evidence: string }[]
+  concerns?: { issue: string; evidence: string }[]
+  claims_dropped_unsupported?: number
+  model?: string
+  unavailable?: string
 }
 
 export interface QuestionsListResponse {

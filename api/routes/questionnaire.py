@@ -280,6 +280,7 @@ def _status_response(
         error_detail=questionnaire.error_detail if questionnaire.status == "error" else None,
         theme=metadata.get("theme"),
         profile=metadata.get("profile"),
+        study_understanding=metadata.get("study_understanding"),
     )
 
 

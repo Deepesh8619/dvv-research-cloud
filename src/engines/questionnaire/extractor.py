@@ -78,6 +78,11 @@ from src.engines.questionnaire.section_paths import (
 )
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
 from src.engines.questionnaire.study_overview import parse_overview
+from src.engines.questionnaire.study_understanding import (
+    context_for,
+    governing_rules,
+    understand_study,
+)
 from src.engines.questionnaire.swallowed_options import repair_swallowed_options
 from src.engines.questionnaire.table_questions import labelled_sections, question_from_tables
 from src.engines.questionnaire.trade_off import apply as flag_trade_offs
@@ -537,6 +542,7 @@ def _extract_via_spec_table(
     fields: SpecTableFields,
     datamap_question: DatamapQuestion | None = None,
     patterns: list[LearnedPattern] | None = None,
+    study_context: str | None = None,
 ) -> ExtractionResult | None:
     """Deterministic parse, plus ONE small call for whatever it could not state.
 
@@ -576,6 +582,7 @@ def _extract_via_spec_table(
         options=[(o.code, o.label) for o in fields.options],
         base=fields.base,
         notes=fields.notes,
+        study_context=study_context,
     )
     try:
         response = run_task(
@@ -866,6 +873,7 @@ def _extract_via_prose(
     fields: ProseFields,
     datamap_question: DatamapQuestion | None = None,
     patterns: list[LearnedPattern] | None = None,
+    study_context: str | None = None,
 ) -> ExtractionResult | None:
     """Prose directives, plus one small call for what they do not state.
 
@@ -900,6 +908,7 @@ def _extract_via_prose(
         text=fields.text,
         options=[(o.code, o.label) for o in fields.options],
         notes=fields.terminate_verbatim,
+        study_context=study_context,
     )
     try:
         response = run_task(
@@ -940,6 +949,7 @@ def extract_question(
     learned_rules: list[str] | None = None,
     patterns: list[LearnedPattern] | None = None,
     datamap_question: DatamapQuestion | None = None,
+    study_context: str | None = None,
 ) -> ExtractionResult:
     """Extract one chunk into a structured Question + confidence + flags.
 
@@ -971,7 +981,9 @@ def extract_question(
     # the table is not parseable or the residue call fails.
     fields = _spec_table_fields(chunk, patterns)
     if fields is not None:
-        structured = _extract_via_spec_table(chunk, fields, datamap_question, patterns)
+        structured = _extract_via_spec_table(
+            chunk, fields, datamap_question, patterns, study_context
+        )
         if structured is not None:
             return structured
 
@@ -987,12 +999,12 @@ def extract_question(
     # full LLM extraction anyway. Measured on a 3-question document: 951s and
     # three model calls, for questions the parser answers in milliseconds.
     if prose is not None and (prose.complete or prose.options or prose.terminate_if):
-        via_prose = _extract_via_prose(chunk, prose, datamap_question, patterns)
+        via_prose = _extract_via_prose(chunk, prose, datamap_question, patterns, study_context)
         if via_prose is not None:
             return via_prose
 
     prompt = schema.build_extraction_prompt(
-        chunk.chunk_text, chunk.candidate_qid, profile_hint, learned_rules
+        chunk.chunk_text, chunk.candidate_qid, profile_hint, learned_rules, study_context
     )
     try:
         response: AIResponse = run_task(
@@ -1340,6 +1352,15 @@ def extract_survey_definition(
         if on_progress is not None:
             on_progress(0, len(chunks))
 
+    # Read the study's instructions before any question, as an analyst does:
+    # what the survey is for, its groups, and the rules that govern later
+    # questions. One model call per document; each question's own model call
+    # then receives the parts that concern it. Real documents only — unit
+    # tests that hand-build chunks pass no blocks and pay no call.
+    understanding = understand_study(chunks) if blocks is not None else None
+    if blocks is not None and on_progress is not None:
+        on_progress(0, len(chunks))
+
     # The script's own record of what was fielded, when the data arrived first.
     # Used two ways: to answer a parser's open questions without a model call,
     # and afterwards to add questions the document reader never found at all.
@@ -1365,7 +1386,10 @@ def extract_survey_definition(
             )
             continue
         known = datamap_index.get(key)
-        result = extract_question(chunk, profile_hint, learned_rules, patterns, known)
+        result = extract_question(
+            chunk, profile_hint, learned_rules, patterns, known,
+            study_context=context_for(understanding, chunk.candidate_qid),
+        )
 
         if _is_backend_unavailable_result(result):
             consecutive_backend_failures += 1
@@ -1431,7 +1455,18 @@ def extract_survey_definition(
         if tables:
             capture_carousel(result.question, tables)
 
+    # A question the brief states a rule about is never pre-approved: an analyst
+    # checks it against that rule. The rule travels with it, in the brief's words.
+    governed = governing_rules(understanding)
+    for result in results:
+        rules = governed.get((result.question.qid or "").upper())
+        if rules:
+            result.add_flag(schema.FLAG_BRIEF_RULE)
+            result.question.validation["brief_rules"] = rules
+
     survey = _assemble_survey(results, study_id, detection, reconcile_meta)
+    if understanding:
+        survey.metadata["study_understanding"] = understanding
 
     # What the document shows as taken out — struck through, or a Word tracked
     # deletion. It is not in the survey, and a reviewer has to be told: "the

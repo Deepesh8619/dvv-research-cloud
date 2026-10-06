@@ -229,6 +229,9 @@ DEFAULT_ROUTES: dict[str, dict[str, str]] = {
     # segmenter, src/engines/questionnaire/reconciler.py). Same "auto" chain as
     # extract/verify — local first, then whichever cloud key is present.
     "questionnaire.reconcile_segmentation": {"backend": "auto", "model": ""},
+    # One reading of the study's instructions before any question is read
+    # (src/engines/questionnaire/study_understanding.py).
+    "questionnaire.understand": {"backend": "auto", "model": ""},
     "report.narrative": {"backend": "auto", "model": ""},
     # study.chat routes through src/ai/navigator.py (multi-tool agent loop on
     # Groq, then Cerebras) rather than run_task — kept here so the task

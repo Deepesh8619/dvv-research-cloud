@@ -216,14 +216,20 @@ def make_executor(db: Session, user: UserDB):
         """
         definition = survey(args)
         brief = (definition.metadata or {}).get("study_overview")
-        if not brief:
+        understood = (definition.metadata or {}).get("study_understanding")
+        if not brief and not understood:
             return {
                 "has_brief": False,
                 "note": "This questionnaire has no study overview section — it opens "
                         "at the first question. Nothing is wrong with it.",
             }
+        brief = brief or {}
         return {
             "has_brief": True,
+            # What an analyst understood from the instructions before reading any
+            # question: purpose, groups, rules and the questions they govern —
+            # every item quoting the instruction line it rests on.
+            "understanding": understood,
             "markets": brief.get("markets"),
             "sample_size": brief.get("sample_size"),
             "loi_minutes": brief.get("loi_minutes"),

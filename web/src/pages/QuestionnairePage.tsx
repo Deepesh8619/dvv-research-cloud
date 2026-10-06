@@ -24,6 +24,7 @@ import SourcePane from '../components/review/SourcePane'
 import SourceTile from '../components/review/SourceTile'
 import { useRenderedSource } from '../components/review/useRenderedSource'
 import Lessons from '../components/review/Lessons'
+import StudyUnderstandingPanel from '../components/review/StudyUnderstandingPanel'
 import { useLabel } from '../labels/LabelContext'
 import { BucketBar, ConnectionsPanel, IssuesPanel, ProgressRing } from '../components/review/QuestionMap'
 import { bucketInfo } from '../lib/buckets'
@@ -751,6 +752,14 @@ export function QuestionDetail({
                 <span className="font-medium">{info.label}</span>
                 {info.blocking && <span className="ml-1 text-[10px] uppercase">(blocks approval)</span>}
                 <span className="block mt-0.5 opacity-90">{info.description}</span>
+                {f === 'BRIEF_RULE' &&
+                  (Array.isArray(q.validation?.brief_rules) ? (q.validation.brief_rules as string[]) : []).map(
+                    (rule) => (
+                      <q key={rule} className="block mt-1 italic">
+                        {rule}
+                      </q>
+                    ),
+                  )}
               </div>
             )
           })}
@@ -1533,6 +1542,7 @@ export default function QuestionnairePage() {
       {/* Ready → list + detail */}
       {status && !notFound && !['processing', 'error'].includes(status.status) && (
         <>
+          <StudyUnderstandingPanel understanding={status.study_understanding} onGoTo={goTo} />
           <IssuesPanel errors={status.validation_errors} onGoTo={goTo} />
 
           {approveAllError && (
