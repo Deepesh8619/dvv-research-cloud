@@ -72,6 +72,13 @@ export const FLAG_INFO: Record<string, FlagInfo> = {
     blocking: true,
     severity: 'error',
   },
+  BRIEF_RULE: {
+    label: 'Study instruction applies',
+    description:
+      "The study's instructions state a rule about this question (quoted below). Check the question follows it — screen-outs, who is asked, how it is coded — then approve.",
+    blocking: false,
+    severity: 'warn',
+  },
   LIST_INHERITED: {
     label: 'List copied — check',
     description:

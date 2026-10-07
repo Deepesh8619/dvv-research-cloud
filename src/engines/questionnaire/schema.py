@@ -53,6 +53,10 @@ FLAG_EXTRACTION_MODEL_ERROR = "EXTRACTION_MODEL_ERROR"
 # no route / bad output). Regex segmentation still stands, so extraction proceeds
 # on the original chunks — this flag just records that the safety net was skipped.
 FLAG_RECONCILIATION_UNAVAILABLE = "RECONCILIATION_UNAVAILABLE"
+# The study's instructions state a rule about this question (study_understanding).
+# Not blocking: it keeps the question out of auto-approval so an analyst checks
+# it against the rule, quoted in validation["brief_rules"].
+FLAG_BRIEF_RULE = "BRIEF_RULE"
 # A hidden/derived variable (qid prefixed HID_): a programmer-computed flag
 # derived from other answers, NOT a respondent-facing question. The platform has
 # no derived-variable engine, so the honest handling is detect + label (force
@@ -376,6 +380,7 @@ def build_extraction_prompt(
     candidate_qid: str | None,
     profile_hint: str | None = None,
     learned_rules: list[str] | None = None,
+    study_context: str | None = None,
 ) -> str:
     """Prompt for the single-chunk extraction pass.
 
@@ -409,10 +414,22 @@ def build_extraction_prompt(
         f"{_DIRECTIVE_GUIDANCE}\n\n"
         f"{_RULES}\n"
         f"{spec}"
+        f"{_study_block(study_context)}"
         f"{hint}"
         "----- SOURCE CHUNK -----\n"
         f"{chunk_text}\n"
         "----- END CHUNK -----\n"
+    )
+
+
+def _study_block(study_context: str | None) -> str:
+    """What the study's instructions say that bears on this question."""
+    if not study_context:
+        return ""
+    return (
+        "The study's instructions, as an analyst read them before this question "
+        "(use them to understand the question; never copy them into it):\n"
+        f"{study_context}\n\n"
     )
 
 
@@ -622,6 +639,7 @@ def build_residue_prompt(
     options: list[tuple[int, str]] | None = None,
     base: str | None = None,
     notes: str | None = None,
+    study_context: str | None = None,
 ) -> str:
     """Ask about the residue only, giving just enough context to answer it.
 
@@ -640,6 +658,8 @@ def build_residue_prompt(
         known.append(f"Base / among who: {base}")
     if notes:
         known.append(f"Scripter notes: {notes}")
+    if study_context:
+        known.append(f"From the study's instructions:\n{study_context}")
 
     asks = "\n".join(f"- {_RESIDUE_FIELDS[f][1]}" for f in wanted)
     return (

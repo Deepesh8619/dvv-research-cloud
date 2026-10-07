@@ -234,6 +234,9 @@ class QuestionnaireStatusResponse(BaseModel):
     # Set once extraction ran; None for authored/blank questionnaires. Lets the
     # review UI show which client convention was recognized.
     profile: dict | None = None
+    # The study's instructions as read before any question: summary, groups,
+    # rules (with the questions they govern), hidden variables, concerns.
+    study_understanding: dict | None = None
 
 
 class QuestionnaireSettingsRequest(BaseModel):
