@@ -101,3 +101,47 @@ def test_without_an_archived_document_it_says_so_rather_than_guessing():
     report = diagnose(_stored_as_one_question(), [], _DOCUMENT, can_reextract=False)
     assert report["can_reextract"] is False
     assert "uploaded again" in report["note"]
+
+
+# --- The completeness gate: markers counted before segmentation decides --------
+
+from src.engines.questionnaire.extraction_diagnosis import (  # noqa: E402
+    completeness_problems,
+    document_markers,
+)
+
+
+def _numbered(n: int) -> list[DocumentBlock]:
+    return [DocumentBlock("paragraph", f"Q{i}. Question number {i}?", i) for i in range(1, n + 1)]
+
+
+def test_markers_are_counted_from_the_raw_document():
+    assert document_markers(_numbered(40))["expected_questions"] == 40
+    # An unnumbered document marks its questions with base tags alone.
+    assert document_markers(_DOCUMENT)["expected_questions"] == 2
+
+
+def test_a_document_collapsed_into_one_question_cannot_pass():
+    """The Greenbrook failure: one chunk, read cleanly, nothing reported missing."""
+    problems = completeness_problems(_stored_as_one_question(), document_markers(_DOCUMENT))
+    assert any("never split" in p for p in problems)
+
+
+def test_a_large_shortfall_is_named():
+    blocks = _numbered(40)
+    kept = [Question(qid=f"Q{i}", text="t", type=QuestionType.OPEN_TEXT, source_text="x")
+            for i in range(1, 11)]
+    problems = completeness_problems(kept, document_markers(blocks))
+    assert any("marks 40 questions" in p and "holds 10" in p for p in problems)
+
+
+def test_grid_parts_merging_into_one_question_is_not_a_shortfall():
+    """Q2a. and Q2b. are two labels and legitimately one grid question."""
+    blocks = _numbered(20)
+    kept = [Question(qid=f"Q{i}", text="t", type=QuestionType.OPEN_TEXT, source_text="x")
+            for i in range(1, 17)]
+    assert completeness_problems(kept, document_markers(blocks)) == []
+
+
+def test_a_definition_extracted_before_markers_existed_is_not_blocked():
+    assert completeness_problems(_stored_as_one_question(), None) == []

@@ -1358,3 +1358,26 @@ def test_the_app_shell_is_never_cached(client):
         asset = web.get("/assets/index-abc123.js")
         assert asset.status_code == 200
         assert "no-cache" not in asset.headers.get("cache-control", "")
+
+
+def test_approve_all_refuses_a_definition_short_of_the_document(client):
+    """Every question present is approved and clean — and the document marked
+    forty. Per-question checks cannot see what never became a question."""
+    test_client, session_factory, state = client
+    state["survey"].metadata["document_markers"] = {
+        "expected_questions": 40, "document_chars": 10_000,
+    }
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+    for qid in ("Q1", "Q2"):
+        test_client.post(f"/api/studies/study_q1/questionnaire/questions/{qid}/approve")
+
+    resp = test_client.post("/api/studies/study_q1/questionnaire/approve-all")
+    assert resp.status_code == 422
+    first = resp.json()["detail"]["unresolved"][0]
+    assert first["qid"] == "Document"
+    assert "marks 40 questions" in first["reasons"][0]
+    # The reviewer sees it before ever pressing approve.
+    issues = test_client.get("/api/studies/study_q1/questionnaire").json()["validation_errors"]
+    assert "marks 40 questions" in issues[0]

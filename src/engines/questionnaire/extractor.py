@@ -58,6 +58,7 @@ from src.engines.questionnaire.datamap_recovery import (
     normalize_qid,
     recover_missing,
 )
+from src.engines.questionnaire.extraction_diagnosis import document_markers
 from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
 from src.engines.questionnaire.learned import LearnedPattern, learned_hidden_variable
 from src.engines.questionnaire.list_sources import fill_lists, points_at_a_list
@@ -1533,6 +1534,9 @@ def extract_survey_definition(
                 survey.blocks[-1].question_ids.append(question.qid)
         if recovered:
             survey.metadata["recovered_from_datamap"] = [q.qid for q in recovered]
+
+    if blocks is not None:
+        survey.metadata["document_markers"] = document_markers(blocks)
 
     # Last, after every pass that changes the survey: the list was taken before
     # lists were filled and sections applied, and the review screen showed four
