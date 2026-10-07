@@ -220,14 +220,14 @@ DEFAULT_ROUTES: dict[str, dict[str, str]] = {
     # Two-pass questionnaire extraction (src/engines/questionnaire/extractor.py).
     # Judgment-heavy, hallucination-sensitive structured extraction. Unlike the
     # sibling tasks above these are NOT hardcoded to a provider: the sentinel
-    # backend "auto" makes run_task walk the Ollama → Groq → Cerebras
-    # fallback chain (_extraction_chain()) — local first (free/private), then
-    # whichever cloud backends have a key — trying each until one succeeds.
+    # backend "auto" makes run_task walk the fallback chain
+    # (_extraction_chain()) — the configured cloud backends, or Ollama alone on
+    # an offline install — trying each until one succeeds.
     "questionnaire.extract": {"backend": "auto", "model": ""},
     "questionnaire.verify": {"backend": "auto", "model": ""},
     # Whole-document segmentation reconciliation (safety net over the regex
     # segmenter, src/engines/questionnaire/reconciler.py). Same "auto" chain as
-    # extract/verify — local first, then whichever cloud key is present.
+    # extract/verify.
     "questionnaire.reconcile_segmentation": {"backend": "auto", "model": ""},
     "report.narrative": {"backend": "auto", "model": ""},
     # study.chat routes through src/ai/navigator.py (multi-tool agent loop on
@@ -617,38 +617,51 @@ def _fallback_models_from_env() -> list[str]:
 GROQ_FALLBACK_MODELS = _fallback_models_from_env()
 
 
-def _extraction_chain() -> list[dict[str, str]]:
-    """Ordered backend fallback for judgment-heavy extraction: local first.
+def _local_extraction_opted_in() -> bool:
+    return os.environ.get("DVV_EXTRACT_LOCAL", "").strip().lower() in {"1", "true", "yes"}
 
-    The chain is **Ollama → Bedrock → Groq → Cerebras → Hugging Face**, open-weight models
-    only: the private local model first, then each cloud provider whose key is
-    set (Ollama is always attempted — it fails fast when nothing listens).
-    `run_task` walks this list, escalating on any BackendUnavailable or
-    ModelOutputError and only raising once every candidate has failed. Resolved
-    per call so tests and runtime see the current environment.
+
+def _extraction_chain() -> list[dict[str, str]]:
+    """Ordered backend fallback for judgment-heavy extraction: one brain per environment.
+
+    The cloud chain is **Bedrock → Groq → Cerebras → Hugging Face**, open-weight
+    models only, each included when its key is set. Ollama is used only when no
+    cloud key is set (an offline install — it is then the whole chain), or when
+    `DVV_EXTRACT_LOCAL=1` puts it first deliberately.
+
+    It used to lead every chain. That made the brain environment-dependent: a
+    laptop with Ollama running had `llama3.2:3b` deciding question types and
+    routing, while the server, with no Ollama, had a 32B cloud model decide — so
+    the same document produced different instruments in the two places, and a
+    local failure's five-minute cooldown could switch brains MID-document. Every
+    local trial was measuring the small model, not the parser. A 3B model is
+    not a fallback for this work; it is a different, weaker answer.
+
+    Resolved per call so tests and runtime see the current environment.
     """
     keys = llm_key_presence()
-    chain: list[dict[str, str]] = [
-        {"backend": "ollama", "model": _EXTRACTION_MODELS["ollama"]}
-    ]
+    cloud: list[dict[str, str]] = []
     # Bedrock first among the clouds: in-region (the NDA story), paid, no free-tier
     # rate limits. Groq and Cerebras remain as fallbacks when their keys are set.
     if keys.get("BEDROCK_API_KEY"):
-        chain.append({"backend": "bedrock", "model": bedrock_model()})
+        cloud.append({"backend": "bedrock", "model": bedrock_model()})
     if keys.get("GROQ_API_KEY"):
         primary = _EXTRACTION_MODELS["groq"]
-        chain.append({"backend": "groq", "model": primary})
+        cloud.append({"backend": "groq", "model": primary})
         # Same provider, different model = a separate daily allowance.
         for model in GROQ_FALLBACK_MODELS:
             if model != primary:
-                chain.append({"backend": "groq", "model": model})
+                cloud.append({"backend": "groq", "model": model})
     if keys.get("CEREBRAS_API_KEY"):
-        chain.append({"backend": "cerebras", "model": _EXTRACTION_MODELS["cerebras"]})
+        cloud.append({"backend": "cerebras", "model": _EXTRACTION_MODELS["cerebras"]})
     if keys.get("HF_TOKEN"):
-        chain.append(
-            {"backend": "huggingface", "model": _EXTRACTION_MODELS["huggingface"]}
-        )
-    return chain
+        cloud.append({"backend": "huggingface", "model": _EXTRACTION_MODELS["huggingface"]})
+    local = {"backend": "ollama", "model": _EXTRACTION_MODELS["ollama"]}
+    if not cloud:
+        return [local]
+    if _local_extraction_opted_in():
+        return [local, *cloud]
+    return cloud
 
 
 def run_task(
@@ -662,8 +675,7 @@ def run_task(
     route = (routes or DEFAULT_ROUTES).get(task)
     if route is None:
         raise KeyError(f"no route configured for task: {task}")
-    # "auto" defers to the Ollama → Bedrock → Groq → Cerebras → Hugging Face chain,
-    # trying each configured backend until one succeeds.
+    # "auto" defers to _extraction_chain(), trying each backend until one succeeds.
     if route["backend"] == "auto":
         return _run_chain(_extraction_chain(), prompt, schema, timeout)
     return _run_one(route["backend"], route["model"], prompt, schema, timeout)
