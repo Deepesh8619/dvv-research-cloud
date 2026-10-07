@@ -24,7 +24,14 @@ def _normalize_db_url(url: str) -> str:
     from the very first minute of a deploy.
     """
     if url.startswith("postgres://"):
-        return "postgresql://" + url[len("postgres://") :]
+        url = "postgresql://" + url[len("postgres://") :]
+    # Name the installed driver. A bare `postgresql://` means "SQLAlchemy's
+    # default driver", and SQLAlchemy 2.1 changed that default from psycopg2 to
+    # psycopg 3 — which is not installed. A fresh image build picked 2.1 up and
+    # the app crashed on its first import; the upgrade's rollback rebuilt the
+    # OLD code with the same new library and crashed the same way.
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg2://" + url[len("postgresql://") :]
     return url
 
 
