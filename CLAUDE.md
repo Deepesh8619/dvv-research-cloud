@@ -6,6 +6,61 @@
 
 ---
 
+## 0. Never again — read before changing anything
+
+Each line below cost real time, a broken deploy, or client data. Add to it when
+something new does. Lessons for the PRODUCT's own AI agents (copilot,
+questionnaire reader, instruction reader) live in `src/ai/known_failures.py`
+instead — prompts are built from that list and a test enforces it.
+
+**Where things are**
+- Code: `~/dev/dvv-research-cloud`. Reference material (vision docs, test
+  questionnaires, data files): `~/dev/DVV`. Real test questionnaires:
+  `~/dev/DVV/Test data/` (Bubble, Vivo, Google Ads) and
+  `~/dev/DVV/Test data/New folder (2)/` (TRD studies 1 and 2). Skip `~$` Word lock files.
+- Production: AWS Lightsail, `https://13-203-248-222.sslip.io`. It does NOT track
+  `main`: someone runs `cd /opt/dvv/deploy && ./dvv upgrade` on the box. A merge is
+  undeployed until `/api/health`'s `commit` matches. SSH is not reachable from dev machines.
+
+**Privacy**
+- Client questionnaires are under NDA. Never send them to a free AI tier.
+- To run with AI OFF, set keys EMPTY: `GROQ_API_KEY= CEREBRAS_API_KEY= BEDROCK_API_KEY=
+  HF_TOKEN= OLLAMA_HOST=http://127.0.0.1:1`. NOT `env -u` — `src/env.py` re-adds unset
+  keys from `.env`, and that silently sent client documents to Groq (2026-10-04).
+  Confirm `llm_key_presence()` is all False before trusting a run.
+- Open-weight models only; no OpenAI/Anthropic in the code (a test enforces it).
+
+**Deploys**
+- Local success does not prove the image builds: Docker resolves dependencies fresh.
+  Unpinned `sqlalchemy>=2.0` pulled 2.1 and took production down (2026-10-07). Pin
+  upper bounds. The upgrade's rollback REBUILDS the old commit, so dependency drift
+  breaks the rollback too.
+
+**Measuring parser and QA changes**
+- Measure on all five real documents, not a fixture. Baseline on `main` in a
+  `git worktree` and compare the LISTS of affected questions, not counts.
+- Exclude model-touched questions from regression comparisons — they change run to run.
+- Studies on the server were read by an OLDER parser: measure repairs (QA loop,
+  re-read) on old-parser extractions too, not only fresh ones.
+- One extraction model per environment (Ollama only offline or with
+  `DVV_EXTRACT_LOCAL=1`). A local 3B model and the server's 32B model read the same
+  document differently.
+
+**Design rules learned the hard way**
+- A check that cries wolf gets deleted (`no_way_out` flagged 25 good questions).
+  Measure a new check on the real documents before shipping it.
+- A repair must never hide evidence: a scripter note lifted off the respondent's
+  screen stays on the question (`validation.lifted_notes`) so QA keeps reporting it.
+- Any flag means a person looks: nothing flagged is auto- or bulk-approved, and a
+  question with nothing to answer can never be approved.
+- Test links skip the pre-launch check on purpose; they report what a live link would refuse.
+- Judge what the RESPONDENT sees (the compiled survey), not the stored text.
+
+> Sections 1–12 below predate October 2026 and are partly stale — `docs/METHODS.md`
+> and `git log` are current. Fix them when you touch them.
+
+---
+
 ## 1. What this actually is
 
 A survey data-processing platform that takes a raw respondent-level file (SPSS `.sav`, CSV, or Excel export from Decipher/Qualtrics/etc.) and produces client-ready crosstab decks — Excel + PowerPoint — with statistical significance testing, in about a minute, with human approval gates at the points that matter (file classification, QC, final delivery sign-off).
