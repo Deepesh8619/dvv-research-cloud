@@ -851,6 +851,8 @@ def test_a_test_link_opens_even_when_a_real_link_would_be_refused(client):
     body = resp.json()
     assert body["is_test"] is True
     assert test_client.get(f"/api/r/{body['token']}").json()["is_test"] is True
+    # Opened, but not silently: the tester is told what a live link would refuse.
+    assert body["preflight_failures"], "a test link must still report what would block going live"
 
 
 def test_populate_adds_synthetic_sessions_and_shows_in_field_report(client):

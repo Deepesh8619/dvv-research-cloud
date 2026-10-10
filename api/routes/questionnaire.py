@@ -63,6 +63,7 @@ from src.core.survey_definition import (
     Question,
     QuestionType,
     SurveyDefinition,
+    has_nothing_to_answer,
 )
 from src.engines.fielding.materialize import plan_datamap
 from src.engines.questionnaire.extraction_diagnosis import completeness_problems, diagnose
@@ -91,6 +92,11 @@ def _is_reviewable(question) -> bool:
 
     return question.type is not QuestionType.INFO
 
+
+_NOTHING_TO_ANSWER = (
+    "{qid} gives a respondent nothing to answer. Add its answer options or rows, "
+    "or change its type, then approve it."
+)
 
 _BLOCKING_FLAGS = frozenset(
     {
@@ -1171,6 +1177,10 @@ def approve_question(
     # questionnaire could never be finalised. A reviewer hit exactly that dead
     # end: "81/81 approved" beside "cannot approve, S6 unresolved".
     matching = [q for q in survey.questions if q.qid == qid]
+    # Approving says "a respondent can answer this as the document intends".
+    # A question with nothing to pick cannot be that, whoever clicks.
+    if any(has_nothing_to_answer(q) for q in matching):
+        raise HTTPException(status_code=422, detail=_NOTHING_TO_ANSWER.format(qid=qid))
     cleared = sorted({f for q in matching for f in q.flags if f in _BLOCKING_FLAGS})
     if cleared:
         for q in matching:
@@ -1217,10 +1227,14 @@ def approve_clean(
     newly_approved: list[str] = []
     still_blocked: list[dict] = []
     for q in survey.questions:
-        blocking = sorted(set(q.flags) & _BLOCKING_FLAGS)
-        if blocking:
+        # ANY flag, not only blocking ones: a flag is the system asking a person
+        # to look — "Empty options", "Study instruction applies". Skipping only
+        # blocking flags bulk-approved a question with no answers, which then
+        # reached a test link with nothing to fill in.
+        held = sorted(q.flags) + (["NOTHING_TO_ANSWER"] if has_nothing_to_answer(q) else [])
+        if held:
             if q.qid not in approved:
-                still_blocked.append({"qid": q.qid, "flags": blocking})
+                still_blocked.append({"qid": q.qid, "flags": held})
             continue
         if q.qid not in approved:
             approved.add(q.qid)
@@ -1296,6 +1310,11 @@ def approve_all(
         blocking = sorted(set(q.flags) & _BLOCKING_FLAGS)
         if blocking:
             reasons.append(f"unresolved flags: {', '.join(blocking)}")
+        # Even if it was approved earlier: an approval given before this check
+        # existed must not carry an unanswerable question into the field.
+        if has_nothing_to_answer(q):
+            reasons.append("nothing for a respondent to answer — add its options or rows, "
+                           "or change its type")
         if reasons:
             unresolved.append({"qid": q.qid, "reasons": reasons})
 

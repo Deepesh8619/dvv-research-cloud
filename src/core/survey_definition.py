@@ -47,6 +47,20 @@ class QuestionType(StrEnum):
     INFO = "info"  # non-question display content
 
 
+_CHOICE_TYPES = frozenset({
+    QuestionType.SINGLE, QuestionType.MULTI, QuestionType.DROPDOWN, QuestionType.RANK,
+    QuestionType.MAXDIFF,
+})
+
+
+def has_nothing_to_answer(q: Question) -> bool:
+    """True when a respondent shown this question could not answer it: a choice
+    with no options, or a grid missing its rows or its scale."""
+    if q.type is QuestionType.GRID_SINGLE:
+        return not (q.rows and q.cols)
+    return q.type in _CHOICE_TYPES and not q.options
+
+
 # String literals reused across entities. Kept as module constants so callers and
 # tests share one source of truth without introducing a second enum pattern.
 ExprOp = Literal["eq", "ne", "in", "gt", "lt", "and", "or", "not", "selected"]

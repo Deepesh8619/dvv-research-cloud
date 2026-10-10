@@ -50,6 +50,8 @@ from src.engines.questionnaire.block_notes import apply as apply_block_notes
 from src.engines.questionnaire.carousel import apply as apply_carousels
 from src.engines.questionnaire.carousel import capture as capture_carousel
 from src.engines.questionnaire.constant_sum import apply as apply_constant_sums
+from src.engines.questionnaire.constant_sum import make_constant_sum
+from src.engines.questionnaire.constant_sum import read as read_constant_sum
 from src.engines.questionnaire.datamap_recovery import (
     DatamapQuestion,
     fill_from_datamap,
@@ -892,6 +894,12 @@ def _extract_via_prose(
         # Costly, and a needless source of run-to-run variance.
         fields.missing = []
         question.extraction_evidence.setdefault("type", "a grid table")
+    elif fields.missing == ["type"] and (summed := read_constant_sum(chunk.chunk_text)):
+        # "MUST SUM TO 100%" over a table of empty boxes states the type outright:
+        # one number per row. Asked instead, a model called it a rating grid
+        # with no scale, and the respondent got nothing to fill in.
+        make_constant_sum(question, *summed)
+        fields.missing = []
     confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
     if filled_from_datamap:
         question.extraction_evidence.update(

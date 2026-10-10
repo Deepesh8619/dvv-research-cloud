@@ -435,13 +435,18 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
             }
             for row in question.rows
         ]
-        total = validation.get("sum")
-        if total is not None:
+        total, floor = validation.get("sum"), validation.get("sum_min")
+        if total is not None or floor is not None:
             summed = " + ".join(f"{{{question.qid}.{row.code}}}" for row in question.rows)
             element["validators"] = [{
                 "type": "expression",
-                "expression": f"{summed} = {total}",
-                "text": f"These should add up to {total}.",
+                "expression": (
+                    f"{summed} = {total}" if total is not None else f"{summed} >= {floor}"
+                ),
+                "text": (
+                    f"These should add up to {total}." if total is not None
+                    else f"These should add up to at least {floor}."
+                ),
             }]
     elif qtype == QuestionType.NUMERIC:
         element["type"] = "text"

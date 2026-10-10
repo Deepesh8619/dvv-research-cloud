@@ -610,6 +610,17 @@ def _trailing_routing_directives(current: list[DocumentBlock]) -> list[DocumentB
     return tail
 
 
+def _asks_a_question(block: DocumentBlock) -> bool:
+    """A paragraph worded as a question to a respondent, not a scripter note."""
+    text = block.text.strip()
+    return (
+        block.block_type == "paragraph"
+        and len(text) >= 40
+        and "?" in text
+        and not text.startswith("[")
+    )
+
+
 def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
     """Split ordered blocks into candidate questions on detected label lines.
 
@@ -665,6 +676,17 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
         if is_boundary and qid is None and base_tags_open and _BASE_TAG_RE.match(block.text):
             base_counter += 1
             qid = f"Q{base_counter}"
+        elif (
+            not is_boundary and base_tags_open and current
+            and current[-1].block_type == "table" and _asks_a_question(block)
+        ):
+            # A question whose [BASE:] tag the author forgot. A question's
+            # answer table ends that question, so a question sentence straight
+            # after one starts the next — a scripter reads it that way. Without
+            # this, the TRD referrer study's settings question rode inside the
+            # previous single-choice question and was never asked.
+            base_counter += 1
+            is_boundary, qid = True, f"Q{base_counter}"
         if is_boundary:
             carried = _trailing_routing_directives(current)
             flush()

@@ -832,6 +832,8 @@ export interface QuestionLinks {
 }
 
 export interface FieldingLink extends FieldingRedirects {
+  /** Test links only: checks that would refuse a live link. */
+  preflight_failures?: Array<{ id: string; label: string; detail: string; qids: string[] }>
   id: string
   study_id: string
   questionnaire_id: string

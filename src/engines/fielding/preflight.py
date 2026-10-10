@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.core.survey_definition import QuestionType, SurveyDefinition
+from src.core.survey_definition import QuestionType, SurveyDefinition, has_nothing_to_answer
 from src.engines.fielding.dryrun import simulate
 from src.engines.fielding.materialize import uncomputed_derived
 from src.engines.fielding.maxdiff_design import FATAL as MAXDIFF_FATAL
@@ -107,11 +107,7 @@ def preflight(
         )
     checks.append(structure)
 
-    empty = [
-        q.qid for q in answerable
-        if (q.type is QuestionType.GRID_SINGLE and not (q.rows and q.cols))
-        or (q.type in _CHOICE and not q.options)
-    ]
+    empty = [q.qid for q in answerable if has_nothing_to_answer(q)]
     checks.append(_result(
         Check("answers", "Every question has answers to choose from"), empty, FAIL,
         "These would reach a respondent with nothing to pick.",
