@@ -237,6 +237,9 @@ class QuestionnaireStatusResponse(BaseModel):
     # The study's instructions as read before any question: summary, groups,
     # rules (with the questions they govern), hidden variables, concerns.
     study_understanding: dict | None = None
+    # The QA loop's record: what the QA agent found, what the programmer agent
+    # fixed, and what is left for a person.
+    qa: dict | None = None
 
 
 class QuestionnaireSettingsRequest(BaseModel):

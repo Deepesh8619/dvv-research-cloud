@@ -25,6 +25,7 @@ import SourceTile from '../components/review/SourceTile'
 import { useRenderedSource } from '../components/review/useRenderedSource'
 import Lessons from '../components/review/Lessons'
 import StudyUnderstandingPanel from '../components/review/StudyUnderstandingPanel'
+import QAPanel from '../components/review/QAPanel'
 import { useLabel } from '../labels/LabelContext'
 import { BucketBar, ConnectionsPanel, IssuesPanel, ProgressRing } from '../components/review/QuestionMap'
 import { bucketInfo } from '../lib/buckets'
@@ -752,6 +753,14 @@ export function QuestionDetail({
                 <span className="font-medium">{info.label}</span>
                 {info.blocking && <span className="ml-1 text-[10px] uppercase">(blocks approval)</span>}
                 <span className="block mt-0.5 opacity-90">{info.description}</span>
+                {f === 'QA_ISSUE' &&
+                  (Array.isArray(q.validation?.qa_issues) ? (q.validation.qa_issues as string[]) : []).map(
+                    (issue) => (
+                      <q key={issue} className="block mt-1 italic">
+                        {issue}
+                      </q>
+                    ),
+                  )}
                 {f === 'BRIEF_RULE' &&
                   (Array.isArray(q.validation?.brief_rules) ? (q.validation.brief_rules as string[]) : []).map(
                     (rule) => (
@@ -1543,6 +1552,17 @@ export default function QuestionnairePage() {
       {status && !notFound && !['processing', 'error'].includes(status.status) && (
         <>
           <StudyUnderstandingPanel understanding={status.study_understanding} onGoTo={goTo} />
+          <QAPanel
+            qa={status.qa}
+            canRun={canWrite}
+            onGoTo={goTo}
+            onRun={async () => {
+              if (!studyId) return
+              await questionnaireApi.runQA(studyId)
+              loadStatus()
+              loadQuestions()
+            }}
+          />
           <IssuesPanel errors={status.validation_errors} onGoTo={goTo} />
 
           {approveAllError && (

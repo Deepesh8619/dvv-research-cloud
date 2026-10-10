@@ -1436,3 +1436,37 @@ def test_approve_all_refuses_an_unanswerable_question_even_if_approved_before(cl
     assert resp.status_code == 422
     reasons = {u["qid"]: u["reasons"] for u in resp.json()["detail"]["unresolved"]}
     assert any("nothing for a respondent to answer" in r for r in reasons["Q2"])
+
+
+def test_qa_runs_on_a_stored_study_and_the_record_is_shared(client):
+    """The QA loop on demand: it saves its record where the review page and the
+    copilot read it, and it never changes a question a person approved."""
+    test_client, session_factory, state = client
+    q2 = next(q for q in state["survey"].questions if q.qid == "Q2")
+    q2.options = [Option(code=1, label="Alpha |"), Option(code=2, label="Beta")]
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    record = test_client.post("/api/studies/study_q1/questionnaire/qa").json()
+    assert record["fixed"] == 1
+    assert test_client.get("/api/studies/study_q1/questionnaire").json()["qa"]["fixed"] == 1
+    labels = [o["label"] for o in test_client.get(
+        "/api/studies/study_q1/questionnaire/questions/Q2").json()["options"]]
+    assert labels == ["Alpha", "Beta"]
+
+
+def test_qa_never_changes_an_approved_question(client):
+    test_client, session_factory, state = client
+    q2 = next(q for q in state["survey"].questions if q.qid == "Q2")
+    q2.options = [Option(code=1, label="Alpha |"), Option(code=2, label="Beta")]
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+    test_client.post("/api/studies/study_q1/questionnaire/questions/Q2/approve")
+
+    record = test_client.post("/api/studies/study_q1/questionnaire/qa").json()
+    assert record["fixed"] == 0 and record["needs_you"] == 1
+    labels = [o["label"] for o in test_client.get(
+        "/api/studies/study_q1/questionnaire/questions/Q2").json()["options"]]
+    assert labels == ["Alpha |", "Beta"]

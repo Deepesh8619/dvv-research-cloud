@@ -217,7 +217,7 @@ def make_executor(db: Session, user: UserDB):
         definition = survey(args)
         brief = (definition.metadata or {}).get("study_overview")
         understood = (definition.metadata or {}).get("study_understanding")
-        if not brief and not understood:
+        if not brief and not understood and not (definition.metadata or {}).get("qa"):
             return {
                 "has_brief": False,
                 "note": "This questionnaire has no study overview section — it opens "
@@ -230,6 +230,8 @@ def make_executor(db: Session, user: UserDB):
             # question: purpose, groups, rules and the questions they govern —
             # every item quoting the instruction line it rests on.
             "understanding": understood,
+            # The QA loop's record — the same one the review page shows.
+            "qa": (definition.metadata or {}).get("qa"),
             "markets": brief.get("markets"),
             "sample_size": brief.get("sample_size"),
             "loi_minutes": brief.get("loi_minutes"),

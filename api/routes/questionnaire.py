@@ -68,6 +68,7 @@ from src.core.survey_definition import (
 from src.engines.fielding.materialize import plan_datamap
 from src.engines.questionnaire.extraction_diagnosis import completeness_problems, diagnose
 from src.engines.questionnaire.extractor import extract_survey_definition, reread_question
+from src.engines.questionnaire.qa_loop import run_qa
 from src.engines.rag.store import ensure_index
 from src.intake.questionnaire_loader import (
     load_docx,
@@ -296,6 +297,7 @@ def _status_response(
         theme=metadata.get("theme"),
         profile=metadata.get("profile"),
         study_understanding=metadata.get("study_understanding"),
+        qa=metadata.get("qa"),
     )
 
 
@@ -1198,6 +1200,31 @@ def approve_question(
         "n_approved": len(approved),
         "cleared_flags": cleared,
     }
+
+
+@router.post("/studies/{study_id}/questionnaire/qa")
+def run_questionnaire_qa(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Run the QA loop on the stored definition. (Owner/Analyst)
+
+    The QA agent tests every question as the respondent meets it and against
+    the document; the programmer agent repairs what it safely can with today's
+    parsers; what is left is flagged for a person. Questions a person approved
+    are reported on but never changed. Runs automatically on extraction — this
+    is for a study extracted before a parser fix, or after edits."""
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    record = run_qa(survey, locked=set(questionnaire.approved_qids or []))
+    survey.metadata["validation_errors"] = survey.validate()
+    _save_definition(db, questionnaire, survey)
+    logger.info(
+        f"[{study_id}] QA by {user.name}: {record['checked']} checked, "
+        f"{record['fixed']} fixed, {record['needs_you']} need a person"
+    )
+    return record
 
 
 @router.post("/studies/{study_id}/questionnaire/questions/approve-clean")
