@@ -184,13 +184,67 @@ function AnswersChange({ before, after }: { before: unknown; after: unknown }) {
   const a = (after ?? {}) as Record<string, string[]>
   const keys = Array.from(new Set([...Object.keys(b), ...Object.keys(a)]))
   const clean = (x: string) => x.replace(/\[[^\]]*\]/g, ' ').replace(/^[\s|]+|[\s|]+$/g, '').replace(/\s+/g, ' ')
+  // Answers under a different heading — options that became a constant sum's
+  // rows, or a grid's — moved; they were not lost and found. Counted one by
+  // one, so a list that also had a few labels edited still reads as a move.
+  const removedAll = keys.flatMap((k) => (b[k] ?? []).filter((x) => !(a[k] ?? []).includes(x)).map((x) => [k, x] as const))
+  const addedAll = keys.flatMap((k) => (a[k] ?? []).filter((x) => !(b[k] ?? []).includes(x)).map((x) => [k, x] as const))
+  const addedClean = new Map(addedAll.map(([k, x]) => [clean(x), k]))
+  const moved = removedAll.filter(([k, x]) => {
+    const to = addedClean.get(clean(x))
+    return to !== undefined && to !== k
+  })
+  const movedClean = new Set(moved.map(([, x]) => clean(x)))
+  // An answer and its reworded version (one starts the other, or they open the
+  // same way) are one edit, not a removal plus an addition.
+  const opening = (x: string) => clean(x).toLowerCase().slice(0, 30)
+  const edits: [string, string][] = []
+  const leftAdded = addedAll.map(([, x]) => x).filter((x) => !movedClean.has(clean(x)))
+  for (const [, x] of removedAll) {
+    if (movedClean.has(clean(x))) continue
+    // Identical once separators and notes are off is a cleanup, shown as one —
+    // only a real change of wording counts as reworded.
+    const sameStart = (u: string, v: string) =>
+      Math.min(u.length, v.length) >= 12 && (u.startsWith(v) || v.startsWith(u))
+    const twin = leftAdded.find((y) => sameStart(opening(y), opening(x)) && clean(y) !== clean(x))
+    if (twin) {
+      edits.push([x, twin])
+      leftAdded.splice(leftAdded.indexOf(twin), 1)
+      movedClean.add(clean(x))
+      movedClean.add(clean(twin))
+    }
+  }
+  const fromKey = moved[0]?.[0]
+  const toKey = moved.length ? addedClean.get(clean(moved[0][1])) : undefined
   return (
     <div className="space-y-2">
+      {edits.length > 0 && (
+        <div className="text-sm">
+          <span className="text-[10px] font-mono uppercase tracking-wide text-slate-400">
+            reworded {edits.length}
+          </span>
+          <ul className="mt-1 space-y-1">
+            {edits.map(([was, now]) => (
+              <li key={was} className="text-slate-800 line-clamp-2" title={`was: ${was}`}>
+                {now} <span className="text-xs text-slate-400">— was: {was.length > 60 ? was.slice(0, 60) + '…' : was}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {moved.length > 0 && (
+        <p className="text-sm text-slate-700">
+          {moved.length} answer{moved.length === 1 ? '' : 's'} moved from{' '}
+          <span className="font-medium">{fromKey}</span> to <span className="font-medium">{toKey}</span>
+          {toKey === 'rows' ? ' — one box or line each' : ''}.
+        </p>
+      )}
       {keys.map((k) => {
         const was = b[k] ?? []
         const now = a[k] ?? []
-        const removed = was.filter((x) => !now.includes(x))
-        const added = now.filter((x) => !was.includes(x))
+        const removed = was.filter((x) => !now.includes(x) && !movedClean.has(clean(x)))
+        const added = now.filter((x) => !was.includes(x) && !movedClean.has(clean(x)))
+        if (!removed.length && !added.length && (moved.length || edits.length)) return null
         const cleanedOnly =
           removed.length > 0 && removed.map(clean).join('\u0000') === added.map(clean).join('\u0000')
         return (
@@ -224,8 +278,8 @@ function AnswersChange({ before, after }: { before: unknown; after: unknown }) {
   )
 }
 
-function ChangeRow({ q }: { q: QuestionDiff }) {
-  const [open, setOpen] = useState(false)
+export function ChangeRow({ q, defaultOpen = false }: { q: QuestionDiff; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
   const fields = q.changes.map((c) => FIELD_WORD[c.field] ?? c.field)
   const summary =
     q.only_in === 'before'

@@ -17,6 +17,8 @@ import { TableSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import { flagInfo } from '../components/questionnaireFlags'
 import CorrectionBox from '../components/CorrectionBox'
+import QuestionAgent from '../components/review/QuestionAgent'
+import { removeAndRenumber } from '../lib/optionCodes'
 import ExtractionProvenance from '../components/ExtractionProvenance'
 import TeachFormat from '../components/TeachFormat'
 import ReadPanel from '../components/review/ReadPanel'
@@ -580,6 +582,8 @@ export function QuestionDetail({
   const [lessonsReload, setLessonsReload] = useState(0)
   // Raw text of an option-code box while it has focus — see the input below.
   const [codeDrafts, setCodeDrafts] = useState<Record<number, string>>({})
+  // What "Teach the parser" from the question agent hands the correction box.
+  const [teachText, setTeachText] = useState<{ text: string; nonce: number } | null>(null)
   // Display-only fallback: the extractor stashes the routing sentence in
   // question.validation.routing_verbatim (one shared string) so it survives even
   // when the structured show_if/terminate_if is nulled out as unresolvable — the
@@ -597,6 +601,7 @@ export function QuestionDetail({
   // Reset local form when the selected question changes.
   useEffect(() => {
     setState(buildDetailState(q))
+    setCodesTyped(false)
     setProblems([])
     setError(null)
     setSavedOk(false)
@@ -616,7 +621,10 @@ export function QuestionDetail({
     const nextCode = state.options.reduce((m, o) => Math.max(m, o.code), 0) + 1
     set('options', [...state.options, { code: nextCode, label: '' }])
   }
-  const removeOption = (i: number) => set('options', state.options.filter((_, idx) => idx !== i))
+  // Removing an answer closes the gap in its run of codes (see removeAndRenumber);
+  // once the reviewer types a code, their numbering is theirs.
+  const [codesTyped, setCodesTyped] = useState(false)
+  const removeOption = (i: number) => set('options', removeAndRenumber(state.options, i, codesTyped))
 
   // Rows are re-coded 1..n on every change — order IS the code, so there is
   // nothing for a reviewer to get wrong by hand.
@@ -629,33 +637,40 @@ export function QuestionDetail({
       state.rows.filter((_, idx) => idx !== i).map((r, idx) => ({ ...r, code: idx + 1 })),
     )
 
+  // The editor's question as the API stores it — what Save sends, and what the
+  // question agent revises, so a follow-up works on what is on screen.
+  const patchFromState = (): Record<string, unknown> => {
+    const showIf = fromFlatRouting(state.showIf, state.showIfVerbatim)
+    const terminateIf = fromFlatRouting(state.terminateIf, state.terminateIfVerbatim)
+    const patch: Record<string, unknown> = {
+      text: state.text,
+      // The pseudo-type never reaches the API — what is saved is always the
+      // real wire type (numeric), with the rows/total carrying the meaning.
+      type: isConstantSum ? 'numeric' : state.type,
+      // Every field of every answer — exclusive, anchored, "other, specify".
+      // Sending only code and label wiped those on any edit, even a typo fix.
+      options: hasOptions ? state.options.map((o) => ({ ...o })) : [],
+      show_if: (showIf as unknown as Record<string, unknown>) ?? null,
+      terminate_if: (terminateIf as unknown as Record<string, unknown>) ?? null,
+    }
+    if (isConstantSum) {
+      patch.rows = state.rows.map((r) => ({ code: r.code, label: r.label }))
+      patch.validation = { min: 0, max: state.sumTotal, sum: state.sumTotal }
+    } else if (isConstantSumQuestion(q)) {
+      // Leaving constant-sum for another type: a plain numeric (or anything
+      // else) has no per-item boxes, so the stale rows must not survive.
+      patch.rows = null
+    }
+    return patch
+  }
+
   const handleSave = async () => {
     setSaving(true)
     setProblems([])
     setError(null)
     setSavedOk(false)
     try {
-      const showIf = fromFlatRouting(state.showIf, state.showIfVerbatim)
-      const terminateIf = fromFlatRouting(state.terminateIf, state.terminateIfVerbatim)
-      const patch: Record<string, unknown> = {
-        text: state.text,
-        // The pseudo-type never reaches the API — what is saved is always the
-        // real wire type (numeric), with the rows/total carrying the meaning.
-        type: isConstantSum ? 'numeric' : state.type,
-        options: hasOptions
-          ? state.options.map((o) => ({ code: o.code, label: o.label }))
-          : [],
-        show_if: (showIf as unknown as Record<string, unknown>) ?? null,
-        terminate_if: (terminateIf as unknown as Record<string, unknown>) ?? null,
-      }
-      if (isConstantSum) {
-        patch.rows = state.rows.map((r) => ({ code: r.code, label: r.label }))
-        patch.validation = { min: 0, max: state.sumTotal, sum: state.sumTotal }
-      } else if (isConstantSumQuestion(q)) {
-        // Leaving constant-sum for another type: a plain numeric (or anything
-        // else) has no per-item boxes, so the stale rows must not survive.
-        patch.rows = null
-      }
+      const patch = patchFromState()
       const res = await questionnaireApi.update(studyId, q.qid, patch)
       onSaved(res.data)
       setSavedOk(true)
@@ -712,6 +727,7 @@ export function QuestionDetail({
               questionId={q.qid}
               profileSlug={profile?.slug}
               profileLabel={profile?.label}
+              prefill={teachText}
             />
           )}
         </div>
@@ -773,6 +789,19 @@ export function QuestionDetail({
             )
           })}
         </div>
+      )}
+
+      {canWrite && (
+        <QuestionAgent
+          studyId={studyId}
+          qid={q.qid}
+          current={patchFromState}
+          onUse={(candidate) => {
+            setState(buildDetailState(candidate))
+            setSavedOk(false)
+          }}
+          onTeach={canCorrect ? (text) => setTeachText({ text, nonce: Date.now() }) : undefined}
+        />
       )}
 
       <ExtractionProvenance method={q.extraction_method} evidence={q.extraction_evidence} />
@@ -875,6 +904,7 @@ export function QuestionDetail({
                     setCodeDrafts((d) => ({ ...d, [i]: raw }))
                     if (raw.trim() !== '' && Number.isFinite(Number(raw))) {
                       setOption(i, { code: Number(raw) })
+                      setCodesTyped(true)
                     }
                   }}
                   onBlur={() =>

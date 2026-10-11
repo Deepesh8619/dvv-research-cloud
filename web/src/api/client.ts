@@ -414,6 +414,16 @@ export interface QuestionnaireStatus {
   qa?: QARecord | null
 }
 
+export interface AgentSuggestion {
+  source: string
+  explanation: string
+  question: Question
+  change: QuestionDiff
+  qa_before: string[]
+  qa_after: string[]
+  dropped: string[]
+}
+
 export interface QARecord {
   ran_at: string
   checked: number
@@ -624,6 +634,17 @@ export const questionnaireApi = {
     api.post<{ qid: string; approved: boolean; n_approved: number }>(
       `/studies/${studyId}/questionnaire/questions/${qid}/approve`,
       {},
+    ),
+
+  /** Suggested fixes for one question — saves nothing. */
+  questionAgent: async (
+    studyId: string,
+    qid: string,
+    body: { instruction?: string; current?: Record<string, unknown> },
+  ) =>
+    api.post<{ suggestions: AgentSuggestion[]; error: string | null }>(
+      `/studies/${studyId}/questionnaire/questions/${qid}/agent`,
+      body,
     ),
 
   runQA: async (studyId: string) =>

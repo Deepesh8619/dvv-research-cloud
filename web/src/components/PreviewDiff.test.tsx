@@ -32,4 +32,24 @@ describe('rule preview', () => {
     fireEvent.click(screen.getByText('was Q5'))
     expect(screen.getByText(/separators removed/)).toBeTruthy()
   })
+
+  it('shows answers that moved to rows as one line, and an edited one as was → now', () => {
+    const moved: ExtractionDiff = {
+      counts: { improved: 0, regressed: 0, changed: 1, unchanged: 0 },
+      n_questions: 1,
+      questions: [{
+        qid: 'Q2', verdict: 'changed', only_in: null, flags_cleared: [], flags_added: [],
+        changes: [{
+          field: 'answers', verdict: 'changed',
+          before: { options: ['Talk therapy alone', 'ECT', 'Have received TMS'] },
+          after: { rows: ['Talk therapy alone', 'ECT', 'Have received TMS (with or without medication)'] },
+        }],
+      }],
+    }
+    render(<ReadyView diff={moved} />)
+    fireEvent.click(screen.getByText('Q2'))
+    expect(screen.getByText(/2 answers moved from/)).toBeTruthy()
+    expect(screen.getByText(/reworded 1/)).toBeTruthy()
+    expect(screen.getByText(/— was: Have received TMS$/)).toBeTruthy()
+  })
 })

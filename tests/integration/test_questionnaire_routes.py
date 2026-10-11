@@ -1470,3 +1470,35 @@ def test_qa_never_changes_an_approved_question(client):
     labels = [o["label"] for o in test_client.get(
         "/api/studies/study_q1/questionnaire/questions/Q2").json()["options"]]
     assert labels == ["Alpha |", "Beta"]
+
+
+def test_the_question_agent_suggests_and_saves_nothing(client):
+    test_client, session_factory, state = client
+    q2 = next(q for q in state["survey"].questions if q.qid == "Q2")
+    q2.options = [Option(code=1, label="Alpha |"), Option(code=2, label="Beta")]
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    body = test_client.post(
+        "/api/studies/study_q1/questionnaire/questions/Q2/agent", json={}
+    ).json()
+    assert body["suggestions"] and body["error"] is None
+    stored = test_client.get("/api/studies/study_q1/questionnaire/questions/Q2").json()
+    assert [o["label"] for o in stored["options"]] == ["Alpha |", "Beta"]
+
+
+def test_saving_a_question_keeps_every_setting_of_its_answers(client):
+    """Saving sent only code and label: a typo fix wiped "None of these"
+    being exclusive and "Other" having its text box."""
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+    test_client.patch("/api/studies/study_q1/questionnaire/questions/Q2", json={"options": [
+        {"code": 1, "label": "Alpha"},
+        {"code": 2, "label": "None of these", "exclusive": True, "anchored": True},
+    ]})
+    stored = test_client.get("/api/studies/study_q1/questionnaire/questions/Q2").json()
+    none = stored["options"][1]
+    assert none["exclusive"] is True and none["anchored"] is True

@@ -44,6 +44,8 @@ interface Props {
   profileSlug?: string | null
   profileLabel?: string | null
   onApplied?: () => void
+  /** Open pre-filled — from the question agent's "Teach the parser". */
+  prefill?: { text: string; nonce: number } | null
 }
 
 export default function CorrectionBox({
@@ -52,6 +54,7 @@ export default function CorrectionBox({
   profileSlug,
   profileLabel,
   onApplied,
+  prefill,
 }: Props) {
   const tTrigger = useLabel('correction.trigger', 'Correct this')
   const tHeading = useLabel('correction.heading', 'What did we read wrong?')
@@ -67,6 +70,11 @@ export default function CorrectionBox({
   const [rules, setRules] = useState<ProfileRule[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!prefill) return
+    setOpen(true)
+    setInstruction(prefill.text)
+  }, [prefill])
 
   const slug = result?.profile_slug ?? profileSlug ?? null
 

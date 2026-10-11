@@ -578,3 +578,25 @@ def test_a_note_after_an_answer_table_stays_with_its_question():
         DocumentBlock("paragraph", "[TERMINATE IF NO — does this apply to referrers too?]", 2),
     ]
     assert len(segment_into_questions(blocks)) == 1
+
+
+def test_lettered_sub_questions_are_questions_not_the_previous_ones_answers():
+    """TRD referrer: "For the following questions..." then A.-D., each asking
+    for a percentage, were all read as answers of the question before."""
+    from src.intake.questionnaire_loader import DocumentBlock
+
+    rows = [["After 1 treatment", ""], ["After 2 treatments", ""]]
+    blocks = [
+        DocumentBlock("paragraph", "[BASE: ALL] When do you first discuss treatment? "
+                      "Select one.", 0),
+        DocumentBlock("table", "\n".join(" | ".join(r) for r in rows), 1, rows=rows),
+        DocumentBlock("paragraph", "For the following questions, please provide your "
+                      "best estimates.", 2),
+        DocumentBlock("paragraph", "A. What percentage do you discuss treatment options with?", 3),
+        DocumentBlock("paragraph", "Fill in [0-100]_____________ [%]", 4),
+        DocumentBlock("paragraph", "B. Of those, what portion are referred for treatment?", 5),
+        DocumentBlock("paragraph", "Fill in [0-100]_____________ [%]", 6),
+    ]
+    chunks = segment_into_questions(blocks)
+    assert [c.candidate_qid for c in chunks] == ["Q1", "Q2", "Q3"]
+    assert chunks[1].chunk_text.startswith("A. What percentage")

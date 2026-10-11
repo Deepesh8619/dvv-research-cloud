@@ -21,10 +21,12 @@ Roles (api/auth.py): owner/analyst may upload and edit; reviewer is read-only
 
 import logging
 import threading
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.auth import UserRole, get_current_user, require_role
@@ -69,6 +71,8 @@ from src.engines.fielding.materialize import plan_datamap
 from src.engines.questionnaire.extraction_diagnosis import completeness_problems, diagnose
 from src.engines.questionnaire.extractor import extract_survey_definition, reread_question
 from src.engines.questionnaire.qa_loop import run_qa
+from src.engines.questionnaire.question_agent import revise as question_agent_revise
+from src.engines.questionnaire.question_agent import suggest_repairs
 from src.engines.rag.store import ensure_index
 from src.intake.questionnaire_loader import (
     load_docx,
@@ -865,14 +869,22 @@ def _rename_qid(
     survey._rebuild_index()
 
 
+_OPTION_FIELDS = {f.name for f in dataclass_fields(Option)}
+
+
 def _build_options(raw: list[dict]) -> list[Option]:
-    """Build Option list from raw {code,label,...} dicts (shared by edit + add)."""
+    """Build Option list from raw {code,label,...} dicts (shared by edit + add).
+
+    Every field an Option carries survives — exclusive, anchored, "other,
+    specify", a per-answer condition, a hidden variable's derivation. Keeping
+    only three of them meant an answer's own condition vanished on any edit.
+    """
     return [
-        Option(
-            code=int(o["code"]),
-            label=str(o["label"]),
-            **{k: o[k] for k in ("exclusive", "anchored", "open_other") if k in o},
-        )
+        Option.from_dict({
+            **{k: v for k, v in o.items() if k in _OPTION_FIELDS},
+            "code": int(o["code"]),
+            "label": str(o["label"]),
+        })
         for o in raw
     ]
 
@@ -1225,6 +1237,50 @@ def run_questionnaire_qa(
         f"{record['fixed']} fixed, {record['needs_you']} need a person"
     )
     return record
+
+
+class QuestionAgentRequest(BaseModel):
+    # The analyst's words. Omitted: only the programmer agent's repairs.
+    instruction: str | None = None
+    # The question as the editor shows it right now, unsaved — so a follow-up
+    # ("keep the text box on Other") revises what is on screen.
+    current: dict | None = None
+
+
+@router.post("/studies/{study_id}/questionnaire/questions/{qid}/agent")
+def question_agent(
+    study_id: str,
+    qid: str,
+    body: QuestionAgentRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Suggested fixes for one question, each with before/after and QA.
+    Saves nothing — the analyst chooses, edits, and saves. (Owner/Analyst)"""
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    if qid not in survey:
+        raise HTTPException(status_code=404, detail=f"Question {qid} not found")
+    stored = survey[qid]
+    base = stored
+    if body.current:
+        try:
+            base = Question.from_dict({**stored.to_dict(), **body.current})
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=f"Unreadable question: {exc}") from exc
+    by_qid = {q.qid: q for q in survey.questions}
+    suggestions = suggest_repairs(base, by_qid)
+    error = None
+    instruction = (body.instruction or "").strip()
+    if instruction:
+        revised = question_agent_revise(base, instruction[:1000], by_qid)
+        if "error" in revised:
+            error = revised["error"]
+        else:
+            suggestions.insert(0, revised)
+    logger.info(f"[{study_id}] question agent on {qid} by {user.name}: "
+                f"{len(suggestions)} suggestion(s){' — ' + error if error else ''}")
+    return {"suggestions": suggestions, "error": error}
 
 
 @router.post("/studies/{study_id}/questionnaire/questions/approve-clean")
