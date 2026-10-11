@@ -1381,3 +1381,92 @@ def test_approve_all_refuses_a_definition_short_of_the_document(client):
     # The reviewer sees it before ever pressing approve.
     issues = test_client.get("/api/studies/study_q1/questionnaire").json()["validation_errors"]
     assert "marks 40 questions" in issues[0]
+
+
+def _with_unanswerable_q2(state):
+    """Q2 as the TRD study shipped it: a choice question with no answers."""
+    q2 = next(q for q in state["survey"].questions if q.qid == "Q2")
+    q2.options = []
+    q2.flags = ["EMPTY_OPTIONS"]
+
+
+def test_a_question_with_nothing_to_answer_cannot_be_approved(client):
+    test_client, session_factory, state = client
+    _with_unanswerable_q2(state)
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    resp = test_client.post("/api/studies/study_q1/questionnaire/questions/Q2/approve")
+    assert resp.status_code == 422
+    assert "nothing to answer" in resp.json()["detail"]
+
+
+def test_approve_clean_leaves_every_flagged_question_for_a_person(client):
+    """A non-blocking flag is still the system asking someone to look. Bulk
+    approval took "Empty options" as clean and a question with no answers
+    reached a test link."""
+    test_client, session_factory, state = client
+    _with_unanswerable_q2(state)
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    body = test_client.post("/api/studies/study_q1/questionnaire/questions/approve-clean").json()
+    held = {b["qid"]: b["flags"] for b in body["still_blocked"]}
+    assert "Q2" in held and "NOTHING_TO_ANSWER" in held["Q2"]
+    assert body["n_newly_approved"] == 1  # Q1 only
+
+
+def test_approve_all_refuses_an_unanswerable_question_even_if_approved_before(client):
+    """Approvals given before this check existed must not carry it to field."""
+    from api.db import set_questionnaire_approved_qids
+
+    test_client, session_factory, state = client
+    _with_unanswerable_q2(state)
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+    db = session_factory()
+    qid = test_client.get("/api/studies/study_q1/questionnaire").json()["id"]
+    set_questionnaire_approved_qids(db, qid, ["Q1", "Q2"])
+    db.close()
+
+    resp = test_client.post("/api/studies/study_q1/questionnaire/approve-all")
+    assert resp.status_code == 422
+    reasons = {u["qid"]: u["reasons"] for u in resp.json()["detail"]["unresolved"]}
+    assert any("nothing for a respondent to answer" in r for r in reasons["Q2"])
+
+
+def test_qa_runs_on_a_stored_study_and_the_record_is_shared(client):
+    """The QA loop on demand: it saves its record where the review page and the
+    copilot read it, and it never changes a question a person approved."""
+    test_client, session_factory, state = client
+    q2 = next(q for q in state["survey"].questions if q.qid == "Q2")
+    q2.options = [Option(code=1, label="Alpha |"), Option(code=2, label="Beta")]
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    record = test_client.post("/api/studies/study_q1/questionnaire/qa").json()
+    assert record["fixed"] == 1
+    assert test_client.get("/api/studies/study_q1/questionnaire").json()["qa"]["fixed"] == 1
+    labels = [o["label"] for o in test_client.get(
+        "/api/studies/study_q1/questionnaire/questions/Q2").json()["options"]]
+    assert labels == ["Alpha", "Beta"]
+
+
+def test_qa_never_changes_an_approved_question(client):
+    test_client, session_factory, state = client
+    q2 = next(q for q in state["survey"].questions if q.qid == "Q2")
+    q2.options = [Option(code=1, label="Alpha |"), Option(code=2, label="Beta")]
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+    test_client.post("/api/studies/study_q1/questionnaire/questions/Q2/approve")
+
+    record = test_client.post("/api/studies/study_q1/questionnaire/qa").json()
+    assert record["fixed"] == 0 and record["needs_you"] == 1
+    labels = [o["label"] for o in test_client.get(
+        "/api/studies/study_q1/questionnaire/questions/Q2").json()["options"]]
+    assert labels == ["Alpha |", "Beta"]

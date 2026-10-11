@@ -186,6 +186,8 @@ _BARE_TERMINATE_RE = re.compile(r"\s(TERMINATE|SCREEN\s*-?\s*OUT)\s*$")
 _TERMINATE_TAG = re.compile(r"\bTERMINATE\b|\bSCREEN\s*-?\s*OUT\b", re.I)
 _EXCLUSIVE_TAG = re.compile(r"\bEXCLUSIVE\b", re.I)
 _ANCHOR_TAG = re.compile(r"\bANCHOR\b", re.I)
+# Empty table cells at either end of a serialized row: "label |  | ".
+_EMPTY_CELLS = re.compile(r"^(?:\s*\|)+\s*|(?:\s*\|)+\s*$")
 
 # "CONTINUE IF AGES 18-60. TERMINATE ALL OTHERS" — the one range-screening
 # wording common enough across client documents to read without teaching.
@@ -895,6 +897,11 @@ def parse_prose_question(
         # "Male TERMINATE": the same instruction without its brackets. Written
         # in capitals, like every scripter instruction, so an answer that
         # merely uses the word ("I would terminate my plan") is untouched.
+        # An answer list written as a one-column table serializes as
+        # "Out-of-pocket costs | " — an empty cell beside each answer. The pipe
+        # reached respondents, and it hid trailing tags: "Other (specify)
+        # [ANCHOR] |" kept its bracket on screen and was never anchored.
+        line = _EMPTY_CELLS.sub("", line)
         bare = _BARE_TERMINATE_RE.search(line)
         if bare and not _OPTION_TAG_RE.search(line):
             line = f"{line[: bare.start()].rstrip()} [{bare.group(1)}]"

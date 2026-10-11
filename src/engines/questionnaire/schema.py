@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 
+from src.ai.known_failures import block_for
 from src.core.survey_definition import QuestionType
 
 # The exact enum values the model is allowed to choose. Derived from the real
@@ -413,6 +414,7 @@ def build_extraction_prompt(
         f"{_TYPE_GUIDANCE}\n\n"
         f"{_DIRECTIVE_GUIDANCE}\n\n"
         f"{_RULES}\n"
+        f"{block_for('extract')}\n"
         f"{spec}"
         f"{_study_block(study_context)}"
         f"{hint}"
@@ -670,4 +672,5 @@ def build_residue_prompt(
         + "\n\nDetermine ONLY these remaining fields:\n"
         + asks
         + "\n"
+        + block_for("residue", "Avoid these known mistakes:")
     )

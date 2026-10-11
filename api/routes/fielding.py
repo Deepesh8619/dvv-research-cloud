@@ -348,7 +348,13 @@ def create_link(
     # refused link was refused and saved at the same time. A test link skips
     # this: it exists to try the script, including a broken one, on nobody real.
     check = {"ok": True, "checks": []}
-    if not is_test:
+    # A test link is still CHECKED — it is the scripter's and QA's first look at
+    # the survey as a respondent meets it, and "Q2 has nothing to answer" is
+    # exactly what they are there to find. It is just never refused.
+    test_failures: list[dict] = []
+    if is_test:
+        test_failures = [c for c in _preflight(db, study_id)["checks"] if c["status"] == "fail"]
+    else:
         check = _preflight(db, study_id)
         if not check["ok"] and not (body.force if body else False):
             failing = [c for c in check["checks"] if c["status"] == "fail"]
@@ -408,6 +414,7 @@ def create_link(
     response = _link_response(link, fielding_link_counts(db, link.id))
     response.unenforced_routing = unenforced
     response.display_issues = display_issues
+    response.preflight_failures = test_failures
     return response
 
 

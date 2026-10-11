@@ -18,6 +18,7 @@ import re
 from collections.abc import Callable
 from datetime import date
 
+from src.ai.known_failures import block_for
 from src.ai.navigator import _compatible_chat, _run_agent_loop
 from src.ai.router import (
     CEREBRAS_DEFAULT_MODEL,
@@ -69,6 +70,7 @@ Rules:
   returns no rows, say what it did return rather than describing a table you do
   not have.
 
+{known_failures}
 Today is {today}. User: {user} ({role}).{page}"""
 
 
@@ -206,8 +208,8 @@ def run_copilot(
 ) -> tuple[str, list[dict], str]:
     """Answer one message. Returns (reply, tool results, provider that answered)."""
     today = date.today().isoformat()
-    prompt = SYSTEM_PROMPT.format(today=today, user=user, role=role,
-                                  page=f"\n{page}" if page else "")
+    prompt = SYSTEM_PROMPT.format(known_failures=block_for("copilot"), today=today, user=user,
+                                  role=role, page=f"\n{page}" if page else "")
     failures = []
     for label, url, key_env, model in _providers():
         def chat(messages, t, with_tools=True, tools_subset=None,  # noqa: B023 - bound per loop

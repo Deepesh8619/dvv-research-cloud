@@ -237,6 +237,9 @@ class QuestionnaireStatusResponse(BaseModel):
     # The study's instructions as read before any question: summary, groups,
     # rules (with the questions they govern), hidden variables, concerns.
     study_understanding: dict | None = None
+    # The QA loop's record: what the QA agent found, what the programmer agent
+    # fixed, and what is left for a person.
+    qa: dict | None = None
 
 
 class QuestionnaireSettingsRequest(BaseModel):
@@ -339,6 +342,8 @@ class FieldingLinkResponse(BaseModel):
     # gap in a sentence, a mask whose source is missing narrows nothing. Both
     # are decisions for a human before the link reaches a panel.
     display_issues: list[dict[str, str]] = []
+    # Test links only: the pre-link checks that WOULD refuse a live link.
+    preflight_failures: list[dict] = []
     counts: dict = {}
     # Vendor redirect templates (T10); None when unset.
     redirect_complete: str | None = None

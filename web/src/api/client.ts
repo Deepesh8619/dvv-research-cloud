@@ -411,6 +411,15 @@ export interface QuestionnaireStatus {
   } | null
   // The study's instructions as read before any question (study_understanding).
   study_understanding?: StudyUnderstanding | null
+  qa?: QARecord | null
+}
+
+export interface QARecord {
+  ran_at: string
+  checked: number
+  fixed: number
+  needs_you: number
+  entries: { qid: string; agent: 'qa' | 'programmer'; status: 'fixed' | 'needs_you'; detail: string; check?: string; evidence?: string }[]
 }
 
 export interface StudyUnderstanding {
@@ -616,6 +625,9 @@ export const questionnaireApi = {
       `/studies/${studyId}/questionnaire/questions/${qid}/approve`,
       {},
     ),
+
+  runQA: async (studyId: string) =>
+    api.post<QARecord>(`/studies/${studyId}/questionnaire/qa`),
 
   approveClean: async (studyId: string) =>
     api.post<{
@@ -832,6 +844,8 @@ export interface QuestionLinks {
 }
 
 export interface FieldingLink extends FieldingRedirects {
+  /** Test links only: checks that would refuse a live link. */
+  preflight_failures?: Array<{ id: string; label: string; detail: string; qids: string[] }>
   id: string
   study_id: string
   questionnaire_id: string

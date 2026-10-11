@@ -594,11 +594,16 @@ function CreatePanel({
 
   // A test link skips the pre-link check panel entirely — that check exists to
   // protect real respondents, and a test link never has any.
+  const [testWarnings, setTestWarnings] = useState<
+    NonNullable<FieldingLink['preflight_failures']>
+  >([])
   const handleCreateTest = async () => {
     setCreating(true)
     setError(null)
+    setTestWarnings([])
     try {
-      await fieldingApi.createLink(studyId, undefined, undefined, false, null, true)
+      const res = await fieldingApi.createLink(studyId, undefined, undefined, false, null, true)
+      setTestWarnings(res.data.preflight_failures ?? [])
       onCreated()
     } catch (err) {
       setError(errorMessage(err) || 'Could not create test link')
@@ -755,6 +760,22 @@ function CreatePanel({
       )}
 
       {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+      {testWarnings.length > 0 && (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <p className="font-medium">
+            Test link created — but a live link would be refused until these are fixed:
+          </p>
+          <ul className="mt-1 list-disc pl-5 space-y-0.5">
+            {testWarnings.map((w) => (
+              <li key={w.id}>
+                {w.label}
+                {w.qids.length > 0 && <span className="font-mono"> ({w.qids.join(', ')})</span>}
+                {w.detail && <span className="block text-amber-700">{w.detail}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

@@ -72,6 +72,13 @@ export const FLAG_INFO: Record<string, FlagInfo> = {
     blocking: true,
     severity: 'error',
   },
+  QA_ISSUE: {
+    label: 'QA found a problem',
+    description:
+      'The QA agent tested this question as a respondent sees it and against the document, and the programmer agent could not fix it safely. What it found is quoted below.',
+    blocking: false,
+    severity: 'warn',
+  },
   BRIEF_RULE: {
     label: 'Study instruction applies',
     description:

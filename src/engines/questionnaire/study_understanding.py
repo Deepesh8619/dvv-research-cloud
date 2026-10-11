@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import re
 
+from src.ai.known_failures import block_for
 from src.ai.router import BackendUnavailable, ModelOutputError, run_task
 from src.intake.questionnaire_loader import QuestionChunk
 
@@ -137,7 +138,9 @@ def build_prompt(brief: str, index: list[str]) -> str:
         "`evidence`, the instruction line it comes from, copied exactly.\n"
         "- Name questions only from the question list, exactly as written there.\n"
         "- State only what the instructions say or directly imply. Leave a list "
-        "empty rather than invent.\n\n"
+        "empty rather than invent.\n"
+        + block_for("understand")
+        + "\n"
         f"=== STUDY INSTRUCTIONS ===\n{brief}\n\n"
         "=== QUESTIONS IN THIS DOCUMENT (name: opening words) ===\n" + "\n".join(index)
     )

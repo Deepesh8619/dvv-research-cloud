@@ -496,3 +496,18 @@ def test_a_base_tag_is_a_label_not_part_of_the_sentence():
     assert f.text == "How satisfied are you with TMS outcomes?"
     assert "BASE: ALL" in " ".join(f.directives)
     assert [o.label for o in f.options] == ["Very satisfied", "Not satisfied"]
+
+
+def test_an_answer_list_written_as_a_one_column_table_loses_its_separators():
+    """"Other (specify) [ANCHOR] |" reached respondents with the pipe, and the
+    pipe hid the tag, so the answer was never anchored."""
+    from src.engines.questionnaire.prose_directives import parse_prose_question
+
+    fields = parse_prose_question(
+        "Q5. Which factors matter most? Select all that apply.\n"
+        "Safety | \nEfficacy | \nOther (specify) [ANCHOR] | ",
+        "Q5", None,
+    )
+    labels = [o.label for o in fields.options]
+    assert labels == ["Safety", "Efficacy", "Other (specify)"]
+    assert fields.options[-1].anchored

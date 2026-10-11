@@ -51,6 +51,9 @@ class TableQuestion:
     cols: list[Option]
     randomize_rows: bool = False
     evidence: str = ""
+    # Row label -> the condition written on that row ("Q10.1>0"), kept so the
+    # bracket never reaches a respondent and the rule is not lost.
+    row_conditions: dict[str, str] | None = None
 
 
 def _clean(cell: str) -> str:
@@ -239,6 +242,91 @@ def _row_condition(row: list[str]) -> Expression | None:
     return None
 
 
+_COLUMNS_BANNER = re.compile(r"^\s*COLUMNS?\s*:?\s*$", re.I)
+_ROWS_BANNER = re.compile(r"^\s*\[?\s*ROWS?\b", re.I)
+_BRACKETED = re.compile(r"^\s*\[[^\]]*\]\s*$")
+_ROW_CONDITION = re.compile(r"\[\s*(?:SHOW|ASK)\s+IF\s+([^\]]+)\]", re.I)
+
+
+def _is_banner(row: list[str], pattern: re.Pattern) -> bool:
+    cells = [c for c in row if (c or "").strip()]
+    return bool(cells) and all(pattern.match(c) for c in cells)
+
+
+def _merged_value(row: list[str]) -> str:
+    """A row whose cells are one merged cell repeated: that one value."""
+    return next((c.strip() for c in row if (c or "").strip()), "")
+
+
+def stacked_grid(rows: list[list[str]]) -> TableQuestion | None:
+    """A grid written as a stack rather than side by side:
+
+        COLUMNS:  | COLUMNS:            | COLUMNS: | ...
+        (opt-out) | Not at all satisfied |          | Somewhat | ... | Extremely
+        0         | 1                    | 2        | 3        | ... | 5
+        [ROWS, RANDOMIZE] | [ROWS, RANDOMIZE] | ...
+        TMS       | TMS                  | TMS      | ...   (one merged cell)
+
+    Both TRD studies write every rating grid this way, and the side-by-side
+    reader found neither rows nor columns in it — the respondent got a grid
+    with nothing in it.
+    """
+    cols_at = next((i for i, r in enumerate(rows) if _is_banner(r, _COLUMNS_BANNER)), None)
+    if cols_at is None:
+        return None
+    # The code row ("0 | 1 | 2 | 3 | 4 | 5") closes the column header. What
+    # follows is an optional banner — "[ROWS, RANDOMIZE]" or just "[RANDOMIZE]"
+    # — and then the items.
+    code_at = next(
+        (i for i in range(cols_at + 1, len(rows))
+         if [c for c in rows[i] if c.strip()]
+         and all(re.fullmatch(r"-?\d+", c.strip()) for c in rows[i] if c.strip())),
+        None,
+    )
+    if code_at is None:
+        return None
+    code_row = rows[code_at]
+    header = rows[cols_at + 1 : code_at + 1]
+    rows_at = code_at
+    if code_at + 1 < len(rows) and (
+        _is_banner(rows[code_at + 1], _ROWS_BANNER)
+        or _is_banner(rows[code_at + 1], _BRACKETED)
+    ):
+        rows_at = code_at + 1
+    label_row = next((r for r in header if r is not code_row), [""] * len(code_row))
+    cols: list[Option] = []
+    seen: set[int] = set()
+    for label, code in zip(label_row + [""] * len(code_row), code_row, strict=False):
+        if not code.strip() or int(code) in seen:
+            continue  # a merged cell repeats its column; keep it once
+        seen.add(int(code))
+        cols.append(Option(code=int(code), label=_clean(label) or code.strip()))
+    if len(cols) < _MIN_GRID_COLUMNS:
+        return None
+
+    statements: list[Option] = []
+    conditions: dict[str, str] = {}
+    for row in rows[rows_at + 1 :]:
+        raw = _merged_value(row)
+        label = _clean(raw)
+        if not label:
+            continue
+        condition = _ROW_CONDITION.search(raw)
+        if condition:
+            conditions[label] = condition.group(1).strip()
+        statements.append(Option(code=len(statements) + 1, label=label))
+    if len(statements) < 1:
+        return None
+    return TableQuestion(
+        rows=statements,
+        cols=cols,
+        randomize_rows=bool(re.search(r"RANDOMI[SZ]E", " ".join(rows[rows_at]), re.I)),
+        evidence=f"a stacked COLUMNS/ROWS table: {len(cols)}-point scale over "
+                 f"{len(statements)} rows",
+        row_conditions=conditions or None,
+    )
+
+
 def question_from_tables(
     tables: list[list[list[str]]], prose_options: list[Option]
 ) -> TableQuestion | None:
@@ -256,7 +344,7 @@ def question_from_tables(
     statements in a delivery file.
     """
     for rows in tables:
-        whole = grid(rows)
+        whole = stacked_grid(rows) or grid(rows)
         if whole:
             return whole
 

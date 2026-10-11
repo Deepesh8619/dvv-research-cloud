@@ -547,3 +547,34 @@ def test_word_list_formatting_is_captured(tmp_path) -> None:
     assert listed["Beta"] is True
     assert listed["Q1. Which do you use?"] is False
     assert listed["[PN: RANDOMIZE]"] is False
+
+
+def test_a_question_whose_base_tag_was_forgotten_still_starts_its_own_question():
+    """Both TRD studies had one: a question sentence straight after the previous
+    question's answer table, without the [BASE:] tag every other question has.
+    It rode inside the question before it and was never asked."""
+    from src.intake.questionnaire_loader import DocumentBlock
+
+    rows = [["Recommend one treatment", ""], ["Present several options", ""]]
+    blocks = [
+        DocumentBlock("paragraph", "[BASE: ALL] How do you approach the referral? Select one.", 0),
+        DocumentBlock("table", "\n".join(" | ".join(r) for r in rows), 1, rows=rows),
+        DocumentBlock("paragraph", "Thinking about the patients you refer, what percentage "
+                      "go to each setting? [0-100, MUST SUM TO 100%]", 2),
+        DocumentBlock("paragraph", "[BASE: ALL] How satisfied are you overall?", 3),
+    ]
+    chunks = segment_into_questions(blocks)
+    assert [c.candidate_qid for c in chunks] == ["Q1", "Q2", "Q3"]
+    assert chunks[1].chunk_text.startswith("Thinking about the patients you refer")
+
+
+def test_a_note_after_an_answer_table_stays_with_its_question():
+    from src.intake.questionnaire_loader import DocumentBlock
+
+    rows = [["Yes", ""], ["No", ""]]
+    blocks = [
+        DocumentBlock("paragraph", "[BASE: ALL] Do you prescribe TMS?", 0),
+        DocumentBlock("table", "\n".join(" | ".join(r) for r in rows), 1, rows=rows),
+        DocumentBlock("paragraph", "[TERMINATE IF NO — does this apply to referrers too?]", 2),
+    ]
+    assert len(segment_into_questions(blocks)) == 1
