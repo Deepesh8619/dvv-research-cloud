@@ -1239,6 +1239,80 @@ def run_questionnaire_qa(
     return record
 
 
+def _with_edits(stored: Question, current: dict | None) -> Question:
+    """The stored question with the editor's unsaved fields laid over it."""
+    if not current:
+        return stored
+    try:
+        return Question.from_dict({**stored.to_dict(), **current})
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"Unreadable question: {exc}") from exc
+
+
+# What the link does with an element that depends on earlier answers. In a
+# preview there are no earlier answers, so each is removed and said out loud.
+_DEPENDS_ON_ANSWERS = {
+    "visibleIf": "In the link this question only shows when its condition is met.",
+    "enableIf": "In the link this question is only answerable when its condition is met.",
+    "choicesVisibleIf": "In the link only some of these answers show, depending on earlier "
+                        "answers. All are shown here.",
+    "rowsVisibleIf": "In the link only some rows show, depending on earlier answers.",
+}
+
+
+class QuestionPreviewRequest(BaseModel):
+    # The question as the editor shows it, unsaved.
+    current: dict | None = None
+
+
+@router.post("/studies/{study_id}/questionnaire/questions/{qid}/preview")
+def question_preview(
+    study_id: str,
+    qid: str,
+    body: QuestionPreviewRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The question exactly as the survey link would render it — compiled by
+    the link's own compiler from the editor's unsaved state. Saves nothing."""
+    from src.renderers.surveyjs_compiler import _compile_question
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    if qid not in survey:
+        raise HTTPException(status_code=404, detail=f"Question {qid} not found")
+    question = _with_edits(survey[qid], body.current)
+    by_qid = {q.qid: q for q in survey.questions}
+    by_qid[qid] = question
+    try:
+        element = _compile_question(question, by_qid)
+    except Exception as exc:  # the link could not build it either — say so
+        return {"survey_json": None, "notes": [f"The link cannot build this question: {exc}"]}
+    notes = [why for key, why in _DEPENDS_ON_ANSWERS.items() if element.pop(key, None)]
+    if "{" in (element.get("title") or ""):
+        notes.append("Text in braces is filled in from an earlier answer in the link.")
+    if element.get("type") == "html" and question.type is not QuestionType.INFO:
+        notes.append("The link shows this as text only — a respondent cannot answer it.")
+    # What the QA agent finds on the edited question, while it is being edited:
+    # the problem shows up with the change that caused it, not after saving.
+    from src.engines.questionnaire.qa_loop import _tested, qa_check
+
+    problems = [
+        f"{i.detail} ({i.evidence})" if i.evidence else i.detail
+        for i in (qa_check(question, by_qid) if _tested(question) else [])
+    ]
+    return {
+        "problems": problems,
+        "survey_json": {
+            "showQuestionNumbers": "off",
+            "showNavigationButtons": False,
+            "pages": [{"name": "preview", "elements": [element]}],
+        },
+        "notes": notes,
+        "theme": survey.metadata.get("theme"),
+    }
+
+
 class QuestionAgentRequest(BaseModel):
     # The analyst's words. Omitted: only the programmer agent's repairs.
     instruction: str | None = None
@@ -1261,13 +1335,7 @@ def question_agent(
     survey = _load_definition(db, questionnaire)
     if qid not in survey:
         raise HTTPException(status_code=404, detail=f"Question {qid} not found")
-    stored = survey[qid]
-    base = stored
-    if body.current:
-        try:
-            base = Question.from_dict({**stored.to_dict(), **body.current})
-        except (KeyError, TypeError, ValueError) as exc:
-            raise HTTPException(status_code=422, detail=f"Unreadable question: {exc}") from exc
+    base = _with_edits(survey[qid], body.current)
     by_qid = {q.qid: q for q in survey.questions}
     suggestions = suggest_repairs(base, by_qid)
     error = None

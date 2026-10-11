@@ -4,7 +4,6 @@ import QuestionSymbol from '../components/respondent/symbols'
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Model } from 'survey-core'
-import { BorderlessLight } from 'survey-core/themes'
 import { Survey } from 'survey-react-ui'
 import { GridMaskSource, PipeVariable, errorMessage, fieldingApi } from '../api/client'
 import { Theme, themeFor } from '../api/themes'
@@ -18,6 +17,7 @@ import {
 } from '../components/Icons'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { registerRespondentControls } from '../components/respondent/controls'
+import { applySurveyTheme, gradientBar } from '../components/respondent/surveyLook'
 
 // Grid, rank and number questions are drawn by us — see controls.tsx.
 registerRespondentControls()
@@ -42,26 +42,6 @@ type Phase = 'loading' | 'welcome' | 'error' | 'closed' | 'paused' | 'running' |
 // Absent/unknown -> the DVV Indigo default. Presentation only; no logic depends
 // on it. THEMES is the ONE source of truth, shared with the pickers.
 const DEFAULT_THEME = themeFor(null)
-
-// The 4px card top strip — the one deliberate flourish per the design spec.
-function gradientBar(theme: Theme): string {
-  return `linear-gradient(90deg, ${theme.accent}, ${theme.accentDeep})`
-}
-
-// One polished default theme + the segment accent, applied via applyTheme. Keeps
-// the modern-survey look (styled inputs, progress bar) tied to the accent; the
-// deep tone drives pressed/hover, the ~10%-alpha light drives the selected tint.
-function applySurveyTheme(survey: Model, theme: Theme): void {
-  survey.applyTheme({
-    ...BorderlessLight,
-    cssVariables: {
-      ...BorderlessLight.cssVariables,
-      '--sjs-primary-backcolor': theme.accent,
-      '--sjs-primary-backcolor-dark': theme.accentDeep,
-      '--sjs-primary-backcolor-light': `${theme.accent}1A`, // ~10% alpha selected tint
-    },
-  })
-}
 
 function Centered({ theme, children }: { theme: Theme; children: React.ReactNode }) {
   return (

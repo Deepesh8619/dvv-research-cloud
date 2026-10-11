@@ -18,6 +18,7 @@ import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../c
 import { flagInfo } from '../components/questionnaireFlags'
 import CorrectionBox from '../components/CorrectionBox'
 import QuestionAgent from '../components/review/QuestionAgent'
+import QuestionPreview from '../components/review/QuestionPreview'
 import { removeAndRenumber } from '../lib/optionCodes'
 import ExtractionProvenance from '../components/ExtractionProvenance'
 import TeachFormat from '../components/TeachFormat'
@@ -847,12 +848,23 @@ export function QuestionDetail({
         />
       )}
 
+      <QuestionPreview
+        studyId={studyId}
+        qid={q.qid}
+        current={patchFromState}
+        version={JSON.stringify(state)}
+      />
+
       {/* Text */}
       <div>
-        <label className="text-xs font-medium uppercase tracking-wide text-slate-500 block mb-1">
+        <label
+          htmlFor={`question-text-${q.qid}`}
+          className="text-xs font-medium uppercase tracking-wide text-slate-500 block mb-1"
+        >
           Question text
         </label>
         <textarea
+          id={`question-text-${q.qid}`}
           value={state.text}
           disabled={!canWrite}
           onChange={(e) => set('text', e.target.value)}
@@ -866,8 +878,14 @@ export function QuestionDetail({
 
       {/* Type */}
       <div>
-        <label className="text-xs font-medium uppercase tracking-wide text-slate-500 block mb-1">Type</label>
+        <label
+          htmlFor={`question-type-${q.qid}`}
+          className="text-xs font-medium uppercase tracking-wide text-slate-500 block mb-1"
+        >
+          Type
+        </label>
         <select
+          id={`question-type-${q.qid}`}
           value={state.type}
           disabled={!canWrite}
           onChange={(e) => set('type', e.target.value)}

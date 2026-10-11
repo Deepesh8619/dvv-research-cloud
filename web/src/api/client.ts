@@ -636,6 +636,13 @@ export const questionnaireApi = {
       {},
     ),
 
+  /** The question as the link would render it, from unsaved edits. */
+  preview: async (studyId: string, qid: string, current: Record<string, unknown>) =>
+    api.post<{ survey_json: Record<string, unknown> | null; notes: string[]; problems?: string[]; theme?: string | null }>(
+      `/studies/${studyId}/questionnaire/questions/${qid}/preview`,
+      { current },
+    ),
+
   /** Suggested fixes for one question — saves nothing. */
   questionAgent: async (
     studyId: string,
