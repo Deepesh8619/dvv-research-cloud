@@ -108,3 +108,57 @@ def test_identical_extractions_report_no_change():
     qs = [_q("Q1", terminate_if={"op": "eq"}), _q("Q2", options=[{"code": 1, "label": "Y"}])]
     counts = diff_extractions(qs, [dict(q) for q in qs]).counts()
     assert counts == {"improved": 0, "regressed": 0, "changed": 0, "unchanged": 2}
+
+
+# --- Honest verdicts after a re-read renumbers, cleans, or adds information --
+
+
+def _opt(*labels):
+    return [{"code": i, "label": label} for i, label in enumerate(labels, start=1)]
+
+
+def test_a_renumbered_question_is_compared_with_itself():
+    """A recovered question shifts every number after it. Matched by number,
+    Q15 was compared with what had been Q14 and read as a regression."""
+    before = [_q("Q4", text="How satisfied are you with TMS?", options=_opt("Yes", "No")),
+              _q("Q5", text="Which factors matter most to your patients?", options=_opt("A", "B"))]
+    after = [_q("Q4", text="How satisfied are you with TMS?", options=_opt("Yes", "No")),
+             _q("Q5", text="A question that was recovered", options=_opt("X", "Y")),
+             _q("Q6", text="Which factors matter most to your patients?", options=_opt("A", "B"))]
+    d = diff_extractions(before, after).to_dict()
+    moved = next(q for q in d["questions"] if q["qid"] == "Q6")
+    assert moved["renumbered_from"] == "Q5" and moved["verdict"] == "unchanged"
+    assert d["counts"]["regressed"] == 0
+
+
+def test_answers_that_only_lost_separators_are_improved():
+    before = [_q(options=_opt("Safety |", "Other (specify) [ANCHOR] |"))]
+    after = [_q(options=_opt("Safety", "Other (specify)"))]
+    assert diff_extractions(before, after).to_dict()["counts"]["improved"] == 1
+
+
+def test_a_grid_whose_options_became_rows_and_a_scale_is_not_a_regression():
+    before = [_q(type="grid_single", options=_opt("COLUMNS:", "0 | 1 | 2"))]
+    after = [_q(type="grid_single", options=[], rows=_opt("TMS", "Spravato"),
+                cols=_opt("Not at all", "Extremely"))]
+    assert diff_extractions(before, after).to_dict()["counts"]["improved"] == 1
+
+
+def test_a_question_that_can_no_longer_be_answered_is_still_a_regression():
+    before = [_q(options=_opt("Yes", "No"))]
+    after = [_q(options=[])]
+    assert diff_extractions(before, after).to_dict()["counts"]["regressed"] == 1
+
+
+def test_an_informational_flag_is_not_harm():
+    before = [_q(options=_opt("Yes", "No"))]
+    after = [_q(options=_opt("Yes", "No"), flags=["BRIEF_RULE"])]
+    assert diff_extractions(before, after).to_dict()["counts"]["regressed"] == 0
+
+
+def test_quality_is_measured_the_same_way_on_both_sides():
+    before = [_q("Q1", options=[]), _q("Q2", options=_opt("Yes", "No"))]
+    after = [_q("Q1", options=_opt("Yes", "No")), _q("Q2", options=_opt("Yes", "No"))]
+    quality = diff_extractions(before, after).to_dict()["quality"]
+    assert quality["before"]["answerable_pct"] == 50
+    assert quality["after"]["answerable_pct"] == 100

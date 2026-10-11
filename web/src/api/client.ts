@@ -1229,6 +1229,8 @@ export interface QuestionDiff {
   qid: string
   verdict: 'improved' | 'regressed' | 'changed' | 'unchanged'
   only_in: 'before' | 'after' | null
+  /** The number this question had before, when the re-read renumbered it. */
+  renumbered_from?: string | null
   flags_cleared: string[]
   flags_added: string[]
   changes: FieldChange[]
@@ -1237,7 +1239,15 @@ export interface QuestionDiff {
 export interface ExtractionDiff {
   counts: { improved: number; regressed: number; changed: number; unchanged: number }
   n_questions: number
+  /** Whole-questionnaire quality, measured the same way on both sides. */
+  quality?: { before: DiffQuality; after: DiffQuality }
   questions: QuestionDiff[]
+}
+
+export interface DiffQuality {
+  n: number
+  answerable_pct: number | null
+  qa_pass_pct: number | null
 }
 
 export interface PreviewState {
