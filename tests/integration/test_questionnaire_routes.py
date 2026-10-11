@@ -1502,3 +1502,25 @@ def test_saving_a_question_keeps_every_setting_of_its_answers(client):
     stored = test_client.get("/api/studies/study_q1/questionnaire/questions/Q2").json()
     none = stored["options"][1]
     assert none["exclusive"] is True and none["anchored"] is True
+
+
+def test_the_preview_is_the_links_own_rendering_of_unsaved_edits(client):
+    """Compiled by the link's compiler from what the editor shows, unsaved;
+    a condition on earlier answers is shown and said, QA is run live."""
+    test_client, session_factory, _ = client
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    body = test_client.post(
+        "/api/studies/study_q1/questionnaire/questions/Q2/preview",
+        json={"current": {"text": "Edited wording?", "options": [],
+                          "show_if": {"op": "eq", "qid": "Q1", "value": 1}}},
+    ).json()
+    element = body["survey_json"]["pages"][0]["elements"][0]
+    assert element["title"] == "Edited wording?"
+    assert "visibleIf" not in element
+    assert any("only shows when its condition is met" in n for n in body["notes"])
+    assert any("nothing to answer" in p for p in body["problems"])
+    stored = test_client.get("/api/studies/study_q1/questionnaire/questions/Q2").json()
+    assert stored["text"] == "Which brands do you know?"  # nothing saved
