@@ -610,6 +610,9 @@ def _trailing_routing_directives(current: list[DocumentBlock]) -> list[DocumentB
     return tail
 
 
+_LETTERED = re.compile(r"^\s*[A-H][.)]\s+\S")
+
+
 def _asks_a_question(block: DocumentBlock) -> bool:
     """A paragraph worded as a question to a respondent, not a scripter note."""
     text = block.text.strip()
@@ -677,9 +680,12 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
             base_counter += 1
             qid = f"Q{base_counter}"
         elif (
-            not is_boundary and base_tags_open and current
-            and current[-1].block_type == "table" and _asks_a_question(block)
+            not is_boundary and base_tags_open and current and _asks_a_question(block)
+            and (current[-1].block_type == "table" or _LETTERED.match(block.text))
         ):
+            # Also "A. Thinking about your TRD patients, what percentage...?":
+            # lettered sub-questions under an intro ("For the following
+            # questions...") were read as the previous question's answers.
             # A question whose [BASE:] tag the author forgot. A question's
             # answer table ends that question, so a question sentence straight
             # after one starts the next — a scripter reads it that way. Without

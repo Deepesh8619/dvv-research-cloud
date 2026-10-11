@@ -739,6 +739,7 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     # "Select up to 2." A cap nobody records is a cap nobody enforces, and the
     # question looks right on screen because the sentence is still in it.
     validation.update(fields.select_limits)
+    validation.update(fields.bounds)
     # MR techniques the question declares about itself. Recorded structurally
     # so the review UI can show them and the data cross-check can verify a mask
     # actually held — a mis-scripted mask is invisible in the output otherwise.

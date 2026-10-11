@@ -67,6 +67,10 @@ _ANY_NOTE = re.compile(r"\s*\[[^\]]*\]\s*")
 # What must never reach a respondent's screen: a bracketed scripter note, or the
 # "|" that separates table cells in the stored text.
 _SCRIPTER_RESIDUE = re.compile(r"\[[^\]]*\]|\s\|(?:\s|$)|^\|")
+# An answer that is really a question: it asks ("...?"), or it is an entry
+# prompt ("Fill in", "Record number") — what respondents answer, not choose.
+_ASKS = re.compile(r"\?\s*(?:\(|\[|$)|\bFill\s+in\b|\bRecord\s+(?:number|age|answer)\b", re.I)
+_SUM_STATED = re.compile(r"(?:SUM|ADD)(?:\s+UP)?\s+TO\s+(?:AT\s+LEAST\s+)?\d", re.I)
 _EDGE_PIPES = re.compile(r"^(?:\s*\|)+\s*|(?:\s*\|)+\s*$")
 # A table's header row glued onto the end of the question: "...Fill in | % |".
 # Short cells only, so a real sentence that happens to contain "|" is left alone.
@@ -156,6 +160,23 @@ def qa_check(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
                     "the document says who is asked this, and the survey asks everyone",
                     f"[{body}]",
                 ))
+    asking = [o.label for o in (q.options or []) if _ASKS.search(o.label)]
+    if asking:
+        issues.append(Issue(
+            "question_inside_answers",
+            f"{len(asking)} answer(s) read like questions — later questions were "
+            "probably swallowed into this one and would never be asked",
+            "; ".join(a[:70] for a in asking[:2]),
+        ))
+    summed = _own_sum(q)
+    if summed and not (q.type is QuestionType.NUMERIC and q.rows):
+        issues.append(Issue(
+            "sum_not_applied",
+            f"the document says these {len(summed[0])} answers must add up to "
+            f"{'at least ' if summed[2] else ''}{summed[1]}; the survey asks it as "
+            f"{q.type.value}",
+            "; ".join(summed[0][:3]),
+        ))
     for row, condition in ((q.validation or {}).get("row_conditions") or {}).items():
         issues.append(Issue(
             "row_condition_not_applied",
@@ -179,8 +200,22 @@ def _reread(q: Question) -> str | None:
     return "re-read it from the document with today's parser"
 
 
+def _own_sum(q: Question) -> tuple | None:
+    """A sum the question ITSELF states, with the boxes under it.
+
+    Only the question's own wording counts: an older reading could hold the
+    NEXT question's text too, and a single-choice question that swallowed a
+    sum table must never be turned into number boxes because of it.
+    """
+    lines = (q.source_text or "").strip().splitlines()
+    own = f"{q.text or ''}\n{lines[0] if lines else ''}"
+    if not _SUM_STATED.search(own):
+        return None
+    return read_constant_sum(q.source_text or "")
+
+
 def _constant_sum(q: Question) -> str | None:
-    found = read_constant_sum(q.source_text or "")
+    found = _own_sum(q)
     if found is None or (q.type is QuestionType.NUMERIC and q.rows):
         return None
     make_constant_sum(q, *found)

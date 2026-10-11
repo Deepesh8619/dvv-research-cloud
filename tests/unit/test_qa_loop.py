@@ -93,3 +93,14 @@ def test_a_table_header_glued_to_the_question_text_is_cut_off():
     record = run_qa(_survey(q))
     assert q.text == "What percentage received each of the following? Fill in"
     assert [e["status"] for e in record["entries"]] == ["fixed"]
+
+
+def test_qa_notices_questions_swallowed_into_an_answer_list():
+    q = Question(qid="Q6", type=QuestionType.SINGLE, text="When do you first discuss it?",
+                 options=[Option(1, "After 1 treatment"),
+                          Option(2, "A. What percentage do you discuss it with?"),
+                          Option(3, "Fill in [0-100]_____")],
+                 source_text="Q6. When do you first discuss it?")
+    from src.engines.questionnaire.qa_loop import qa_check
+
+    assert "question_inside_answers" in [i.check for i in qa_check(q, {"Q6": q})]

@@ -414,6 +414,16 @@ export interface QuestionnaireStatus {
   qa?: QARecord | null
 }
 
+export interface AgentSuggestion {
+  source: string
+  explanation: string
+  question: Question
+  change: QuestionDiff
+  qa_before: string[]
+  qa_after: string[]
+  dropped: string[]
+}
+
 export interface QARecord {
   ran_at: string
   checked: number
@@ -624,6 +634,17 @@ export const questionnaireApi = {
     api.post<{ qid: string; approved: boolean; n_approved: number }>(
       `/studies/${studyId}/questionnaire/questions/${qid}/approve`,
       {},
+    ),
+
+  /** Suggested fixes for one question — saves nothing. */
+  questionAgent: async (
+    studyId: string,
+    qid: string,
+    body: { instruction?: string; current?: Record<string, unknown> },
+  ) =>
+    api.post<{ suggestions: AgentSuggestion[]; error: string | null }>(
+      `/studies/${studyId}/questionnaire/questions/${qid}/agent`,
+      body,
     ),
 
   runQA: async (studyId: string) =>
@@ -1229,6 +1250,8 @@ export interface QuestionDiff {
   qid: string
   verdict: 'improved' | 'regressed' | 'changed' | 'unchanged'
   only_in: 'before' | 'after' | null
+  /** The number this question had before, when the re-read renumbered it. */
+  renumbered_from?: string | null
   flags_cleared: string[]
   flags_added: string[]
   changes: FieldChange[]
@@ -1237,7 +1260,15 @@ export interface QuestionDiff {
 export interface ExtractionDiff {
   counts: { improved: number; regressed: number; changed: number; unchanged: number }
   n_questions: number
+  /** Whole-questionnaire quality, measured the same way on both sides. */
+  quality?: { before: DiffQuality; after: DiffQuality }
   questions: QuestionDiff[]
+}
+
+export interface DiffQuality {
+  n: number
+  answerable_pct: number | null
+  qa_pass_pct: number | null
 }
 
 export interface PreviewState {

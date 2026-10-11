@@ -186,6 +186,9 @@ _BARE_TERMINATE_RE = re.compile(r"\s(TERMINATE|SCREEN\s*-?\s*OUT)\s*$")
 _TERMINATE_TAG = re.compile(r"\bTERMINATE\b|\bSCREEN\s*-?\s*OUT\b", re.I)
 _EXCLUSIVE_TAG = re.compile(r"\bEXCLUSIVE\b", re.I)
 _ANCHOR_TAG = re.compile(r"\bANCHOR\b", re.I)
+_ENTRY_PROMPT = re.compile(r"^\s*(?:Fill\s+in|Enter|Record)\b", re.I)
+# "[0-100]", "[0-1,000]" — a pure number range, nothing else in the bracket.
+_NUMBER_RANGE = re.compile(r"(\d[\d,]*)\s*-\s*(\d[\d,]*)")
 # Empty table cells at either end of a serialized row: "label |  | ".
 _EMPTY_CELLS = re.compile(r"^(?:\s*\|)+\s*|(?:\s*\|)+\s*$")
 
@@ -365,6 +368,8 @@ class ProseFields:
     # How many options the respondent may tick: {"min_select", "max_select"}.
     # Empty for the overwhelming majority of questions, which say nothing.
     select_limits: dict[str, int] = field(default_factory=dict)
+    # The number range an entry box accepts: {"min", "max"}, from "[0-100]".
+    bounds: dict[str, int] = field(default_factory=dict)
     # Sampling targets found in the option list ("TARGET 50/50 GENDER SPLIT").
     # Not answers, and not noise either: they are the quota this study needs.
     quota_hints: list[str] = field(default_factory=list)
@@ -875,6 +880,13 @@ def parse_prose_question(
             directives.append(line.strip())
             continue
 
+        if _ENTRY_PROMPT.match(line):
+            # "Fill in [0-100]_____ [%]" is where the respondent types — an
+            # instruction about the answer box, never an answer to choose.
+            directives.append(line.strip())
+            directives.extend(bracket_bodies(line))
+            continue
+
         if is_note_line(line):
             # "Note: Healthcare decisions include researching where to seek
             # care..." sat under S5's options and became answer code 1.
@@ -1116,6 +1128,21 @@ def parse_prose_question(
                 else:
                     fields.terminate_if = None
                     fields.missing.append("terminate")
+
+    # An entry with a stated number range is a number. "Fill in [0-100]" and
+    # "[0-1,000] ... [OE]" both mean "type a number from here to here": OE is
+    # "open entry" in these documents, not "free text", when a range is given.
+    entry = (
+        any(_ENTRY_PROMPT.match(d) for d in directives)
+        or fields.qtype is QuestionType.OPEN_TEXT
+    )
+    span = next((m for d in directives if (m := _NUMBER_RANGE.fullmatch(d.strip()))), None)
+    if entry and span and not fields.options and fields.qtype in (None, QuestionType.OPEN_TEXT):
+        low, high = (int(g.replace(",", "")) for g in span.groups())
+        if low < high:
+            fields.qtype = QuestionType.NUMERIC
+            fields.bounds = {"min": low, "max": high}
+            fields.evidence["type"] = f"a number from {low} to {high}"
 
     if not fields.text:
         fields.missing.append("text")

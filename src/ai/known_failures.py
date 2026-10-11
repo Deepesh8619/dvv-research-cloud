@@ -70,6 +70,14 @@ KNOWN_FAILURES: tuple[KnownFailure, ...] = (
         frozenset({"extract"}),
     ),
     KnownFailure(
+        "\"Fill in [0-100] ____\" is an entry box, never an answer to choose: a number with "
+        "that range. Lettered lines \"A. ...?\" under \"For the following questions\" are "
+        "separate questions, not answers.",
+        "Four TRD referrer percentage questions (A-D) were read as answers of the question "
+        "before them; one survived as a choice with the single answer \"Fill in\". 2026-10-11.",
+        frozenset({"extract"}),
+    ),
+    KnownFailure(
         "An instruction about who is NOT screened out (\"Do not term respondents from the CRM\") "
         "governs every screen-out in the survey — name every screener question it applies to.",
         "Bubble's brief exempted CRM respondents; every screen-out would have removed them. "

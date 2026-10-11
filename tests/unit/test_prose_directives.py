@@ -511,3 +511,25 @@ def test_an_answer_list_written_as_a_one_column_table_loses_its_separators():
     labels = [o.label for o in fields.options]
     assert labels == ["Safety", "Efficacy", "Other (specify)"]
     assert fields.options[-1].anchored
+
+
+def test_a_fill_in_entry_with_a_range_is_a_number_not_an_answer():
+    """"Fill in [0-100]____ [%]" was read as the question's only answer."""
+    from src.engines.questionnaire.prose_directives import parse_prose_question
+
+    fields = parse_prose_question(
+        "A. What percentage do you discuss treatment with?\nFill in [0-100]_____________ [%]",
+        "Q7", None,
+    )
+    assert fields.qtype is QuestionType.NUMERIC and fields.options == []
+    assert fields.bounds == {"min": 0, "max": 100}
+
+
+def test_open_entry_with_a_number_range_is_a_number_and_without_one_stays_text():
+    from src.engines.questionnaire.prose_directives import parse_prose_question
+
+    counted = parse_prose_question(
+        "Q2. How many patients have you treated? Fill in [0-1,000]\n_____ [OE]", "Q2", None)
+    assert counted.qtype is QuestionType.NUMERIC and counted.bounds == {"min": 0, "max": 1000}
+    said = parse_prose_question("Q9. What else would you like to tell us? [OE]\n_____", "Q9", None)
+    assert said.qtype is QuestionType.OPEN_TEXT and said.bounds == {}
