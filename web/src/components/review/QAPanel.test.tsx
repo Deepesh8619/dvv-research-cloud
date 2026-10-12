@@ -32,3 +32,27 @@ describe('QAPanel', () => {
     expect(screen.getByRole('button', { name: 'Run QA again' })).toBeTruthy()
   })
 })
+
+describe('QAPanel second opinion', () => {
+  it('shows the AI reviewer as an opinion to judge, with its evidence and questions', () => {
+    const onGoTo = vi.fn()
+    render(
+      <QAPanel
+        canRun
+        onRun={async () => {}}
+        onGoTo={onGoTo}
+        qa={{ ran_at: 'x', checked: 3, fixed: 0, needs_you: 0, entries: [] }}
+        logicReview={{
+          model: 'bedrock/qwen',
+          findings: [{ qids: ['Q10', 'S1'], severity: 'error', problem: 'Q10 is only for people S1 screens out.',
+            evidence: 'asked if: S1 eq 2 "No"', fix: 'Ask Q10 of S1 = 1' }],
+        }}
+        onRunLogicReview={async () => {}}
+      />,
+    )
+    expect(screen.getByText(/it can be wrong, judge each/)).toBeTruthy()
+    expect(screen.getByText('asked if: S1 eq 2 "No"')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Q10' }))
+    expect(onGoTo).toHaveBeenCalledWith('Q10')
+  })
+})

@@ -70,6 +70,7 @@ from src.core.survey_definition import (
 from src.engines.fielding.materialize import plan_datamap
 from src.engines.questionnaire.extraction_diagnosis import completeness_problems, diagnose
 from src.engines.questionnaire.extractor import extract_survey_definition, reread_question
+from src.engines.questionnaire.logic_review import review as review_logic
 from src.engines.questionnaire.qa_loop import run_qa
 from src.engines.questionnaire.question_agent import revise as question_agent_revise
 from src.engines.questionnaire.question_agent import suggest_repairs
@@ -302,6 +303,7 @@ def _status_response(
         profile=metadata.get("profile"),
         study_understanding=metadata.get("study_understanding"),
         qa=metadata.get("qa"),
+        logic_review=metadata.get("logic_review"),
     )
 
 
@@ -1212,6 +1214,24 @@ def approve_question(
         "n_approved": len(approved),
         "cleared_flags": cleared,
     }
+
+
+@router.post("/studies/{study_id}/questionnaire/logic-review")
+def run_logic_review(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """A second opinion on the whole survey: one model read, for problems
+    between questions that no QA rule covers. Changes no question. (Owner/Analyst)"""
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    result = review_logic(survey)
+    survey.metadata["logic_review"] = result
+    _save_definition(db, questionnaire, survey)
+    logger.info(f"[{study_id}] logic review by {user.name}: "
+                f"{len(result.get('findings', []))} finding(s)")
+    return result
 
 
 @router.post("/studies/{study_id}/questionnaire/qa")

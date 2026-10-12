@@ -240,6 +240,8 @@ class QuestionnaireStatusResponse(BaseModel):
     # The QA loop's record: what the QA agent found, what the programmer agent
     # fixed, and what is left for a person.
     qa: dict | None = None
+    # The AI logic reviewer's second opinion on the whole survey.
+    logic_review: dict | None = None
 
 
 class QuestionnaireSettingsRequest(BaseModel):

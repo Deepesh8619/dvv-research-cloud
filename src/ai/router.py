@@ -235,6 +235,9 @@ DEFAULT_ROUTES: dict[str, dict[str, str]] = {
     # One question revised from an analyst's plain-language instruction
     # (src/engines/questionnaire/question_agent.py).
     "questionnaire.revise": {"backend": "auto", "model": ""},
+    # One read of the whole survey for problems between questions
+    # (src/engines/questionnaire/logic_review.py).
+    "questionnaire.logic_review": {"backend": "auto", "model": ""},
     "report.narrative": {"backend": "auto", "model": ""},
     # study.chat routes through src/ai/navigator.py (multi-tool agent loop on
     # Groq, then Cerebras) rather than run_task — kept here so the task
