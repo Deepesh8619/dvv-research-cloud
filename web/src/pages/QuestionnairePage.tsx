@@ -1610,6 +1610,12 @@ export default function QuestionnairePage() {
               loadStatus()
               loadQuestions()
             }}
+            logicReview={status.logic_review}
+            onRunLogicReview={async () => {
+              if (!studyId) return
+              await questionnaireApi.runLogicReview(studyId)
+              loadStatus()
+            }}
           />
           <IssuesPanel errors={status.validation_errors} onGoTo={goTo} />
 

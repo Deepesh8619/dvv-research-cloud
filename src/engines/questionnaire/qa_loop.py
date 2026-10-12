@@ -95,6 +95,73 @@ class Issue:
 # --- QA agent -----------------------------------------------------------------
 
 
+def _codes_in(expr) -> list[tuple[str, object]]:
+    """(qid, code) pairs an eq/in/selected condition tests, anywhere in the tree."""
+    out = []
+    if expr is None:
+        return out
+    if expr.op in ("eq", "selected") and expr.qid and expr.row is None:
+        out.append((expr.qid, expr.value))
+    if expr.op == "in" and expr.qid and expr.row is None:
+        out.extend((expr.qid, v) for v in expr.values or [])
+    for child in expr.children or []:
+        out.extend(_codes_in(child))
+    return out
+
+
+def _order_and_answers(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
+    """Between-question checks that need no judgment: the survey's order and
+    each question's own answer codes decide them. Found by the logic reviewer
+    on a planted test survey; exact here, so they cost nothing and never vary."""
+    order = {qid: i for i, qid in enumerate(by_qid)}
+    here = order.get(q.qid)
+    issues: list[Issue] = []
+    if here is None:
+        return issues
+    for kind, expr in (("asked if", q.show_if), ("screens out if", q.terminate_if)):
+        for ref in sorted((expr.referenced_qids() if expr else set()) - {q.qid}):
+            if ref in order and order[ref] > here:
+                issues.append(Issue(
+                    "condition_on_later_question",
+                    f"\u201c{kind}\u201d depends on {ref}, which is asked after this question "
+                    "— nobody has answered it yet",
+                    ref,
+                ))
+        for ref, code in _codes_in(expr):
+            source = by_qid.get(ref)
+            answers = [*(source.options or []), *(source.cols or [])] if source else []
+            offered = {o.code for o in answers}
+            if offered and code not in offered:
+                issues.append(Issue(
+                    "condition_on_missing_answer",
+                    f"\u201c{kind}\u201d needs answer {code} at {ref}, which {ref} does not "
+                    "offer — it can never be met",
+                    f"{ref} = {code}",
+                ))
+    pipes = ((q.validation or {}).get("techniques") or {}).get("pipes") or []
+    for ref in {p.get("source_qid") for p in pipes if p.get("source_qid")}:
+        source = by_qid.get(ref)
+        if source is None or ref not in order:
+            continue
+        if order[ref] > here:
+            issues.append(Issue(
+                "pipe_from_later_question",
+                f"the text inserts {ref}'s answer, but {ref} is asked after this question",
+                ref,
+            ))
+        elif source.show_if is not None and (
+            q.show_if is None or q.show_if.to_dict() != source.show_if.to_dict()
+        ):
+            issues.append(Issue(
+                "pipe_may_be_missing",
+                f"the text inserts {ref}'s answer, but {ref} is only asked of some "
+                "respondents and this question has a different condition — check everyone "
+                "who sees this has answered it",
+                ref,
+            ))
+    return issues
+
+
 def _flat(text: str | None) -> str:
     return " ".join(re.sub(r"[^\w%]", " ", (text or "").lower()).split())
 
@@ -211,6 +278,7 @@ def qa_check(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
             "question asked of everyone; merge them or set who sees each",
             repeats[0],
         ))
+    issues.extend(_order_and_answers(q, by_qid))
     summed = _own_sum(q)
     if summed and not (q.type is QuestionType.NUMERIC and q.rows):
         issues.append(Issue(

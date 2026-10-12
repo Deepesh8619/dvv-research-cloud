@@ -412,6 +412,15 @@ export interface QuestionnaireStatus {
   // The study's instructions as read before any question (study_understanding).
   study_understanding?: StudyUnderstanding | null
   qa?: QARecord | null
+  logic_review?: LogicReview | null
+}
+
+export interface LogicReview {
+  model?: string
+  unavailable?: string
+  findings: { qids: string[]; problem: string; evidence: string; severity: 'error' | 'warning'; fix?: string }[]
+  already_reported_by_qa?: number
+  claims_dropped_unsupported?: number
 }
 
 export interface AgentSuggestion {
@@ -653,6 +662,9 @@ export const questionnaireApi = {
       `/studies/${studyId}/questionnaire/questions/${qid}/agent`,
       body,
     ),
+
+  runLogicReview: async (studyId: string) =>
+    api.post<LogicReview>(`/studies/${studyId}/questionnaire/logic-review`),
 
   runQA: async (studyId: string) =>
     api.post<QARecord>(`/studies/${studyId}/questionnaire/qa`),

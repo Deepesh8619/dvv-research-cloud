@@ -64,6 +64,7 @@ from src.engines.questionnaire.extraction_diagnosis import document_markers
 from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
 from src.engines.questionnaire.learned import LearnedPattern, learned_hidden_variable
 from src.engines.questionnaire.list_sources import fill_lists, points_at_a_list
+from src.engines.questionnaire.logic_review import review as review_logic
 from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import Mask, detect_techniques
 from src.engines.questionnaire.per_item import apply as apply_per_item_grids
@@ -1561,6 +1562,10 @@ def extract_survey_definition(
     # respondent will meet it, a programmer agent repairs what it safely can,
     # and what is left is flagged for a person. Deterministic — no model call.
     run_qa(survey)
+    # A second opinion over the whole survey, for problems between questions no
+    # rule covers. Real documents only (one model call); never blocks anything.
+    if blocks is not None:
+        survey.metadata["logic_review"] = review_logic(survey)
 
     # Last, after every pass that changes the survey: the list was taken before
     # lists were filled and sections applied, and the review screen showed four
