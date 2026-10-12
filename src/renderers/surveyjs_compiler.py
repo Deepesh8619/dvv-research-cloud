@@ -111,7 +111,11 @@ def _pipe_marker(source: Question, body: str) -> str:
         position = _pipe_position(body)
         if position is not None:
             return "{" + _rank_variable(source.qid, position) + "}"
-    if source.type is QuestionType.GRID_SINGLE and source.rows:
+    # One row of a grid, or one box of a constant sum ("...FOR ECT"): a single
+    # value the sentence can hold. The whole question cannot — see qa_loop.
+    if source.rows and (
+        source.type is QuestionType.GRID_SINGLE or source.type is QuestionType.NUMERIC
+    ):
         lowered = body.casefold()
         for row in sorted(source.rows, key=lambda r: -len(r.label or "")):
             label = (row.label or "").casefold()
