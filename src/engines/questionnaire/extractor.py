@@ -76,6 +76,7 @@ from src.engines.questionnaire.prose_directives import (
 )
 from src.engines.questionnaire.qa_loop import run_qa
 from src.engines.questionnaire.reconciler import reconcile_segmentation
+from src.engines.questionnaire.relative_bases import resolve_relative_bases
 from src.engines.questionnaire.section_paths import (
     apply_intro_screens,
     apply_section_paths,
@@ -1551,6 +1552,10 @@ def extract_survey_definition(
 
     if blocks is not None:
         survey.metadata["document_markers"] = document_markers(blocks)
+
+    # "[BASE: ANSWERED YES ABOVE]": a base that points instead of naming. Before
+    # QA, so QA judges the survey with these bases applied.
+    resolve_relative_bases(survey)
 
     # The QA loop, as the last pass: a QA agent tests every question as the
     # respondent will meet it, a programmer agent repairs what it safely can,

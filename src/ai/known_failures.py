@@ -78,6 +78,20 @@ KNOWN_FAILURES: tuple[KnownFailure, ...] = (
         frozenset({"extract"}),
     ),
     KnownFailure(
+        "\"[BASE: ANSWERED YES ABOVE]\" is a condition: the nearest earlier question that "
+        "offers that answer, answered with it. Never drop a base because it names no question.",
+        "TRD referrer Q4 and Q5 lost their Yes/No bases; everyone would have been asked "
+        "both. 2026-10-12.",
+        frozenset({"extract"}),
+    ),
+    KnownFailure(
+        "A question that inserts another question's answer must insert ONE value. Inserting a "
+        "question with several answers (a sum's boxes, a grid's rows) shows \"[object "
+        "Object]\" to the respondent — say which one, or flag it.",
+        "TRD referrer Q4 inserted the whole sum-to-100 Q2. 2026-10-12.",
+        frozenset({"extract", "copilot"}),
+    ),
+    KnownFailure(
         "An instruction about who is NOT screened out (\"Do not term respondents from the CRM\") "
         "governs every screen-out in the survey — name every screener question it applies to.",
         "Bubble's brief exempted CRM respondents; every screen-out would have removed them. "

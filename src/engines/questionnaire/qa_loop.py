@@ -70,6 +70,8 @@ _SCRIPTER_RESIDUE = re.compile(r"\[[^\]]*\]|\s\|(?:\s|$)|^\|")
 # An answer that is really a question: it asks ("...?"), or it is an entry
 # prompt ("Fill in", "Record number") — what respondents answer, not choose.
 _ASKS = re.compile(r"\?\s*(?:\(|\[|$)|\bFill\s+in\b|\bRecord\s+(?:number|age|answer)\b", re.I)
+# "{Q2}" in a compiled title — a whole question piped in (not "{Q2.1}").
+_PIPE = re.compile(r"\{([A-Za-z][\w]*)\}")
 _SUM_STATED = re.compile(r"(?:SUM|ADD)(?:\s+UP)?\s+TO\s+(?:AT\s+LEAST\s+)?\d", re.I)
 _EDGE_PIPES = re.compile(r"^(?:\s*\|)+\s*|(?:\s*\|)+\s*$")
 # A table's header row glued onto the end of the question: "...Fill in | % |".
@@ -91,6 +93,10 @@ class Issue:
 
 
 # --- QA agent -----------------------------------------------------------------
+
+
+def _flat(text: str | None) -> str:
+    return " ".join(re.sub(r"[^\w%]", " ", (text or "").lower()).split())
 
 
 def _respondent_view(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
@@ -115,6 +121,20 @@ def _respondent_view(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
         return [Issue("nothing_to_answer",
                       "the respondent sees this question with nothing to answer",
                       f"shown as {kind}")]
+    # A pipe the link cannot fill: "{Q2}" from a question with several answers
+    # (boxes of a constant sum, rows of a grid) prints "[object Object]".
+    for name in _PIPE.findall(element.get("title") or ""):
+        source = by_qid.get(name)
+        if source is not None and source.rows and source.type in (
+            QuestionType.NUMERIC, QuestionType.GRID_SINGLE
+        ):
+            return [Issue(
+                "pipe_cannot_fill",
+                f"the text inserts {name}'s answer, but {name} has {len(source.rows)} "
+                f"answers — the respondent would read “[object Object]”. Say which "
+                f"one to insert (e.g. “…FOR <row>”), or reword",
+                "{" + name + "}",
+            )]
     leftovers = [t for t in _screen_texts(element) if _SCRIPTER_RESIDUE.search(t)]
     if leftovers:
         return [Issue("scripter_text_on_screen",
@@ -167,6 +187,29 @@ def qa_check(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
             f"{len(asking)} answer(s) read like questions — later questions were "
             "probably swallowed into this one and would never be asked",
             "; ".join(a[:70] for a in asking[:2]),
+        ))
+    # Another question's whole wording on a line of its own inside this one — a
+    # second ask swallowed whole. Not a shared stem ("Which of the following best
+    # describes you?") and not an intro screen split off from this question:
+    # both were false alarms, measured on the real documents.
+    def bare(text: str | None) -> str:
+        return _flat(_ANY_NOTE.sub(" ", text or ""))
+
+    own = bare(q.text)
+    lines = {bare(line) for line in (q.source_text or "").splitlines()}
+    repeats = [
+        other.qid for other in by_qid.values()
+        if other.qid != q.qid and other.type is not QuestionType.INFO
+        and len(other.text or "") >= 40
+        and bare(other.text) in lines
+        and bare(other.text) not in own and own not in bare(other.text)
+    ]
+    if repeats:
+        issues.append(Issue(
+            "repeats_another_question",
+            f"this holds a second copy of {', '.join(repeats)}'s question — usually one "
+            "question asked of everyone; merge them or set who sees each",
+            repeats[0],
         ))
     summed = _own_sum(q)
     if summed and not (q.type is QuestionType.NUMERIC and q.rows):
