@@ -84,3 +84,63 @@ def test_a_made_up_type_is_refused(monkeypatch):
     monkeypatch.setattr(qa, "run_task", _model({"type": "slider", "explanation": "x"}))
     q = _stored_sum_question()
     assert "does not exist" in qa.revise(q, "make it a slider", {"Q2": q})["error"]
+
+
+# --- Using a named question's answers; not losing rows; flat limits -----------
+
+def _q2_and_q4():
+    q2 = Question(qid="Q2", type=QuestionType.NUMERIC, text="What share came from each place?",
+                  rows=[Option(1, "Home"), Option(2, "Work"), Option(3, "Cafe")],
+                  validation={"sum": 100})
+    q4 = Question(qid="Q4", type=QuestionType.OPEN_TEXT,
+                  text="Of the [INSERT Q2 RESPONSE] cups, what percent had milk?",
+                  source_text="Of the [INSERT Q2 RESPONSE] cups, what percent had milk? ____%",
+                  validation={"techniques": {"pipes": [{"source_qid": "Q2"}]}})
+    return q2, q4
+
+
+def test_the_agent_may_reuse_the_answers_of_a_question_the_analyst_names(monkeypatch):
+    """"Show Q2's categories here" is a request, not an invention."""
+    q2, q4 = _q2_and_q4()
+    seen = {}
+
+    def model(task, prompt, schema, **kwargs):
+        seen["prompt"] = prompt
+        return AIResponse(content={
+            "type": "numeric", "explanation": "One box per Q2 category.",
+            "rows": [{"code": 1, "label": "Home"}, {"code": 2, "label": "Work"},
+                     {"code": 3, "label": "Cafe"}],
+            "total": 100, "box_min": 0, "box_max": 100,
+        }, backend="test", model="m")
+
+    monkeypatch.setattr(qa, "run_task", model)
+    out = qa.revise(q4, "Show each category from Q2 as a number box adding up to 100.",
+                    {"Q2": q2, "Q4": q4})
+    assert "rows: 1=Home; 2=Work; 3=Cafe" in seen["prompt"]
+    assert [r["label"] for r in out["question"]["rows"]] == ["Home", "Work", "Cafe"]
+    assert out["dropped"] == []
+    assert {k: out["question"]["validation"][k] for k in ("sum", "min", "max")} == {
+        "sum": 100, "min": 0, "max": 100}
+
+
+def test_rows_the_analyst_did_not_ask_to_remove_are_kept(monkeypatch):
+    """Told to keep the rows, the model returned one of two; the other vanished."""
+    q2, q4 = _q2_and_q4()
+    q4.type, q4.rows = QuestionType.NUMERIC, [Option(1, "Home"), Option(2, "Work")]
+    monkeypatch.setattr(qa, "run_task", _model({
+        "type": "numeric", "text": "What percent had milk?", "explanation": "Reworded.",
+        "rows": [{"code": 1, "label": "Home"}],
+    }))
+    out = qa.revise(q4, "Reword the question; keep the rows.", {"Q2": q2, "Q4": q4})
+    assert [r["label"] for r in out["question"]["rows"]] == ["Home", "Work"]
+    assert "kept all 2 rows" in out["explanation"]
+
+
+def test_a_malformed_answer_is_reported_as_such_not_as_no_ai(monkeypatch):
+    from src.ai.router import ModelOutputError
+
+    def bad(*a, **k):
+        raise ModelOutputError("the model's answer did not fit")
+    monkeypatch.setattr(qa, "run_task", bad)
+    q2, q4 = _q2_and_q4()
+    assert "answered, but not in a form" in qa.revise(q4, "fix it", {"Q2": q2, "Q4": q4})["error"]
