@@ -1,5 +1,6 @@
 """Public endpoints for share links (no auth required)."""
 
+import json
 import logging
 from pathlib import Path
 
@@ -100,3 +101,38 @@ def download_public_study(token: str, fmt: str, db: Session = Depends(get_db)):
         )
 
     return FileResponse(path, media_type=media, filename=Path(path).name)
+
+
+@router.get("/public/studies/{token}/crosstabs")
+def get_public_crosstabs(token: str, db: Session = Depends(get_db)):
+    """Computed tables via public share link. Same gate as the downloads."""
+    link = get_share_link(db, token)
+    if not link or link.revoked:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Share link not found or has been revoked",
+        )
+    study = get_study(db, link.study_id)
+    if not study:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
+    if study.status not in ("approved_for_delivery", "delivered"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Study is not yet approved for delivery",
+        )
+
+    raw = None
+    if study.excel_path:
+        f = Path(study.excel_path).parent / "crosstabs.json"
+        if f.exists():
+            raw = f.read_text()
+    raw = raw or getattr(study, "crosstabs_json", None)
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No table data for this study"
+        )
+
+    # Whitelist top-level keys: nothing internal can ride along.
+    data = json.loads(raw)
+    keys = ("title", "weight", "confidence", "min_base_for_test", "tables")
+    return {k: data[k] for k in keys if k in data}
