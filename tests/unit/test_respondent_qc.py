@@ -94,6 +94,18 @@ def test_duplicates_ignore_system_columns_and_keep_first():
     assert detect_duplicates(df, dm) == [2]
 
 
+def test_duplicates_ignore_record_and_paradata_columns():
+    dm = DataMap()
+    dm.add(Variable(name="Q1", type=VarType.SINGLE, values={1: "a", 2: "b"}))
+    dm.add(Variable(name="Q2", type=VarType.NUMERIC))
+    dm.add(Variable(name="record", type=VarType.NUMERIC))
+    dm.add(Variable(name="vDurationSec", type=VarType.NUMERIC, provenance="fielding_paradata"))
+    df = pl.DataFrame(
+        {"record": [1, 2], "vDurationSec": [100.0, 250.0], "Q1": [1, 1], "Q2": [10, 10]}
+    )
+    assert detect_duplicates(df, dm) == [1]
+
+
 def test_gibberish_open_ends():
     dm = DataMap()
     dm.add(Variable(name="OE1", type=VarType.TEXT))

@@ -513,3 +513,161 @@ def test_live_data_says_when_location_cannot_be_filled(client, monkeypatch):
         f"/api/studies/study_m1/fielding/links/{link['id']}/responses"
     ).json()
     assert body["location_available"] is False
+
+
+def test_materialize_honours_the_locked_cleaning_version(client, tmp_path):
+    import pandas as pd
+
+    test_client, sf, _ = client
+    _seed(sf)
+    link_resp = test_client.post("/api/studies/study_m1/fielding/links")
+    token, link_id = link_resp.json()["token"], link_resp.json()["id"]
+    url = f"/api/studies/study_m1/fielding/links/{link_id}/materialize"
+    test_client.post(
+        f"/api/studies/study_m1/fielding/links/{link_id}/quotas",
+        json={"cells": [{"name": "coffee", "limit": 5, "condition":
+                         {"op": "eq", "qid": "Q2", "value": 1}}]},
+    )
+    bad, _ = _run_respondent(test_client, token, age=30, coffee=1, brands=[1])
+    _run_respondent(test_client, token, age=40, coffee=2, brands=[2])
+    assert test_client.post(url).json()["n_respondents"] == 2  # unlocked: as before
+
+    db = sf()
+    study = db.get(StudyDB, "study_m1")
+    study.study_metadata = {"cleaning": {"locked": True, "versions": [
+        {"version": 1, "removed": {bad: "speeder"}, "imputations": []}]}}
+    db.commit()
+    db.close()
+
+    body = test_client.post(url).json()
+    assert body["n_respondents"] == 1
+    assert body["delivery"]["n_rows"] == 2
+    assert body["replacement_needed"]["total"] == 1
+    assert sum(body["replacement_needed"]["by_cell"].values()) == 1
+    assert "NOT decremented" in body["replacement_note"]
+    delivery = pd.read_excel(tmp_path / "study_m1" / "study_m1_responses.xlsx")
+    assert sorted(delivery["vCleanStatus"].to_list()) == [1, 2]
+
+
+def _two_links(test_client):
+    toks = []
+    for vendor in ("Dynata", None):
+        resp = test_client.post("/api/studies/study_m1/fielding/links")
+        link = resp.json()
+        if vendor:
+            test_client.patch(
+                f"/api/studies/study_m1/fielding/links/{link['id']}/vendor",
+                json={"vendor_name": vendor},
+            )
+        toks.append((link["token"], link["id"]))
+    return toks
+
+
+def test_study_materialize_combines_links_with_vsource(client, tmp_path):
+    import polars as pl
+
+    test_client, sf, _ = client
+    _seed(sf)
+    (t1, _), (t2, _) = _two_links(test_client)
+    _run_respondent(test_client, t1, age=30, coffee=1, brands=[1])
+    _run_respondent(test_client, t2, age=40, coffee=2, brands=[2])
+    body = test_client.post("/api/studies/study_m1/fielding/materialize").json()
+    assert body["n_respondents"] == 2
+    df = pl.read_parquet(tmp_path / "study_m1" / "data.parquet")
+    assert sorted(df["respondent_id"].to_list()) == [1, 2]
+    assert df["vSessionId"].n_unique() == 2
+    assert df["vSource"].n_unique() == 2
+    dm = DataMap.from_json((tmp_path / "study_m1" / "datamap.json").read_text())
+    assert sorted(dm["vSource"].values.values()) == ["Dynata", "Link 2"]
+
+
+def test_study_materialize_incompatible_versions_409(client):
+    test_client, sf, _ = client
+    _seed(sf)
+    (t1, _), (t2, l2) = _two_links(test_client)
+    _run_respondent(test_client, t1, age=30, coffee=1, brands=[1])
+    _run_respondent(test_client, t2, age=40, coffee=2, brands=[2])
+    from api.db import FieldingLinkDB
+
+    db = sf()
+    link = db.get(FieldingLinkDB, l2)
+    survey = SurveyDefinition.from_json(link.survey_json)
+    survey.questions = [q for q in survey.questions if q.qid != "Q3"]
+    survey.blocks[0].question_ids = ["Q1", "Q2", "Q4"]
+    link.survey_json = survey.to_json()
+    link.survey_version = 2
+    db.commit()
+    db.close()
+    resp = test_client.post("/api/studies/study_m1/fielding/materialize")
+    assert resp.status_code == 409
+    assert "[1, 2]" in resp.json()["detail"]
+
+
+def _email_survey_client(client, tmp_path):
+    test_client, sf, _ = client
+    _seed(sf)
+    db = sf()
+    qd = db.get(QuestionnaireDB, "quest_m1")
+    survey = SurveyDefinition.from_json(qd.definition_json)
+    survey.questions[3].text = "Your e-mail"
+    survey.questions[3].validation = {}
+    qd.definition_json = survey.to_json()
+    db.commit()
+    db.close()
+    link = test_client.post("/api/studies/study_m1/fielding/links").json()
+    _run_respondent(test_client, link["token"], age=30, coffee=1, brands=[1],
+                    follow_up="me@acme.com")
+    return test_client, sf, link["id"]
+
+
+def test_mask_pii_masks_delivery_not_parquet_and_default_is_off(client, tmp_path):
+    import pandas as pd
+    import polars as pl
+
+    test_client, sf, link_id = _email_survey_client(client, tmp_path)
+    url = f"/api/studies/study_m1/fielding/links/{link_id}/materialize"
+    assert test_client.post(url).status_code == 200
+    xlsx = tmp_path / "study_m1" / "study_m1_responses.xlsx"
+    assert "me@acme.com" in pd.read_excel(xlsx)["Q4"].to_list()  # default off
+
+    r = test_client.patch("/api/studies/study_m1/settings", json={"mask_pii": True})
+    assert r.json() == {"mask_pii": True}
+    assert test_client.post(url).status_code == 200
+    assert "me@acme.com" not in pd.read_excel(xlsx)["Q4"].to_list()
+    raw = pl.read_parquet(tmp_path / "study_m1" / "data.parquet")
+    assert "me@acme.com" in raw["Q4"].to_list()
+
+    live = test_client.get(f"/api/studies/study_m1/fielding/links/{link_id}/responses").json()
+    assert all("me@acme.com" not in str(r["answers"]) for r in live["rows"])
+
+
+def test_settings_owner_only(client):
+    test_client, sf, state = client
+    _seed(sf)
+    state["role"] = "analyst"
+    assert test_client.patch(
+        "/api/studies/study_m1/settings", json={"mask_pii": True}
+    ).status_code == 403
+
+
+def test_rematerialize_clears_needs_rematerialize(client):
+    test_client, sf, _ = client
+    _seed(sf)
+    link = test_client.post("/api/studies/study_m1/fielding/links").json()
+    _run_respondent(test_client, link["token"], age=30, coffee=1, brands=[1])
+    db = sf()
+    study = db.get(StudyDB, "study_m1")
+    study.study_metadata = {"needs_rematerialize": True}
+    db.commit()
+    db.close()
+    for url in (f"/api/studies/study_m1/fielding/links/{link['id']}/materialize",
+                "/api/studies/study_m1/fielding/materialize"):
+        db = sf()
+        study = db.get(StudyDB, "study_m1")
+        study.study_metadata = {"needs_rematerialize": True}
+        db.commit()
+        db.close()
+        assert test_client.post(url).status_code == 200
+        db = sf()
+        assert db.get(StudyDB, "study_m1").study_metadata["needs_rematerialize"] is False
+        db.close()

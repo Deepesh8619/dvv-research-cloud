@@ -87,6 +87,8 @@ PARA_REGION = "vRegion"
 PARA_CITY = "vCity"
 PARA_POSTAL = "vPostcode"
 PARA_IP_HASH = "vConnection"
+# Stable key: respondent_id is renumbered 1..N on every materialize.
+PARA_SESSION = "vSessionId"
 
 
 @dataclass
@@ -390,6 +392,8 @@ def _paradata_variables() -> list[Variable]:
         # nothing downstream could see them without a column to compare.
         Variable(name=PARA_IP_HASH, label="Connection (hashed)",
                  type=VarType.TEXT, provenance="fielding_paradata"),
+        Variable(name=PARA_SESSION, label="Session ID", type=VarType.TEXT,
+                 provenance="fielding_paradata"),
     ]
 
 
@@ -517,6 +521,7 @@ def materialize_fielding(
     columns[PARA_CITY] = _pandas_series(VarType.TEXT, cities)
     columns[PARA_POSTAL] = _pandas_series(VarType.TEXT, postcodes)
     columns[PARA_IP_HASH] = _pandas_series(VarType.TEXT, connections)
+    columns[PARA_SESSION] = _pandas_series(VarType.TEXT, [s.id for s in completes])
 
     # Which block each respondent met FIRST, when the script rotated them.
     #
