@@ -23,3 +23,12 @@ def test_pii_columns_conservative():
         dm.add(Variable(name=n, label=lab, type=VarType.TEXT))
     got = set(pii_columns(dm))
     assert got == {"email", "Q1", "Q2", "Q3", "Q4", "Q5", "ip"}
+
+
+def test_email_ad_type_label_is_not_pii():
+    dm = DataMap([
+        Variable("DA_PLACEMENTr8", label="What types of ads has your company used? - E-mail",
+                 type=VarType.SINGLE),
+        Variable("em", label="Your email address", type=VarType.TEXT),
+    ])
+    assert pii_columns(dm) == ["em"]

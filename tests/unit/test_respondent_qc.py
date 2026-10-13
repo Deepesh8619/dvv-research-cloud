@@ -308,3 +308,21 @@ def test_excluding_computed_columns_changes_the_verdict_not_just_the_count():
     rows, n_grids = detect_straightliners(df, dm)
     assert n_grids == 1, "the computed block must not be counted as a grid"
     assert sorted(rows) == [0, 1], "respondent 3 varied and must not be flagged"
+
+
+def test_duplicates_compare_fielded_question_columns():
+    # Fielded question variables carry provenance "fielding"; excluding them
+    # left nothing to compare, so a real duplicate was never found (rehearsal).
+    dm = DataMap([
+        Variable("Q1", type=VarType.SINGLE, values={1: "a", 2: "b"}, provenance="fielding"),
+        Variable("Q2", type=VarType.SINGLE, values={1: "a", 2: "b"}, provenance="fielding"),
+        Variable("vDurationSec", type=VarType.NUMERIC, provenance="fielding_paradata"),
+    ])
+    df = pl.DataFrame({"Q1": [1, 1, 2], "Q2": [2, 2, 1], "vDurationSec": [300, 410, 500]})
+    assert detect_duplicates(df, dm) == [1]
+
+
+def test_gibberish_skips_paradata_text():
+    dm = DataMap([Variable("vConnection", type=VarType.TEXT, provenance="fielding_paradata")])
+    df = pl.DataFrame({"vConnection": ["b7d0c1f3d9" * 3 + "bd"]})  # hex hash, no vowels
+    assert detect_gibberish_open_ends(df, dm) == {}

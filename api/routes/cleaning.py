@@ -244,7 +244,8 @@ def lock_cleaning(
     datamap = DataMap.from_json(datamap_path.read_text())
     _publish_tables(db, study, run_dir, datamap)
 
-    fielded = bool((study.study_metadata or {}).get("materialized_from_link"))
+    meta = study.study_metadata or {}
+    fielded = bool(meta.get("materialized_from_link") or meta.get("materialized_from_links"))
     if not fielded:  # fielded studies already carry every-disposition delivery files
         out_dir = STUDIES_DIR / study_id  # where download/{spss,responses} look
         out_dir.mkdir(parents=True, exist_ok=True)

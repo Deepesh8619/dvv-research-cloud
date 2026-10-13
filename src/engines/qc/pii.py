@@ -20,7 +20,8 @@ _NAME_TOKENS = {
     "firstname", "lastname", "fullname", "surname", "address", "ipaddress", "rawip",
 }
 _LABEL = re.compile(
-    r"\be-?mail\b"
+    r"\be-?mail\s*(?:address|id)\b"
+    r"|^\s*(?:your\s+)?e-?mail\s*:?\s*$"
     r"|\b(?:phone|mobile|cell(?:ular)?|contact|telephone|tel)\s*(?:number|no\.?|#)"
     r"|\btelephone\b"
     r"|\b(?:full|first|last|sur|family|your|respondent'?s?)\s*name\b"
