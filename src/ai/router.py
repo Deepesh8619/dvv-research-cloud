@@ -150,6 +150,11 @@ def _retry_after_seconds(exc: urllib.error.HTTPError, detail: str) -> float | No
     return float(match.group(1)) if match else None
 
 
+# A provider rejecting the model's own malformed tool call (Groq: "Failed to
+# call a function ... failed_generation"; OpenAI-compatible: "tool_use_failed").
+_MALFORMED_ANSWER = re.compile(r"failed to call a function|failed_generation|tool_use_failed", re.I)
+
+
 def http_json(request: urllib.request.Request, timeout: int) -> dict:
     """urlopen with the certifi SSL context, returning parsed JSON.
 
@@ -165,6 +170,7 @@ def http_json(request: urllib.request.Request, timeout: int) -> dict:
     We honour the provider's own wait hint, bounded, then give up honestly.
     """
     attempt = 0
+    malformed_retried = False
     while True:
         try:
             with urllib.request.urlopen(
@@ -197,6 +203,16 @@ def http_json(request: urllib.request.Request, timeout: int) -> dict:
                 )
                 time.sleep(wait)
                 continue
+            if exc.code == 400 and _MALFORMED_ANSWER.search(detail):
+                # The model answered, but its structured answer did not fit the
+                # schema ("Failed to call a function"). That is not an outage:
+                # it is random, and a second try usually fits. Filed as
+                # "unreachable" it told an analyst no AI existed while it was
+                # answering every few seconds.
+                if not malformed_retried:
+                    malformed_retried = True
+                    continue
+                raise ModelOutputError(f"the model's answer did not fit: {detail}") from exc
             raise urllib.error.URLError(
                 f"HTTP {exc.code}: {detail or exc.reason}"
             ) from exc
@@ -786,6 +802,10 @@ def _run_chain(
                 note_backend_exhausted(backend, cause.retry_after, candidate['model'])
     assert last_exc is not None
     summary = "all backends failed — " + " | ".join(failures)
-    if isinstance(last_exc, BackendUnavailable):
-        raise BackendUnavailable(summary, config_error=all_config_errors)
-    raise ModelOutputError(summary)
+    # If any model actually answered (badly), say so: "unreachable" told an
+    # analyst no AI existed while one was answering every few seconds.
+    if any("did not fit" in f or "ModelOutputError" in f for f in failures) or not isinstance(
+        last_exc, BackendUnavailable
+    ):
+        raise ModelOutputError(summary)
+    raise BackendUnavailable(summary, config_error=all_config_errors)

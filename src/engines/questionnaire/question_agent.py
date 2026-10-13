@@ -30,30 +30,45 @@ from src.engines.questionnaire.diffing import _diff_question
 from src.engines.questionnaire.qa_loop import REPAIRS, qa_check
 
 _OPTION_FIELDS = {f.name for f in dataclass_fields(Option)}
+# The analyst asked for fewer answers: only then may a list shrink.
+_REMOVING = re.compile(
+    r"\b(remove|delete|drop|take out|get rid of|fewer|only keep|keep only)\b", re.I
+)
 _TYPES = [t.value for t in QuestionType if t is not QuestionType.MAXDIFF]
+# Kept small and explicit: optional flags on every row and an open-ended
+# "validation" object are where models produce malformed structured answers
+# ('anchored false': None), which providers reject outright.
+_ROW = {
+    "type": "object",
+    "properties": {"code": {"type": "integer"}, "label": {"type": "string"}},
+    "required": ["code", "label"],
+}
 _ITEM = {
     "type": "object",
     "properties": {
         "code": {"type": "integer"},
         "label": {"type": "string"},
-        "exclusive": {"type": "boolean"},
-        "anchored": {"type": "boolean"},
-        "open_other": {"type": "boolean"},
+        "exclusive": {"type": "boolean", "description": "Only for 'None of these'-type answers."},
     },
     "required": ["code", "label"],
 }
+_NUMBER = {"type": "integer"}
 REVISE_SCHEMA: dict = {
     "type": "object",
     "properties": {
         "type": {"type": "string", "enum": _TYPES},
         "text": {"type": "string"},
         "options": {"type": "array", "items": _ITEM},
-        "rows": {"type": "array", "items": _ITEM},
-        "cols": {"type": "array", "items": _ITEM},
-        "validation": {
-            "type": "object",
-            "description": "min, max, sum (must equal), sum_min (at least), min_select, max_select",
-        },
+        "rows": {"type": "array", "items": _ROW},
+        "cols": {"type": "array", "items": _ROW},
+        # Flat on purpose. As a nested "validation" object, the model looped on
+        # invented keys ("sum_not_applicable_2": null ...) until the provider
+        # rejected the answer. Each of these is a plain number or absent.
+        "total": {**_NUMBER, "description": "Number boxes must add up to exactly this."},
+        "total_at_least": {**_NUMBER, "description": "Boxes must add up to at least this."},
+        "box_min": {**_NUMBER, "description": "Smallest number a box accepts."},
+        "box_max": {**_NUMBER, "description": "Largest number a box accepts."},
+        "max_answers": {**_NUMBER, "description": "Most answers a respondent may pick."},
         "explanation": {"type": "string", "description": "One sentence: what you changed."},
     },
     "required": ["type", "explanation"],
@@ -118,22 +133,51 @@ def _grounded(items: list[dict], allowed: str) -> tuple[list[Option], list[str]]
     return kept, dropped
 
 
-def _prompt(q: Question, instruction: str) -> str:
+def _related(q: Question, instruction: str, by_qid: dict[str, Question]) -> list[Question]:
+    """Questions the analyst names ("...the categories from Q2") and the ones
+    this question inserts answers from. Their answers are legitimate material:
+    "put Q2's categories here" is a request, not an invention."""
+    named = {m.upper() for m in re.findall(r"\b[A-Za-z]{1,4}\d+[A-Za-z]?\b", instruction)}
+    pipes = ((q.validation or {}).get("techniques") or {}).get("pipes") or []
+    named |= {(p.get("source_qid") or "").upper() for p in pipes}
+    return [other for qid, other in by_qid.items() if qid.upper() in named and qid != q.qid]
+
+
+def _describe(other: Question) -> str:
+    def items(xs):
+        return "; ".join(f"{o.code}={o.label}" for o in xs or [])
+    parts = [f"{other.qid} [{other.type.value}] {other.text}"]
+    if other.options:
+        parts.append(f"answers: {items(other.options)}")
+    if other.rows:
+        parts.append(f"rows: {items(other.rows)}")
+    if other.cols:
+        parts.append(f"scale: {items(other.cols)}")
+    return " | ".join(parts)
+
+
+def _prompt(q: Question, instruction: str, related: list[Question]) -> str:
     current = {k: v for k, v in _as_dict(q).items()
                if k in ("qid", "text", "type", "options", "rows", "cols", "validation")}
+    context = (
+        "Other questions the analyst refers to (you may reuse their answers):\n"
+        + "\n".join(_describe(o) for o in related) + "\n\n"
+    ) if related else ""
     return (
         "You are a senior survey programmer fixing ONE question for an analyst.\n\n"
         f"The analyst says: {instruction}\n\n"
         f"The question as it stands now:\n{current}\n\n"
         f"The questionnaire's own text for it:\n{q.source_text or '(not available)'}\n\n"
+        + context +
         "Return the corrected question. Rules:\n"
         "- Change what the analyst asks, and only what that change requires.\n"
         "- Every option, row and scale label must come from the questionnaire text, the "
         "question as it stands, or the analyst's words. Never invent one.\n"
         "- Types: single (one answer), multi (several), dropdown, rank, grid_single (each "
         "row rated on one scale: rows + cols), numeric (a number; with rows = one box per "
-        "item, and validation.sum when they must add up — validation.sum_min for 'at "
-        "least'), open_text, info (display only).\n"
+        "item, and `total` when they must add up — `total_at_least` for 'at least'), "
+        "open_text, info (display only).\n"
+        "- Leave out any field you are not changing.\n"
         "- Say in `explanation`, in one plain sentence, what you changed.\n"
         + block_for("extract")
     )
@@ -141,13 +185,20 @@ def _prompt(q: Question, instruction: str) -> str:
 
 def revise(q: Question, instruction: str, by_qid: dict[str, Question]) -> dict:
     """A model's revision of the question, following the analyst's words."""
+    related = _related(q, instruction, by_qid)
     try:
-        response = run_task("questionnaire.revise", _prompt(q, instruction), REVISE_SCHEMA)
-    except (BackendUnavailable, ModelOutputError):
+        response = run_task("questionnaire.revise", _prompt(q, instruction, related),
+                            REVISE_SCHEMA)
+    except BackendUnavailable:
         return {"error": (
             "No AI model could be reached just now, so the agent could not follow "
             "your words. Any suggestions shown come from the programmer agent, which "
             "needs no AI. Try again in a minute."
+        )}
+    except ModelOutputError:
+        return {"error": (
+            "The agent answered, but not in a form that could be used. Try again, or "
+            "say it in different words."
         )}
     raw = response.content if isinstance(response.content, dict) else {}
     try:
@@ -158,19 +209,39 @@ def revise(q: Question, instruction: str, by_qid: dict[str, Question]) -> dict:
     allowed = _norm(" ".join([
         q.source_text or "", q.text or "", instruction,
         *(o.label for o in [*(q.options or []), *(q.rows or []), *(q.cols or [])]),
+        *(o.label for other in related
+          for o in [*(other.options or []), *(other.rows or []), *(other.cols or [])]),
     ]))
     after = copy.deepcopy(q)
     after.type = new_type
     if raw.get("text"):
         after.text = str(raw["text"]).strip()
     dropped: list[str] = []
+    notes: list[str] = []
+    removing = bool(_REMOVING.search(instruction))
     for name in ("options", "rows", "cols"):
         if name in raw:
             kept, lost = _grounded(raw.get(name) or [], allowed)
+            had = list(getattr(q, name) or [])
+            if had and 0 < len(kept) < len(had) and not removing:
+                # Asked to keep the rows, a model returned one of two and the
+                # other was gone. Shorter lists only when the analyst asked.
+                notes.append(f"kept all {len(had)} {name} — the agent returned only "
+                             f"{len(kept)} without being asked to remove any")
+                continue
             setattr(after, name, kept or ([] if name == "options" else None))
             dropped += lost
-    if isinstance(raw.get("validation"), dict):
-        after.validation = {**(q.validation or {}), **raw["validation"]}
+    limits = {
+        key: raw[field] for field, key in (
+            ("total", "sum"), ("total_at_least", "sum_min"), ("box_min", "min"),
+            ("box_max", "max"), ("max_answers", "max_select"),
+        )
+        if isinstance(raw.get(field), int) and not isinstance(raw.get(field), bool)
+    }
+    if limits:
+        after.validation = {**(q.validation or {}), **limits}
     explanation = str(raw.get("explanation") or "Revised as asked.").strip()
+    if notes:
+        explanation += " (" + "; ".join(notes) + ")"
     return _suggestion(f"agent ({response.backend}/{response.model})", explanation,
                        q, after, by_qid, dropped)

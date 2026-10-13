@@ -573,3 +573,25 @@ def test_no_default_model_is_made_by_openai(monkeypatch):
     root = pathlib.Path(__file__).resolve().parents[2]
     policy = (root / "deploy" / "aws" / "app-policy.json").read_text()
     assert "openai" not in policy
+
+
+@pytest.mark.exercises_http_json
+def test_a_malformed_tool_call_is_retried_then_reported_as_a_model_error(monkeypatch):
+    """Groq answers HTTP 400 "Failed to call a function" when the model's own
+    structured answer does not fit. That is not an outage — it is retried once,
+    and if it fails again it is a model-output error, never "unreachable"."""
+    import io
+    import urllib.error
+
+    calls = {"n": 0}
+
+    def fake_urlopen(request, timeout=None, context=None):
+        calls["n"] += 1
+        body = io.BytesIO(json.dumps({"error": {
+            "message": "Failed to call a function. Please adjust your prompt."}}).encode())
+        raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", {}, body)
+
+    monkeypatch.setattr(router.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(router.ModelOutputError):
+        router.http_json(urllib.request.Request("https://api.groq.com/x"), 5)
+    assert calls["n"] == 2
