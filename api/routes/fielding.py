@@ -64,6 +64,7 @@ from api.db import (
     list_respondent_sessions,
     pid_already_finished,
     set_fielding_link_soft_launch,
+    set_fielding_link_vendor,
     set_quota_cell_condition,
     set_respondent_session_status,
     touch_respondent_session,
@@ -86,6 +87,7 @@ from api.models import (
     RespondentEntryResponse,
     RespondentSessionResponse,
     SoftLaunchRequest,
+    VendorRequest,
 )
 from api.routes.questionnaire import _read_definition_json
 from src.core.survey_definition import (
@@ -224,6 +226,9 @@ def _link_response(link, counts: dict | None = None) -> FieldingLinkResponse:
             and (counts or {}).get("completes", 0) >= link.soft_launch_limit
         ),
         is_test=bool(link.is_test),
+        vendor_name=link.vendor_name,
+        cpi=link.cpi,
+        target_completes=link.target_completes,
     )
 
 
@@ -382,6 +387,7 @@ def create_link(
         # A test link never soft-launches — there's no real sample to protect.
         soft_launch_limit=(body.soft_launch_limit if body and not is_test else None),
         is_test=is_test,
+        vendor=redirects,
     )
     if not check["ok"]:
         # Opened over a failing check on purpose: say so where it can be found.
@@ -535,6 +541,25 @@ def close_link(
         raise HTTPException(status_code=404, detail="Fielding link not found")
     link = close_fielding_link(db, link_id)
     logger.info(f"[{study_id}] Fielding link {link_id} closed by {user.name}")
+    return _link_response(link, fielding_link_counts(db, link.id))
+
+
+@router.patch(
+    "/studies/{study_id}/fielding/links/{link_id}/vendor",
+    response_model=FieldingLinkResponse,
+)
+def set_vendor(
+    study_id: str,
+    link_id: str,
+    body: VendorRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Set vendor name, CPI and target completes on a link. (Owner/Analyst)"""
+    _owner_link(db, study_id, link_id)
+    link = set_fielding_link_vendor(
+        db, link_id, body.vendor_name, body.cpi, body.target_completes
+    )
     return _link_response(link, fielding_link_counts(db, link.id))
 
 

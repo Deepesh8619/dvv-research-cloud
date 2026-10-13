@@ -1300,3 +1300,25 @@ def test_delivery_files_are_reported_from_disk_not_from_memory(client, tmp_path,
     (folder / "study_f1_responses.xlsx").write_bytes(b"x")
     body = test_client.get("/api/studies/study_f1/fielding/links").json()
     assert body["delivery_formats"] == ["sav", "xlsx"]
+
+
+def test_vendor_fields_round_trip_patch_and_viewer_refused(client):
+    test_client, sf, state = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = test_client.post(
+        "/api/studies/study_f1/fielding/links", json={"vendor_name": "Cint", "cpi": 4.5}
+    ).json()
+    listed = test_client.get("/api/studies/study_f1/fielding/links").json()["links"][0]
+    assert (listed["vendor_name"], listed["cpi"], listed["target_completes"]) == ("Cint", 4.5, None)
+
+    url = f"/api/studies/study_f1/fielding/links/{link['id']}/vendor"
+    resp = test_client.patch(url, json={"vendor_name": "Dynata", "cpi": 6, "target_completes": 300})
+    assert resp.status_code == 200
+    assert (resp.json()["vendor_name"], resp.json()["cpi"], resp.json()["target_completes"]) == (
+        "Dynata", 6, 300)
+    assert test_client.patch(url, json={"cpi": -1}).status_code == 422
+    assert test_client.patch(url, json={"target_completes": 0}).status_code == 422
+
+    state["role"] = "reviewer"
+    assert test_client.patch(url, json={"cpi": 1}).status_code == 403

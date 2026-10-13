@@ -5,7 +5,7 @@ import os
 import secrets
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, Column, Integer, String, Text, create_engine
+from sqlalchemy import JSON, Boolean, Column, Float, Integer, String, Text, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -240,6 +240,10 @@ class FieldingLinkDB(Base):
     # respondents, and it opens even when the pre-link check fails. Its data is
     # never a study's real data.
     is_test = Column(Boolean, default=False)
+    # Vendor commercials. cpi is in the study's currency.
+    vendor_name = Column(String, nullable=True)
+    cpi = Column(Float, nullable=True)
+    target_completes = Column(Integer, nullable=True)
 
 
 class RespondentSessionDB(Base):
@@ -759,6 +763,10 @@ def _ensure_new_columns():
             # Soft launch hold (T25).
             "soft_launch_limit": "INTEGER",
             "is_test": "BOOLEAN",
+            # Vendor commercials (V1).
+            "vendor_name": "VARCHAR",
+            "cpi": "FLOAT",
+            "target_completes": "INTEGER",
         },
         "respondent_sessions": {
             "pid": "VARCHAR",
@@ -1212,6 +1220,9 @@ def set_questionnaire_approved_qids(
 # --- Fielding (T9') ---------------------------------------------------------
 
 
+_VENDOR_FIELDS = ("vendor_name", "cpi", "target_completes")
+
+
 def create_fielding_link(
     db: Session,
     study_id: str,
@@ -1222,6 +1233,7 @@ def create_fielding_link(
     redirects: dict | None = None,
     soft_launch_limit: int | None = None,
     is_test: bool = False,
+    vendor: dict | None = None,
 ) -> "FieldingLinkDB":
     """Open a fielding link, pinning the approved SurveyDefinition JSON snapshot.
 
@@ -1248,6 +1260,7 @@ def create_fielding_link(
         redirect_security=redirects.get("redirect_security"),
         soft_launch_limit=soft_launch_limit,
         is_test=is_test,
+        **{k: v for k, v in (vendor or {}).items() if k in _VENDOR_FIELDS},
     )
     db.add(link)
     db.commit()
@@ -1533,6 +1546,86 @@ def answers_by_session(db: Session, link_id: str) -> dict[str, dict]:
     return out
 
 
+def erase_respondent_session(db: Session, session: "RespondentSessionDB") -> int:
+    """Erase one respondent's personal data (DPDP/GDPR) but KEEP the session row.
+
+    Answers are deleted; pid and entry_params are blanked. status_code and the
+    timestamps stay so incidence and field counts do not move. Returns answers removed.
+    """
+    n = (
+        db.query(RespondentAnswerDB)
+        .filter(RespondentAnswerDB.session_id == session.id)
+        .delete(synchronize_session=False)
+    )
+    session.entry_params = {}
+    session.pid = None
+    db.commit()
+    return n
+
+
+def purge_study_data(db: Session, study_id: str, *, force: bool = False) -> dict:
+    """IRREVERSIBLY delete a study's personal/client data; keep the StudyDB row and ALL audit rows.
+
+    Refuses unless metadata `retain_until` has passed (force=True overrides; CLI only).
+    Files are removed only when strictly inside STUDIES_DIR (resolved, no symlink escape).
+    Returns counts only. Raises on failure (commits).
+    """
+    import shutil
+    from pathlib import Path
+
+    from api.config import STUDIES_DIR
+
+    study = db.get(StudyDB, study_id)
+    if not study:
+        raise ValueError("Study not found")
+    ru = (study.study_metadata or {}).get("retain_until")
+    if not force and not (ru and str(ru)[:10] <= datetime.now(UTC).date().isoformat()):
+        raise PermissionError("retain_until is missing or in the future; refusing to purge")
+
+    root = Path(STUDIES_DIR).resolve()
+    cands = [Path(STUDIES_DIR) / study_id]
+    if study.excel_path:
+        cands.append(Path(study.excel_path).parent)
+    files = skipped = 0
+    for c in {p.resolve() for p in cands}:
+        if c == root or root not in c.parents:
+            skipped += 1  # outside the allowed root: never touch
+            continue
+        if c.is_dir():
+            files += sum(1 for f in c.rglob("*") if f.is_file() or f.is_symlink())
+            shutil.rmtree(c)  # does not follow symlinks
+
+    link_ids = [r[0] for r in db.query(FieldingLinkDB.id).filter(
+        FieldingLinkDB.study_id == study_id)]
+    sess_ids = (
+        [r[0] for r in db.query(RespondentSessionDB.id).filter(
+            RespondentSessionDB.fielding_link_id.in_(link_ids))]
+        if link_ids else []
+    )
+    answers = (
+        db.query(RespondentAnswerDB).filter(RespondentAnswerDB.session_id.in_(sess_ids))
+        .delete(synchronize_session=False) if sess_ids else 0
+    )
+    if sess_ids:
+        db.query(RespondentSessionDB).filter(RespondentSessionDB.id.in_(sess_ids)).delete(
+            synchronize_session=False)
+    chats = db.query(ChatMessageDB).filter(ChatMessageDB.study_id == study_id).delete(
+        synchronize_session=False)
+    shares = db.query(ShareLinkDB).filter(ShareLinkDB.study_id == study_id).update(
+        {ShareLinkDB.revoked: True}, synchronize_session=False)
+    study.source_file_b64 = None
+    study.status = "purged"
+    counts = {"sessions": len(sess_ids), "answers": answers, "chat_messages": chats,
+              "share_links_revoked": shares, "files": files, "paths_skipped": skipped}
+    record_audit(
+        db, entity="compliance.purge", entity_id=study_id, action="purge", actor_id="cli",
+        study_id=study_id,
+        summary="Purged study data: " + ", ".join(f"{k}={v}" for k, v in counts.items()),
+    )
+    db.commit()
+    return counts
+
+
 def backfill_session_pids() -> int:
     """Fill `pid` on sessions created before the column existed. Idempotent.
 
@@ -1569,6 +1662,19 @@ def set_fielding_link_soft_launch(
     link = get_fielding_link(db, link_id)
     if link:
         link.soft_launch_limit = limit
+        db.commit()
+        db.refresh(link)
+    return link
+
+
+def set_fielding_link_vendor(
+    db: Session, link_id: str, vendor_name: str | None, cpi: float | None,
+    target_completes: int | None,
+) -> "FieldingLinkDB":
+    """Overwrite a link's vendor fields (None clears one)."""
+    link = get_fielding_link(db, link_id)
+    if link:
+        link.vendor_name, link.cpi, link.target_completes = vendor_name, cpi, target_completes
         db.commit()
         db.refresh(link)
     return link
