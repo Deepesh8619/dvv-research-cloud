@@ -563,6 +563,7 @@ def _extract_via_spec_table(
         fill_from_datamap(fields, datamap_question) if datamap_question else []
     )
     question = _question_from_fields(fields, chunk)
+    question.show_if = fields.show_if
     # Fields read straight from the table are not model guesses.
     confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
     if filled_from_datamap:
@@ -595,7 +596,17 @@ def _extract_via_spec_table(
             "questionnaire.extract", prompt, schema.residue_schema(fields.missing)
         )
     except (BackendUnavailable, ModelOutputError, KeyError):
-        return None
+        if set(fields.missing) != {"base"}:
+            return None
+        # Only the base needs judgment. The rest of the question was read
+        # exactly; discarding it for a full model read produced a question whose
+        # answers were the table's own labels. Keep it and show the base words.
+        question.flags.append(schema.FLAG_AMBIGUOUS_ROUTING)
+        question.validation[_ROUTING_VERBATIM_KEY] = fields.base
+        result = ExtractionResult(question=question, confidence=confidence)
+        _flag_derived_variable(result, chunk, patterns)
+        _validate_question(result, {})
+        return result
 
     content = response.content if isinstance(response.content, dict) else {}
     if "type" in fields.missing:
@@ -1168,6 +1179,15 @@ def _downgrade_confidence(result: ExtractionResult, discrepancies: list[str]) ->
         result.question.extraction_confidence[field_name] = lowered
 
 
+def _match_qid_case(expr: Expression, known_qids: set[str]) -> None:
+    """Rewrite each referenced qid to the known qid it equals ignoring case."""
+    by_upper = {k.upper(): k for k in known_qids}
+    if expr.qid and expr.qid not in known_qids:
+        expr.qid = by_upper.get(expr.qid.upper(), expr.qid)
+    for child in expr.children or []:
+        _match_qid_case(child, known_qids)
+
+
 def _resolve_cross_chunk_routing(
     results: list[ExtractionResult], known_qids: set[str]
 ) -> None:
@@ -1185,6 +1205,9 @@ def _resolve_cross_chunk_routing(
             expr: Expression | None = getattr(q, kind)
             if expr is None:
                 continue
+            # "HID_B2B_B2c = 2" means HID_B2B_B2C: a typed lowercase letter is
+            # not a different question. Fix the case before calling it missing.
+            _match_qid_case(expr, known_qids)
             # A referenced qid that is neither known in the document nor this
             # question itself is unresolvable.
             unresolved = {
@@ -1609,6 +1632,19 @@ def _deduplicate_qids(results: list[ExtractionResult]) -> None:
         result.question.validation["original_qid"] = qid
         result.question.qid = new_qid
         seen[new_qid] = 1
+        # Its own screen-out named itself by the shared name; left alone it
+        # screened on the FIRST question's answers ("TERMINATE if 98" against
+        # a question with no 98), so it could never fire.
+        _rename_qid(result.question.terminate_if, qid, new_qid)
+
+
+def _rename_qid(expr: Expression | None, old: str, new: str) -> None:
+    if expr is None:
+        return
+    if expr.qid == old:
+        expr.qid = new
+    for child in expr.children or []:
+        _rename_qid(child, old, new)
 
 
 def _assemble_survey(

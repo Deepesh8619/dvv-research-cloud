@@ -131,11 +131,59 @@ _TEMPLATE_PROMPT = re.compile(
 )
 
 
+#: "Other >>>" / "Custom >>>": the value is in the NEXT cell, after its prompt —
+#: "Among who | Other >>> | If not All, specify: C_ACCOUNT = 2". Reading the
+#: first cell kept "Other >>>", so every base in such a table was lost.
+_SEE_NEXT = re.compile(r">{2,}\s*$")
+_PROMPT_PREFIX = re.compile(r"^if\s+.{0,24}?[,:]\s*(?:specify|details|describe)?\s*:?\s*", re.I)
+
+
 def _value_of(row: list[str]) -> str:
-    for cell in _cells(row)[1:]:
-        if cell and not _TEMPLATE_PROMPT.match(cell):
-            return cell
+    cells = _cells(row)[1:]
+    for i, cell in enumerate(cells):
+        if not cell or _TEMPLATE_PROMPT.match(cell):
+            continue
+        if _SEE_NEXT.search(cell):
+            for later in cells[i + 1:]:
+                stated = _PROMPT_PREFIX.sub("", later).strip()
+                if stated:
+                    return stated
+        return cell
     return ""
+
+
+_ALL_RESPONDENTS = re.compile(r"^\s*(?:all(?:\s+respondents)?|everyone|total)\s*\.?\s*$", re.I)
+#: "C_ACCOUNT = 2", "HID_GOOGLE_USER = 2 or 3", "DA_PLACEMENT = 3 and/or 4", "S1=1-3".
+_CODED_BASE = re.compile(
+    r"\b(?P<qid>[A-Za-z][A-Za-z0-9_]{1,40})\s*=\s*"
+    r"(?P<codes>\d{1,3}(?:\s*(?:-|–|,|or|and/or)\s*\d{1,3})*)",
+)
+#: Wording that means more than one coded condition — left for a person/model.
+_COMPOUND = re.compile(r"\band\b(?!/or)|\bfor at least\b|\bselected at\b|\bonly show\b", re.I)
+
+
+def base_condition(base: str | None) -> Expression | None:
+    """A show condition from a base that states exactly one coded condition.
+
+    "Google Ads Current User (HID_GOOGLE_USER = 1)" -> HID_GOOGLE_USER in [1].
+    Anything with a second condition ("... AND 1-98 selected at X") or none at
+    all ("Provider aware based on HID_AWARE") returns None.
+    """
+    found = list(_CODED_BASE.finditer(base or ""))
+    if len(found) != 1:
+        return None
+    rest = (base[: found[0].start()] + base[found[0].end():])
+    if _COMPOUND.search(rest) or _COMPOUND.search(found[0].group("codes")):
+        return None
+    values: list[int] = []
+    for part in re.split(r"\s*(?:,|or|and/or)\s*", found[0].group("codes")):
+        lo, _, hi = part.replace("–", "-").partition("-")
+        low, high = int(lo), int(hi or lo)
+        if high < low:
+            return None
+        values += range(low, high + 1)
+    return Expression(op="in", qid=found[0].group("qid"), values=values,
+                      verbatim_text=base.strip())
 
 
 #: The header of the column a hidden variable states its derivation in.
@@ -185,7 +233,9 @@ _TERMINATE_RE = re.compile(
     # document states plainly never fired. The instrument passed every other
     # check because a missing terminate looks exactly like a question that
     # screens nobody out.
-    r"(?:if|when)?\s*(?:code[s]?\s*)?([\d,\-\u2013\s&and]+?)\s*"
+    # "TERMINATE if selects punch 1, 10, or 99": the verb and "punch" are
+    # filler, and "or" joins codes like a comma does.
+    r"(?:if|when)?\s*(?:selects?\s+)?(?:punch(?:es)?\s+|code[s]?\s*)?([\d,\-\u2013\s&andor]+?)\s*"
     r"(not\s+selected|is\s+not|selected|chosen|$)",
     re.IGNORECASE,
 )
@@ -268,6 +318,8 @@ class SpecTableFields:
     #: are its opt-out codes ("99: Prefer not to answer").
     numeric_range: dict[str, int] = field(default_factory=dict)
     base: str | None = None
+    #: The base as a condition, when it states one coded condition.
+    show_if: Expression | None = None
     show: str | None = None
     randomize: str | None = None
     notes: str | None = None
@@ -523,6 +575,7 @@ def parse_spec_table(
     #: The answer a bracketed directive would belong to, and what was found.
     last_option: Option | None = None
     option_bases: list[dict] = []
+    base_clash: list[str] = []
     list_sources_found: list[dict] = []
     seen_qid_row = False
     in_row_list = False
@@ -588,6 +641,16 @@ def parse_spec_table(
         name = _field_for(cells[0], patterns)
         if name:
             value = _value_of(row)
+            if name == "base" and _ALL_RESPONDENTS.match(value):
+                # "All respondents | If not All, specify: HID_GOOGLE_USER = 2 or 3"
+                # — the scripter filled in a base and forgot to switch the
+                # dropdown. The written base is the intent; say it was a clash.
+                written = (_PROMPT_PREFIX.sub("", c).strip() for c in cells[2:]
+                           if _PROMPT_PREFIX.match(c))
+                stated = next((w for w in written if w), "")
+                if stated:
+                    base_clash.append(f"marked '{value}' but specifies: {stated}")
+                    value = stated
             found.setdefault(name, value)
             if name == "qid":
                 seen_qid_row = True
@@ -729,6 +792,8 @@ def parse_spec_table(
         fields.evidence["terminate"] = notes.strip()
     if fields.base:
         fields.evidence["base"] = f"Among who: {fields.base}"
+    if base_clash:
+        fields.evidence["base_clash"] = base_clash[0]
 
     if not fields.text:
         fields.missing.append("text")
@@ -736,8 +801,10 @@ def parse_spec_table(
         fields.missing.append("type")
     # A base in prose ("those aware of the brand") needs judgment; a blank base
     # means everyone and needs none; a coded one ("S1=1-3") is already usable.
-    if fields.base and not re.fullmatch(r"[\w\s=,<>\-\d/]+", fields.base):
-        fields.missing.append("base")
+    if fields.base and not _ALL_RESPONDENTS.match(fields.base):
+        fields.show_if = base_condition(fields.base)
+        if fields.show_if is None:
+            fields.missing.append("base")
     if notes and re.search(r"terminate|term\b|screen\s*-?\s*out", notes, re.IGNORECASE):
         if fields.terminate_if is None and "terminate_gap" not in fields.evidence:
             # It states a screen-out we could not parse — never silently drop it.
