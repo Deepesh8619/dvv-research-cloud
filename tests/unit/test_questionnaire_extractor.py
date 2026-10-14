@@ -1191,3 +1191,29 @@ def test_show_respondent_directly_is_never_read_as_hidden():
     ])
     assert q.type is QuestionType.SINGLE
     assert schema.FLAG_DERIVED_VARIABLE not in q.flags
+
+
+def test_a_routing_qid_typed_in_the_wrong_case_resolves():
+    from src.core.survey_definition import Expression
+    from src.engines.questionnaire.extractor import _match_qid_case
+
+    expr = Expression(op="and", children=[Expression(op="in", qid="HID_B2B_B2c", values=[2])])
+    _match_qid_case(expr, {"HID_B2B_B2C", "C_CUST_AGE"})
+    assert expr.children[0].qid == "HID_B2B_B2C"
+
+
+def test_a_renamed_duplicate_keeps_its_own_screen_out():
+    from src.core.survey_definition import Expression, Question
+    from src.engines.questionnaire.extractor import ExtractionResult, _deduplicate_qids
+
+    def q(codes):
+        return ExtractionResult(question=Question(
+            qid="SS_ADVERT_DECMAKER", text="t", type=QuestionType.SINGLE,
+            terminate_if=Expression(op="in", qid="SS_ADVERT_DECMAKER", values=codes),
+        ), confidence={})
+
+    first, second = q([5, 6]), q([1, 3, 98])
+    _deduplicate_qids([first, second])
+    assert first.question.terminate_if.qid == "SS_ADVERT_DECMAKER"
+    assert second.question.qid == "SS_ADVERT_DECMAKER_2"
+    assert second.question.terminate_if.qid == "SS_ADVERT_DECMAKER_2"

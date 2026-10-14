@@ -648,3 +648,53 @@ def test_a_real_open_end_is_still_an_open_end():
             ["Q type", stated],
         ]))
         assert f.qtype is QuestionType.OPEN_TEXT, f"{stated} read as {f.qtype}"
+
+
+def _with_base(*base_row, notes=""):
+    rows = [r for r in GBK if r[0] not in ("Among who", "Other details")]
+    return _table(rows + [["Among who", *base_row], ["Other details", notes]])
+
+
+def test_a_base_behind_other_arrows_is_read_from_the_next_cell():
+    # "Other >>>" means "see the next cell". Keeping the arrow lost every base
+    # in the Google Ads document, and every question showed to everyone.
+    f = parse_spec_table(_with_base("Other >>>", "If not All, specify: C_ACCOUNT = 2"))
+    assert f.base == "C_ACCOUNT = 2"
+    assert (f.show_if.qid, f.show_if.values) == ("C_ACCOUNT", [2])
+    assert "base" not in f.missing
+
+
+def test_a_labelled_base_with_one_coded_condition_is_applied():
+    f = parse_spec_table(_with_base(
+        "Other >>>",
+        "If not All, specify: Google Ads Lapsed or Aware Non-User (HID_GOOGLE_USER = 2 or 3)",
+    ))
+    assert (f.show_if.qid, f.show_if.values) == ("HID_GOOGLE_USER", [2, 3])
+    f = parse_spec_table(_with_base("Other >>>", "If not All, specify: DA_PLACEMENT = 3 and/or 4"))
+    assert f.show_if.values == [3, 4]
+
+
+def test_a_compound_or_prose_base_is_left_for_review():
+    for base in ("DA_PLACEMENT = 3 and/or 4 AND 1-98 selected at DA_VID_EFFIC",
+                 "Provider aware based on HID_AWARE",
+                 "Ask if GA_GOOGLE_TOOL = 5 for at least one option"):
+        f = parse_spec_table(_with_base("Other >>>", f"If not All, specify: {base}"))
+        assert f.show_if is None and "base" in f.missing, base
+
+
+def test_all_respondents_with_a_written_base_uses_the_written_base():
+    f = parse_spec_table(
+        _with_base("All respondents", "If not All, specify: HID_META_USER = 2 or 3")
+    )
+    assert f.show_if.values == [2, 3]
+    assert "base_clash" in f.evidence
+    f = parse_spec_table(_with_base("All respondents", "If not All, specify:"))
+    assert f.show_if is None and "base" not in f.missing
+
+
+def test_terminate_if_selects_punch_list_with_or():
+    rows = [r for r in GBK if r[0] != "Other details"]
+    rows.insert(4, ["10", "More than 1000"])
+    notes = ["Other details", "TERMINATE if selects punch 1, 10, or 99"]
+    f = parse_spec_table(_table(rows + [notes]))
+    assert f.terminate_if.values == [1, 10, 99]
