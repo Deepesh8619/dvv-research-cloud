@@ -99,14 +99,14 @@ Three real client questionnaires, deterministic path only (no model calls):
 | Vivo AU Wave 2 | 70 | 1 |
 | Google Ads SMB | 79 | 0 |
 
-1334 backend tests, 91 web tests.
+1628 backend tests, 112 web tests.
 
 ## Quickstart
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-pytest                       # 1334 tests
+pytest                       # 1628 tests
 cd web && npm install && npm run dev
 ```
 
@@ -145,6 +145,7 @@ engine reads a source file format directly.
 | [`docs/CHANGELOG-correction-loop.md`](docs/CHANGELOG-correction-loop.md) | Build log — founders teaching the parser |
 | [`docs/LIFECYCLE_AND_ARCHITECTURE.md`](docs/LIFECYCLE_AND_ARCHITECTURE.md) | Study lifecycle and architecture |
 | [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md) | How the pieces are used together |
+| [`docs/FIRST_STUDY.md`](docs/FIRST_STUDY.md) | Runbook for fielding the first real study end to end |
 | [`docs/ARCHITECTURE-agents.md`](docs/ARCHITECTURE-agents.md) | Chat specialists and the model router |
 | [`DEPLOY.md`](DEPLOY.md) | Per-client Compose bundle, licensing |
 | `docs/obsidian-vault/` | **Stale (July 2026)** — the tab-engine phase. Kept for history. |

@@ -2,6 +2,13 @@
 
 Written 2026-09-24, against `657de2e`.
 
+> **Status 2026-10-14.** Since this was written: MaxDiff design and screens,
+> block rotation, the QA loop, and the clean-and-decide / vendor-ops /
+> compliance bundle (branch `feat/mr-ops-bundle`) were built. **Tier 1 is
+> still untouched** — no study has been fielded, the client bundle has not run
+> on another machine, and Bedrock has not run on real AWS. Next step:
+> [`FIRST_STUDY.md`](FIRST_STUDY.md). Features stop until that is done.
+
 Two kinds of work live here and they are not interchangeable:
 
 - **MOAT** — shares the `SurveyDefinition` spine, so one change reaches
