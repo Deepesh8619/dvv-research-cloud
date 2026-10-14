@@ -66,6 +66,7 @@ from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
 from src.engines.questionnaire.learned import LearnedPattern, learned_hidden_variable
 from src.engines.questionnaire.list_sources import fill_lists, points_at_a_list
 from src.engines.questionnaire.logic_review import review as review_logic
+from src.engines.questionnaire.loop_bases import resolve_loop_bases_from_hidden
 from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import Mask, detect_techniques
 from src.engines.questionnaire.per_item import apply as apply_per_item_grids
@@ -1592,6 +1593,8 @@ def extract_survey_definition(
     # "[BASE: ANSWERED YES ABOVE]": a base that points instead of naming. Before
     # QA, so QA judges the survey with these bases applied.
     resolve_relative_bases(survey)
+    # A loop turn's base, pointing at a hidden variable that names its brand.
+    resolve_loop_bases_from_hidden(survey)
     # Automatic answers and typed-vs-choice contradictions, before QA so the
     # base flag an automatic answer does not deserve is gone when QA looks.
     mark_derived_facts(survey)

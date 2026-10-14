@@ -119,3 +119,77 @@ def base_for(label: str, bases: dict[str, Expression]) -> Expression | None:
         if known and (known in wanted or wanted in known):
             return condition
     return None
+
+
+# --- Bases that point at a hidden variable -----------------------------------
+
+_STATE = re.compile(r"\b(current|lapsed|aware|non)\b", re.I)
+_QID_NAMED = re.compile(r"\b([A-Z][A-Z0-9]*_[A-Z0-9_]+)\b")
+
+
+def _words(text: str) -> set[str]:
+    return {w.lower() for w in _STATE.findall(text or "")}
+
+
+def _hidden_answers(survey) -> list[tuple[str, int, str]]:
+    """(qid, code, label) for every value of every hidden variable."""
+    out = []
+    for q in survey.questions:
+        hidden = "DERIVED_VARIABLE" in (q.flags or []) or q.qid.upper().startswith("HID")
+        if hidden:
+            out += [(q.qid, o.code, o.label or "") for o in q.options or []]
+    return out
+
+
+def resolve_loop_bases_from_hidden(survey) -> list[str]:
+    """Each loop turn's base, read from the hidden variable its base points at.
+
+        Among who: Provider aware based on HID_AWARE      (loop: Google Ads, Meta Ads, ...)
+        HID_AWARE: 1 Google Ads Aware / 2 Meta Ads Aware / ...
+
+    The Google Ads turn is asked of HID_AWARE = 1. "Platform current user" with
+    no variable named is matched the same way across every hidden variable.
+    A turn is resolved only when exactly ONE value names its brand and every
+    state word of the base (current / lapsed / aware / non); anything else
+    stays flagged with its words — two plausible answers is not an answer.
+    """
+    from src.engines.questionnaire import schema
+
+    answers = _hidden_answers(survey)
+    resolved = []
+    for q in survey.questions:
+        loop = (q.validation or {}).get("loop") or {}
+        brand = _brand(loop.get("label") or "")
+        if not brand or q.show_if is not None:
+            continue
+        base = re.sub(r"^\s*Among who:\s*", "", (q.extraction_evidence or {}).get("base", ""))
+        if not base or schema.FLAG_AMBIGUOUS_ROUTING not in (q.flags or []):
+            continue
+        from src.engines.questionnaire.spec_table import base_condition
+
+        stated = base_condition(base)
+        if stated is not None and brand in base.lower():
+            # "Google Ads Lapsed or Aware Non-User (HID_GOOGLE_USER = 2 or 3)" is
+            # written for the Google turn; the other turns are not and stay flagged.
+            hits = [(stated.qid, None, base)]
+        else:
+            hits = None
+        named = set(_QID_NAMED.findall(base))
+        pool = [a for a in answers if not named or a[0] in named]
+        state = _words(base)
+        if hits is None:
+            hits = [a for a in pool
+                    if brand in a[2].lower() and state and state <= _words(a[2])
+                    and _words(a[2]) <= state]
+        if len(hits) != 1:
+            continue
+        qid, code, label = hits[0]
+        q.show_if = (Expression(op="in", qid=qid, values=stated.values, verbatim_text=base)
+                     if code is None else
+                     Expression(op="in", qid=qid, values=[code], verbatim_text=base))
+        q.extraction_evidence["show_if"] = f"{base} → {qid} = {code} ({label})"
+        q.flags = [f for f in q.flags if f != schema.FLAG_AMBIGUOUS_ROUTING]
+        if (q.validation or {}).get("routing_verbatim") == base:
+            q.validation.pop("routing_verbatim")
+        resolved.append(q.qid)
+    return resolved
