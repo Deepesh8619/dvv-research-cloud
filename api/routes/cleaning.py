@@ -200,6 +200,9 @@ def _write_cleaning_log(path, removed, decisions, cells, policies, by, at) -> No
                     "decided_at"])
         for k, reason in removed.items():
             w.writerow([k, "", "", "", "remove", reason, by, at])
+        for k, d in decisions.items():  # a flagged respondent kept on purpose is part of the record
+            if d["decision"] == "keep":
+                w.writerow([k, "", "", "", "keep", d["reason_code"], by, at])
         for c in cells:
             w.writerow([c["key"], c["variable"], c["old"], c["new"], c["method"], c["reason"],
                         c["by"] or by, c["at"] or at])

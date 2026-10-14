@@ -1557,7 +1557,9 @@ def erase_respondent_session(db: Session, session: "RespondentSessionDB") -> int
         .filter(RespondentAnswerDB.session_id == session.id)
         .delete(synchronize_session=False)
     )
-    session.entry_params = {}
+    # `erased` keeps the row in field counts but drops it from materialized data
+    # and every data check (a blank row would otherwise count and trip no_user_agent).
+    session.entry_params = {"erased": True}
     session.pid = None
     db.commit()
     return n

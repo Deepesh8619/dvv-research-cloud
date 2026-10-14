@@ -146,7 +146,7 @@ def test_erase_respondent_by_id_and_pid(client):
     db = sf()
     assert sid not in answers_by_session(db, link_id)
     row = db.get(RespondentSessionDB, sid)
-    assert row.pid is None and row.entry_params == {}
+    assert row.pid is None and row.entry_params == {"erased": True}
     aud = db.query(AuditLogDB).filter(AuditLogDB.entity == "compliance.erasure").all()
     assert len(aud) == 1 and aud[0].entity_id == sid and "P9" not in (aud[0].summary or "")
     db.close()

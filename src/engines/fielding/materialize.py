@@ -461,7 +461,11 @@ def materialize_fielding(
     DataFrame with one row per included respondent (plus respondent_id and
     paradata columns).
     """
-    completes = [s for s in sessions if getattr(s, "status_code", None) in statuses]
+    completes = [
+        s for s in sessions
+        if getattr(s, "status_code", None) in statuses
+        and not (getattr(s, "entry_params", None) or {}).get("erased")
+    ]
     # Deterministic order: by start time then id, so respondent_id is stable
     # across re-materializations.
     completes.sort(key=lambda s: (str(getattr(s, "started_at", "") or ""), str(s.id)))
