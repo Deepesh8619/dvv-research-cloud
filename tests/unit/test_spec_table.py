@@ -705,3 +705,17 @@ def test_auto_punch_in_the_base_cell_is_an_automatic_answer_not_a_base():
         "Other >>>", "If not All, specify: auto=punch those who select only one at DA_GOALS"))
     assert f.show_if is None and "base" not in f.missing
     assert "auto_answer" in f.evidence
+
+
+def test_each_screen_out_sentence_on_a_number_is_read_on_its_own():
+    from src.core.survey_definition import Option
+    from src.engines.questionnaire.spec_table import _parse_numeric_terminate
+
+    notes = ("Allow 0-99999999. TERMINATE if less than $500 Flag if greater than $1,000,000 "
+             "TERMINATE if selects 'Prefer not to answer' TERMINATE if 13-99 selected at "
+             "SS_REVENUE (term only after they have answered SS_AD_SPEND).")
+    expr, unread = _parse_numeric_terminate(
+        notes, "SS_AD_SPEND", [Option(code=99, label="Prefer not to answer")])
+    got = {(c.op, c.value, tuple(c.values or ())) for c in expr.children}
+    assert got == {("lt", 500, ()), ("in", None, (99,))}  # the flag at $1M is not a screen-out
+    assert unread  # the SS_REVENUE rule is left for a person

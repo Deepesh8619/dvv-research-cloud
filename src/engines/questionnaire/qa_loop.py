@@ -180,6 +180,7 @@ _INSTRUCTION = re.compile(
     r"^\s*(?:RANDOMI[SZ]E|ROTATE|ENABLE|ANCHOR|TERMINATE|PROGRAMMER|PN\b|DO\s+NOT|"
     r"SHOW\s+AS|DISPLAY\s+AS|INSERT)\b"
 )
+_TYPED_ENTRY = re.compile(r"\ballow\s+\d[\d,]*\s*[-–]\s*\d[\d,]*\s+to\s+be\s+entered", re.I)
 _TIDY_QID = re.compile(r"[A-Za-z][A-Za-z0-9_.]*")
 
 
@@ -269,6 +270,14 @@ def _consistency_checks(q: Question, by_qid: dict[str, Question]) -> list[Issue]
             "single_but_asks_for_all",
             "the wording asks for every answer that applies, but the question allows one",
             _ASKS_FOR_ALL.search(wording).group(0),
+        ))
+    typed = _TYPED_ENTRY.search(q.source_text or "")
+    if typed and q.type in (QuestionType.SINGLE, QuestionType.MULTI):
+        issues.append(Issue(
+            "entry_rule_on_a_choice",
+            "the notes describe typing a number, but this is a list to pick from — "
+            "one of the two is left over from another question",
+            typed.group(0),
         ))
     have = _answers(q, by_qid)
     if have:

@@ -201,8 +201,9 @@ def _always_decidable(question: Question, chunk_text: str) -> list[Check]:
         )
 
     # 6. A screen-out that names a code nobody can pick never fires.
+    # On a typed number, "under 500" is a value, not answer code 500.
     codes = {o.code for o in question.options or []}
-    if question.terminate_if is not None and codes:
+    if question.terminate_if is not None and codes and question.type is not QuestionType.NUMERIC:
         named = _codes_named(question.terminate_if, question.qid)
         unknown = sorted(named - codes)
         checks.append(

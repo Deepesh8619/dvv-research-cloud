@@ -493,36 +493,67 @@ def _numeric_range(text: str) -> dict[str, int]:
     return {}
 
 
+_RULE_SPLIT = re.compile(r"\b(?:terminate|term|screen\s*-?\s*out|flag)\b", re.I)
+# "less than $500", "under 18", "more than 1,000"
+_WORD_BOUND_RE = re.compile(
+    r"\b(less\s+than|fewer\s+than|under|below|more\s+than|greater\s+than|over|above)\s+"
+    r"\$?\s*(\d[\d,]*)",
+    re.I,
+)
+
+
 def _parse_numeric_terminate(
     notes: str, qid: str, opt_outs: list[Option]
 ) -> tuple[Expression | None, bool]:
     """ "TERMINATE if age<25 or age>?? OR if 99 selected" on a typed number.
 
     Returns the screen-out it can state exactly, and whether part of it could
-    NOT be read. A bound written "??" is a number the scripter never filled in:
-    the rest still holds (under 25 is out whatever the upper limit), and the
-    gap goes to a person rather than being guessed.
+    NOT be read. Each TERMINATE sentence is read on its own: "TERMINATE if less
+    than $500 / Flag if greater than $1,000,000 / TERMINATE if 13-99 selected at
+    SS_REVENUE" is two screen-outs and a flag, and reading them as one applied
+    the revenue codes to this question. A bound written "??" is a number the
+    scripter never filled in: the rest still holds, and the gap goes to a person.
     """
-    if not re.search(r"terminate|term\b|screen\s*-?\s*out", notes or "", re.I):
+    pieces = _RULE_SPLIT.split(notes or "")
+    keywords = _RULE_SPLIT.findall(notes or "")
+    rules = [text for word, text in zip(keywords, pieces[1:], strict=True)
+             if word.lower() != "flag" and re.match(r"\s*(?:if|when)\b", text, re.I)]
+    if not rules:
         return None, False
-    rule = re.split(r"terminate|term\b|screen\s*-?\s*out", notes, maxsplit=1, flags=re.I)[1]
     parts: list[Expression] = []
     unread = False
-    for op, bound in _NUMERIC_BOUND_RE.findall(rule):
-        if bound.startswith("?"):
+    known = {o.code for o in opt_outs}
+    for rule in rules:
+        before = len(parts)
+        named = _TERMINATE_AT_RE.search(rule)
+        if named and named.group(1).upper() != qid.upper():
+            # On another question's answer: kept in words for a person.
             unread = True
             continue
-        value = int(bound)
-        # Whole numbers, so "<= 24" is "< 25"; the model has no <= of its own.
-        if op == "<=":
-            op, value = "<", value + 1
-        elif op == ">=":
-            op, value = ">", value - 1
-        parts.append(Expression(op="lt" if op == "<" else "gt", qid=qid, value=value))
-    known = {o.code for o in opt_outs}
-    codes = [int(c) for c in _CODE_SELECTED_RE.findall(rule) if int(c) in known]
-    if codes:
-        parts.append(Expression(op="in", qid=qid, values=codes))
+        bounds = [(op, b) for op, b in _NUMERIC_BOUND_RE.findall(rule)]
+        for word, number in _WORD_BOUND_RE.findall(rule):
+            low = word.lower()
+            op = "<" if low.startswith(("less", "fewer", "under", "below")) else ">"
+            bounds.append((op, number.replace(",", "")))
+        for op, bound in bounds:
+            if bound.startswith("?"):
+                unread = True
+                continue
+            value = int(bound)
+            # Whole numbers, so "<= 24" is "< 25"; the model has no <= of its own.
+            if op == "<=":
+                op, value = "<", value + 1
+            elif op == ">=":
+                op, value = ">", value - 1
+            parts.append(Expression(op="lt" if op == "<" else "gt", qid=qid, value=value))
+        codes = [int(c) for c in _CODE_SELECTED_RE.findall(rule) if int(c) in known]
+        lowered = rule.lower()
+        codes += [o.code for o in opt_outs
+                  if o.label and o.label.lower() in lowered and o.code not in codes]
+        if codes:
+            parts.append(Expression(op="in", qid=qid, values=codes))
+        if len(parts) == before and not any(b.startswith("?") for _, b in bounds):
+            unread = True
     if not parts:
         return None, True
     expression = parts[0] if len(parts) == 1 else Expression(op="or", children=parts)
@@ -783,8 +814,9 @@ def parse_spec_table(
             # Not sent to a model: it cannot know a number the scripter never
             # wrote either, and it would overwrite the part that WAS exact.
             fields.evidence["terminate_gap"] = (
-                "part of this screen-out is not stated (a bound written '??') — "
-                "the rest is applied; confirm the missing limit"
+                "part of this screen-out could not be applied (a limit written '??', "
+                "or a rule on another question's answer) — the rest is applied; "
+                "set the missing part by hand"
             )
     else:
         fields.terminate_if = _parse_terminate(notes, options, qid)

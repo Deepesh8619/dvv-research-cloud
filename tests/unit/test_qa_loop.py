@@ -192,3 +192,10 @@ def test_names_reused_odd_names_instructions_and_missing_sources_are_reported():
     assert "odd_question_name" in _found(s, "C_TEAM_S(ZE")
     assert "instruction_as_answer" in _found(s, "Q24b")
     assert "list_source_missing" in _found(s, "DA_SHARE")
+
+
+def test_a_typed_number_rule_on_a_choice_list_is_reported():
+    q = Question(qid="SS_EMP", text="How many employees?", type=QuestionType.SINGLE,
+                 source_text="Allow 0-9999999 to be entered, whole numbers only",
+                 options=[Option(code=1, label="Just me"), Option(code=2, label="2-9")])
+    assert "entry_rule_on_a_choice" in _found(_survey(q), "SS_EMP")
