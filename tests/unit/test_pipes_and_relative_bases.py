@@ -90,3 +90,21 @@ def test_questions_that_share_a_stem_are_not_repeats():
                    text="Which of the following best describes you and your household now?")
     by = {"S9": s9, "S10": s10}
     assert "repeats_another_question" not in [i.check for i in qa_check(s9, by)]
+
+
+def test_a_base_naming_codes_of_the_previous_question_is_applied():
+    from src.core.survey_definition import Option, Question, QuestionType, SurveyDefinition
+    from src.engines.questionnaire.relative_bases import resolve_relative_bases
+
+    familiar = Question(qid="Q9", text="How familiar?", type=QuestionType.SINGLE,
+                        options=[Option(code=c, label=f"L{c}") for c in range(1, 6)])
+    follow = Question(qid="Q10", text="Perception?", type=QuestionType.MULTI,
+                      source_text="[BASE SELECTS 1-4 IN PREVIOUS QUESTION] Which best ...",
+                      options=[Option(code=1, label="Good")])
+    odd = Question(qid="Q11", text="Why?", type=QuestionType.OPEN_TEXT,
+                   source_text="[BASE: CODES 7 OR 8 ABOVE] Why?")
+    survey = SurveyDefinition(study_id="s", questions=[familiar, follow, odd])
+    assert resolve_relative_bases(survey) == ["Q10"]
+    assert (follow.show_if.qid, follow.show_if.values) == ("Q9", [1, 2, 3, 4])
+    # Q10 offers no 7 or 8: left in words for a person, never guessed.
+    assert odd.show_if is None and "AMBIGUOUS_ROUTING" in odd.flags
