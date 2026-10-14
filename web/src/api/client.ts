@@ -1443,3 +1443,49 @@ export const copilotApi = {
   confirm: async (card: CopilotProposal) =>
     api.request({ method: card.method, url: card.path, data: card.body }),
 }
+
+export const publicCrosstabs = (token: string) =>
+  api.get<CrosstabsPayload>(`/public/studies/${token}/crosstabs`)
+
+export interface CleaningState {
+  key_column: string | null
+  flags: Record<string, Array<{ check: string; detail: string }>>
+  skipped: unknown[]
+  decisions: Record<string, { decision: 'remove' | 'keep'; reason_code?: string; note?: string | null }>
+  n_unreviewed_flagged: number
+  locked: boolean
+  versions: Array<Record<string, unknown>>
+  rules: Array<Record<string, unknown>>
+  imputations: Array<Record<string, unknown>>
+}
+
+export interface ImputationBody {
+  variable: string
+  method: string
+  target: string
+  donor_class?: string
+  min?: number
+  max?: number
+  confirm?: boolean
+}
+
+// Mirrors api/routes/cleaning.py. Keep is one respondent per call (server-enforced).
+export const cleaningApi = {
+  get: async (id: string) => api.get<CleaningState>(`/studies/${id}/cleaning`),
+  decide: async (
+    id: string,
+    body: { keys: string[]; decision: 'remove' | 'keep'; reason_code: string; note?: string },
+  ) => api.post(`/studies/${id}/cleaning/decisions`, body),
+  rules: async (id: string) =>
+    api.get<{ rules: Array<Record<string, unknown>>; proposed: Array<Record<string, unknown>> }>(
+      `/studies/${id}/cleaning/rules`,
+    ),
+  putRules: async (id: string, rules: unknown[]) => api.put(`/studies/${id}/cleaning/rules`, { rules }),
+  imputation: async (id: string, body: ImputationBody, preview: boolean) =>
+    api.post<{ preview: boolean; n_cells: number; cells?: Array<Record<string, unknown>> }>(
+      `/studies/${id}/cleaning/imputations?preview=${preview}`,
+      body,
+    ),
+  lock: async (id: string) => api.post(`/studies/${id}/cleaning/lock`),
+  unlock: async (id: string, note: string) => api.post(`/studies/${id}/cleaning/unlock`, { note }),
+}

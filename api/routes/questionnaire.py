@@ -20,6 +20,7 @@ Roles (api/auth.py): owner/analyst may upload and edit; reviewer is read-only
 """
 
 import logging
+import os
 import threading
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta
@@ -355,6 +356,17 @@ def _study_datamap(db, study_id: str):
         return None
 
 
+# Extractions share one rate-limited model quota; ten at once slow each other
+# and none finish. Extra uploads wait here (status stays "processing").
+# ponytail: per-process; a shared job queue comes with multiple web workers.
+_EXTRACTION_SLOTS = threading.BoundedSemaphore(int(os.getenv("DVV_MAX_EXTRACTIONS", "3")))
+
+
+def _run_extraction_queued(*args) -> None:
+    with _EXTRACTION_SLOTS:
+        _run_extraction(*args)
+
+
 def _run_extraction(
     questionnaire_id: str,
     study_id: str,
@@ -564,7 +576,7 @@ async def upload_questionnaire(
 
     definition_path = _definition_path(study_id, questionnaire.id)
     thread = threading.Thread(
-        target=_run_extraction,
+        target=_run_extraction_queued,
         args=(questionnaire.id, study_id, file_path, definition_path, file.filename),
         daemon=True,
     )

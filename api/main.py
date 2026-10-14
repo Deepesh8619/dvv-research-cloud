@@ -165,7 +165,9 @@ try:
     from api.routes import (
         auth,
         chat,
+        cleaning,
         codeframes,
+        compliance,
         corrections,
         fielding,
         materialize,
@@ -173,6 +175,7 @@ try:
         questionnaire,
         studies,
         ui_overrides,
+        vendors,
     )
 
     app.include_router(auth.router, prefix="/api")
@@ -194,14 +197,17 @@ try:
     logger.info("✅ Fielding routes loaded")
 
     app.include_router(materialize.router, prefix="/api")
+    app.include_router(vendors.router, prefix="/api")
     logger.info("✅ Materialize routes loaded")
 
+    app.include_router(compliance.router, prefix="/api")
     app.include_router(corrections.router, prefix="/api")
     logger.info("✅ Correction-loop routes loaded")
 
     app.include_router(ui_overrides.router, prefix="/api")
     logger.info("✅ UI-override routes loaded")
 
+    app.include_router(cleaning.router, prefix="/api")
     app.include_router(codeframes.router, prefix="/api")
     logger.info("✅ Codeframe-library routes loaded")
     from api.routes import copilot

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { DocChartIcon, DownloadIcon } from '../components/Icons'
-import { shareApi, PublicStudy } from '../api/client'
+import { shareApi, publicCrosstabs, PublicStudy, CrosstabsPayload } from '../api/client'
+import CrosstabTable from '../components/CrosstabTable'
 import LoadingSpinner from '../components/LoadingSpinner'
 import Badge from '../components/ui/Badge'
 import { buttonClasses } from '../components/ui/Button'
@@ -11,6 +12,7 @@ export default function SharePage() {
   const [study, setStudy] = useState<PublicStudy | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [tabs, setTabs] = useState<CrosstabsPayload | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -18,6 +20,7 @@ export default function SharePage() {
       try {
         const res = await shareApi.getPublic(token)
         setStudy(res.data)
+        publicCrosstabs(token).then((r) => setTabs(r.data)).catch(() => {})
       } catch (err: any) {
         setError(err.response?.data?.detail || 'Share link not found or expired')
       } finally {
@@ -116,6 +119,13 @@ export default function SharePage() {
             )}
           </div>
         </div>
+
+        {tabs?.tables.map((t) => (
+          <div key={t.id} className="bg-white rounded-lg border border-slate-200 shadow-panel p-6 mb-6">
+            <h3 className="text-sm font-semibold text-slate-900 mb-3">{t.title}</h3>
+            <CrosstabTable table={t} minBase={tabs.min_base_for_test} showBases />
+          </div>
+        ))}
 
         {/* Footer */}
         <div className="text-center py-6">

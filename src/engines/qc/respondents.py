@@ -208,10 +208,17 @@ def detect_duplicates(df: pl.DataFrame, datamap: DataMap) -> list[int]:
     which would mask the duplication. The FIRST occurrence is kept unflagged;
     every later copy is flagged (standard dedupe convention).
     """
+    # Identifiers and paradata (record, vDurationSec, respondent_id...) differ
+    # on every row and would hide every duplicate; skip them like _grid_groups.
     cols = [
         v.name
         for v in datamap.variables
-        if v.name in df.columns and v.type in (VarType.SINGLE, VarType.MULTI, VarType.NUMERIC)
+        if v.name in df.columns
+        and v.type in (VarType.SINGLE, VarType.MULTI, VarType.NUMERIC)
+        and v.name != "respondent_id"
+        and v.provenance != "fielding_paradata"
+        and classify_variable(v.name, getattr(v, "label", "") or "", v.question_ref)
+        in EXPECTED_IN_QUESTIONNAIRE
     ]
     if not cols:
         return []
@@ -245,7 +252,10 @@ def detect_gibberish_open_ends(df: pl.DataFrame, datamap: DataMap) -> dict[str, 
     """Per TEXT variable, row indices whose answer looks like junk."""
     out: dict[str, list[int]] = {}
     for v in datamap.variables:
+        # paradata TEXT (connection hash, geo) is not an answer; a hash with no vowels is not junk
         if v.type != VarType.TEXT or v.name not in df.columns:
+            continue
+        if v.provenance == "fielding_paradata":
             continue
         series = df[v.name]
         flagged = [

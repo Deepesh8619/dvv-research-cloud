@@ -13,11 +13,13 @@ Idempotent: re-materializing after more completes overwrites the run dir with
 the fresh full dataset. Zero completes -> 422, not a crash.
 """
 
+import json
 import logging
 import os
 
 import polars as pl
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.auth import UserRole, get_current_user, require_role
@@ -49,6 +51,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+class SettingsBody(BaseModel):
+    mask_pii: bool
+
+
 def _approved_survey(db: Session, study_id: str) -> SurveyDefinition:
     """The study's approved questionnaire, or a 409 saying why there is none."""
     from api.db import list_questionnaires_for_study
@@ -62,6 +68,163 @@ def _approved_survey(db: Session, study_id: str) -> SurveyDefinition:
                    "not final yet.",
         )
     return SurveyDefinition.from_json(approved.definition_json)
+
+
+def _publish_tables(db: Session, study, run_dir, datamap) -> None:
+    """(Re)build crosstabs + deck from run_dir/data.parquet and point the study at them."""
+    study_id = study.id
+    parquet_path = run_dir / "data.parquet"
+    # Auto crosstabs deck so the Tables tab / durable crosstabs_json activate,
+    # same machinery the orchestrator uses. Skipped cleanly if no tabulatable
+    # (single-coded) questions exist.
+    crosstabs_json = None
+    # Fallback when there are no tabulatable (single-coded) questions: keep the
+    # marker. excel_path only needs to point INTO run_dir for _study_dir to
+    # resolve it; the deck download then 404s, which download_deck already
+    # handles gracefully (it 404s on any missing file, never 500s).
+    excel_path = str(run_dir / "fielded.marker")
+    tab_plan = auto_tab_plan(datamap, title=f"{study.client_name} — Fielded Topline")
+    if tab_plan:
+        deck_run = run_tab_plan(str(parquet_path), tab_plan, datamap)
+        deck_to_json(deck_run, run_dir / "crosstabs.json")
+        crosstabs_json = (run_dir / "crosstabs.json").read_text()
+        # Render the SAME deck to .xlsx via the existing renderer — the exact
+        # call the orchestrator uses for uploaded studies. Ephemeral disk is
+        # acceptable for v1: re-materializing (one click) regenerates it.
+        xlsx_path = run_dir / f"{study_id}_fielded_deck.xlsx"
+        render_excel(deck_run, str(xlsx_path))
+        excel_path = str(xlsx_path)
+    update_study_paths(db, study_id, excel_path=excel_path, datamap_json=datamap.to_json())
+    if crosstabs_json is not None:
+        set_study_artifacts(db, study_id, crosstabs_json=crosstabs_json)
+
+
+def _write_and_publish(db, study, datamap, df, delivery_map, delivery_df):
+    """Shared tail: write study-level data + delivery files, re-apply a locked
+    cleaning version, publish tables. Returns (run_dir, df, delivery_df, removed, exports)."""
+    study_id = study.id
+    # Write to the run-dir convention the read path expects. Reuse the study's
+    # own dir under STUDIES_DIR; excel_path.parent must resolve here (that's how
+    # _study_dir locates data.parquet/datamap.json).
+    run_dir = STUDIES_DIR / study_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    parquet_path = run_dir / "data.parquet"
+    (run_dir / "datamap.json").write_text(datamap.to_json())
+    # nan_to_null mirrors the orchestrator's pl.from_pandas load step so missing
+    # cells are true parquet nulls, exactly like an uploaded study.
+    # A fresh data.parquet makes any data_raw.parquet stale (apply_cleaning would
+    # rebuild from the OLD respondents), so drop it before writing.
+    (run_dir / "data_raw.parquet").unlink(missing_ok=True)
+    pl.from_pandas(df, nan_to_null=True).write_parquet(str(parquet_path))
+    cleaning = (study.study_metadata or {}).get("cleaning") or {}
+    removed: dict = {}
+    if cleaning.get("locked") and cleaning.get("versions"):
+        from src.engines.qc.cleaning import apply_cleaning
+
+        latest = cleaning["versions"][-1]
+        removed = dict(latest.get("removed") or {})
+        apply_cleaning(run_dir, removed, latest.get("imputations") or [])
+        df = pl.read_parquet(parquet_path)  # n_respondents/tables see the cleaned set
+
+    # The DELIVERY files, separate from the analysis artifacts above on purpose.
+    # A topline computed over screened-out respondents is simply wrong, so
+    # data.parquet stays completes-only — but a delivery carries every
+    # disposition, because the terminates are the evidence the screen-outs
+    # worked and the denominator of the incidence rate the client is buying.
+    if removed:
+        from src.engines.qc.cleaning import annotate_delivery
+
+        delivery_df, delivery_map = annotate_delivery(
+            pl.from_pandas(delivery_df, nan_to_null=True), delivery_map, removed
+        )
+        delivery_df = delivery_df.to_pandas()
+    if (study.study_metadata or {}).get("mask_pii"):
+        delivery_df = _mask_delivery(delivery_df, delivery_map)
+    exports: dict[str, str] = {}
+    sav_path = run_dir / f"{study_id}_responses.sav"
+    try:
+        write_sav(delivery_df, delivery_map, str(sav_path))
+        exports["sav"] = str(sav_path)
+    except Exception as exc:  # a delivery format must never fail the pipeline
+        logger.warning(f"[{study_id}] SPSS export failed (non-fatal): {exc}")
+    responses_xlsx = run_dir / f"{study_id}_responses.xlsx"
+    try:
+        _write_labelled_xlsx(delivery_df, delivery_map, responses_xlsx)
+        exports["xlsx"] = str(responses_xlsx)
+    except Exception as exc:
+        logger.warning(f"[{study_id}] respondent-level xlsx failed (non-fatal): {exc}")
+
+    _publish_tables(db, study, run_dir, datamap)
+    # Erasure sets this; a successful write is what clears it.
+    study.study_metadata = {**(study.study_metadata or {}), "needs_rematerialize": False}
+    db.commit()
+    return run_dir, df, delivery_df, removed, exports
+
+
+def _mask_delivery(delivery_df, delivery_map):
+    """A masked COPY for the delivery files; data.parquet stays raw."""
+    from src.core.models import VarType
+    from src.engines.qc.pii import mask_text, pii_columns
+
+    out = delivery_df.copy()
+    pii = set(pii_columns(delivery_map))
+    for var in delivery_map.variables:
+        if var.name not in out.columns:
+            continue
+        if var.name in pii:
+            out[var.name] = out[var.name].astype(object).where(out[var.name].isna(), "***")
+        elif var.type is VarType.TEXT:
+            out[var.name] = out[var.name].map(mask_text)
+    return out
+
+
+@router.patch("/studies/{study_id}/settings")
+def update_settings(
+    study_id: str,
+    body: SettingsBody,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER)),
+):
+    """Study delivery settings. Only `mask_pii` today. (Owner)"""
+    from api.db import record_audit
+
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    old = bool((study.study_metadata or {}).get("mask_pii"))
+    study.study_metadata = {**(study.study_metadata or {}), "mask_pii": body.mask_pii}
+    record_audit(
+        db, entity="compliance.settings", entity_id=study_id, action="set",
+        actor_id=user.id, study_id=study_id, summary=f"mask_pii {old} -> {body.mask_pii}",
+    )
+    db.commit()
+    return {"mask_pii": body.mask_pii}
+
+
+def _replacement(db, link_id, removed, answers) -> dict:
+    replacement = {"total": 0, "by_cell": {}}
+    if removed:
+        from api.db import list_quota_cells
+        from src.core.survey_definition import Expression
+        from src.engines.fielding.decisions import QuotaCell
+        from src.engines.qc.cleaning import replacement_needed
+
+        cells = [
+            QuotaCell(id=c.id, condition=Expression.from_dict(json.loads(c.condition_json)),
+                      limit=c.cell_limit, count=c.count)
+            for c in list_quota_cells(db, link_id)
+        ]
+        replacement = replacement_needed(
+            {k: answers.get(k, {}) for k in removed if k in answers}, cells
+        )
+    return replacement
+
+
+_REPLACEMENT_NOTE = (
+    "Quota counts are NOT decremented for removed respondents. "
+    "Reopening a cell to field replacements is a person's call, "
+    "made through PATCH /quotas/{id}."
+)
 
 
 @router.post("/studies/{study_id}/fielding/links/{link_id}/materialize")
@@ -94,65 +257,15 @@ def materialize_link(
     answers = answers_by_session(db, link_id)  # one query, not one per respondent
     datamap, df = materialize_fielding(survey, completes, answers)
 
-    # Write to the run-dir convention the read path expects. Reuse the study's
-    # own dir under STUDIES_DIR; excel_path.parent must resolve here (that's how
-    # _study_dir locates data.parquet/datamap.json).
-    run_dir = STUDIES_DIR / study_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    datamap_path = run_dir / "datamap.json"
-    parquet_path = run_dir / "data.parquet"
-    datamap_path.write_text(datamap.to_json())
-    # nan_to_null mirrors the orchestrator's pl.from_pandas load step so missing
-    # cells are true parquet nulls, exactly like an uploaded study.
-    pl.from_pandas(df, nan_to_null=True).write_parquet(str(parquet_path))
-
-    # Auto crosstabs deck so the Tables tab / durable crosstabs_json activate,
-    # same machinery the orchestrator uses. Skipped cleanly if no tabulatable
-    # (single-coded) questions exist.
-    crosstabs_json = None
-    # Fallback when there are no tabulatable (single-coded) questions: keep the
-    # marker. excel_path only needs to point INTO run_dir for _study_dir to
-    # resolve it; the deck download then 404s, which download_deck already
-    # handles gracefully (it 404s on any missing file, never 500s).
-    excel_path = str(run_dir / "fielded.marker")
-    tab_plan = auto_tab_plan(datamap, title=f"{study.client_name} — Fielded Topline")
-    if tab_plan:
-        deck_run = run_tab_plan(str(parquet_path), tab_plan, datamap)
-        deck_to_json(deck_run, run_dir / "crosstabs.json")
-        crosstabs_json = (run_dir / "crosstabs.json").read_text()
-        # Render the SAME deck to .xlsx via the existing renderer — the exact
-        # call the orchestrator uses for uploaded studies. Ephemeral disk is
-        # acceptable for v1: re-materializing (one click) regenerates it.
-        xlsx_path = run_dir / f"{study_id}_fielded_deck.xlsx"
-        render_excel(deck_run, str(xlsx_path))
-        excel_path = str(xlsx_path)
-    # The DELIVERY files, separate from the analysis artifacts above on purpose.
-    # A topline computed over screened-out respondents is simply wrong, so
-    # data.parquet stays completes-only — but a delivery carries every
-    # disposition, because the terminates are the evidence the screen-outs
-    # worked and the denominator of the incidence rate the client is buying.
-    all_answers = answers  # answers_by_session already holds every disposition
     delivery_map, delivery_df = materialize_fielding(
-        survey, sessions, all_answers, statuses=ALL_STATUSES
+        survey, sessions, answers, statuses=ALL_STATUSES
     )
-    exports: dict[str, str] = {}
-    sav_path = run_dir / f"{study_id}_responses.sav"
-    try:
-        write_sav(delivery_df, delivery_map, str(sav_path))
-        exports["sav"] = str(sav_path)
-    except Exception as exc:  # a delivery format must never fail the pipeline
-        logger.warning(f"[{study_id}] SPSS export failed (non-fatal): {exc}")
-    responses_xlsx = run_dir / f"{study_id}_responses.xlsx"
-    try:
-        _write_labelled_xlsx(delivery_df, delivery_map, responses_xlsx)
-        exports["xlsx"] = str(responses_xlsx)
-    except Exception as exc:
-        logger.warning(f"[{study_id}] respondent-level xlsx failed (non-fatal): {exc}")
-
-    update_study_paths(db, study_id, excel_path=excel_path, datamap_json=datamap.to_json())
-    if crosstabs_json is not None:
-        set_study_artifacts(db, study_id, crosstabs_json=crosstabs_json)
+    run_dir, df, delivery_df, removed, exports = _write_and_publish(
+        db, study, datamap, df, delivery_map, delivery_df
+    )
     update_study_status(db, study_id, "rendered", {"materialized_from_link": link_id})
+
+    replacement = _replacement(db, link_id, removed, answers)
 
     logger.info(
         f"[{study_id}] Materialized link {link_id}: {len(df)} respondents, "
@@ -166,6 +279,126 @@ def materialize_link(
             "n_rows": len(delivery_df),
             "formats": sorted(exports),
         },
+        "replacement_needed": replacement,
+        "replacement_note": _REPLACEMENT_NOTE,
+    }
+
+
+def _merge_datamaps(maps: list, versions: list[tuple[int, object]]):
+    """Union of datamaps by variable name; 409 on conflicts or unmergeable versions."""
+    from src.core.models import DataMap
+
+    distinct = sorted({v for v, _ in versions})
+    if len(distinct) > 1 and len({tuple(m.names()) for m in maps}) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Links are pinned to survey versions {distinct} with different "
+                   "question sets; they cannot be combined into one dataset.",
+        )
+    merged = DataMap()
+    for m in maps:
+        for var in m.variables:
+            if var.name not in merged:
+                merged.add(var)
+                continue
+            have = merged[var.name]
+            if have.type != var.type or have.values != var.values:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Variable {var.name} has conflicting types or value labels "
+                           f"across links (survey versions {distinct}).",
+                )
+    return merged
+
+
+@router.post("/studies/{study_id}/fielding/materialize")
+def materialize_study(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Materialize ALL non-test links into ONE study dataset with a `vSource` column.
+
+    (Owner/Analyst) Same outputs as the per-link route, combined across vendors.
+    """
+    import pandas as pd
+
+    from api.db import list_fielding_links_for_study
+    from src.core.models import Variable, VarType
+
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    links = sorted(
+        (lk for lk in list_fielding_links_for_study(db, study_id) if not lk.is_test),
+        key=lambda lk: lk.created_at or "",
+    )
+    parts = []  # (link, datamap, df, delivery_map, delivery_df, answers)
+    for n, link in enumerate(links, 1):
+        survey = SurveyDefinition.from_json(link.survey_json)
+        sessions = list_respondent_sessions(db, link.id)
+        completes = [s for s in sessions if s.status_code == STATUS_COMPLETE]
+        if not completes:
+            continue
+        answers = answers_by_session(db, link.id)
+        dmap, df = materialize_fielding(survey, completes, answers)
+        xmap, xdf = materialize_fielding(survey, sessions, answers, statuses=ALL_STATUSES)
+        parts.append((link, f"Link {n}", dmap, df, xmap, xdf, answers))
+    if not parts:
+        raise HTTPException(
+            status_code=422,
+            detail="No completed sessions to materialize (need at least one status_code=10)",
+        )
+
+    versions = [(p[0].survey_version, p[0]) for p in parts]
+    datamap = _merge_datamaps([p[2] for p in parts], versions)
+    delivery_map = _merge_datamaps([p[4] for p in parts], versions)
+
+    labels = {p[0].id: (p[0].vendor_name or p[1]) for p in parts}
+    codes = {lab: i for i, lab in enumerate(sorted(set(labels.values())), 1)}
+    for dm in (datamap, delivery_map):
+        dm.add(Variable(
+            name="vSource", label="Sample source (vendor)", type=VarType.SINGLE,
+            values={c: lab for lab, c in codes.items()}, provenance="fielding",
+        ))
+
+    def _combine(idx: int):
+        frames = []
+        for p in parts:
+            f = p[idx].copy()
+            f["vSource"] = codes[labels[p[0].id]]
+            frames.append(f)
+        out = pd.concat(frames, ignore_index=True)
+        out["respondent_id"] = pd.Series(range(1, len(out) + 1), dtype="int64")
+        return out
+
+    df, delivery_df = _combine(3), _combine(5)
+    run_dir, df, delivery_df, removed, exports = _write_and_publish(
+        db, study, datamap, df, delivery_map, delivery_df
+    )
+    update_study_status(
+        db, study_id, "rendered", {"materialized_from_links": [p[0].id for p in parts]}
+    )
+
+    by_cell: dict = {}
+    total = 0
+    for p in parts:
+        rep = _replacement(db, p[0].id, removed, p[6])
+        total += rep["total"]
+        for k, v in rep["by_cell"].items():
+            by_cell[k] = by_cell.get(k, 0) + v
+    logger.info(
+        f"[{study_id}] Materialized {len(parts)} links: {len(df)} respondents by {user.name}"
+    )
+    return {
+        "n_respondents": len(df),
+        "n_variables": len(datamap),
+        "n_links": len(parts),
+        "sources": {str(c): lab for lab, c in codes.items()},
+        "destination": str(run_dir),
+        "delivery": {"n_rows": len(delivery_df), "formats": sorted(exports)},
+        "replacement_needed": {"total": total, "by_cell": by_cell},
+        "replacement_note": _REPLACEMENT_NOTE,
     }
 
 
@@ -439,12 +672,22 @@ def live_responses(
     )
     answers = answers_by_session(db, link_id)
     limit = max(1, min(int(limit), 1000))
+    study = get_study(db, study_id)
+    mask = bool((study.study_metadata or {}).get("mask_pii")) if study else False
+    if mask:
+        from src.engines.qc.pii import is_pii_label, mask_text
     rows = []
     for session in sessions[:limit]:
         given = answers.get(session.id, {})
         shown = {
             qid: _display(by_qid.get(qid), given[qid]) for qid in order if qid in given
         }
+        if mask:
+            shown = {
+                qid: "***" if is_pii_label(qid, by_qid[qid].text if qid in by_qid else "")
+                else mask_text(val)
+                for qid, val in shown.items()
+            }
         shown.update(_system_values(session))
         rows.append({
             "id": session.id[:8],

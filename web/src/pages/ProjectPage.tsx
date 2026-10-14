@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import CleaningPanel from '../components/CleaningPanel'
 import CrosscheckPanel from '../components/CrosscheckPanel'
 import axios from 'axios'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
@@ -45,7 +46,7 @@ const STAGE_PROGRESS: Record<string, number> = {
 // instrument the client signed off. That second comparison is the one a DP shop
 // is paid for, and burying it under generic data QC misrepresented which of the
 // two matters.
-const TABS = ['Overview', 'Questionnaire checks', 'Reports', 'Activity'] as const
+const TABS = ['Overview', 'Questionnaire checks', 'Reports', 'Cleaning', 'Activity'] as const
 type Tab = (typeof TABS)[number]
 
 export default function ProjectPage() {
@@ -258,7 +259,7 @@ export default function ProjectPage() {
 
       {/* Tab nav */}
       <div className="border-b border-slate-200 mb-6">
-        <nav className="flex gap-1">
+        <nav className="flex gap-1 overflow-x-auto">
           {TABS.map((t) => (
             <button
               key={t}
@@ -280,6 +281,7 @@ export default function ProjectPage() {
         <QuestionnaireChecksTab study={study} canWrite={hasWriteRole(user?.role)} />
       )}
       {tab === 'Reports' && (noData ? <NoDataState /> : <ReportsTab study={study} />)}
+      {tab === 'Cleaning' && (noData ? <NoDataState /> : <CleaningPanel studyId={study.id} role={user?.role} />)}
       {tab === 'Activity' && <ActivityTab study={study} />}
 
       {/* Share modal */}

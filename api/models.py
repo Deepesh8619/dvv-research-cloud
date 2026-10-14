@@ -361,6 +361,10 @@ class FieldingLinkResponse(BaseModel):
     # respondents, and it opened even if the pre-link check would have refused
     # a real link. Never a study's real data.
     is_test: bool = False
+    # Vendor commercials; cpi is in the study's currency.
+    vendor_name: str | None = None
+    cpi: float | None = None
+    target_completes: int | None = None
 
 
 class FieldingLinkListResponse(BaseModel):
@@ -491,6 +495,17 @@ class FieldingLinkCreateRequest(FieldingRedirectsRequest):
     # never real data, so there is nothing to hold back for. See is_test on
     # FieldingLinkDB.
     test: bool = False
+    vendor_name: str | None = None
+    cpi: float | None = Field(default=None, ge=0)
+    target_completes: int | None = Field(default=None, ge=1)
+
+
+class VendorRequest(BaseModel):
+    """Set a link's vendor fields; omitted/null clears the field."""
+
+    vendor_name: str | None = None
+    cpi: float | None = Field(default=None, ge=0)
+    target_completes: int | None = Field(default=None, ge=1)
 
 
 class SoftLaunchRequest(BaseModel):

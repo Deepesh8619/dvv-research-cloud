@@ -30,6 +30,7 @@ class _FakeSession:
     status_code: int | None
     started_at: str | None = None
     completed_at: str | None = None
+    entry_params: dict | None = None
 
 
 def _survey() -> SurveyDefinition:
@@ -156,6 +157,16 @@ def test_paradata_columns_present_with_duration():
     assert df.iloc[0][PARA_DURATION] == 600.0
 
 
+def test_session_id_paradata_column():
+    sessions = [
+        _FakeSession("s_b", STATUS_COMPLETE, "2026-01-01T00:01:00", "2026-01-01T00:02:00"),
+        _FakeSession("s_a", STATUS_COMPLETE, "2026-01-01T00:00:00", "2026-01-01T00:02:00"),
+    ]
+    datamap, df = materialize_fielding(_survey(), sessions, {})
+    assert "vSessionId" in datamap
+    assert list(df["vSessionId"]) == ["s_a", "s_b"]
+
+
 def test_respondent_id_is_stable_sequential():
     survey = _survey()
     sessions = [
@@ -175,3 +186,13 @@ def test_no_completes_yields_empty_frame_not_crash():
     datamap, df = materialize_fielding(survey, sessions, {"s1": {}})
     assert len(df) == 0
     assert len(datamap) > 0  # DataMap schema still built even with zero rows
+
+
+def test_erased_session_is_not_materialized():
+    sessions = [
+        _FakeSession("s_a", STATUS_COMPLETE, "2026-01-01T00:00:00", "2026-01-01T00:02:00"),
+        _FakeSession("s_b", STATUS_COMPLETE, "2026-01-01T00:01:00", "2026-01-01T00:02:00",
+                     entry_params={"erased": True}),
+    ]
+    _, df = materialize_fielding(_survey(), sessions, {})
+    assert list(df["vSessionId"]) == ["s_a"]
