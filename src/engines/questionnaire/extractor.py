@@ -384,12 +384,11 @@ def _validate_question(result: ExtractionResult, routing: dict) -> None:
     # expression references nothing BUT itself (a mixed `Q7 and Q3` staying is
     # fine). This keeps us from fighting the model's own tested fixture while
     # still surfacing the far-more-common "gated its own display" mistake.
-    for expr in (q.show_if, q.terminate_if):
-        if expr is None:
-            continue
-        refs = expr.referenced_qids()
-        if refs and refs == {q.qid}:
-            result.add_flag(schema.FLAG_AMBIGUOUS_ROUTING)
+    # Only the SHOW condition: screening out on this question's own answer
+    # ("TERMINATE if 5,6 selected") is the commonest screener rule there is, and
+    # flagging it put an unexplained routing flag on every screener question.
+    if q.show_if is not None and q.show_if.referenced_qids() == {q.qid}:
+        result.add_flag(schema.FLAG_AMBIGUOUS_ROUTING)
 
     # Ambiguous routing from the model, or low routing confidence.
     routing_conf = float(result.confidence.get("routing", 1.0))
@@ -543,6 +542,26 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
     )
 
 
+_STATED_TOTAL = re.compile(
+    r"\b(?:add|sum|total)s?\s+(?:up\s+)?to\s+(at\s+least\s+)?(\d{1,4})\s*%?", re.I
+)
+
+
+def _numbered_boxes_with_a_total(question: Question) -> None:
+    """ "[Numeric OE]%" over "1: Google Ads / 2: Meta Ads / 98: Other", worded
+    "must add up to 100%": the numbered lines are the BOXES, not ways out of
+    typing. Read as opt-outs they became exclusive answers with no total, and
+    the respondent had one box for the whole budget."""
+    stated = _STATED_TOTAL.search(question.text or "")
+    if question.type is not QuestionType.NUMERIC or not question.options or not stated:
+        return
+    kept = list(question.options)
+    make_constant_sum(question, [o.label for o in kept], int(stated.group(2)),
+                      at_least=bool(stated.group(1)))
+    for row, option in zip(question.rows, kept, strict=True):
+        row.code, row.show_if = option.code, option.show_if
+
+
 def _extract_via_spec_table(
     chunk: QuestionChunk,
     fields: SpecTableFields,
@@ -564,6 +583,9 @@ def _extract_via_spec_table(
     )
     question = _question_from_fields(fields, chunk)
     question.show_if = fields.show_if
+    if "auto_answer" in fields.evidence:
+        question.validation["auto_answer"] = fields.evidence["auto_answer"]
+    _numbered_boxes_with_a_total(question)
     # Fields read straight from the table are not model guesses.
     confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
     if filled_from_datamap:
@@ -1188,6 +1210,21 @@ def _match_qid_case(expr: Expression, known_qids: set[str]) -> None:
         _match_qid_case(child, known_qids)
 
 
+def _name_technique_sources(survey: SurveyDefinition) -> None:
+    """Directives are read uppercased ("SHOW BRANDS SELECTED AT Q2b" -> Q2B);
+    the question is Q2b. Every reader matching exactly found no source, so the
+    list or pipe silently drew from nothing. Give each the real question's name.
+    Runs last: later passes add lists of their own."""
+    known = {q.qid for q in survey.questions}
+    by_upper = {k.upper(): k for k in known}
+    for q in survey.questions:
+        techniques = (q.validation or {}).get("techniques") or {}
+        for item in (techniques.get("masks") or []) + (techniques.get("pipes") or []):
+            for key in ("source_qid", "exclude_qid"):
+                if item.get(key) and item[key] not in known:
+                    item[key] = by_upper.get(str(item[key]).upper(), item[key])
+
+
 def _resolve_cross_chunk_routing(
     results: list[ExtractionResult], known_qids: set[str]
 ) -> None:
@@ -1584,6 +1621,7 @@ def extract_survey_definition(
     # The QA loop, as the last pass: a QA agent tests every question as the
     # respondent will meet it, a programmer agent repairs what it safely can,
     # and what is left is flagged for a person. Deterministic — no model call.
+    _name_technique_sources(survey)
     run_qa(survey)
     # A second opinion over the whole survey, for problems between questions no
     # rule covers. Real documents only (one model call); never blocks anything.

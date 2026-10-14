@@ -147,3 +147,16 @@ def test_a_plain_answer_list_is_still_judged():
         Option(code=3, label="No, only myself"),
     ])
     assert "codes_match_the_document" in _names(shifted)
+
+
+def test_a_hidden_variable_line_with_its_definition_counts_as_captured():
+    from src.core.survey_definition import Option, Question, QuestionType
+    from src.engines.questionnaire.verification import verify_against_source
+
+    q = Question(qid="HID_GEO_REGION", text="Region", type=QuestionType.INFO, options=[
+        Option(code=1, label="Northeast", definition="HID_GEO_DIVISION = 1,2"),
+        Option(code=2, label="Midwest", definition="HID_GEO_DIVISION = 3,4")])
+    src = ("Q Name | HID_GEO_REGION\n | Label: | Definition:\n"
+           "1 | Northeast | HID_GEO_DIVISION = 1,2\n2 | Midwest | HID_GEO_DIVISION = 3,4")
+    failed = {c.name for c in verify_against_source(q, src) if not c.passed}
+    assert "source_options_all_captured" not in failed

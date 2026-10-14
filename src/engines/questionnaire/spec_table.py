@@ -152,6 +152,7 @@ def _value_of(row: list[str]) -> str:
     return ""
 
 
+_AUTO_PUNCH = re.compile(r"\bauto\s*[-=]?\s*(?:punch|code|fill)", re.I)
 _ALL_RESPONDENTS = re.compile(r"^\s*(?:all(?:\s+respondents)?|everyone|total)\s*\.?\s*$", re.I)
 #: "C_ACCOUNT = 2", "HID_GOOGLE_USER = 2 or 3", "DA_PLACEMENT = 3 and/or 4", "S1=1-3".
 _CODED_BASE = re.compile(
@@ -801,7 +802,11 @@ def parse_spec_table(
         fields.missing.append("type")
     # A base in prose ("those aware of the brand") needs judgment; a blank base
     # means everyone and needs none; a coded one ("S1=1-3") is already usable.
-    if fields.base and not _ALL_RESPONDENTS.match(fields.base):
+    if fields.base and _AUTO_PUNCH.search(fields.base):
+        # "auto=punch those who select only one at DA_GOALS": nobody is left
+        # out — the answer is filled in for some respondents. Not a base.
+        fields.evidence["auto_answer"] = fields.base
+    elif fields.base and not _ALL_RESPONDENTS.match(fields.base):
         fields.show_if = base_condition(fields.base)
         if fields.show_if is None:
             fields.missing.append("base")

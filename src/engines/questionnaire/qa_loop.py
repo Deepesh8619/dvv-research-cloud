@@ -38,6 +38,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
 from src.core.survey_definition import (
+    Option,
     Question,
     QuestionType,
     SurveyDefinition,
@@ -162,6 +163,160 @@ def _order_and_answers(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
     return issues
 
 
+_NAMED_QID = re.compile(
+    r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]*[A-Za-z0-9]\b|\b[A-Z]{1,3}\d{1,3}[a-z]?(?=\s*[=<>])"
+)
+_NON_ANSWER = 97
+_ASKS_FOR_ALL = re.compile(
+    r"\b(?:select|check|choose|indicate|mark|tick)\s+all\b|\ball\s+that\s+apply\b", re.I
+)
+_KEEP_CODE = re.compile(
+    r"\b(?:anchor|exclusive)\s+(?:punch(?:es)?\s+|codes?\s+)?"
+    r"(\d{1,3}(?:\s*(?:,|and|&)\s*\d{1,3})*)"
+    r"|\bmake\s+(\d{1,3}(?:\s*(?:,|and|&)\s*\d{1,3})*)\s+exclusive",
+    re.I,
+)
+_INSTRUCTION = re.compile(
+    r"^\s*(?:RANDOMI[SZ]E|ROTATE|ENABLE|ANCHOR|TERMINATE|PROGRAMMER|PN\b|DO\s+NOT|"
+    r"SHOW\s+AS|DISPLAY\s+AS|INSERT)\b"
+)
+_TIDY_QID = re.compile(r"[A-Za-z][A-Za-z0-9_.]*")
+
+
+def _answers(q: Question, by_qid: dict[str, Question]) -> set[int]:
+    """Codes this question can carry: its own, plus any list it borrows."""
+    codes = {o.code for o in [*(q.options or []), *(q.cols or []), *(q.rows or [])]}
+    for mask in ((q.validation or {}).get("techniques") or {}).get("masks") or []:
+        source = by_qid.get(mask.get("source_qid") or "")
+        if source is not None:
+            codes |= {o.code for o in source.options or []}
+    return codes
+
+
+def _derivation_checks(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
+    """A hidden variable's definitions, checked against the questions they name.
+
+    A definition is the programmer's formula, kept as written. Nothing read it,
+    so "C_ZIP" (the question is C_GEO_ZIP), two values claiming the same
+    answers, and an answer no value claims all reached the data unnoticed.
+    """
+    from src.engines.questionnaire.spec_table import base_condition
+
+    stated = [(o, o.definition) for o in q.options or [] if o.definition]
+    if not stated:
+        return []
+    upper = {k.upper(): k for k in by_qid}
+    issues: list[Issue] = []
+    missing = sorted({name for _, text in stated for name in _NAMED_QID.findall(text)
+                      if name.upper() not in upper})
+    if missing:
+        issues.append(Issue(
+            "definition_names_missing_question",
+            f"the formula names {', '.join(missing)} — not "
+            f"{'a question' if len(missing) == 1 else 'questions'} in this survey; "
+            "probably renamed or mistyped",
+            "; ".join(t for _, t in stated if any(m in t for m in missing))[:160],
+        ))
+    claims: dict[str, list[tuple[Option, set[int]]]] = {}
+    for option, text in stated:
+        cond = base_condition(text)
+        if cond is not None and cond.qid.upper() in upper:
+            claims.setdefault(upper[cond.qid.upper()], []).append((option, set(cond.values)))
+    if not claims:
+        return issues
+    source_qid, parts = max(claims.items(), key=lambda kv: len(kv[1]))
+    source = by_qid[source_qid]
+    offered = {o.code for o in source.options or []}
+    for code in sorted(offered):
+        owners = [o.label for o, codes in parts if code in codes]
+        if len(owners) > 1:
+            issues.append(Issue(
+                "definition_overlaps",
+                f"answer {code} at {source_qid} is claimed by {len(owners)} values "
+                f"({', '.join(owners[:3])}) — a respondent can only have one",
+                f"{source_qid} = {code}",
+            ))
+            break
+    unknown = sorted({c for _, codes in parts for c in codes} - offered)
+    if offered and unknown:
+        issues.append(Issue(
+            "definition_codes_not_offered",
+            f"the formula uses {source_qid} = {unknown}, which {source_qid} does not offer",
+            f"{source_qid} = {unknown}",
+        ))
+    if len(parts) >= max(2, len(stated) - 1) and source.type is not QuestionType.NUMERIC:
+        screened = {code for _, code in _codes_in(source.terminate_if)}
+        covered = {c for _, codes in parts for c in codes}
+        left = sorted(c for c in offered - covered - screened if c < _NON_ANSWER)
+        if left:
+            labels = {o.code: o.label for o in source.options or []}
+            issues.append(Issue(
+                "definition_leaves_answers_out",
+                f"respondents answering {left} at {source_qid} get no value here "
+                f"({'; '.join(labels[c][:30] for c in left[:3])}) — and miss any question "
+                "asked by this variable",
+                f"{source_qid} = {left}",
+            ))
+    return issues
+
+
+def _consistency_checks(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
+    """What the document says against what it does — exact, no judgment."""
+    issues = _derivation_checks(q, by_qid)
+    wording = _ANY_NOTE.sub(" ", q.text or "")
+    if q.type is QuestionType.SINGLE and _ASKS_FOR_ALL.search(wording):
+        issues.append(Issue(
+            "single_but_asks_for_all",
+            "the wording asks for every answer that applies, but the question allows one",
+            _ASKS_FOR_ALL.search(wording).group(0),
+        ))
+    have = _answers(q, by_qid)
+    if have:
+        named = {int(c) for m in _KEEP_CODE.finditer(q.source_text or "")
+                 for c in re.findall(r"\d+", m.group(1) or m.group(2))}
+        absent = sorted(named - have)
+        if absent:
+            issues.append(Issue(
+                "anchor_or_exclusive_missing_code",
+                f"the notes anchor or make exclusive code {absent}, which this list does not have",
+                ", ".join(map(str, absent)),
+            ))
+    notes = [o.label for o in [*(q.options or []), *(q.rows or []), *(q.cols or [])]
+             if _INSTRUCTION.match(o.label or "") and o.label == o.label.upper()]
+    if notes:
+        issues.append(Issue(
+            "instruction_as_answer",
+            "a programming instruction was read as an answer — the respondent would pick it",
+            notes[0][:80],
+        ))
+    techniques = (q.validation or {}).get("techniques") or {}
+    sources = {t.get(k) for t in (techniques.get("masks") or []) + (techniques.get("pipes") or [])
+               for k in ("source_qid", "exclude_qid") if t.get(k)}
+    gone = sorted(s for s in sources if s not in by_qid)
+    if gone:
+        issues.append(Issue(
+            "list_source_missing",
+            f"answers or wording are taken from {', '.join(gone)}, which is not a question "
+            "in this survey — the respondent would get nothing from it",
+            ", ".join(gone),
+        ))
+    original = (q.validation or {}).get("original_qid")
+    if original and original != "UNKNOWN":
+        issues.append(Issue(
+            "name_reused",
+            f"the document gives this question the same name as an earlier one ({original}); "
+            f"it is called {q.qid} here — confirm the data column name with the client",
+            original,
+        ))
+    if not _TIDY_QID.fullmatch(q.qid or ""):
+        issues.append(Issue(
+            "odd_question_name",
+            f"the name {q.qid!r} has characters a data column cannot use — probably a typo",
+            q.qid,
+        ))
+    return issues
+
+
 def _flat(text: str | None) -> str:
     return " ".join(re.sub(r"[^\w%]", " ", (text or "").lower()).split())
 
@@ -279,6 +434,7 @@ def qa_check(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
             repeats[0],
         ))
     issues.extend(_order_and_answers(q, by_qid))
+    issues.extend(_consistency_checks(q, by_qid))
     summed = _own_sum(q)
     if summed and not (q.type is QuestionType.NUMERIC and q.rows):
         issues.append(Issue(
@@ -394,14 +550,17 @@ def run_qa(survey: SurveyDefinition, locked: set[str] | None = None) -> dict:
     by_qid = {q.qid: q for q in survey.questions}
     entries: list[dict] = []
     for q in survey.questions:
-        if not _tested(q):
+        tested = _tested(q)
+        if not tested and set(q.flags or ()) & (_UNREAD - {schema.FLAG_DERIVED_VARIABLE}):
             continue
         q.flags = [f for f in q.flags if f != FLAG_QA_ISSUE]
-        found = qa_check(q, by_qid)
+        # A screen or hidden variable shows nothing to answer, but its
+        # formula can still name a question that does not exist.
+        found = qa_check(q, by_qid) if tested else _consistency_checks(q, by_qid)
         if not found:
             continue
         fixes: list[str] = []
-        if q.qid not in locked:
+        if tested and q.qid not in locked:
             for repair in REPAIRS:
                 trial = copy.deepcopy(q)
                 did = repair(trial)

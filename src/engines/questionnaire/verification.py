@@ -130,6 +130,10 @@ def _answer_list_checks(
     #    looked complete.
     captured = {_normalise(o.label) for o in question.options or []}
     captured |= {_normalise(o.label) for o in (question.rows or [])}
+    # A hidden variable's line is "label | definition"; the label alone never
+    # matched it, so every derived variable reported its own answers missing.
+    captured |= {_normalise(f"{o.label} {o.definition}") for o in question.options or []
+                 if o.definition}
     dropped = [label for _, label in source_options if label not in captured]
     if question.type is not QuestionType.GRID_SINGLE:
         checks.append(

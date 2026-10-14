@@ -1217,3 +1217,29 @@ def test_a_renamed_duplicate_keeps_its_own_screen_out():
     assert first.question.terminate_if.qid == "SS_ADVERT_DECMAKER"
     assert second.question.qid == "SS_ADVERT_DECMAKER_2"
     assert second.question.terminate_if.qid == "SS_ADVERT_DECMAKER_2"
+
+
+def test_a_numbered_list_that_must_total_100_becomes_number_boxes():
+    from src.core.survey_definition import Option, Question
+    from src.engines.questionnaire.extractor import _numbered_boxes_with_a_total
+
+    q = Question(qid="DA_SHARE", type=QuestionType.NUMERIC,
+                 text="What percentage do you spend on each? The percentages must add up to 100%.",
+                 options=[Option(code=1, label="Google Ads", exclusive=True),
+                          Option(code=98, label="Other", exclusive=True)])
+    _numbered_boxes_with_a_total(q)
+    assert [(r.code, r.label) for r in q.rows] == [(1, "Google Ads"), (98, "Other")]
+    assert q.validation["sum"] == 100 and not q.options
+
+
+def test_list_sources_take_the_real_question_name():
+    from src.core.survey_definition import Question, SurveyDefinition
+    from src.engines.questionnaire.extractor import _name_technique_sources
+
+    s = SurveyDefinition(study_id="s", questions=[
+        Question(qid="Q2b", text="Bought?", type=QuestionType.MULTI),
+        Question(qid="Q2c", text="When?", type=QuestionType.SINGLE, validation={
+            "techniques": {"masks": [{"source_qid": "Q2B", "mode": "selected"}]}}),
+    ])
+    _name_technique_sources(s)
+    assert s.questions[1].validation["techniques"]["masks"][0]["source_qid"] == "Q2b"

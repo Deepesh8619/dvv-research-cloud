@@ -3,7 +3,13 @@
 Each test is a real defect from the TRD and Vivo studies, reduced to its shape.
 """
 
-from src.core.survey_definition import Option, Question, QuestionType, SurveyDefinition
+from src.core.survey_definition import (
+    Expression,
+    Option,
+    Question,
+    QuestionType,
+    SurveyDefinition,
+)
 from src.engines.questionnaire import qa_loop
 from src.engines.questionnaire.qa_loop import FLAG_QA_ISSUE, Issue, run_qa
 from src.engines.questionnaire.table_questions import stacked_grid
@@ -104,3 +110,85 @@ def test_qa_notices_questions_swallowed_into_an_answer_list():
     from src.engines.questionnaire.qa_loop import qa_check
 
     assert "question_inside_answers" in [i.check for i in qa_check(q, {"Q6": q})]
+
+
+# --- Exact consistency checks (Google Ads SMB, Vivo) ---------------------------
+
+def _hidden(qid, *defs):
+    return Question(qid=qid, text="Hidden", type=QuestionType.INFO, flags=["DERIVED_VARIABLE"],
+                    options=[Option(code=i, label=lab, definition=d)
+                             for i, (lab, d) in enumerate(defs, start=1)])
+
+
+def _division():
+    return Question(qid="HID_GEO_DIVISION", text="Division", type=QuestionType.SINGLE,
+                    options=[Option(code=c, label=f"Division {c}") for c in range(1, 10)]
+                    + [Option(code=99, label="Prefer not to answer")])
+
+
+def _found(survey, qid):
+    run_qa(survey)
+    return {e["check"] for e in survey.metadata["qa"]["entries"] if e["qid"] == qid}
+
+
+def test_a_hidden_variable_formula_naming_no_question_is_reported():
+    s = _survey(_division(), _hidden("HID_GEO_STATE", ("All", "Based on C_ZIP = 1")))
+    assert "definition_names_missing_question" in _found(s, "HID_GEO_STATE")
+
+
+def test_a_region_formula_with_overlap_and_unclaimed_divisions_is_reported():
+    region = _hidden("HID_GEO_REGION", ("Northeast", "HID_GEO_DIVISION = 1,2"),
+                     ("Midwest", "HID_GEO_DIVISION = 3,4"), ("South", "HID_GEO_DIVISION = 1,2"),
+                     ("West", "HID_GEO_DIVISION = 5,6,7"))
+    found = _found(_survey(_division(), region), "HID_GEO_REGION")
+    assert {"definition_overlaps", "definition_leaves_answers_out"} <= found
+
+
+def test_a_correct_formula_is_not_reported():
+    size = Question(qid="SS_EMP", text="Employees?", type=QuestionType.SINGLE,
+                    options=[Option(code=c, label=str(c)) for c in range(1, 11)],
+                    terminate_if=Expression(op="in", qid="SS_EMP", values=[1, 10]))
+    hid = _hidden("HID_COMP_SIZE", ("Micro", "SS_EMP = 2"), ("Small", "SS_EMP= 3-4"),
+                  ("Mid", "SS_EMP= 5-9"))
+    assert _found(_survey(size, hid), "HID_COMP_SIZE") == set()
+
+
+def test_single_choice_asking_for_all_that_apply_is_reported():
+    q = Question(qid="SS_CHANNELS", text="Indicate all the channels you sell through.",
+                 type=QuestionType.SINGLE, options=[Option(code=1, label="Web"),
+                                                    Option(code=2, label="Store")])
+    assert "single_but_asks_for_all" in _found(_survey(q), "SS_CHANNELS")
+
+
+def test_an_anchor_on_a_code_the_list_lacks_is_reported_but_a_borrowed_one_is_not():
+    q = Question(qid="S4", text="Industries?", type=QuestionType.MULTI,
+                 source_text="[PROGRAMMING: RANDOMIZE 1-7. ANCHOR 99]",
+                 options=[Option(code=c, label=f"Industry {c}") for c in range(1, 9)])
+    assert "anchor_or_exclusive_missing_code" in _found(_survey(q), "S4")
+    source = Question(qid="DA_SUCCESS", text="Metrics?", type=QuestionType.MULTI,
+                      options=[Option(code=1, label="ROI"), Option(code=98, label="Other")])
+    top = Question(qid="DA_TOP_SUCCESS", text="Top metric?", type=QuestionType.SINGLE,
+                   source_text="Randomize: Yes | Anchor 98",
+                   options=[Option(code=1, label="ROI"), Option(code=98, label="Other")],
+                   validation={"techniques": {"masks": [{"source_qid": "DA_SUCCESS",
+                                                         "mode": "selected"}]}})
+    assert "anchor_or_exclusive_missing_code" not in _found(_survey(source, top), "DA_TOP_SUCCESS")
+
+
+def test_names_reused_odd_names_instructions_and_missing_sources_are_reported():
+    reused = Question(qid="GA_NON_BARRIER_OE_2", text="Why not Meta?", type=QuestionType.OPEN_TEXT,
+                      validation={"original_qid": "GA_NON_BARRIER_OE"})
+    odd = Question(qid="C_TEAM_S(ZE", text="Team size?", type=QuestionType.SINGLE,
+                   options=[Option(code=1, label="1"), Option(code=2, label="2+")])
+    note = Question(qid="Q24b", text="Dislike?", type=QuestionType.SINGLE,
+                    options=[Option(code=1, label="Too long"),
+                             Option(code=2, label="RANDOMIZE ORDER. ENABLE ZOOM")])
+    borrow = Question(qid="DA_SHARE", text="Share?", type=QuestionType.MULTI,
+                      options=[Option(code=1, label="Google")],
+                      validation={"techniques": {"masks": [{"source_qid": "DA_USAGE",
+                                                            "mode": "selected"}]}})
+    s = _survey(reused, odd, note, borrow)
+    assert "name_reused" in _found(s, "GA_NON_BARRIER_OE_2")
+    assert "odd_question_name" in _found(s, "C_TEAM_S(ZE")
+    assert "instruction_as_answer" in _found(s, "Q24b")
+    assert "list_source_missing" in _found(s, "DA_SHARE")

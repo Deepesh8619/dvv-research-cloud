@@ -698,3 +698,10 @@ def test_terminate_if_selects_punch_list_with_or():
     notes = ["Other details", "TERMINATE if selects punch 1, 10, or 99"]
     f = parse_spec_table(_table(rows + [notes]))
     assert f.terminate_if.values == [1, 10, 99]
+
+
+def test_auto_punch_in_the_base_cell_is_an_automatic_answer_not_a_base():
+    f = parse_spec_table(_with_base(
+        "Other >>>", "If not All, specify: auto=punch those who select only one at DA_GOALS"))
+    assert f.show_if is None and "base" not in f.missing
+    assert "auto_answer" in f.evidence
