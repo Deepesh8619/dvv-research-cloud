@@ -385,12 +385,11 @@ def _validate_question(result: ExtractionResult, routing: dict) -> None:
     # expression references nothing BUT itself (a mixed `Q7 and Q3` staying is
     # fine). This keeps us from fighting the model's own tested fixture while
     # still surfacing the far-more-common "gated its own display" mistake.
-    for expr in (q.show_if, q.terminate_if):
-        if expr is None:
-            continue
-        refs = expr.referenced_qids()
-        if refs and refs == {q.qid}:
-            result.add_flag(schema.FLAG_AMBIGUOUS_ROUTING)
+    # Only the SHOW condition: screening out on this question's own answer
+    # ("TERMINATE if 5,6 selected") is the commonest screener rule there is, and
+    # flagging it put an unexplained routing flag on every screener question.
+    if q.show_if is not None and q.show_if.referenced_qids() == {q.qid}:
+        result.add_flag(schema.FLAG_AMBIGUOUS_ROUTING)
 
     # Ambiguous routing from the model, or low routing confidence.
     routing_conf = float(result.confidence.get("routing", 1.0))
