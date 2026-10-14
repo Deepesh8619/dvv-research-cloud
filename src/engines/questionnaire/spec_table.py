@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 
 from src.core.survey_definition import Expression, Option, QuestionType
 from src.engines.questionnaire import option_directives
+from src.engines.questionnaire.flag_reasons import auto_answer_lines
 from src.engines.questionnaire.learned import (
     LearnedPattern,
     learned_field,
@@ -727,6 +728,14 @@ def parse_spec_table(
     if fields.terminate_if is not None:
         fields.terminate_verbatim = notes.strip()
         fields.evidence["terminate"] = notes.strip()
+    # "Among who: Other >>>" pointing at "auto=punch those who select only one at
+    # DA_GOALS": the cell is the rule for an AUTOMATIC ANSWER, not a base the
+    # reader failed to understand. Sending "Other >>>" to a model as the base
+    # is how it came back as an unclear one.
+    auto = auto_answer_lines(table_text)
+    if auto and fields.base and re.fullmatch(r"other\W*", fields.base, re.IGNORECASE):
+        fields.base = None
+        fields.evidence["auto_answer"] = auto[0]
     if fields.base:
         fields.evidence["base"] = f"Among who: {fields.base}"
 

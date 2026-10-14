@@ -71,6 +71,7 @@ from src.core.survey_definition import (
 from src.engines.fielding.materialize import plan_datamap
 from src.engines.questionnaire.extraction_diagnosis import completeness_problems, diagnose
 from src.engines.questionnaire.extractor import extract_survey_definition, reread_question
+from src.engines.questionnaire.flag_reasons import flag_reasons
 from src.engines.questionnaire.logic_review import review as review_logic
 from src.engines.questionnaire.qa_loop import run_qa
 from src.engines.questionnaire.question_agent import revise as question_agent_revise
@@ -322,6 +323,9 @@ def _question_payload(question, approved_qids: set[str]) -> dict:
     validation = question.validation or {}
     data["extraction_error"] = validation.get("extraction_error")
     data["verification_error"] = validation.get("verification_error")
+    # One sentence per flag naming this question and what was seen — computed
+    # here, not stored, so an edit changes the reason with it.
+    data["flag_reasons"] = flag_reasons(question)
     return data
 
 

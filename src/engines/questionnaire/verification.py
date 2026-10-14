@@ -93,7 +93,16 @@ def verify_against_source(question: Question, chunk_text: str) -> list[Check]:
     # question rebuilt from the data map — there is nothing to compare against,
     # and a check with no evidence available must not produce a finding. It goes
     # to the model instead, which is what the model is for.
-    if source_options:
+    #
+    # A hidden/derived variable has no respondent answers to capture: the lines
+    # under it are its DERIVATION ("Google Ads current user: DA_USAGE = 1,2,3,4"),
+    # which the reader files as definitions on the values. Counting them as
+    # answers the definition "dropped" flagged eight HID_ variables of one
+    # real document as unfaithful when nothing had been dropped.
+    derived = "DERIVED_VARIABLE" in (question.flags or ()) or (
+        question.qid.upper().startswith("HID_")
+    )
+    if source_options and not derived:
         checks.extend(_answer_list_checks(question, haystack, source_options))
     return checks + _always_decidable(question, chunk_text)
 

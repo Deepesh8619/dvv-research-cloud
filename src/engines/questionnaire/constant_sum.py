@@ -49,6 +49,9 @@ _SUM = re.compile(
 # A serialized table row: cells joined by "|". "Talk therapy alone |  | "
 _CELL_SPLIT = re.compile(r"\s*\|\s*")
 _MIN_ITEMS = 2
+# "[Numeric OE: 1-digit minimum]%" over "1: Google Ads / 2: Meta Ads / 98: Other":
+# the list is not choices, it is one number box per line.
+_NUMERIC_OE_LIST = re.compile(r"^\s*\[\s*NUMERIC\s+OE\b[^\]]*\]\s*%?\s*$", re.I | re.M)
 
 
 def _table_items(lines: list[str]) -> list[str]:
@@ -87,11 +90,27 @@ def read(text: str, tables: bool = True) -> tuple[list[str], int | None, bool] |
     return None
 
 
-def make_constant_sum(q, items: list[str], total: int | None, at_least: bool = False) -> None:
+def numeric_list_sum(q) -> tuple[int, bool] | None:
+    """(total, at_least) when a numeric-OE answer list is a set of boxes that
+    must add up to a total its own wording states, else None."""
+    if q.type is not QuestionType.NUMERIC or q.rows or len(q.options or []) < _MIN_ITEMS:
+        return None
+    if not _NUMERIC_OE_LIST.search(q.source_text or ""):
+        return None
+    stated = _SUM.search(q.text or "")
+    if not stated:
+        return None
+    return int(stated.group("n")), bool(stated.group("least"))
+
+
+def make_constant_sum(
+    q, items: list[str], total: int | None, at_least: bool = False,
+    rows: list[Option] | None = None,
+) -> None:
     """One number box per item, with the sum the document states — exact, or a
-    floor when `at_least`."""
+    floor when `at_least`. `rows` keeps the document's own codes (98 = Other)."""
     q.type = QuestionType.NUMERIC
-    q.rows = [Option(code=i, label=label) for i, label in enumerate(items, start=1)]
+    q.rows = rows or [Option(code=i, label=label) for i, label in enumerate(items, start=1)]
     q.options = []
     q.cols = None
     validation = dict(q.validation or {})
@@ -114,8 +133,13 @@ def apply(survey: SurveyDefinition) -> list[str]:
     for q in survey.questions:
         found = read(q.source_text or "", tables=False)
         if found is None:
-            continue
-        make_constant_sum(q, *found)
+            listed = numeric_list_sum(q)
+            if listed is None:
+                continue
+            rows = [Option(code=o.code, label=o.label, show_if=o.show_if) for o in q.options]
+            make_constant_sum(q, [r.label for r in rows], *listed, rows=rows)
+        else:
+            make_constant_sum(q, *found)
         changed.append(q.qid)
     if changed:
         survey.metadata["constant_sums"] = changed

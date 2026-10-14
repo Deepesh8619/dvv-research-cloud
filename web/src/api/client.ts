@@ -340,6 +340,8 @@ export interface Question {
   /** field -> the exact fragment that decided it. */
   extraction_evidence?: Record<string, string>
   flags: string[]
+  /** flag code -> one sentence naming this question and what was seen. */
+  flag_reasons?: Record<string, string>
   approved: boolean
 }
 

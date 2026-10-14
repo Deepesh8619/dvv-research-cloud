@@ -86,6 +86,41 @@ export const FLAG_INFO: Record<string, FlagInfo> = {
     blocking: false,
     severity: 'warn',
   },
+  ENTRY_MODE_CONFLICT: {
+    label: 'Typed number vs choice list',
+    description:
+      'The document says respondents type a number, but the question was read as a choice list. They produce different data columns: decide which one the instrument really is.',
+    blocking: false,
+    severity: 'warn',
+  },
+  DERIVED_VARIABLE_UNCONFIRMED: {
+    label: 'Hidden variable — confirm',
+    description:
+      'Read as a hidden variable from its wording alone. Confirm it is not a real question somebody wrote in capitals.',
+    blocking: false,
+    severity: 'warn',
+  },
+  EXTRACTION_CONFIG_ERROR: {
+    label: 'Extraction not configured',
+    description:
+      'The extractor could not run for this chunk because of a configuration fault (for example a missing key). Fix it once and re-read, or fill the question in by hand.',
+    blocking: true,
+    severity: 'error',
+  },
+  EXTRACTION_MODEL_ERROR: {
+    label: 'Extraction output rejected',
+    description:
+      'The model answered but its output did not fit the question schema. Review the source text and fill this question in manually.',
+    blocking: true,
+    severity: 'error',
+  },
+  RECOVERED_FROM_DATAMAP: {
+    label: 'Rebuilt from data map',
+    description:
+      'The document did not yield this question, so it was rebuilt from the data map. Its wording and routing are the script\'s, not the client\'s.',
+    blocking: false,
+    severity: 'warn',
+  },
   LIST_INHERITED: {
     label: 'List copied — check',
     description:

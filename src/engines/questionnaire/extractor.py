@@ -61,6 +61,7 @@ from src.engines.questionnaire.datamap_recovery import (
     recover_missing,
 )
 from src.engines.questionnaire.extraction_diagnosis import document_markers
+from src.engines.questionnaire.flag_reasons import mark_derived_facts
 from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
 from src.engines.questionnaire.learned import LearnedPattern, learned_hidden_variable
 from src.engines.questionnaire.list_sources import fill_lists, points_at_a_list
@@ -1120,6 +1121,10 @@ def verify_question(chunk: QuestionChunk, result: ExtractionResult) -> Extractio
 
     if not faithful:
         result.add_flag(schema.FLAG_VERIFICATION_DISCREPANCY)
+        result.question.validation = {
+            **(result.question.validation or {}),
+            "verification_discrepancies": discrepancies,
+        }
         _downgrade_confidence(result, discrepancies)
 
     return result
@@ -1192,6 +1197,14 @@ def _resolve_cross_chunk_routing(
             }
             if unresolved:
                 result.add_flag(schema.FLAG_UNRESOLVED_ROUTING_QID)
+                # Kept for the reviewer: the expression itself is about to go.
+                q.validation = {
+                    **(q.validation or {}),
+                    "unresolved_routing": [
+                        *(q.validation or {}).get("unresolved_routing", []),
+                        {"field": kind, "qids": sorted(unresolved)},
+                    ],
+                }
                 setattr(q, kind, None)
 
 
@@ -1557,6 +1570,9 @@ def extract_survey_definition(
     # "[BASE: ANSWERED YES ABOVE]": a base that points instead of naming. Before
     # QA, so QA judges the survey with these bases applied.
     resolve_relative_bases(survey)
+    # Automatic answers and typed-vs-choice contradictions, before QA so the
+    # base flag an automatic answer does not deserve is gone when QA looks.
+    mark_derived_facts(survey)
 
     # The QA loop, as the last pass: a QA agent tests every question as the
     # respondent will meet it, a programmer agent repairs what it safely can,

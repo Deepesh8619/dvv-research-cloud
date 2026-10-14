@@ -137,8 +137,29 @@ def _fill(q: Question, items: list[Option]) -> None:
         q.flags.remove(schema.FLAG_EMPTY_OPTIONS)
 
 
+def canonical_sources(survey: SurveyDefinition) -> None:
+    """Store the real qid in every mask/pipe source.
+
+    The technique parser upper-cases what it reads ("Q2B"); the question is
+    "Q2b". Matching ignores case, but the stored name must be the question's
+    own, or every exact-match consumer (preflight, dryrun, links, QC) finds
+    nothing and the list silently draws from no question.
+    """
+    by_upper = {q.qid.upper(): q.qid for q in survey.questions}
+    for q in survey.questions:
+        t = (q.validation or {}).get("techniques") or {}
+        for item, keys in [(m, ("source_qid", "exclude_qid")) for m in t.get("masks") or []] + [
+            (p, ("source_qid",)) for p in t.get("pipes") or []
+        ]:
+            for key in keys:
+                real = by_upper.get(str(item.get(key) or "").upper())
+                if real:
+                    item[key] = real
+
+
 def fill_lists(survey: SurveyDefinition) -> list[dict]:
     """Fill every list the document states elsewhere. Returns what was filled."""
+    canonical_sources(survey)
     by_upper = {q.qid.upper(): q for q in survey.questions}
     filled: list[dict] = []
     seen: list[Question] = []  # questions before this one, in order
