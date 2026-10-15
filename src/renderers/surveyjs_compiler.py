@@ -40,6 +40,8 @@ from src.engines.questionnaire.write_ins import write_in_name, write_in_prompt, 
 # bracketed is ever shown to a person: the compiler removes it on the way out,
 # while the stored question keeps its original wording for review.
 _BRACKETED = re.compile(r"\[[^\]]*\]")
+# A pipe marker may be bracketed, doubled-angle, angled or guillemeted.
+_PIPE_GROUP = re.compile(r"\[[^\]]*\]|<<[^<>]*>>|<[A-Za-z][^<>]{0,40}>|«[^»]*»")
 _WHITESPACE = re.compile(r"\s+")
 # " ?" and " ," left behind once a directive is lifted out of a sentence.
 _STRANDED_PUNCTUATION = re.compile(r"\s+([?.,;:!])")
@@ -139,7 +141,7 @@ def _resolve_pipes(text: str, pipes: list[dict], by_qid: dict[str, Question]) ->
             continue  # unresolvable — the strip below removes it
         source = question.qid
         wanted = _normalize(pipe.get("verbatim") or "")
-        for group in _BRACKETED.findall(text):
+        for group in _PIPE_GROUP.findall(text):
             body = _normalize(group[1:-1])
             if body == wanted or (wanted and wanted in body) or source.casefold() in body:
                 # EVERY occurrence: a question that names the brand twice

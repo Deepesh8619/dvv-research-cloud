@@ -45,7 +45,7 @@ os.environ.update(_AI_OFF)
 os.environ.pop("DVV_EXTRACT_LOCAL", None)
 sys.path.insert(0, str(REPO))
 
-from src.ai.router import llm_key_presence  # noqa: E402
+from src.ai.router import BackendUnavailable, llm_key_presence  # noqa: E402
 from src.core.survey_definition import (  # noqa: E402
     Expression,
     Question,
@@ -1052,10 +1052,19 @@ def main(argv: list[str] | None = None) -> int:
     pairs = find_pairs(a.batch) if a.batch else [(a.docx, a.gold)] if a.docx and a.gold else []
     if not pairs:
         ap.error("give --docx and --gold, or --batch DIR")
-    results = []
+    results: list[dict] = []
+    aborted: list[str] = []
     for docx, gpath in pairs:
         gold = json.loads(gpath.read_text())
-        res = run_document(docx, gold, load_base(a.baseline, gold["doc_id"]))
+        try:
+            res = run_document(docx, gold, load_base(a.baseline, gold["doc_id"]))
+        except BackendUnavailable as exc:
+            # AI is off on purpose; when the deterministic parser cannot read a document the
+            # extractor's circuit breaker raises instead of returning what it could read.
+            # That is a result (the document produced NO definition), not a reason to stop.
+            print(f"{gold['doc_id']}: ABORTED, extraction produced no definition ({str(exc)[:90]})")
+            aborted.append(gold["doc_id"])
+            continue
         write_doc(out, res, holdout="holdout" in gpath.parts)
         results.append(res)
         s = res["scores"]

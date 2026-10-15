@@ -13,12 +13,12 @@ from src.intake.questionnaire_loader import load_docx, segment_into_questions
 
 LINES = [
     "Coffee Habits Study",
-    "Q1. [SINGLE PUNCH] Do you drink coffee at least once a week?", "1. Yes", "2. No [KILL]",
-    "Q2. [MULTI PUNCH] Which of these brands have you bought in the past month? [SCRAMBLE]",
+    "Q1. [ONE ANSWER ONLY] Do you drink coffee at least once a week?", "1. Yes", "2. No [KILL]",
+    "Q2. [ANY NUMBER OF ANSWERS] Which of these brands have you bought in the past month? [SCRAMBLE]",  # noqa: E501
     "1. Brand A", "2. Brand B", "3. Brand C", "99. None of these [KILL]",
-    "Q3. [MULTI PUNCH] What matters when you choose a coffee shop? [SCRAMBLE]",
+    "Q3. [ANY NUMBER OF ANSWERS] What matters when you choose a coffee shop? [SCRAMBLE]",
     "1. Price", "2. Taste", "3. Location",
-    "Q4. [OPEN] Why did you choose your favourite coffee shop?",
+    "Q4. [FREE TALK] Why did you choose your favourite coffee shop?",
 ]
 
 
@@ -40,12 +40,14 @@ def test_the_report_names_what_to_teach_and_teaching_completes_the_read(tmp_path
     suggested = {t["fragment"]: t["suggest"] for t in report["teach"]}
     assert suggested.get("[KILL]") == "option_tag"
     assert suggested.get("SCRAMBLE") == "randomize_signal"
-    assert "[OPEN]" in suggested
+    assert "[FREE TALK]" in suggested
 
     after = _extract(tmp_path, [
         LearnedPattern("option_tag", "[KILL]", "terminate"),
         LearnedPattern("randomize_signal", "[SCRAMBLE]"),
-        LearnedPattern("type_signal", "[OPEN]", "open_text"),
+        LearnedPattern("type_signal", "[FREE TALK]", "open_text"),
+        LearnedPattern("type_signal", "[ONE ANSWER ONLY]", "single"),
+        LearnedPattern("type_signal", "[ANY NUMBER OF ANSWERS]", "multi"),
     ])
     by = {q.qid: q for q in after.questions}
     assert after.metadata["decoding"]["verdict"] == "familiar"
