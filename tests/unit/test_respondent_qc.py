@@ -91,7 +91,7 @@ def test_duplicates_ignore_system_columns_and_keep_first():
         }
     )
     # rows 0 and 2 share the full answer pattern; only the LATER row is flagged.
-    assert detect_duplicates(df, dm) == [2]
+    assert detect_duplicates(df, dm, min_answers=1) == [2]
 
 
 def test_duplicates_ignore_record_and_paradata_columns():
@@ -103,7 +103,7 @@ def test_duplicates_ignore_record_and_paradata_columns():
     df = pl.DataFrame(
         {"record": [1, 2], "vDurationSec": [100.0, 250.0], "Q1": [1, 1], "Q2": [10, 10]}
     )
-    assert detect_duplicates(df, dm) == [1]
+    assert detect_duplicates(df, dm, min_answers=1) == [1]
 
 
 def test_gibberish_open_ends():
@@ -319,10 +319,23 @@ def test_duplicates_compare_fielded_question_columns():
         Variable("vDurationSec", type=VarType.NUMERIC, provenance="fielding_paradata"),
     ])
     df = pl.DataFrame({"Q1": [1, 1, 2], "Q2": [2, 2, 1], "vDurationSec": [300, 410, 500]})
-    assert detect_duplicates(df, dm) == [1]
+    assert detect_duplicates(df, dm, min_answers=1) == [1]
 
 
 def test_gibberish_skips_paradata_text():
     dm = DataMap([Variable("vConnection", type=VarType.TEXT, provenance="fielding_paradata")])
     df = pl.DataFrame({"vConnection": ["b7d0c1f3d9" * 3 + "bd"]})  # hex hash, no vowels
     assert detect_gibberish_open_ends(df, dm) == {}
+
+
+def test_short_survey_patterns_are_not_duplicates():
+    # Eight yes/no questions: many genuine respondents match each other. The default
+    # minimum keeps the check quiet; a long identical pattern is still a duplicate.
+    short = DataMap([Variable(f"Q{i}", type=VarType.SINGLE, values={0: "n", 1: "y"})
+                     for i in range(8)])
+    df = pl.DataFrame({f"Q{i}": [1, 1, 1] for i in range(8)})
+    assert detect_duplicates(df, short) == []
+    long = DataMap([Variable(f"Q{i}", type=VarType.SINGLE, values={0: "n", 1: "y"})
+                    for i in range(20)])
+    df = pl.DataFrame({f"Q{i}": [1, 1, 0] for i in range(20)})
+    assert detect_duplicates(df, long) == [1]
