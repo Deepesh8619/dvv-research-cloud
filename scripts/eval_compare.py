@@ -57,6 +57,7 @@ from src.core.survey_definition import (  # noqa: E402
 from src.engines.fielding.preflight import preflight  # noqa: E402
 from src.engines.questionnaire.definition_audit import audit_definition  # noqa: E402
 from src.engines.questionnaire.extractor import extract_survey_definition  # noqa: E402
+from src.engines.questionnaire.write_ins import write_in_name  # noqa: E402
 from src.intake.questionnaire_loader import load_docx, segment_into_questions  # noqa: E402
 from src.renderers.surveyjs_compiler import compile_to_surveyjs  # noqa: E402
 
@@ -583,7 +584,8 @@ def link_got(el: dict | None) -> dict:
             "limits": link_limits(el)}
 
 
-def cmp_link(g: dict, el: dict | None, page: dict | None, q: Question | None) -> list[Diff]:
+def cmp_link(g: dict, el: dict | None, page: dict | None, q: Question | None,
+             links: dict | None = None) -> list[Diff]:
     gold_type = g["type"]
     if not g.get("asked", True):
         if el is None:
@@ -623,6 +625,13 @@ def cmp_link(g: dict, el: dict | None, page: dict | None, q: Question | None) ->
         out += cmp_options(g["rows"], l_opts(el.get("rows") or el.get("items")), "row", False)
     if g.get("columns"):
         out += cmp_options(g["columns"], l_opts(el.get("columns")), "column", False)
+    # "Other (specify)": the respondent must get a text box that appears when it is picked.
+    for o in (g.get("options") or []) + (g.get("rows") or []):
+        if o.get("other_specify") and q is not None and links is not None:
+            box = links.get(nq(write_in_name(q.qid, o["code"])))
+            if box is None or box[0].get("type") != "text" or not box[0].get("visibleIf"):
+                out.append(Diff("OPTION_DIFF", "link_other_specify",
+                                f"option {o['code']} asks the respondent to specify; the link has no text box that opens when it is picked"))
     lim = link_limits(el)
     lim = {k: v for k, v in lim.items() if k in ("min", "max", "sum", "select_min", "select_max", "required")}
     out += cmp_constraints(g, lim, "LINK")
@@ -770,7 +779,7 @@ def run_document(docx: Path, gold: dict, baseline: dict | None = None) -> dict:
                     l1 += pterm
             except (KeyError, StopIteration, TypeError, ValueError) as exc:
                 ld.append(Diff("LOGIC_DIFF", "logic_unchecked", f"gold condition not evaluable: {exc!r}"))
-        l2 = cmp_link(g, el, page, q)
+        l2 = cmp_link(g, el, page, q, links)
         if asked and not g.get("struck_out") and el is not None:
             l2 += probe_diffs(g, el, compiled, gold_by)
         if asked and not g.get("struck_out") and el is not None:

@@ -112,6 +112,7 @@ from src.engines.questionnaire.verification import (
     failed,
     verify_against_source,
 )
+from src.engines.questionnaire.write_ins import mark_write_ins
 from src.intake.questionnaire_loader import DocumentBlock, QuestionChunk
 
 # Question types whose whole point is a fixed answer list; an empty option list
@@ -1005,6 +1006,7 @@ def reread_question(
     result = ExtractionResult(question=new_question)
     _flag_derived_variable(result, chunk, patterns)
     _validate_question(result, {})
+    mark_write_ins([new_question])
     return new_question
 
 
@@ -1709,6 +1711,10 @@ def extract_survey_definition(
 
     if blocks is not None:
         survey.metadata["document_markers"] = document_markers(blocks)
+
+    # "Other (Specify)": the option that asks the respondent to type. After
+    # every pass that builds or copies option lists (loops, datamap recovery).
+    mark_write_ins(survey)
 
     # "[BASE: ANSWERED YES ABOVE]": a base that points instead of naming. Before
     # QA, so QA judges the survey with these bases applied.

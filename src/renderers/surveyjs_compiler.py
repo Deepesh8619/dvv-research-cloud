@@ -30,6 +30,7 @@ from src.engines.questionnaire.grid_masks import affirmative_codes, variable_nam
 from src.engines.questionnaire.grid_subquestions import without_question_label
 from src.engines.questionnaire.prose_directives import is_derived_wording, is_terminal_option
 from src.engines.questionnaire.symbols import symbols_for_survey
+from src.engines.questionnaire.write_ins import write_in_name, write_in_prompt, write_ins
 
 # Square brackets are a SCRIPTING convention, not respondent language. Across
 # every instrument we have — client documents and public federal ones alike —
@@ -578,6 +579,39 @@ def _is_respondent_facing(question: Question) -> bool:
     return not _options_are_rules(question)
 
 
+def _write_in_elements(question: Question) -> list[dict[str, Any]]:
+    """One text box per "Other (Specify)" option, shown only when it is picked.
+
+    Named `<qid>r<code>oe`, as the data file names it. Required while visible:
+    a respondent who picked "Other" and typed nothing has told us nothing.
+    The parent's own base is part of the condition, so an answer left behind on
+    a page the respondent has since been routed away from cannot show the box.
+    """
+    out: list[dict[str, Any]] = []
+    for option in write_ins(question):
+        if question.type in (QuestionType.GRID_SINGLE, QuestionType.NUMERIC):
+            ref = f"{{{question.qid}.{option.code}}}"  # a row of the answer map
+            picked = f"{ref} > 0" if question.type is QuestionType.NUMERIC else f"{ref} notempty"
+        else:
+            ref = f"{{{question.qid}}}"
+            op = "contains" if question.type in _MULTI_VALUED else "="
+            picked = f"{ref} {op} {_format_value(option.code)}"
+        conditions = [picked]
+        if question.show_if is not None:
+            conditions.insert(0, _expression_to_visibleif_string(question.show_if))
+        if option.show_if is not None:
+            conditions.insert(0, _expression_to_visibleif_string(option.show_if))
+        visible = picked if len(conditions) == 1 else " and ".join(f"({c})" for c in conditions)
+        out.append({
+            "type": "text",
+            "name": write_in_name(question.qid, option.code),
+            "title": write_in_prompt(option.label),
+            "isRequired": True,
+            "visibleIf": visible,
+        })
+    return out
+
+
 def _compile_block(block: Block, survey: SurveyDefinition) -> dict[str, Any]:
     """Compile one `Block` into a SurveyJS page dict."""
     elements: list[dict[str, Any]] = []
@@ -585,6 +619,7 @@ def _compile_block(block: Block, survey: SurveyDefinition) -> dict[str, Any]:
     for qid in block.question_ids:
         if qid in survey and _is_respondent_facing(survey[qid]):
             elements.append(_compile_question(survey[qid], by_qid))
+            elements.extend(_write_in_elements(survey[qid]))
 
     page: dict[str, Any] = {"name": block.block_id, "elements": elements}
     if block.label:

@@ -68,6 +68,7 @@ _ALWAYS_JUNK_PREFIXES = ("noanswer", "geoinfor", "respinfor")
 # _is_paradata_variable and the label-length check in auto_tab_plan).
 _STUB_ONLY_PREFIXES = ("hid", "h_", "hcf", "dummy")
 _CAMEL_SYSTEM_RE = re.compile(r"^[dvh][A-Z]")  # dTrack, vUserAgent, hSample
+_OTHER_SPECIFY_RE = re.compile(r"r\d+oe$")  # Q5r98oe
 
 
 def _is_system_variable(name: str) -> bool:
@@ -76,6 +77,10 @@ def _is_system_variable(name: str) -> bool:
     """
     low = name.lower()
     if low in _SYSTEM_EXACT or low.endswith("flag"):
+        return True
+    # The text behind an "Other (specify)" punch: free text, for verbatim coding.
+    # A string column of few distinct answers is otherwise inferred as a choice.
+    if _OTHER_SPECIFY_RE.search(low):
         return True
     if low.startswith(_ALWAYS_JUNK_PREFIXES + _STUB_ONLY_PREFIXES):
         return True
