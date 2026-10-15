@@ -742,6 +742,14 @@ def parse_prose_question(
     randomize_evidence = ""
     scale_row: str | None = None
 
+    # "...Select up to 2. [RANDOMIZE]": the order note can end the question
+    # sentence itself, not only sit on a line of its own.
+    for body in [*directives, *inline_bases]:
+        if re.search(r"RANDOMI[SZ]E|\bROTATE\b", body, re.I) and not re.search(
+            r"KEEP ORDER|DO NOT RANDOMI[SZ]E", body, re.I
+        ):
+            randomize = True
+            randomize_evidence = f"[{body.strip()}]"
     for body in inline_bases:
         directives.append(body.strip())
         if _BASE_TAG_BODY.match(body):

@@ -487,6 +487,10 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
         # the list is a scripting error a client would reject the data for, and
         # the library has no way to pin one choice.
         element["choices"] = _shuffled_choices(question, element["choices"])
+    if question.randomize_options and element.get("type") in ("matrix", "matrixdropdown"):
+        # A grid's randomisation is its ROWS. Only choices were ever shuffled,
+        # so every "[ROWS, RANDOMIZE]" grid reached respondents in one order.
+        element["rowsOrder"] = "random"
 
     if question.show_if is not None:
         element["visibleIf"] = _expression_to_visibleif_string(question.show_if)

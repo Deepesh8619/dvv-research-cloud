@@ -719,3 +719,15 @@ def test_each_screen_out_sentence_on_a_number_is_read_on_its_own():
     got = {(c.op, c.value, tuple(c.values or ())) for c in expr.children}
     assert got == {("lt", 500, ()), ("in", None, (99,))}  # the flag at $1M is not a screen-out
     assert unread  # the SS_REVENUE rule is left for a person
+
+
+def test_randomize_variable_list_shuffles_a_grid():
+    rows = [
+        ["Q Name", "GA_TOOL"], ["How familiar are you with each tool?"],
+        ["", "Variable list:"], ["1", "Broad match"], ["2", "Smart bidding"],
+        ["", "Response list:"], ["5", "Used"], ["1", "Not aware"],
+        ["Q type", "Carousel VERT Grid (SR)"],
+        ["Randomize variable list", "Yes"], ["Randomize response list", "No"],
+    ]
+    f = parse_spec_table(_table(rows))
+    assert f.randomize == "Yes" and "Randomize variable list" not in f.extras

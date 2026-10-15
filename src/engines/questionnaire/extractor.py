@@ -60,6 +60,7 @@ from src.engines.questionnaire.datamap_recovery import (
     normalize_qid,
     recover_missing,
 )
+from src.engines.questionnaire.decoding_report import decoding_report
 from src.engines.questionnaire.extraction_diagnosis import document_markers
 from src.engines.questionnaire.flag_reasons import mark_derived_facts
 from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
@@ -1705,6 +1706,9 @@ def extract_survey_definition(
     # lists were filled and sections applied, and the review screen showed four
     # questions "with no rows" that had them.
     survey.metadata["validation_errors"] = survey.validate()
+    # Which skills decoded this document, what none could, and what to teach —
+    # so an unfamiliar format is announced, not found question by question.
+    survey.metadata["decoding"] = decoding_report(survey)
     return survey
 
 
