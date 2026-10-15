@@ -552,3 +552,10 @@ def test_rank_from_1_to_n_is_a_ranking():
     chunk = ("[BASE: ALL] What factors would most influence your decision? Please rank from 1 "
              "to 3, with 1 being the most influential. [RANDOMIZE]\nEfficacy |\nSafety |\nCost |")
     assert parse_prose_question(chunk, candidate_qid="Q24").qtype is QuestionType.RANK
+
+
+def test_enter_number_range_sets_the_limits():
+    from src.engines.questionnaire.prose_directives import parse_prose_question
+
+    fields = parse_prose_question("S1. What is your age? [ENTER NUMBER 1-100]", "S1")
+    assert fields.bounds == {"min": 1, "max": 100}

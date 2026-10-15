@@ -549,6 +549,31 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
     )
 
 
+_MAKE_EXCLUSIVE = re.compile(
+    r"\bmake\s+(\d{1,3}(?:\s*(?:,|and|&)\s*\d{1,3})*)\s+exclusive\b"
+    r"|\bexclusive\s*:?\s*(\d{1,3}(?:\s*(?:,|and|&)\s*\d{1,3})*)",
+    re.I,
+)
+
+
+def _limits_and_exclusives_from_cells(question: Question, fields: SpecTableFields) -> None:
+    """ "Q type: Custom >>> Multi-select up to 3" and "Other details: Make 99
+    exclusive" state an answer cap and an exclusive answer; both were read
+    for the type only and the rest dropped."""
+    from src.engines.questionnaire.select_limits import read_limits
+
+    stated = " ".join(filter(None, [fields.evidence.get("type"), fields.notes]))
+    limits = read_limits(stated) or {}
+    if limits.get("max_select") and question.type is QuestionType.MULTI:
+        question.validation = {**(question.validation or {}),
+                               "max_select": limits["max_select"]}
+    codes = {int(c) for m in _MAKE_EXCLUSIVE.finditer(fields.notes or "")
+             for c in re.findall(r"\d+", m.group(1) or m.group(2))}
+    for option in question.options or []:
+        if option.code in codes:
+            option.exclusive = True
+
+
 def _extract_via_spec_table(
     chunk: QuestionChunk,
     fields: SpecTableFields,
@@ -570,6 +595,7 @@ def _extract_via_spec_table(
     )
     question = _question_from_fields(fields, chunk)
     question.show_if = fields.show_if
+    _limits_and_exclusives_from_cells(question, fields)
     # Fields read straight from the table are not model guesses.
     confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
     if filled_from_datamap:

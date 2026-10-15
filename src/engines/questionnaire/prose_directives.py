@@ -195,6 +195,7 @@ _NUMBER_RANGE = re.compile(r"(\d[\d,]*)\s*-\s*(\d[\d,]*)")
 # range plus how to type it. Only these words — "[0-100, MUST SUM TO 100%]"
 # is a total, not a single number.
 _NUMBER_RANGE_STATED = re.compile(
+    r"(?:(?:ENTER\s+)?(?:A\s+)?(?:NUMBER|RANGE|VALUE)\s*:?\s*)?"
     r"(\d[\d,]*)\s*-\s*(\d[\d,]*)\s*%?\s*(?:RESPONSE)?\s*"
     r"(?:,?\s*(?:WHOLE\s+NUMBERS?|INTEGERS?|NUMERIC|NUMBERS?\s+ONLY))?\s*",
     re.I,
@@ -1153,7 +1154,13 @@ def parse_prose_question(
         or fields.qtype is QuestionType.OPEN_TEXT
     )
     span = next((m for d in directives if (m := _NUMBER_RANGE_STATED.fullmatch(d.strip()))), None)
-    if entry and span and not fields.options and fields.qtype in (None, QuestionType.OPEN_TEXT):
+    # "What is your age? [ENTER NUMBER 1-100]": already a number, and the
+    # range is its limits.
+    if span and not fields.options and fields.qtype is QuestionType.NUMERIC and not fields.bounds:
+        entry = True
+    if entry and span and not fields.options and fields.qtype in (
+        None, QuestionType.OPEN_TEXT, QuestionType.NUMERIC
+    ):
         low, high = (int(g.replace(",", "")) for g in span.groups())
         if low < high:
             fields.qtype = QuestionType.NUMERIC

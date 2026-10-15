@@ -1217,3 +1217,17 @@ def test_a_renamed_duplicate_keeps_its_own_screen_out():
     assert first.question.terminate_if.qid == "SS_ADVERT_DECMAKER"
     assert second.question.qid == "SS_ADVERT_DECMAKER_2"
     assert second.question.terminate_if.qid == "SS_ADVERT_DECMAKER_2"
+
+
+def test_spec_cells_state_a_cap_and_an_exclusive_answer():
+    from src.core.survey_definition import Option, Question
+    from src.engines.questionnaire.extractor import _limits_and_exclusives_from_cells
+    from src.engines.questionnaire.spec_table import SpecTableFields
+
+    q = Question(qid="DA_SUCCESS", text="Metrics?", type=QuestionType.MULTI,
+                 options=[Option(code=1, label="ROI"), Option(code=99, label="Not sure")])
+    fields = SpecTableFields(qid="DA_SUCCESS", notes="Make 99 exclusive",
+                             evidence={"type": "Q type: Multi-select up to 3"})
+    _limits_and_exclusives_from_cells(q, fields)
+    assert q.validation["max_select"] == 3
+    assert [o.exclusive for o in q.options] == [False, True]
