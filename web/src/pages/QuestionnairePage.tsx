@@ -28,6 +28,7 @@ import SourceTile from '../components/review/SourceTile'
 import { useRenderedSource } from '../components/review/useRenderedSource'
 import Lessons from '../components/review/Lessons'
 import StudyUnderstandingPanel from '../components/review/StudyUnderstandingPanel'
+import DecodingPanel from '../components/review/DecodingPanel'
 import QAPanel from '../components/review/QAPanel'
 import { useLabel } from '../labels/LabelContext'
 import { BucketBar, ConnectionsPanel, IssuesPanel, ProgressRing } from '../components/review/QuestionMap'
@@ -1603,6 +1604,7 @@ export default function QuestionnairePage() {
       {status && !notFound && !['processing', 'error'].includes(status.status) && (
         <>
           <StudyUnderstandingPanel understanding={status.study_understanding} onGoTo={goTo} />
+          <DecodingPanel decoding={status.decoding} onGoTo={goTo} />
           <QAPanel
             qa={status.qa}
             canRun={canWrite}

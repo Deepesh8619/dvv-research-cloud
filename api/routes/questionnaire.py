@@ -306,6 +306,7 @@ def _status_response(
         study_understanding=metadata.get("study_understanding"),
         qa=metadata.get("qa"),
         logic_review=metadata.get("logic_review"),
+        decoding=metadata.get("decoding"),
     )
 
 

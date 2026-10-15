@@ -60,6 +60,7 @@ from src.engines.questionnaire.datamap_recovery import (
     normalize_qid,
     recover_missing,
 )
+from src.engines.questionnaire.decoding_report import decoding_report
 from src.engines.questionnaire.extraction_diagnosis import document_markers
 from src.engines.questionnaire.flag_reasons import mark_derived_facts
 from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
@@ -788,6 +789,8 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     validation: dict[str, Any] = {}
     if fields.terminate_verbatim:
         validation[_ROUTING_VERBATIM_KEY] = fields.terminate_verbatim
+    if fields.unknown_answer_tags:
+        validation["unknown_answer_tags"] = sorted(set(fields.unknown_answer_tags))
     if fields.directives:
         # Scripter notes we recognised but do not model (SHOW IMAGE, quota
         # instructions). Surfaced for review rather than dropped.
@@ -1705,6 +1708,9 @@ def extract_survey_definition(
     # lists were filled and sections applied, and the review screen showed four
     # questions "with no rows" that had them.
     survey.metadata["validation_errors"] = survey.validate()
+    # Which skills decoded this document, what none could, and what to teach —
+    # so an unfamiliar format is announced, not found question by question.
+    survey.metadata["decoding"] = decoding_report(survey)
     return survey
 
 

@@ -62,6 +62,10 @@ FIELD_ALIASES: dict[str, set[str]] = {
     "randomize": {
         "randomize", "randomise", "randomize response list", "rotation",
         "randomization", "order",
+        # A grid's statements ARE its variable list: shuffling them is the
+        # grid's randomisation (its scale, the response list, never moves).
+        "randomize variable list", "randomise variable list", "randomize statement list",
+        "randomize rows",
     },
     "notes": {
         "other details", "notes", "note", "instructions", "scripter notes",

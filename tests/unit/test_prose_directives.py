@@ -559,3 +559,11 @@ def test_enter_number_range_sets_the_limits():
 
     fields = parse_prose_question("S1. What is your age? [ENTER NUMBER 1-100]", "S1")
     assert fields.bounds == {"min": 1, "max": 100}
+
+
+def test_randomize_at_the_end_of_the_question_sentence_is_applied():
+    from src.engines.questionnaire.prose_directives import parse_prose_question
+
+    chunk = ("[BASE: ALL] What were your biggest hesitations? Select up to 5. [RANDOMIZE]\n"
+             "Cost |\nSafety |\nAccess |")
+    assert parse_prose_question(chunk, candidate_qid="Q7").randomize
