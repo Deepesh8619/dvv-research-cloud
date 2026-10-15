@@ -294,7 +294,7 @@ def match_questions(gold_qs: list[dict], pqs: list[Question]) -> dict[int, tuple
                 score += 0.1
             if r >= 0.6:
                 cands.append((score, r, i, j))
-    for score, r, i, j in sorted(cands, key=lambda c: (-c[0], c[2], c[3])):
+    for _score, _r, i, j in sorted(cands, key=lambda c: (-c[0], c[2], c[3])):
         if i in out or id(pqs[j]) in used:
             continue
         used.add(id(pqs[j]))
