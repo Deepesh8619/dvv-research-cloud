@@ -38,13 +38,14 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
 from src.core.survey_definition import (
+    Option,
     Question,
     QuestionType,
     SurveyDefinition,
     has_nothing_to_answer,
 )
 from src.engines.questionnaire import schema
-from src.engines.questionnaire.constant_sum import make_constant_sum
+from src.engines.questionnaire.constant_sum import make_constant_sum, numeric_list_sum
 from src.engines.questionnaire.constant_sum import read as read_constant_sum
 from src.engines.questionnaire.routing_prose import parse_routing
 from src.engines.questionnaire.verification import verify_against_source
@@ -288,6 +289,17 @@ def qa_check(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
             f"{q.type.value}",
             "; ".join(summed[0][:3]),
         ))
+    v = q.validation or {}
+    first = (q.source_text or "").strip().split("\n")[0]
+    stated = _SUM_STATED.search(f"{q.text or ''}\n{first}")  # own wording only
+    if (q.type is QuestionType.NUMERIC and q.rows and "sum" not in v and "sum_min" not in v
+            and stated):
+        issues.append(Issue(
+            "sum_total_missing",
+            "these number boxes must add up to a total the document states, "
+            "but the survey sets no total",
+            stated.group(0),
+        ))
     for row, condition in ((q.validation or {}).get("row_conditions") or {}).items():
         issues.append(Issue(
             "row_condition_not_applied",
@@ -326,6 +338,11 @@ def _own_sum(q: Question) -> tuple | None:
 
 
 def _constant_sum(q: Question) -> str | None:
+    listed = numeric_list_sum(q)
+    if listed:
+        rows = [Option(code=o.code, label=o.label, show_if=o.show_if) for o in q.options]
+        make_constant_sum(q, [r.label for r in rows], *listed, rows=rows)
+        return f"read it as {len(rows)} number boxes that must add up to {listed[0]}"
     found = _own_sum(q)
     if found is None or (q.type is QuestionType.NUMERIC and q.rows):
         return None
@@ -428,6 +445,9 @@ def run_qa(survey: SurveyDefinition, locked: set[str] | None = None) -> dict:
         else:
             (q.validation or {}).pop("qa_issues", None)
 
+    from src.engines.questionnaire import consistency  # imports Issue from here
+
+    consistency.apply(survey, entries)
     flagged = {e["qid"] for e in entries if e["status"] == "needs_you"}
     auto = survey.metadata.get("auto_approved_qids")
     if auto:

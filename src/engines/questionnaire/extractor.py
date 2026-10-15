@@ -60,11 +60,14 @@ from src.engines.questionnaire.datamap_recovery import (
     normalize_qid,
     recover_missing,
 )
+from src.engines.questionnaire.decoding_report import decoding_report
 from src.engines.questionnaire.extraction_diagnosis import document_markers
+from src.engines.questionnaire.flag_reasons import mark_derived_facts
 from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
 from src.engines.questionnaire.learned import LearnedPattern, learned_hidden_variable
 from src.engines.questionnaire.list_sources import fill_lists, points_at_a_list
 from src.engines.questionnaire.logic_review import review as review_logic
+from src.engines.questionnaire.loop_bases import resolve_loop_bases_from_hidden
 from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import Mask, detect_techniques
 from src.engines.questionnaire.per_item import apply as apply_per_item_grids
@@ -80,6 +83,7 @@ from src.engines.questionnaire.reconciler import reconcile_segmentation
 from src.engines.questionnaire.relative_bases import resolve_relative_bases
 from src.engines.questionnaire.section_paths import (
     apply_intro_screens,
+    apply_section_bases,
     apply_section_paths,
 )
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
@@ -90,7 +94,11 @@ from src.engines.questionnaire.study_understanding import (
     understand_study,
 )
 from src.engines.questionnaire.swallowed_options import repair_swallowed_options
-from src.engines.questionnaire.table_questions import labelled_sections, question_from_tables
+from src.engines.questionnaire.table_questions import (
+    entry_table,
+    labelled_sections,
+    question_from_tables,
+)
 from src.engines.questionnaire.trade_off import apply as flag_trade_offs
 from src.engines.questionnaire.verification import (
     covers_the_question,
@@ -384,12 +392,11 @@ def _validate_question(result: ExtractionResult, routing: dict) -> None:
     # expression references nothing BUT itself (a mixed `Q7 and Q3` staying is
     # fine). This keeps us from fighting the model's own tested fixture while
     # still surfacing the far-more-common "gated its own display" mistake.
-    for expr in (q.show_if, q.terminate_if):
-        if expr is None:
-            continue
-        refs = expr.referenced_qids()
-        if refs and refs == {q.qid}:
-            result.add_flag(schema.FLAG_AMBIGUOUS_ROUTING)
+    # Only the SHOW condition: screening out on this question's own answer
+    # ("TERMINATE if 5,6 selected") is the commonest screener rule there is, and
+    # flagging it put an unexplained routing flag on every screener question.
+    if q.show_if is not None and q.show_if.referenced_qids() == {q.qid}:
+        result.add_flag(schema.FLAG_AMBIGUOUS_ROUTING)
 
     # Ambiguous routing from the model, or low routing confidence.
     routing_conf = float(result.confidence.get("routing", 1.0))
@@ -543,6 +550,31 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
     )
 
 
+_MAKE_EXCLUSIVE = re.compile(
+    r"\bmake\s+(\d{1,3}(?:\s*(?:,|and|&)\s*\d{1,3})*)\s+exclusive\b"
+    r"|\bexclusive\s*:?\s*(\d{1,3}(?:\s*(?:,|and|&)\s*\d{1,3})*)",
+    re.I,
+)
+
+
+def _limits_and_exclusives_from_cells(question: Question, fields: SpecTableFields) -> None:
+    """ "Q type: Custom >>> Multi-select up to 3" and "Other details: Make 99
+    exclusive" state an answer cap and an exclusive answer; both were read
+    for the type only and the rest dropped."""
+    from src.engines.questionnaire.select_limits import read_limits
+
+    stated = " ".join(filter(None, [fields.evidence.get("type"), fields.notes]))
+    limits = read_limits(stated) or {}
+    if limits.get("max_select") and question.type is QuestionType.MULTI:
+        question.validation = {**(question.validation or {}),
+                               "max_select": limits["max_select"]}
+    codes = {int(c) for m in _MAKE_EXCLUSIVE.finditer(fields.notes or "")
+             for c in re.findall(r"\d+", m.group(1) or m.group(2))}
+    for option in question.options or []:
+        if option.code in codes:
+            option.exclusive = True
+
+
 def _extract_via_spec_table(
     chunk: QuestionChunk,
     fields: SpecTableFields,
@@ -563,6 +595,8 @@ def _extract_via_spec_table(
         fill_from_datamap(fields, datamap_question) if datamap_question else []
     )
     question = _question_from_fields(fields, chunk)
+    question.show_if = fields.show_if
+    _limits_and_exclusives_from_cells(question, fields)
     # Fields read straight from the table are not model guesses.
     confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
     if filled_from_datamap:
@@ -595,7 +629,17 @@ def _extract_via_spec_table(
             "questionnaire.extract", prompt, schema.residue_schema(fields.missing)
         )
     except (BackendUnavailable, ModelOutputError, KeyError):
-        return None
+        if set(fields.missing) != {"base"}:
+            return None
+        # Only the base needs judgment. The rest of the question was read
+        # exactly; discarding it for a full model read produced a question whose
+        # answers were the table's own labels. Keep it and show the base words.
+        question.flags.append(schema.FLAG_AMBIGUOUS_ROUTING)
+        question.validation[_ROUTING_VERBATIM_KEY] = fields.base
+        result = ExtractionResult(question=question, confidence=confidence)
+        _flag_derived_variable(result, chunk, patterns)
+        _validate_question(result, {})
+        return result
 
     content = response.content if isinstance(response.content, dict) else {}
     if "type" in fields.missing:
@@ -682,6 +726,19 @@ def _apply_table_shape(question: Question, chunk: QuestionChunk) -> None:
     tables = [b.rows for b in chunk.source_blocks if b.rows]
     if not tables:
         return
+    entry = next((found for t in tables if (found := entry_table(t))), None)
+    if entry is not None and question.type is not QuestionType.GRID_SINGLE:
+        rows, percent = entry
+        question.type = QuestionType.NUMERIC
+        question.rows, question.options, question.cols = rows, [], None
+        if percent:
+            question.validation = {**(question.validation or {}), "min": 0, "max": 100}
+        question.extraction_evidence["options"] = (
+            f"{len(rows)} rows to fill in{' (a percentage each)' if percent else ''}"
+        )
+        if schema.FLAG_EMPTY_OPTIONS in question.flags:
+            question.flags.remove(schema.FLAG_EMPTY_OPTIONS)
+        return
     shape = question_from_tables(tables, list(question.options))
     if shape is None:
         return
@@ -732,6 +789,8 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     validation: dict[str, Any] = {}
     if fields.terminate_verbatim:
         validation[_ROUTING_VERBATIM_KEY] = fields.terminate_verbatim
+    if fields.unknown_answer_tags:
+        validation["unknown_answer_tags"] = sorted(set(fields.unknown_answer_tags))
     if fields.directives:
         # Scripter notes we recognised but do not model (SHOW IMAGE, quota
         # instructions). Surfaced for review rather than dropped.
@@ -796,7 +855,53 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     if question.type is QuestionType.GRID_SINGLE and question.validation:
         for key in ("min_select", "max_select"):
             question.validation.pop(key, None)
+    _codes_from_list_numbers(question, chunk)
     return question
+
+
+_WORD_CODE = re.compile(r"^\s*(\d{1,3})\s*[.)]?\s*$")
+
+
+def _answer_key(text: str) -> str:
+    return " ".join(re.sub(r"\[[^\]]*\]", " ", text or "").lower().split())
+
+
+def _codes_from_list_numbers(question: Question, chunk: QuestionChunk) -> None:
+    """Answer codes as the document prints them, when Word draws them.
+
+    "Don't Know" numbered 99 by Word's list numbering is code 99 in the data;
+    counting the lines made it 6, and a tab of "Don't Know" read an empty
+    column. Applied only when EVERY answer carries a distinct printed number;
+    the question's own screen-out moves with the codes it names.
+    """
+    options = question.options or []
+    if not options:
+        return
+    printed: dict[str, int] = {}
+    for block in chunk.source_blocks:
+        number = _WORD_CODE.match(block.list_label or "")
+        if number and block.block_type != "table":
+            printed.setdefault(_answer_key(block.text), int(number.group(1)))
+    mapping = {o.code: printed.get(_answer_key(o.label)) for o in options}
+    codes = list(mapping.values())
+    if None in codes or len(set(codes)) != len(codes) or all(k == v for k, v in mapping.items()):
+        return
+    for option in options:
+        option.code = mapping[option.code]
+
+    def move(expr: Expression | None) -> None:
+        if expr is None:
+            return
+        if expr.qid == question.qid:
+            if expr.values:
+                expr.values = [mapping.get(v, v) for v in expr.values]
+            if expr.op in ("eq", "selected") and isinstance(expr.value, int):
+                expr.value = mapping.get(expr.value, expr.value)
+        for child in expr.children or []:
+            move(child)
+
+    move(question.terminate_if)
+    question.extraction_evidence["codes"] = "the numbers Word prints beside each answer"
 
 
 def _rebuild_table_rows(source_text: str) -> list[list[str]]:
@@ -1120,6 +1225,10 @@ def verify_question(chunk: QuestionChunk, result: ExtractionResult) -> Extractio
 
     if not faithful:
         result.add_flag(schema.FLAG_VERIFICATION_DISCREPANCY)
+        result.question.validation = {
+            **(result.question.validation or {}),
+            "verification_discrepancies": discrepancies,
+        }
         _downgrade_confidence(result, discrepancies)
 
     return result
@@ -1168,6 +1277,15 @@ def _downgrade_confidence(result: ExtractionResult, discrepancies: list[str]) ->
         result.question.extraction_confidence[field_name] = lowered
 
 
+def _match_qid_case(expr: Expression, known_qids: set[str]) -> None:
+    """Rewrite each referenced qid to the known qid it equals ignoring case."""
+    by_upper = {k.upper(): k for k in known_qids}
+    if expr.qid and expr.qid not in known_qids:
+        expr.qid = by_upper.get(expr.qid.upper(), expr.qid)
+    for child in expr.children or []:
+        _match_qid_case(child, known_qids)
+
+
 def _resolve_cross_chunk_routing(
     results: list[ExtractionResult], known_qids: set[str]
 ) -> None:
@@ -1185,6 +1303,9 @@ def _resolve_cross_chunk_routing(
             expr: Expression | None = getattr(q, kind)
             if expr is None:
                 continue
+            # "HID_B2B_B2c = 2" means HID_B2B_B2C: a typed lowercase letter is
+            # not a different question. Fix the case before calling it missing.
+            _match_qid_case(expr, known_qids)
             # A referenced qid that is neither known in the document nor this
             # question itself is unresolvable.
             unresolved = {
@@ -1192,6 +1313,14 @@ def _resolve_cross_chunk_routing(
             }
             if unresolved:
                 result.add_flag(schema.FLAG_UNRESOLVED_ROUTING_QID)
+                # Kept for the reviewer: the expression itself is about to go.
+                q.validation = {
+                    **(q.validation or {}),
+                    "unresolved_routing": [
+                        *(q.validation or {}).get("unresolved_routing", []),
+                        {"field": kind, "qids": sorted(unresolved)},
+                    ],
+                }
                 setattr(q, kind, None)
 
 
@@ -1497,6 +1626,9 @@ def extract_survey_definition(
     # the base for questions in OTHER chunks, so it can only be applied now that
     # the whole survey exists. Also emits the path as a HID_ variable.
     apply_section_paths(survey)
+    # "BUBBLE CRM INTRODUCTION & SCREENER (S0=2)": a heading that gates the
+    # questions under it.
+    apply_section_bases(survey)
     apply_intro_screens(survey)
     # "Q2a. ever heard of? | Q2b. Ever purchased from?" across one brand list is
     # two questions, not one grid allowing a single answer per brand.
@@ -1557,6 +1689,11 @@ def extract_survey_definition(
     # "[BASE: ANSWERED YES ABOVE]": a base that points instead of naming. Before
     # QA, so QA judges the survey with these bases applied.
     resolve_relative_bases(survey)
+    # A loop turn's base, pointing at a hidden variable that names its brand.
+    resolve_loop_bases_from_hidden(survey)
+    # Automatic answers and typed-vs-choice contradictions, before QA so the
+    # base flag an automatic answer does not deserve is gone when QA looks.
+    mark_derived_facts(survey)
 
     # The QA loop, as the last pass: a QA agent tests every question as the
     # respondent will meet it, a programmer agent repairs what it safely can,
@@ -1571,6 +1708,9 @@ def extract_survey_definition(
     # lists were filled and sections applied, and the review screen showed four
     # questions "with no rows" that had them.
     survey.metadata["validation_errors"] = survey.validate()
+    # Which skills decoded this document, what none could, and what to teach —
+    # so an unfamiliar format is announced, not found question by question.
+    survey.metadata["decoding"] = decoding_report(survey)
     return survey
 
 
@@ -1609,6 +1749,19 @@ def _deduplicate_qids(results: list[ExtractionResult]) -> None:
         result.question.validation["original_qid"] = qid
         result.question.qid = new_qid
         seen[new_qid] = 1
+        # Its own screen-out named itself by the shared name; left alone it
+        # screened on the FIRST question's answers ("TERMINATE if 98" against
+        # a question with no 98), so it could never fire.
+        _rename_qid(result.question.terminate_if, qid, new_qid)
+
+
+def _rename_qid(expr: Expression | None, old: str, new: str) -> None:
+    if expr is None:
+        return
+    if expr.qid == old:
+        expr.qid = new
+    for child in expr.children or []:
+        _rename_qid(child, old, new)
 
 
 def _assemble_survey(

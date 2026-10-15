@@ -374,3 +374,19 @@ def test_one_stray_prose_option_no_longer_throws_the_scale_away():
     assert [o.label for o in shape.cols] == [
         "Do not like it at all", "Do not like very much", "Neither like nor dislike",
         "Like it somewhat", "Like it a great deal"]
+
+
+def test_stored_sources_are_the_real_lowercase_qid():
+    """Parser wrote "Q2B"/"Q2C"; every exact-match consumer needs "Q2b"/"Q2c"."""
+    q2b = Question(qid="Q2b", text="Which brands have you ever purchased?",
+                   type=QuestionType.MULTI, options=list(BRAND_OPTIONS))
+    q2c = Question(qid="Q2c", text="When did you last purchase?", type=QuestionType.MULTI,
+                   options=[], validation=_mask("Q2B", "selected", "Q2B"))
+    q3 = Question(qid="Q3", text="Why did you buy [INSERT Q2C]?", type=QuestionType.SINGLE,
+                  options=list(YES_NO),
+                  validation={"techniques": {"pipes": [{"source_qid": "Q2C"}]}})
+    survey = _survey(q2b, q2c, q3)
+    fill_lists(survey)
+    mask = q2c.validation["techniques"]["masks"][0]
+    assert (mask["source_qid"], mask["exclude_qid"]) == ("Q2b", "Q2b")
+    assert q3.validation["techniques"]["pipes"][0]["source_qid"] == "Q2c"

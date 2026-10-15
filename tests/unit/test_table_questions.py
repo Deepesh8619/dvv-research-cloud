@@ -148,3 +148,18 @@ def test_a_grid_row_keeps_the_condition_written_in_it():
     assert rows is not None
     assert rows.rows[0].show_if is not None
     assert rows.rows[1].show_if is None
+
+
+def test_a_table_of_rows_to_fill_in_under_a_measure_header():
+    from src.engines.questionnaire.table_questions import entry_table
+
+    rows = [["Treatment", "% of TRD Patients"],
+            ["Treated with TMS Only", "[DROP DOWN % - TO BE CONFIRMED]"],
+            ["Treated with Spravato Only", ""],
+            ["Had a consult only", ""]]
+    labels, percent = entry_table(rows)
+    assert [o.label for o in labels] == ["Treated with TMS Only", "Treated with Spravato Only",
+                                         "Had a consult only"]
+    assert percent
+    # An answer list with a header is not this shape.
+    assert entry_table([["Brand", "Aware"], ["A", "1"], ["B", "2"]]) is None

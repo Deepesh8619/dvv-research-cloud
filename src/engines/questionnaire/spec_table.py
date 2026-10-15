@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 
 from src.core.survey_definition import Expression, Option, QuestionType
 from src.engines.questionnaire import option_directives
+from src.engines.questionnaire.flag_reasons import auto_answer_lines
 from src.engines.questionnaire.learned import (
     LearnedPattern,
     learned_field,
@@ -61,6 +62,10 @@ FIELD_ALIASES: dict[str, set[str]] = {
     "randomize": {
         "randomize", "randomise", "randomize response list", "rotation",
         "randomization", "order",
+        # A grid's statements ARE its variable list: shuffling them is the
+        # grid's randomisation (its scale, the response list, never moves).
+        "randomize variable list", "randomise variable list", "randomize statement list",
+        "randomize rows",
     },
     "notes": {
         "other details", "notes", "note", "instructions", "scripter notes",
@@ -131,11 +136,59 @@ _TEMPLATE_PROMPT = re.compile(
 )
 
 
+#: "Other >>>" / "Custom >>>": the value is in the NEXT cell, after its prompt —
+#: "Among who | Other >>> | If not All, specify: C_ACCOUNT = 2". Reading the
+#: first cell kept "Other >>>", so every base in such a table was lost.
+_SEE_NEXT = re.compile(r">{2,}\s*$")
+_PROMPT_PREFIX = re.compile(r"^if\s+.{0,24}?[,:]\s*(?:specify|details|describe)?\s*:?\s*", re.I)
+
+
 def _value_of(row: list[str]) -> str:
-    for cell in _cells(row)[1:]:
-        if cell and not _TEMPLATE_PROMPT.match(cell):
-            return cell
+    cells = _cells(row)[1:]
+    for i, cell in enumerate(cells):
+        if not cell or _TEMPLATE_PROMPT.match(cell):
+            continue
+        if _SEE_NEXT.search(cell):
+            for later in cells[i + 1:]:
+                stated = _PROMPT_PREFIX.sub("", later).strip()
+                if stated:
+                    return stated
+        return cell
     return ""
+
+
+_ALL_RESPONDENTS = re.compile(r"^\s*(?:all(?:\s+respondents)?|everyone|total)\s*\.?\s*$", re.I)
+#: "C_ACCOUNT = 2", "HID_GOOGLE_USER = 2 or 3", "DA_PLACEMENT = 3 and/or 4", "S1=1-3".
+_CODED_BASE = re.compile(
+    r"\b(?P<qid>[A-Za-z][A-Za-z0-9_]{1,40})\s*=\s*"
+    r"(?P<codes>\d{1,3}(?:\s*(?:-|–|,|or|and/or)\s*\d{1,3})*)",
+)
+#: Wording that means more than one coded condition — left for a person/model.
+_COMPOUND = re.compile(r"\band\b(?!/or)|\bfor at least\b|\bselected at\b|\bonly show\b", re.I)
+
+
+def base_condition(base: str | None) -> Expression | None:
+    """A show condition from a base that states exactly one coded condition.
+
+    "Google Ads Current User (HID_GOOGLE_USER = 1)" -> HID_GOOGLE_USER in [1].
+    Anything with a second condition ("... AND 1-98 selected at X") or none at
+    all ("Provider aware based on HID_AWARE") returns None.
+    """
+    found = list(_CODED_BASE.finditer(base or ""))
+    if len(found) != 1:
+        return None
+    rest = (base[: found[0].start()] + base[found[0].end():])
+    if _COMPOUND.search(rest) or _COMPOUND.search(found[0].group("codes")):
+        return None
+    values: list[int] = []
+    for part in re.split(r"\s*(?:,|or|and/or)\s*", found[0].group("codes")):
+        lo, _, hi = part.replace("–", "-").partition("-")
+        low, high = int(lo), int(hi or lo)
+        if high < low:
+            return None
+        values += range(low, high + 1)
+    return Expression(op="in", qid=found[0].group("qid"), values=values,
+                      verbatim_text=base.strip())
 
 
 #: The header of the column a hidden variable states its derivation in.
@@ -185,7 +238,9 @@ _TERMINATE_RE = re.compile(
     # document states plainly never fired. The instrument passed every other
     # check because a missing terminate looks exactly like a question that
     # screens nobody out.
-    r"(?:if|when)?\s*(?:code[s]?\s*)?([\d,\-\u2013\s&and]+?)\s*"
+    # "TERMINATE if selects punch 1, 10, or 99": the verb and "punch" are
+    # filler, and "or" joins codes like a comma does.
+    r"(?:if|when)?\s*(?:selects?\s+)?(?:punch(?:es)?\s+|code[s]?\s*)?([\d,\-\u2013\s&andor]+?)\s*"
     r"(not\s+selected|is\s+not|selected|chosen|$)",
     re.IGNORECASE,
 )
@@ -268,6 +323,8 @@ class SpecTableFields:
     #: are its opt-out codes ("99: Prefer not to answer").
     numeric_range: dict[str, int] = field(default_factory=dict)
     base: str | None = None
+    #: The base as a condition, when it states one coded condition.
+    show_if: Expression | None = None
     show: str | None = None
     randomize: str | None = None
     notes: str | None = None
@@ -440,36 +497,67 @@ def _numeric_range(text: str) -> dict[str, int]:
     return {}
 
 
+_RULE_SPLIT = re.compile(r"\b(?:terminate|term|screen\s*-?\s*out|flag)\b", re.I)
+# "less than $500", "under 18", "more than 1,000"
+_WORD_BOUND_RE = re.compile(
+    r"\b(less\s+than|fewer\s+than|under|below|more\s+than|greater\s+than|over|above)\s+"
+    r"\$?\s*(\d[\d,]*)",
+    re.I,
+)
+
+
 def _parse_numeric_terminate(
     notes: str, qid: str, opt_outs: list[Option]
 ) -> tuple[Expression | None, bool]:
     """ "TERMINATE if age<25 or age>?? OR if 99 selected" on a typed number.
 
     Returns the screen-out it can state exactly, and whether part of it could
-    NOT be read. A bound written "??" is a number the scripter never filled in:
-    the rest still holds (under 25 is out whatever the upper limit), and the
-    gap goes to a person rather than being guessed.
+    NOT be read. Each TERMINATE sentence is read on its own: "TERMINATE if less
+    than $500 / Flag if greater than $1,000,000 / TERMINATE if 13-99 selected at
+    SS_REVENUE" is two screen-outs and a flag, and reading them as one applied
+    the revenue codes to this question. A bound written "??" is a number the
+    scripter never filled in: the rest still holds, and the gap goes to a person.
     """
-    if not re.search(r"terminate|term\b|screen\s*-?\s*out", notes or "", re.I):
+    pieces = _RULE_SPLIT.split(notes or "")
+    keywords = _RULE_SPLIT.findall(notes or "")
+    rules = [text for word, text in zip(keywords, pieces[1:], strict=True)
+             if word.lower() != "flag" and re.match(r"\s*(?:if|when)\b", text, re.I)]
+    if not rules:
         return None, False
-    rule = re.split(r"terminate|term\b|screen\s*-?\s*out", notes, maxsplit=1, flags=re.I)[1]
     parts: list[Expression] = []
     unread = False
-    for op, bound in _NUMERIC_BOUND_RE.findall(rule):
-        if bound.startswith("?"):
+    known = {o.code for o in opt_outs}
+    for rule in rules:
+        before = len(parts)
+        named = _TERMINATE_AT_RE.search(rule)
+        if named and named.group(1).upper() != qid.upper():
+            # On another question's answer: kept in words for a person.
             unread = True
             continue
-        value = int(bound)
-        # Whole numbers, so "<= 24" is "< 25"; the model has no <= of its own.
-        if op == "<=":
-            op, value = "<", value + 1
-        elif op == ">=":
-            op, value = ">", value - 1
-        parts.append(Expression(op="lt" if op == "<" else "gt", qid=qid, value=value))
-    known = {o.code for o in opt_outs}
-    codes = [int(c) for c in _CODE_SELECTED_RE.findall(rule) if int(c) in known]
-    if codes:
-        parts.append(Expression(op="in", qid=qid, values=codes))
+        bounds = [(op, b) for op, b in _NUMERIC_BOUND_RE.findall(rule)]
+        for word, number in _WORD_BOUND_RE.findall(rule):
+            low = word.lower()
+            op = "<" if low.startswith(("less", "fewer", "under", "below")) else ">"
+            bounds.append((op, number.replace(",", "")))
+        for op, bound in bounds:
+            if bound.startswith("?"):
+                unread = True
+                continue
+            value = int(bound)
+            # Whole numbers, so "<= 24" is "< 25"; the model has no <= of its own.
+            if op == "<=":
+                op, value = "<", value + 1
+            elif op == ">=":
+                op, value = ">", value - 1
+            parts.append(Expression(op="lt" if op == "<" else "gt", qid=qid, value=value))
+        codes = [int(c) for c in _CODE_SELECTED_RE.findall(rule) if int(c) in known]
+        lowered = rule.lower()
+        codes += [o.code for o in opt_outs
+                  if o.label and o.label.lower() in lowered and o.code not in codes]
+        if codes:
+            parts.append(Expression(op="in", qid=qid, values=codes))
+        if len(parts) == before and not any(b.startswith("?") for _, b in bounds):
+            unread = True
     if not parts:
         return None, True
     expression = parts[0] if len(parts) == 1 else Expression(op="or", children=parts)
@@ -523,6 +611,7 @@ def parse_spec_table(
     #: The answer a bracketed directive would belong to, and what was found.
     last_option: Option | None = None
     option_bases: list[dict] = []
+    base_clash: list[str] = []
     list_sources_found: list[dict] = []
     seen_qid_row = False
     in_row_list = False
@@ -588,6 +677,16 @@ def parse_spec_table(
         name = _field_for(cells[0], patterns)
         if name:
             value = _value_of(row)
+            if name == "base" and _ALL_RESPONDENTS.match(value):
+                # "All respondents | If not All, specify: HID_GOOGLE_USER = 2 or 3"
+                # — the scripter filled in a base and forgot to switch the
+                # dropdown. The written base is the intent; say it was a clash.
+                written = (_PROMPT_PREFIX.sub("", c).strip() for c in cells[2:]
+                           if _PROMPT_PREFIX.match(c))
+                stated = next((w for w in written if w), "")
+                if stated:
+                    base_clash.append(f"marked '{value}' but specifies: {stated}")
+                    value = stated
             found.setdefault(name, value)
             if name == "qid":
                 seen_qid_row = True
@@ -719,16 +818,31 @@ def parse_spec_table(
             # Not sent to a model: it cannot know a number the scripter never
             # wrote either, and it would overwrite the part that WAS exact.
             fields.evidence["terminate_gap"] = (
-                "part of this screen-out is not stated (a bound written '??') — "
-                "the rest is applied; confirm the missing limit"
+                "part of this screen-out could not be applied (a limit written '??', "
+                "or a rule on another question's answer) — the rest is applied; "
+                "set the missing part by hand"
             )
     else:
         fields.terminate_if = _parse_terminate(notes, options, qid)
     if fields.terminate_if is not None:
         fields.terminate_verbatim = notes.strip()
         fields.evidence["terminate"] = notes.strip()
+    # "Among who: Other >>>" pointing at "auto=punch those who select only one at
+    # DA_GOALS": the cell is the rule for an AUTOMATIC ANSWER, not a base the
+    # reader failed to understand. Sending "Other >>>" to a model as the base
+    # is how it came back as an unclear one.
+    auto = auto_answer_lines(table_text)
+    # With ">>>" read, the base cell holds the rule itself; either way it is
+    # not a base, and must not be sent to a model as one.
+    if auto and fields.base and (
+        re.fullmatch(r"other\W*", fields.base, re.IGNORECASE) or auto_answer_lines(fields.base)
+    ):
+        fields.base = None
+        fields.evidence["auto_answer"] = auto[0]
     if fields.base:
         fields.evidence["base"] = f"Among who: {fields.base}"
+    if base_clash:
+        fields.evidence["base_clash"] = base_clash[0]
 
     if not fields.text:
         fields.missing.append("text")
@@ -736,8 +850,10 @@ def parse_spec_table(
         fields.missing.append("type")
     # A base in prose ("those aware of the brand") needs judgment; a blank base
     # means everyone and needs none; a coded one ("S1=1-3") is already usable.
-    if fields.base and not re.fullmatch(r"[\w\s=,<>\-\d/]+", fields.base):
-        fields.missing.append("base")
+    if fields.base and not _ALL_RESPONDENTS.match(fields.base):
+        fields.show_if = base_condition(fields.base)
+        if fields.show_if is None:
+            fields.missing.append("base")
     if notes and re.search(r"terminate|term\b|screen\s*-?\s*out", notes, re.IGNORECASE):
         if fields.terminate_if is None and "terminate_gap" not in fields.evidence:
             # It states a screen-out we could not parse — never silently drop it.

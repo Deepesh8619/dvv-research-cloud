@@ -144,8 +144,10 @@ _TYPE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
                 r"\byears\b|\bage\b.*\bnumber\b|number\s+\d+\s*-\s*\d+|"
                 r"\d+\s*-\s*digit|num(?:ber)?\s*box", re.I),
      QuestionType.NUMERIC),
+    # "Please rank from 1 to 8, with 1 being the most influential".
     (re.compile(r"\brank\b.{0,20}\b(top|first|three|order)\b|\brank \d[, \d]*and\b|"
-                r"^\s*rank\b", re.I), QuestionType.RANK),
+                r"^\s*rank\b|\bplease rank\b|\brank\b.{0,30}\bfrom 1 to \d+", re.I),
+     QuestionType.RANK),
     # TEXTBOX (11x) and "OE: n-CHARACTER MINIMUM" (6x) are the commonest
     # open-text declarations in these documents and were both being missed.
     (re.compile(r"_\s*_\s*_|open[- ]?end|\btextbox\b|\boe\b|please describe|"
@@ -189,6 +191,15 @@ _ANCHOR_TAG = re.compile(r"\bANCHOR\b", re.I)
 _ENTRY_PROMPT = re.compile(r"^\s*(?:Fill\s+in|Enter|Record)\b", re.I)
 # "[0-100]", "[0-1,000]" — a pure number range, nothing else in the bracket.
 _NUMBER_RANGE = re.compile(r"(\d[\d,]*)\s*-\s*(\d[\d,]*)")
+# "[0-1000, WHOLE NUMBER]", "[0-100 RESPONSE, WHOLE NUMBER]", "[0-100%]": the
+# range plus how to type it. Only these words — "[0-100, MUST SUM TO 100%]"
+# is a total, not a single number.
+_NUMBER_RANGE_STATED = re.compile(
+    r"(?:(?:ENTER\s+)?(?:A\s+)?(?:NUMBER|RANGE|VALUE)\s*:?\s*)?"
+    r"(\d[\d,]*)\s*-\s*(\d[\d,]*)\s*%?\s*(?:RESPONSE)?\s*"
+    r"(?:,?\s*(?:WHOLE\s+NUMBERS?|INTEGERS?|NUMERIC|NUMBERS?\s+ONLY))?\s*",
+    re.I,
+)
 # Empty table cells at either end of a serialized row: "label |  | ".
 _EMPTY_CELLS = re.compile(r"^(?:\s*\|)+\s*|(?:\s*\|)+\s*$")
 
@@ -373,6 +384,9 @@ class ProseFields:
     # Sampling targets found in the option list ("TARGET 50/50 GENDER SPLIT").
     # Not answers, and not noise either: they are the quota this study needs.
     quota_hints: list[str] = field(default_factory=list)
+    #: Tags on answer lines nothing understood ("[KILL]"): kept so a person can
+    #: teach them, instead of vanishing with the label they were cut from.
+    unknown_answer_tags: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
     # field -> the exact fragment that decided it. Shown to the reviewer so
     # approving is checking a citation, not trusting a black box.
@@ -727,10 +741,23 @@ def parse_prose_question(
     last_option_marked = False
     randomize = False
     quota_hints: list[str] = []
+    unknown_answer_tags: list[str] = []
     intro_follows = False
     randomize_evidence = ""
     scale_row: str | None = None
 
+    # "...Select up to 2. [RANDOMIZE]": the order note can end the question
+    # sentence itself, not only sit on a line of its own.
+    for body in [*directives, *inline_bases]:
+        taught_random = learned_randomize(patterns, body)
+        if taught_random is not None:
+            randomize = True
+            randomize_evidence = f"learned: {taught_random}"
+        elif re.search(r"RANDOMI[SZ]E|\bROTATE\b", body, re.I) and not re.search(
+            r"KEEP ORDER|DO NOT RANDOMI[SZ]E", body, re.I
+        ):
+            randomize = True
+            randomize_evidence = f"[{body.strip()}]"
     for body in inline_bases:
         directives.append(body.strip())
         if _BASE_TAG_BODY.match(body):
@@ -961,6 +988,11 @@ def parse_prose_question(
                 per_option = parse_routing(tag_text)
                 if per_option is not None:
                     option.show_if = per_option
+                elif not (
+                    option.exclusive or option.anchored
+                    or re.search(r"SPECIFY|TEXT\s*BOX|\bOE\b|OTHER|_{2,}", tag_text, re.I)
+                ):
+                    unknown_answer_tags.append(tag_text.strip())
         if not continuation:
             options.append(option)
 
@@ -986,6 +1018,7 @@ def parse_prose_question(
         randomize=randomize,
         directives=directives,
         quota_hints=quota_hints,
+        unknown_answer_tags=unknown_answer_tags,
     )
     if show_if is not None:
         fields.show_if = show_if
@@ -1068,6 +1101,12 @@ def parse_prose_question(
     if limits:
         fields.select_limits = limits
         ceiling = limits.get("max_select")
+        # "Which best describes … Select up to 2": "best describes" is a guess
+        # from wording; the stated cap is a fact. Only a declared type ([SP])
+        # outranks it.
+        guessed = fields.evidence.get("type") == "wording that admits only one answer"
+        if ceiling and ceiling > 1 and fields.qtype is QuestionType.SINGLE and guessed:
+            fields.qtype = None
         if fields.qtype is None and ceiling:
             fields.qtype = (
                 QuestionType.MULTI if ceiling > 1 else QuestionType.SINGLE
@@ -1136,8 +1175,14 @@ def parse_prose_question(
         any(_ENTRY_PROMPT.match(d) for d in directives)
         or fields.qtype is QuestionType.OPEN_TEXT
     )
-    span = next((m for d in directives if (m := _NUMBER_RANGE.fullmatch(d.strip()))), None)
-    if entry and span and not fields.options and fields.qtype in (None, QuestionType.OPEN_TEXT):
+    span = next((m for d in directives if (m := _NUMBER_RANGE_STATED.fullmatch(d.strip()))), None)
+    # "What is your age? [ENTER NUMBER 1-100]": already a number, and the
+    # range is its limits.
+    if span and not fields.options and fields.qtype is QuestionType.NUMERIC and not fields.bounds:
+        entry = True
+    if entry and span and not fields.options and fields.qtype in (
+        None, QuestionType.OPEN_TEXT, QuestionType.NUMERIC
+    ):
         low, high = (int(g.replace(",", "")) for g in span.groups())
         if low < high:
             fields.qtype = QuestionType.NUMERIC

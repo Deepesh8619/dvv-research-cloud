@@ -28,6 +28,43 @@ _POINTING = re.compile(
 )
 
 
+#: "[BASE SELECTS 1-4 IN PREVIOUS QUESTION]", "[ASK IF CODES 1, 2 ABOVE]": the
+#: codes of the question above, not an answer label.
+_POINTING_CODES = re.compile(
+    r"\[\s*(?:BASE\s*[:\-]?|ASK\s+IF|SHOW\s+IF)\s*(?:THOSE\s+WHO\s+)?"
+    r"(?:SELECTS?|SELECTED|ANSWERED|CHOSE|CODES?|PUNCH(?:ES)?)?\s*"
+    r"(?P<codes>\d{1,3}(?:\s*(?:-|–|,|OR|AND|TO)\s*\d{1,3})*)\s+"
+    r"(?:(?:IN|AT|ON|TO)\s+)?(?:THE\s+)?(?:PREVIOUS(?:\s+QUESTION)?|PRIOR\s+QUESTION|ABOVE)\s*\]",
+    re.I,
+)
+
+
+def _codes(text: str) -> list[int]:
+    out: list[int] = []
+    for part in re.split(r"\s*(?:,|OR|AND)\s*", text, flags=re.I):
+        low, _, high = re.sub(r"\s*(?:–|TO)\s*", "-", part, flags=re.I).partition("-")
+        out += range(int(low), int(high or low) + 1)
+    return out
+
+
+def _resolve_codes(q, earlier, match) -> bool:
+    """The nearest question above that offers every code named."""
+    wanted = _codes(match.group("codes"))
+    for prev in reversed(earlier):
+        offered = {o.code for o in prev.options or []}
+        if prev.type.value == "info" or not offered:
+            continue
+        if not set(wanted) <= offered:
+            return False  # the question above does not have these codes: a person decides
+        q.show_if = Expression(op="in", qid=prev.qid, values=wanted,
+                               verbatim_text=match.group(0))
+        q.extraction_evidence["show_if"] = (
+            f"{match.group(0)} → {prev.qid} in {wanted}"
+        )
+        return True
+    return False
+
+
 def _norm(text: str) -> str:
     return " ".join(re.sub(r"[^\w]", " ", (text or "").lower()).split())
 
@@ -40,6 +77,15 @@ def resolve_relative_bases(survey: SurveyDefinition) -> list[str]:
         if q.show_if is not None:
             continue
         lines = (q.source_text or "").strip().splitlines()
+        coded = _POINTING_CODES.search(lines[0]) if lines else None
+        if coded:
+            if _resolve_codes(q, questions[:i], coded):
+                resolved.append(q.qid)
+            else:
+                q.validation = {**(q.validation or {}), "routing_verbatim": coded.group(0)}
+                if schema.FLAG_AMBIGUOUS_ROUTING not in q.flags:
+                    q.flags.append(schema.FLAG_AMBIGUOUS_ROUTING)
+            continue
         match = _POINTING.search(lines[0]) if lines else None
         if not match:
             continue

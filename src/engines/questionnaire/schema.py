@@ -79,6 +79,10 @@ FLAG_LIST_INHERITED = "LIST_INHERITED"
 # cannot model. Blocking, and cleared only by a reviewer who has decided to
 # script the exercise elsewhere.
 FLAG_TRADE_OFF_UNSUPPORTED = "TRADE_OFF_UNSUPPORTED"
+# The document says respondents TYPE a number ("Allow 0-9999999 to be entered")
+# but the question was read as a choice list. The two give different data
+# columns, so a person decides which one the instrument really is.
+FLAG_ENTRY_MODE_CONFLICT = "ENTRY_MODE_CONFLICT"
 
 
 # --- Extraction schema ------------------------------------------------------

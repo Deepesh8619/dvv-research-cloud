@@ -242,6 +242,9 @@ class QuestionnaireStatusResponse(BaseModel):
     qa: dict | None = None
     # The AI logic reviewer's second opinion on the whole survey.
     logic_review: dict | None = None
+    # Which reading skills decoded the document, what none could read, and the
+    # recurring conventions worth teaching (decoding_report.py).
+    decoding: dict | None = None
 
 
 class QuestionnaireSettingsRequest(BaseModel):

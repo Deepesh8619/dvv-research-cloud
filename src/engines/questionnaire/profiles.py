@@ -28,7 +28,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from src.intake.questionnaire_loader import _QID_RE, DocumentBlock, _table_qid
+from src.intake.questionnaire_loader import _BASE_TAG_RE, _QID_RE, DocumentBlock, _table_qid
 
 # Bare `1.` / `2.` / `3)` numbering with NO letter prefix — the lightweight
 # format. A trailing separator + space keeps it from matching a `1: Yes` option
@@ -55,11 +55,15 @@ class BlockStats:
     qname_tables: int  # table blocks carrying a `Q Name | <token>` row (GBK)
     prose_labels: int  # paragraphs starting with a Q5./S3./P1.-style label
     plain_numbers: int  # paragraphs starting with bare 1./2. numbering
+    #: paragraphs OPENING with "[BASE: …]" — the unnumbered healthcare format,
+    #: where the base tag is what starts each question. Counted only when no
+    #: question label exists at all; in a labelled document it is a directive.
+    base_tags: int = 0
 
     @property
     def question_ish(self) -> int:
         """Total blocks that look like a question start (any convention)."""
-        return self.qname_tables + self.prose_labels + self.plain_numbers
+        return self.qname_tables + self.prose_labels + self.plain_numbers + self.base_tags
 
 
 def compute_stats(blocks: list[DocumentBlock]) -> BlockStats:
@@ -73,8 +77,12 @@ def compute_stats(blocks: list[DocumentBlock]) -> BlockStats:
                 prose += 1
             elif _PLAIN_NUM_RE.match(b.text):
                 plain += 1
+    tags = 0
+    if not qname and not prose:
+        tags = sum(1 for b in blocks if b.block_type != "table" and _BASE_TAG_RE.match(b.text))
     return BlockStats(
-        n_blocks=len(blocks), qname_tables=qname, prose_labels=prose, plain_numbers=plain
+        n_blocks=len(blocks), qname_tables=qname, prose_labels=prose, plain_numbers=plain,
+        base_tags=tags,
     )
 
 
@@ -130,6 +138,12 @@ REGISTRY: list[QuestionnaireProfile] = [
         label="Prose Q-labels (Q5./S3.)",
         prompt_hint=HINT_PROSE,
         scorer=_ratio_scorer("prose_labels"),
+    ),
+    QuestionnaireProfile(
+        slug="base_tagged",
+        label="Unnumbered, one [BASE: …] tag per question",
+        prompt_hint=HINT_PROSE,
+        scorer=_ratio_scorer("base_tags"),
     ),
     QuestionnaireProfile(
         slug="numbered_plain",

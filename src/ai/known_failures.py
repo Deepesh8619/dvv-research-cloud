@@ -49,6 +49,14 @@ KNOWN_FAILURES: tuple[KnownFailure, ...] = (
         "COLUMNS: row + code row + [ROWS] row = a grid: codes are the scale, rows are items.",
     ),
     KnownFailure(
+        "\"Other >>>\" or \"Custom >>>\" in a spec-table cell means the real value is in the "
+        "next cell, after \"If not All, specify:\". The base is that text, never \"Other\".",
+        "Google Ads SMB: every \"Among who\" base was read as \"Other >>>\" and dropped, so "
+        "all 20 filtered questions showed to everyone. 2026-10-14.",
+        frozenset({"extract", "residue", "understand"}),
+        "\"Other >>>\" = read the next cell; that is the base.",
+    ),
+    KnownFailure(
         "A choice question must have answers to choose from. If the source gives none, do not "
         "return a choice type with an empty list — leave the type undecided.",
         "A question with no answers was approved and shipped to a test link. 2026-10-10.",

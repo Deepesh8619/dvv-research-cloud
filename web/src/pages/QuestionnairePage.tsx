@@ -28,6 +28,7 @@ import SourceTile from '../components/review/SourceTile'
 import { useRenderedSource } from '../components/review/useRenderedSource'
 import Lessons from '../components/review/Lessons'
 import StudyUnderstandingPanel from '../components/review/StudyUnderstandingPanel'
+import DecodingPanel from '../components/review/DecodingPanel'
 import QAPanel from '../components/review/QAPanel'
 import { useLabel } from '../labels/LabelContext'
 import { BucketBar, ConnectionsPanel, IssuesPanel, ProgressRing } from '../components/review/QuestionMap'
@@ -770,6 +771,9 @@ export function QuestionDetail({
                 <span className="font-medium">{info.label}</span>
                 {info.blocking && <span className="ml-1 text-[10px] uppercase">(blocks approval)</span>}
                 <span className="block mt-0.5 opacity-90">{info.description}</span>
+                {q.flag_reasons?.[f] && (
+                  <span className="block mt-1 font-medium">{q.flag_reasons[f]}</span>
+                )}
                 {f === 'QA_ISSUE' &&
                   (Array.isArray(q.validation?.qa_issues) ? (q.validation.qa_issues as string[]) : []).map(
                     (issue) => (
@@ -1600,6 +1604,7 @@ export default function QuestionnairePage() {
       {status && !notFound && !['processing', 'error'].includes(status.status) && (
         <>
           <StudyUnderstandingPanel understanding={status.study_understanding} onGoTo={goTo} />
+          <DecodingPanel decoding={status.decoding} onGoTo={goTo} />
           <QAPanel
             qa={status.qa}
             canRun={canWrite}

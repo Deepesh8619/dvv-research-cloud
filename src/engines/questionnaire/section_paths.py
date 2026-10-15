@@ -301,3 +301,60 @@ def _insert_before(survey: SurveyDefinition, question: Question, qid: str) -> No
             return
     if survey.blocks:
         survey.blocks[-1].question_ids.append(question.qid)
+
+
+# "BUBBLE CRM INTRODUCTION & SCREENER (S0=2)": a whole line that is a section's
+# name and the one condition everybody in it meets — no "ASK <range>".
+_SECTION_BASE_RE = re.compile(
+    rf"^\s*(?P<name>[^()\n]{{4,90}}?)\s*\(\s*(?P<cond>{_QID}\s*=\s*\d[\d\s,\-–]*)\)\s*$"
+)
+_ALL_HEADER_RE = re.compile(r"\(\s*ALL(?:\s+RESPONDENTS)?\s*\)\s*$", re.I)
+_PREFIX = re.compile(r"[A-Za-z]*")
+_NOTE_LINE = re.compile(r"^\s*(?:\[|NOTE\b|PN\b|PROGRAMMER|SCRIPTER)", re.I)
+
+
+def apply_section_bases(survey: SurveyDefinition) -> list[str]:
+    """Give each question under a "<SECTION> (S0=2)" heading that base.
+
+    The section runs from the heading to the next such heading or an "(ALL
+    RESPONDENTS)" heading, and only over questions sharing the first one's
+    name prefix (B1, B2, … B9 — then C2 is another section). Without the
+    prefix stop, a document with no closing heading would gate the rest of
+    the survey on the screener's condition. Returns the qids it gated.
+    """
+    questions = survey.questions
+    starts: list[tuple[int, Expression | None, str]] = []
+    for i, question in enumerate(questions):
+        lines = [ln.strip() for ln in (question.source_text or "").splitlines() if ln.strip()]
+        for j, line in enumerate(lines):
+            at = i if j == 0 else i + 1  # a heading under a question governs the next one
+            match = _SECTION_BASE_RE.match(line)
+            if match and _NOTE_LINE.match(line):
+                continue  # "NOTE TO PROGRAMMER: … (S0=2)" explains, it does not open a section
+            # A heading is written in capitals; "No Quota for Bubble CRM (S0=2)"
+            # and "All Other (S11=3)" are table cells that happen to look alike.
+            if match and any(c.islower() for c in match.group("name")):
+                continue
+            if match and not _SECTION_PATH_RE.search(line):
+                starts.append((at, parse_routing(f"IF {match.group('cond')}"), line))
+            elif _ALL_HEADER_RE.search(line) and len(line) < 120:
+                starts.append((at, None, line))
+    starts.sort(key=lambda s: s[0])
+    starts = [s for n, s in enumerate(starts) if n == 0 or s[0] != starts[n - 1][0]]
+    gated: list[str] = []
+    for n, (start, condition, line) in enumerate(starts):
+        if condition is None or start >= len(questions):
+            continue
+        stop = starts[n + 1][0] if n + 1 < len(starts) else len(questions)
+        prefix = _PREFIX.match(questions[start].qid).group(0).upper()
+        for question in questions[start:stop]:
+            if _PREFIX.match(question.qid).group(0).upper() != prefix:
+                break
+            if schema.FLAG_DERIVED_VARIABLE in question.flags:
+                continue
+            condition_copy = Expression.from_dict(condition.to_dict())
+            condition_copy.verbatim_text = condition_copy.verbatim_text or line
+            question.show_if = _both(question.show_if, condition_copy)
+            question.extraction_evidence.setdefault("base", f"[{line}]")
+            gated.append(question.qid)
+    return gated

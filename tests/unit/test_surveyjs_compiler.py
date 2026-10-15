@@ -477,3 +477,14 @@ def test_a_scripters_own_section_header_is_not_shown_to_a_respondent():
     compiled = compile_to_surveyjs(make_survey())
     assert [b.label for b in make_survey().blocks] == ["Screener", "Main"]
     assert "sections" not in compiled
+
+
+def test_a_randomised_grid_shuffles_its_rows():
+    from src.core.survey_definition import Option, Question, QuestionType
+    from src.renderers.surveyjs_compiler import _compile_question
+
+    q = Question(qid="G", text="Rate each", type=QuestionType.GRID_SINGLE, randomize_options=True,
+                 rows=[Option(code=1, label="A"), Option(code=2, label="B")],
+                 cols=[Option(code=1, label="Low"), Option(code=2, label="High")])
+    element = _compile_question(q, {"G": q})
+    assert element["rowsOrder"] == "random"
