@@ -12,6 +12,7 @@ const KIND_HELP: Record<string, string> = {
   option_tag: 'an answer tag (terminate / exclusive / anchor)',
   randomize_signal: 'an order instruction',
   hidden_variable: 'a computed variable, never asked',
+  by_hand: 'a rule for this question — set it on the question or ask the question agent',
 }
 
 function QidLinks({ qids, onGoTo }: { qids: string[]; onGoTo: (qid: string) => void }) {

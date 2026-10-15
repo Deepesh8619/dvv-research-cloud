@@ -789,6 +789,8 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     validation: dict[str, Any] = {}
     if fields.terminate_verbatim:
         validation[_ROUTING_VERBATIM_KEY] = fields.terminate_verbatim
+    if fields.unknown_answer_tags:
+        validation["unknown_answer_tags"] = sorted(set(fields.unknown_answer_tags))
     if fields.directives:
         # Scripter notes we recognised but do not model (SHOW IMAGE, quota
         # instructions). Surfaced for review rather than dropped.

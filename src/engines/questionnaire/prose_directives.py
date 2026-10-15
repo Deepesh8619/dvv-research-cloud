@@ -384,6 +384,9 @@ class ProseFields:
     # Sampling targets found in the option list ("TARGET 50/50 GENDER SPLIT").
     # Not answers, and not noise either: they are the quota this study needs.
     quota_hints: list[str] = field(default_factory=list)
+    #: Tags on answer lines nothing understood ("[KILL]"): kept so a person can
+    #: teach them, instead of vanishing with the label they were cut from.
+    unknown_answer_tags: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
     # field -> the exact fragment that decided it. Shown to the reviewer so
     # approving is checking a citation, not trusting a black box.
@@ -738,6 +741,7 @@ def parse_prose_question(
     last_option_marked = False
     randomize = False
     quota_hints: list[str] = []
+    unknown_answer_tags: list[str] = []
     intro_follows = False
     randomize_evidence = ""
     scale_row: str | None = None
@@ -745,7 +749,11 @@ def parse_prose_question(
     # "...Select up to 2. [RANDOMIZE]": the order note can end the question
     # sentence itself, not only sit on a line of its own.
     for body in [*directives, *inline_bases]:
-        if re.search(r"RANDOMI[SZ]E|\bROTATE\b", body, re.I) and not re.search(
+        taught_random = learned_randomize(patterns, body)
+        if taught_random is not None:
+            randomize = True
+            randomize_evidence = f"learned: {taught_random}"
+        elif re.search(r"RANDOMI[SZ]E|\bROTATE\b", body, re.I) and not re.search(
             r"KEEP ORDER|DO NOT RANDOMI[SZ]E", body, re.I
         ):
             randomize = True
@@ -980,6 +988,11 @@ def parse_prose_question(
                 per_option = parse_routing(tag_text)
                 if per_option is not None:
                     option.show_if = per_option
+                elif not (
+                    option.exclusive or option.anchored
+                    or re.search(r"SPECIFY|TEXT\s*BOX|\bOE\b|OTHER|_{2,}", tag_text, re.I)
+                ):
+                    unknown_answer_tags.append(tag_text.strip())
         if not continuation:
             options.append(option)
 
@@ -1005,6 +1018,7 @@ def parse_prose_question(
         randomize=randomize,
         directives=directives,
         quota_hints=quota_hints,
+        unknown_answer_tags=unknown_answer_tags,
     )
     if show_if is not None:
         fields.show_if = show_if

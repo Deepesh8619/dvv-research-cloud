@@ -87,9 +87,13 @@ def _suggest(fragment: str, is_row_label: bool) -> str:
     if is_row_label:
         return "field_alias"
     low = fragment.lower()
+    # A condition or a pipe is a rule about THIS question, not a convention a
+    # literal pattern can teach: a person sets it (or the question agent does).
+    if re.search(r"\bif\b|\binsert\b|\bask\b|\bshow\b|=|\bpn\s*:", low):
+        return "by_hand"
     if re.search(r"random|rotat|scramble|shuffle", low):
         return "randomize_signal"
-    if re.search(r"terminat|exclusive|anchor|screen ?out", low):
+    if re.search(r"terminat|exclusive|anchor|screen ?out|kill", low):
         return "option_tag"
     if re.search(r"\bcode\b|recode|hidden|computed", low):
         return "hidden_variable"
@@ -134,7 +138,16 @@ def _unread(question) -> list[tuple[str, bool]]:
     validation = question.validation or {}
     found = [(str(d), False) for d in validation.get("scripter_directives") or []]
     found += [(str(r), True) for r in (validation.get("unrecognised_rows") or {})]
-    return [(f, row) for f, row in found if _norm(f) and not _understood(question, f, row)]
+    unread = [(f, row) for f, row in found if _norm(f) and not _understood(question, f, row)]
+    # Tags on answer lines nobody understood ("No [KILL]") — always offered.
+    unread += [(f"[{t}]", False) for t in validation.get("unknown_answer_tags") or []]
+    if set(question.flags or ()) & _UNREAD_FLAGS:
+        # Nothing could read this question, so it recorded no notes at all:
+        # its bracketed tags are the most likely reason ("[OPEN] Why …?").
+        first = (question.source_text or "").split("\n", 1)[0]
+        unread += [(f"[{b.strip()}]", False) for b in re.findall(r"\[([^\]]{2,40})\]", first)
+                   if not _understood(question, b)]
+    return unread
 
 
 def decoding_report(survey: SurveyDefinition) -> dict:
@@ -161,8 +174,11 @@ def decoding_report(survey: SurveyDefinition) -> dict:
             fragments[key] += 1
             where.setdefault(key, []).append(q.qid)
             kinds[key] = _suggest(key, is_row)
+    # A fragment on an unread question is worth teaching even once: it is the
+    # likely reason a whole question was lost.
+    on_unread = {f for f in where if any(q in not_read for q in where[f])}
     teach = [{"fragment": f, "questions": n, "examples": where[f][:4], "suggest": kinds[f]}
-             for f, n in fragments.most_common() if n >= _RECURRING][:15]
+             for f, n in fragments.most_common() if n >= _RECURRING or f in on_unread][:15]
     read_share = 1 - len(not_read) / len(asked) if asked else 0.0
     profile = (survey.metadata or {}).get("profile") or {}
     unknown_format = isinstance(profile, dict) and profile.get("slug") == "unknown"
