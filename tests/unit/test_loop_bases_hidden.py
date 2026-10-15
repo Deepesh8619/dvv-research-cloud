@@ -43,3 +43,24 @@ def test_a_base_written_for_one_brand_applies_only_to_that_turn():
     resolve_loop_bases_from_hidden(s)
     assert s.questions[1].show_if.values == [2, 3]
     assert s.questions[2].show_if is None
+
+
+def test_an_answer_base_naming_a_hidden_group_is_applied():
+    from src.engines.questionnaire.loop_bases import resolve_answer_bases_from_hidden
+
+    google = _hidden("HID_GOOGLE_USER", "Google Ads Current User", "Google Ads Lapsed User")
+    meta = _hidden("HID_META_USER", "Meta Ads Current User", "Meta Ads Lapsed User")
+    platforms = Question(
+        qid="C_ACCOUNT_PLATFORM", text="Which platforms?", type=QuestionType.MULTI,
+        options=[Option(code=1, label="Google Ads"), Option(code=2, label="Meta Ads"),
+                 Option(code=3, label="TikTok")],
+        validation={"answer_conditions": {"Google Ads": "IF GOOGLE ADS CURRENT USER",
+                                          "Meta Ads": "IF META ADS CURRENT USER",
+                                          "TikTok": "IF TIKTOK CURRENT USER"}})
+    s = SurveyDefinition(study_id="s", questions=[google, meta, platforms])
+    resolve_answer_bases_from_hidden(s)
+    got = {o.code: (o.show_if.qid, o.show_if.values) if o.show_if else None
+           for o in platforms.options}
+    assert got == {1: ("HID_GOOGLE_USER", [1]), 2: ("HID_META_USER", [1]), 3: None}
+    # No hidden group for TikTok: kept in front of QA, not dropped.
+    assert platforms.validation["row_conditions"] == {"TikTok": "IF TIKTOK CURRENT USER"}

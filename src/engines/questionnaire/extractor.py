@@ -67,7 +67,10 @@ from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
 from src.engines.questionnaire.learned import LearnedPattern, learned_hidden_variable
 from src.engines.questionnaire.list_sources import fill_lists, points_at_a_list
 from src.engines.questionnaire.logic_review import review as review_logic
-from src.engines.questionnaire.loop_bases import resolve_loop_bases_from_hidden
+from src.engines.questionnaire.loop_bases import (
+    resolve_answer_bases_from_hidden,
+    resolve_loop_bases_from_hidden,
+)
 from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import Mask, detect_techniques
 from src.engines.questionnaire.per_item import apply as apply_per_item_grids
@@ -609,6 +612,14 @@ def _extract_via_spec_table(
     )
     question = _question_from_fields(fields, chunk)
     question.show_if = fields.show_if
+    # "Google Ads [IF GOOGLE ADS CURRENT USER]": a base on ONE answer that names
+    # no question. Read, then dropped — now kept for the pass that resolves it
+    # from the hidden variables, and flagged by QA if nothing does.
+    labels = {o.code: o.label for o in [*fields.options, *fields.rows]}
+    unresolved = {labels[b["code"]]: b["verbatim"] for b in fields.option_bases
+                  if not b.get("resolved") and b.get("code") in labels}
+    if unresolved:
+        question.validation = {**(question.validation or {}), "answer_conditions": unresolved}
     _limits_and_exclusives_from_cells(question, fields)
     # Fields read straight from the table are not model guesses.
     confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
@@ -1708,6 +1719,8 @@ def extract_survey_definition(
     resolve_counted_bases(survey)
     # A loop turn's base, pointing at a hidden variable that names its brand.
     resolve_loop_bases_from_hidden(survey)
+    # "Google Ads [IF GOOGLE ADS CURRENT USER]": one answer's own base.
+    resolve_answer_bases_from_hidden(survey)
     # Automatic answers and typed-vs-choice contradictions, before QA so the
     # base flag an automatic answer does not deserve is gone when QA looks.
     mark_derived_facts(survey)
