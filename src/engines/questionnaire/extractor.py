@@ -80,11 +80,15 @@ from src.engines.questionnaire.prose_directives import (
 )
 from src.engines.questionnaire.qa_loop import run_qa
 from src.engines.questionnaire.reconciler import reconcile_segmentation
-from src.engines.questionnaire.relative_bases import resolve_relative_bases
+from src.engines.questionnaire.relative_bases import (
+    resolve_counted_bases,
+    resolve_relative_bases,
+)
 from src.engines.questionnaire.section_paths import (
     apply_intro_screens,
     apply_section_bases,
     apply_section_paths,
+    apply_worded_asks,
 )
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
 from src.engines.questionnaire.study_overview import parse_overview
@@ -1689,6 +1693,10 @@ def extract_survey_definition(
     # "[BASE: ANSWERED YES ABOVE]": a base that points instead of naming. Before
     # QA, so QA judges the survey with these bases applied.
     resolve_relative_bases(survey)
+    # "ASK Q12-Q19 IF EVER PURCHASED BUBBLE AT Q2b" — needs the final lists.
+    apply_worded_asks(survey)
+    # "MULTIPLE AT S6", "= 3-5 for at least one option".
+    resolve_counted_bases(survey)
     # A loop turn's base, pointing at a hidden variable that names its brand.
     resolve_loop_bases_from_hidden(survey)
     # Automatic answers and typed-vs-choice contradictions, before QA so the

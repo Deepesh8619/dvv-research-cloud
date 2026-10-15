@@ -95,3 +95,14 @@ def test_directive_is_read_into_show_if_by_the_prose_parser() -> None:
     assert fields.show_if is not None
     assert fields.show_if.qid == "D2"
     assert fields.evidence["base"] == "[IF D2 = 1]"
+
+
+def test_underscore_names_and_grid_rows_are_read():
+    from src.engines.questionnaire.routing_prose import parse_routing
+
+    e = parse_routing("IF HID_GOOGLE_USER = 2 or 3")
+    assert (e.qid, e.values) == ("HID_GOOGLE_USER", [2, 3])
+    rows = parse_routing("IF Q38.11=6-10 OR Q38.12=6-10")
+    leaves = [c for part in rows.children for c in part.children]
+    assert {(leaf.children[0].qid, leaf.children[0].row) for leaf in leaves} == {
+        ("Q38", 11), ("Q38", 12)}
