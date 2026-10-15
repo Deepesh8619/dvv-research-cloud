@@ -104,3 +104,13 @@ def test_a_declared_grid_is_still_a_grid():
 
     assert fields is not None
     assert fields.qtype is QuestionType.GRID_SINGLE
+
+
+def test_a_stated_cap_beats_one_answer_wording():
+    chunk = "\n".join([
+        "Which of the following best describes your perception of X? Select up to 2.",
+        "Hopeful", "Unproven", "Unsure",
+    ])
+    fields = parse_prose_question(chunk, candidate_qid="Q10")
+    assert fields.qtype is QuestionType.MULTI
+    assert fields.select_limits.get("max_select") == 2

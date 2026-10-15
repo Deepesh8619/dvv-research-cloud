@@ -124,7 +124,17 @@ _NOTE_RE = re.compile(r"^\s*SCRIPTER\s*NOTE\b", re.IGNORECASE)
 # today. It is promoted to a boundary only for a document that carries no
 # numbering at all (see `_is_unnumbered`), where it is the only thing marking
 # where one question ends and the next begins.
-_BASE_TAG_RE = re.compile(r"^\s*\[\s*BASE\s*[:\-]", re.IGNORECASE)
+# "[BASE SELECTS 1-4 IN PREVIOUS QUESTION]" writes the tag with no colon. Only
+# the colon form was accepted, so that question, its answers and the next two
+# headings were swallowed into the question above it and never asked.
+_BASE_TAG_RE = re.compile(r"^\s*\[\s*BASE\b(?:\s*[:\-]|\s+)", re.IGNORECASE)
+
+# A section heading in an unnumbered document: ALL CAPS, two or more words.
+_CAPS_HEADING = re.compile(
+    r"^\s*(?!(?:NONE|OTHER|ALL OF|NOT SURE|DON|DO NOT KNOW|PREFER|REFUSED|N/A)\b)"
+    r"(?=[^a-z]*$)(?=.*[A-Z]{2})"
+    r"[A-Z0-9][A-Z0-9&/,:'’()\-–]*(?:\s+[A-Z0-9&/,:'’()\-–]+){1,11}\s*$"
+)
 
 # Bracketed directives NEST — real ones do, routinely:
 #
@@ -647,6 +657,14 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
     def flush() -> None:
         if not current:
             return
+        if (
+            base_tags_open and len(current) == 1 and current_qid is None
+            and _CAPS_HEADING.match(current[0].text or "")
+        ):
+            # A section heading with nothing under it ("ADOPTION INTENT"). It
+            # names a section; it is not a screen, and documents say outright
+            # "do not show section headers".
+            return
         chunks.append(
             QuestionChunk(
                 chunk_text="\n".join(b.text for b in current).strip(),
@@ -676,6 +694,14 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
             continue
 
         is_boundary, qid = _detect_label(block.text, base_tags_open)
+        if (
+            not is_boundary and base_tags_open and current
+            and current[-1].block_type == "table" and _CAPS_HEADING.match(block.text or "")
+        ):
+            # "PRODUCT X PROFILE" after an answer table: a section heading, not
+            # one more answer. Read as answers, it and the next heading were
+            # offered to respondents as choices.
+            is_boundary = True
         if is_boundary and qid is None and base_tags_open and _BASE_TAG_RE.match(block.text):
             base_counter += 1
             qid = f"Q{base_counter}"

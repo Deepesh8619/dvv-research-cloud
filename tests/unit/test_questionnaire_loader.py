@@ -600,3 +600,47 @@ def test_lettered_sub_questions_are_questions_not_the_previous_ones_answers():
     chunks = segment_into_questions(blocks)
     assert [c.candidate_qid for c in chunks] == ["Q1", "Q2", "Q3"]
     assert chunks[1].chunk_text.startswith("A. What percentage")
+
+
+def test_a_base_tag_written_without_a_colon_still_opens_a_question() -> None:
+    """ "[BASE SELECTS 1-4 IN PREVIOUS QUESTION]" — no colon. Both TRD studies
+    wrote it so, and the perception question rode inside the one above it."""
+    blocks = [
+        DocumentBlock("paragraph", "[BASE: ALL] How familiar are you with X?", 0),
+        DocumentBlock("paragraph", "Very familiar", 1),
+        DocumentBlock("paragraph", "Not familiar", 2),
+        DocumentBlock("paragraph", "[BASE SELECTS 1-4 IN PREVIOUS QUESTION] Which describes X?", 3),
+        DocumentBlock("paragraph", "Hopeful", 4),
+        DocumentBlock("paragraph", "[BASED ON YOUR ANSWERS] note text", 5),
+    ]
+    chunks = segment_into_questions(blocks)
+    assert [c.candidate_qid for c in chunks] == ["Q1", "Q2"]
+    assert "Hopeful" not in chunks[0].chunk_text and "Hopeful" in chunks[1].chunk_text
+
+
+def test_a_caps_heading_after_an_answer_table_is_not_an_answer() -> None:
+    blocks = [
+        DocumentBlock("paragraph", "[BASE: ALL] Which describes X?", 0),
+        DocumentBlock("table", "", 1, rows=[["Hopeful", ""], ["Unproven", ""]]),
+        DocumentBlock("paragraph", "PRODUCT X PROFILE", 2),
+        DocumentBlock("paragraph", "Please review the information below.", 3),
+        DocumentBlock("paragraph", "[BASE: ALL] How strong is the evidence?", 4),
+        DocumentBlock("table", "", 5, rows=[["Strong", ""]]),
+        DocumentBlock("paragraph", "NONE OF THE ABOVE", 6),
+    ]
+    chunks = segment_into_questions(blocks)
+    assert "PRODUCT X PROFILE" not in chunks[0].chunk_text
+    assert "NONE OF THE ABOVE" in chunks[-1].chunk_text  # an answer, kept with its question
+
+
+def test_a_bare_section_heading_is_not_a_screen() -> None:
+    blocks = [
+        DocumentBlock("paragraph", "[BASE: ALL] Which describes X?", 0),
+        DocumentBlock("table", "", 1, rows=[["Hopeful", ""]]),
+        DocumentBlock("paragraph", "ADOPTION INTENT", 2),
+        DocumentBlock("paragraph", "[BASE: ALL] How likely are you to use X?", 3),
+        DocumentBlock("table", "", 4, rows=[["Very", ""]]),
+    ]
+    chunks = segment_into_questions(blocks)
+    assert [c.candidate_qid for c in chunks] == ["Q1", "Q2"]
+    assert all("ADOPTION INTENT" not in c.chunk_text for c in chunks)

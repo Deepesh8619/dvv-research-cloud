@@ -1068,6 +1068,12 @@ def parse_prose_question(
     if limits:
         fields.select_limits = limits
         ceiling = limits.get("max_select")
+        # "Which best describes … Select up to 2": "best describes" is a guess
+        # from wording; the stated cap is a fact. Only a declared type ([SP])
+        # outranks it.
+        guessed = fields.evidence.get("type") == "wording that admits only one answer"
+        if ceiling and ceiling > 1 and fields.qtype is QuestionType.SINGLE and guessed:
+            fields.qtype = None
         if fields.qtype is None and ceiling:
             fields.qtype = (
                 QuestionType.MULTI if ceiling > 1 else QuestionType.SINGLE
