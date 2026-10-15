@@ -826,7 +826,53 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     if question.type is QuestionType.GRID_SINGLE and question.validation:
         for key in ("min_select", "max_select"):
             question.validation.pop(key, None)
+    _codes_from_list_numbers(question, chunk)
     return question
+
+
+_WORD_CODE = re.compile(r"^\s*(\d{1,3})\s*[.)]?\s*$")
+
+
+def _answer_key(text: str) -> str:
+    return " ".join(re.sub(r"\[[^\]]*\]", " ", text or "").lower().split())
+
+
+def _codes_from_list_numbers(question: Question, chunk: QuestionChunk) -> None:
+    """Answer codes as the document prints them, when Word draws them.
+
+    "Don't Know" numbered 99 by Word's list numbering is code 99 in the data;
+    counting the lines made it 6, and a tab of "Don't Know" read an empty
+    column. Applied only when EVERY answer carries a distinct printed number;
+    the question's own screen-out moves with the codes it names.
+    """
+    options = question.options or []
+    if not options:
+        return
+    printed: dict[str, int] = {}
+    for block in chunk.source_blocks:
+        number = _WORD_CODE.match(block.list_label or "")
+        if number and block.block_type != "table":
+            printed.setdefault(_answer_key(block.text), int(number.group(1)))
+    mapping = {o.code: printed.get(_answer_key(o.label)) for o in options}
+    codes = list(mapping.values())
+    if None in codes or len(set(codes)) != len(codes) or all(k == v for k, v in mapping.items()):
+        return
+    for option in options:
+        option.code = mapping[option.code]
+
+    def move(expr: Expression | None) -> None:
+        if expr is None:
+            return
+        if expr.qid == question.qid:
+            if expr.values:
+                expr.values = [mapping.get(v, v) for v in expr.values]
+            if expr.op in ("eq", "selected") and isinstance(expr.value, int):
+                expr.value = mapping.get(expr.value, expr.value)
+        for child in expr.children or []:
+            move(child)
+
+    move(question.terminate_if)
+    question.extraction_evidence["codes"] = "the numbers Word prints beside each answer"
 
 
 def _rebuild_table_rows(source_text: str) -> list[list[str]]:
