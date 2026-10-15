@@ -561,6 +561,10 @@ _MAKE_EXCLUSIVE = re.compile(
 )
 
 
+_ANCHOR_CODES = re.compile(r"\banchor\s+(?:codes?\s+|punch(?:es)?\s+)?"
+                           r"(\d{1,3}(?:\s*(?:,|and|&)\s*\d{1,3})*)", re.I)
+
+
 def _limits_and_exclusives_from_cells(question: Question, fields: SpecTableFields) -> None:
     """ "Q type: Custom >>> Multi-select up to 3" and "Other details: Make 99
     exclusive" state an answer cap and an exclusive answer; both were read
@@ -574,9 +578,14 @@ def _limits_and_exclusives_from_cells(question: Question, fields: SpecTableField
                                "max_select": limits["max_select"]}
     codes = {int(c) for m in _MAKE_EXCLUSIVE.finditer(fields.notes or "")
              for c in re.findall(r"\d+", m.group(1) or m.group(2))}
+    # "If Yes, details: randomize 1 and 2, anchor 3" — the code that stays put.
+    anchored = {int(c) for m in _ANCHOR_CODES.finditer(question.source_text or "")
+                for c in re.findall(r"\d+", m.group(1))}
     for option in question.options or []:
         if option.code in codes:
             option.exclusive = True
+        if option.code in anchored:
+            option.anchored = True
 
 
 def _extract_via_spec_table(

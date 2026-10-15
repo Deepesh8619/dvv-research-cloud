@@ -223,7 +223,15 @@ def _statements(rows: list[list[str]], column_positions: list[int]) -> list[Opti
         if not label:
             continue
         code = int(code_cell) if code_cell.isdigit() else len(out) + 1
-        out.append(Option(code=code, label=label, show_if=_row_condition(row)))
+        # "98 | Other (Specify) [ANCHOR]", "None of the above / [ANCHOR,
+        # EXCLUSIVE, …]": the tags are cleaned out of the label, and their
+        # meaning went with them.
+        tags = " ".join(_BRACKET_RE.findall(" ".join(row)))
+        out.append(Option(
+            code=code, label=label, show_if=_row_condition(row),
+            anchored=bool(re.search(r"\bANCHOR", tags, re.I)),
+            exclusive=bool(re.search(r"\bEXCLUSIVE\b", tags, re.I)),
+        ))
     return out
 
 

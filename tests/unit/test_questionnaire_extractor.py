@@ -1231,3 +1231,15 @@ def test_spec_cells_state_a_cap_and_an_exclusive_answer():
     _limits_and_exclusives_from_cells(q, fields)
     assert q.validation["max_select"] == 3
     assert [o.exclusive for o in q.options] == [False, True]
+
+
+def test_anchor_code_in_the_randomize_details_is_anchored():
+    from src.core.survey_definition import Option, Question
+    from src.engines.questionnaire.extractor import _limits_and_exclusives_from_cells
+    from src.engines.questionnaire.spec_table import SpecTableFields
+
+    q = Question(qid="C_OFFER", text="Offer?", type=QuestionType.SINGLE,
+                 source_text="Randomize | Yes | If Yes, details: randomize 1 and 2, anchor 3",
+                 options=[Option(code=c, label=f"L{c}") for c in (1, 2, 3)])
+    _limits_and_exclusives_from_cells(q, SpecTableFields(qid="C_OFFER"))
+    assert [o.anchored for o in q.options] == [False, False, True]
