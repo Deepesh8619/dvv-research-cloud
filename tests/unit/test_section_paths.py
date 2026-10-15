@@ -519,3 +519,35 @@ def test_a_capital_section_heading_with_a_condition_gates_its_questions():
     assert apply_section_bases(survey) == ["B1", "B2"]
     assert survey.questions[1].show_if.values == [2]
     assert survey.questions[3].show_if is None and survey.questions[4].show_if is None
+
+
+def _q(qid, source="", options=()):
+    from src.core.survey_definition import Option, Question, QuestionType
+
+    return Question(qid=qid, text=qid, type=QuestionType.MULTI, source_text=source or qid,
+                    options=[Option(code=c, label=lab) for c, lab in options])
+
+
+def test_ask_notes_naming_an_answer_in_words_split_or_skip():
+    from src.core.survey_definition import SurveyDefinition, evaluate
+    from src.engines.questionnaire.section_paths import apply_section_paths, apply_worded_asks
+
+    survey = SurveyDefinition(study_id="s", questions=[
+        _q("S0a", options=[(1, "Split A"), (2, "Split B")]),
+        _q("C1", options=[(c, str(c)) for c in range(10, 20)]),
+        _q("Q2b", "Q2b. Bought?\n[PN: ASK Q12-Q13 IF EVER PURCHASED BUBBLE AT Q2b. OTHERS SKIP]",
+           options=[(1, "Bubble"), (2, "Anua"), (3, "CeraVe")]),
+        _q("Q12"),
+        _q("Q13", "Q13. Types?\n[PN: ASK Q16 OF ALL EVER PURCHASED – Q2b = YES FOR BUBBLE]"),
+        _q("Q16", "Q16. Satisfied?\n[ASK Q29a OF SPLIT A (S0a=1). SHOW Q27 STATEMENT]"),
+        _q("Q29a", "Q29a. Why?\n[PN: SKIP C8 IF TEEN (C1=13-17)]"),
+        _q("C8"),
+    ])
+    apply_section_paths(survey)
+    apply_worded_asks(survey)
+    by = {q.qid: q for q in survey.questions}
+    assert by["Q12"].show_if.to_dict()["values"] == [1] and by["Q13"].show_if.qid == "Q2b"
+    assert by["Q16"].show_if.values == [1]
+    assert by["Q29a"].show_if.qid == "S0a"
+    assert evaluate(by["C8"].show_if, {"C1": 15}) is False
+    assert evaluate(by["C8"].show_if, {"C1": 19}) is True

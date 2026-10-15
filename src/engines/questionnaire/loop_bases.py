@@ -193,3 +193,39 @@ def resolve_loop_bases_from_hidden(survey) -> list[str]:
             q.validation.pop("routing_verbatim")
         resolved.append(q.qid)
     return resolved
+
+
+def resolve_answer_bases_from_hidden(survey) -> list[str]:
+    """ "Google Ads [IF GOOGLE ADS CURRENT USER]" — one answer's base, naming a
+    group a hidden variable defines ("Google Ads Current User"). Resolved when
+    exactly one hidden value carries that brand and that state; anything left
+    goes to `row_conditions`, which QA reports as shown to everyone."""
+    answers = _hidden_answers(survey)
+    resolved = []
+    for q in survey.questions:
+        pending = dict((q.validation or {}).get("answer_conditions") or {})
+        if not pending:
+            continue
+        for option in [*(q.options or []), *(q.rows or [])]:
+            words = pending.get(option.label)
+            if words is None or option.show_if is not None:
+                continue
+            state = _words(words)
+            hits = [a for a in answers
+                    if state and _words(a[2]) == state
+                    and (brand := _brand(a[2])) and brand in words.lower()]
+            if len(hits) == 1:
+                qid, code, label = hits[0]
+                option.show_if = Expression(op="in", qid=qid, values=[code], verbatim_text=words)
+                resolved.append(f"{q.qid}:{option.code}")
+                # A number box cannot be hidden on its own in the link (SurveyJS
+                # multipletext items take no condition): keep it in front of QA
+                # as "shown to everyone" rather than claim it is applied.
+                if not (q.type.value == "numeric" and q.rows):
+                    pending.pop(option.label)
+        validation = dict(q.validation or {})
+        validation.pop("answer_conditions", None)
+        if pending:
+            validation["row_conditions"] = {**(validation.get("row_conditions") or {}), **pending}
+        q.validation = validation
+    return resolved

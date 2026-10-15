@@ -108,3 +108,36 @@ def test_a_base_naming_codes_of_the_previous_question_is_applied():
     assert (follow.show_if.qid, follow.show_if.values) == ("Q9", [1, 2, 3, 4])
     # Q10 offers no 7 or 8: left in words for a person, never guessed.
     assert odd.show_if is None and "AMBIGUOUS_ROUTING" in odd.flags
+
+
+def test_multiple_selected_and_any_row_bases():
+    from src.core.survey_definition import (
+        Option,
+        Question,
+        QuestionType,
+        SurveyDefinition,
+        evaluate,
+    )
+    from src.engines.questionnaire.relative_bases import resolve_counted_bases
+
+    s6 = Question(qid="S6", text="Insurance?", type=QuestionType.MULTI,
+                  options=[Option(code=c, label=f"I{c}") for c in (1, 2, 3)]
+                  + [Option(code=99, label="Don't know", exclusive=True)])
+    s7 = Question(qid="S7", text="Primary?", type=QuestionType.SINGLE,
+                  source_text="S7.[ASK IF MULTIPLE AT S6 SELECTED] Which is your primary?")
+    tool = Question(qid="GA_TOOL", text="Use?", type=QuestionType.GRID_SINGLE,
+                    rows=[Option(code=1, label="A"), Option(code=2, label="B")],
+                    cols=[Option(code=c, label=str(c)) for c in range(1, 6)])
+    trust = Question(qid="GA_TRUST", text="Trust?", type=QuestionType.GRID_SINGLE,
+                     rows=[Option(code=1, label="A"), Option(code=2, label="B")],
+                     extraction_evidence={
+                         "base": "Among who: Ask if GA_TOOL = 3-5 for at least one option. "
+                                 "Only show options familiar with from GA_TOOL"})
+    s = SurveyDefinition(study_id="s", questions=[s6, s7, tool, trust])
+    assert resolve_counted_bases(s) == ["S7", "GA_TRUST"]
+    assert evaluate(s7.show_if, {"S6": [1, 3]}) and not evaluate(s7.show_if, {"S6": [2]})
+    assert evaluate(trust.show_if, {"GA_TOOL": {1: 1, 2: 4}})
+    assert not evaluate(trust.show_if, {"GA_TOOL": {1: 1, 2: 2}})
+    # Each row only where the same row was rated 3-5.
+    assert evaluate(trust.rows[1].show_if, {"GA_TOOL": {2: 4}})
+    assert not evaluate(trust.rows[0].show_if, {"GA_TOOL": {1: 1}})

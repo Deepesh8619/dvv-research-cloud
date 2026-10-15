@@ -67,7 +67,10 @@ from src.engines.questionnaire.grid_subquestions import split_subquestion_grids
 from src.engines.questionnaire.learned import LearnedPattern, learned_hidden_variable
 from src.engines.questionnaire.list_sources import fill_lists, points_at_a_list
 from src.engines.questionnaire.logic_review import review as review_logic
-from src.engines.questionnaire.loop_bases import resolve_loop_bases_from_hidden
+from src.engines.questionnaire.loop_bases import (
+    resolve_answer_bases_from_hidden,
+    resolve_loop_bases_from_hidden,
+)
 from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import Mask, detect_techniques
 from src.engines.questionnaire.per_item import apply as apply_per_item_grids
@@ -80,11 +83,15 @@ from src.engines.questionnaire.prose_directives import (
 )
 from src.engines.questionnaire.qa_loop import run_qa
 from src.engines.questionnaire.reconciler import reconcile_segmentation
-from src.engines.questionnaire.relative_bases import resolve_relative_bases
+from src.engines.questionnaire.relative_bases import (
+    resolve_counted_bases,
+    resolve_relative_bases,
+)
 from src.engines.questionnaire.section_paths import (
     apply_intro_screens,
     apply_section_bases,
     apply_section_paths,
+    apply_worded_asks,
 )
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
 from src.engines.questionnaire.study_overview import parse_overview
@@ -557,6 +564,10 @@ _MAKE_EXCLUSIVE = re.compile(
 )
 
 
+_ANCHOR_CODES = re.compile(r"\banchor\s+(?:codes?\s+|punch(?:es)?\s+)?"
+                           r"(\d{1,3}(?:\s*(?:,|and|&)\s*\d{1,3})*)", re.I)
+
+
 def _limits_and_exclusives_from_cells(question: Question, fields: SpecTableFields) -> None:
     """ "Q type: Custom >>> Multi-select up to 3" and "Other details: Make 99
     exclusive" state an answer cap and an exclusive answer; both were read
@@ -570,9 +581,14 @@ def _limits_and_exclusives_from_cells(question: Question, fields: SpecTableField
                                "max_select": limits["max_select"]}
     codes = {int(c) for m in _MAKE_EXCLUSIVE.finditer(fields.notes or "")
              for c in re.findall(r"\d+", m.group(1) or m.group(2))}
+    # "If Yes, details: randomize 1 and 2, anchor 3" — the code that stays put.
+    anchored = {int(c) for m in _ANCHOR_CODES.finditer(question.source_text or "")
+                for c in re.findall(r"\d+", m.group(1))}
     for option in question.options or []:
         if option.code in codes:
             option.exclusive = True
+        if option.code in anchored:
+            option.anchored = True
 
 
 def _extract_via_spec_table(
@@ -596,6 +612,14 @@ def _extract_via_spec_table(
     )
     question = _question_from_fields(fields, chunk)
     question.show_if = fields.show_if
+    # "Google Ads [IF GOOGLE ADS CURRENT USER]": a base on ONE answer that names
+    # no question. Read, then dropped — now kept for the pass that resolves it
+    # from the hidden variables, and flagged by QA if nothing does.
+    labels = {o.code: o.label for o in [*fields.options, *fields.rows]}
+    unresolved = {labels[b["code"]]: b["verbatim"] for b in fields.option_bases
+                  if not b.get("resolved") and b.get("code") in labels}
+    if unresolved:
+        question.validation = {**(question.validation or {}), "answer_conditions": unresolved}
     _limits_and_exclusives_from_cells(question, fields)
     # Fields read straight from the table are not model guesses.
     confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
@@ -1689,8 +1713,14 @@ def extract_survey_definition(
     # "[BASE: ANSWERED YES ABOVE]": a base that points instead of naming. Before
     # QA, so QA judges the survey with these bases applied.
     resolve_relative_bases(survey)
+    # "ASK Q12-Q19 IF EVER PURCHASED BUBBLE AT Q2b" — needs the final lists.
+    apply_worded_asks(survey)
+    # "MULTIPLE AT S6", "= 3-5 for at least one option".
+    resolve_counted_bases(survey)
     # A loop turn's base, pointing at a hidden variable that names its brand.
     resolve_loop_bases_from_hidden(survey)
+    # "Google Ads [IF GOOGLE ADS CURRENT USER]": one answer's own base.
+    resolve_answer_bases_from_hidden(survey)
     # Automatic answers and typed-vs-choice contradictions, before QA so the
     # base flag an automatic answer does not deserve is gone when QA looks.
     mark_derived_facts(survey)

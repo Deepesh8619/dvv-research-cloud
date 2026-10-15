@@ -41,8 +41,12 @@ _PREAMBLE_RE = re.compile(
 # The id is the same shape the segmenter recognises as a label (D2, S2, ED11A,
 # PPT612) so a condition can only ever reference something that could be a
 # question.
+# Also the spec-table names ("GA_GOOGLE_TOOL") and one row of a grid ("Q38.11"
+# is row 11 of Q38): both were unreadable, so "ASK IF Q38.11=6-10" and every
+# condition naming an underscore question went unapplied.
 _ATOM_RE = re.compile(
-    r"^\s*\(?\s*([A-Za-z]{1,4}\d+[A-Za-z]?)\s*(=|==|<>|!=|>=|<=|>|<)\s*(.*?)\s*\)?\s*$"
+    r"^\s*\(?\s*([A-Za-z]{1,4}\d+[A-Za-z]?(?:\.\d+)?|[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]*[A-Za-z0-9])"
+    r"\s*(=|==|<>|!=|>=|<=|>|<)\s*(.*?)\s*\)?\s*$"
 )
 _VALUES_RE = re.compile(r"\d+")
 # "S1 = 26-60", "AGE = 26 to 60" — a band, not a punch list. Written constantly
@@ -88,6 +92,24 @@ def _split_top_level(text: str, pattern: re.Pattern) -> list[str] | None:
 
 def _atom(text: str) -> Expression | None:
     """One comparison, or None if it is not one we can read exactly."""
+    found = _atom_on_question(text)
+    if found is None:
+        return None
+    qid = _ATOM_RE.match(text).group(1)
+    if "." in qid:
+        name, row = qid.split(".", 1)
+        _set_row(found, name, int(row))
+    return found
+
+
+def _set_row(expr: Expression, qid: str, row: int) -> None:
+    if expr.qid:
+        expr.qid, expr.row = qid, row
+    for child in expr.children or []:
+        _set_row(child, qid, row)
+
+
+def _atom_on_question(text: str) -> Expression | None:
     m = _ATOM_RE.match(text)
     if not m:
         return None

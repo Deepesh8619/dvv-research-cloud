@@ -163,3 +163,12 @@ def test_a_table_of_rows_to_fill_in_under_a_measure_header():
     assert percent
     # An answer list with a header is not this shape.
     assert entry_table([["Brand", "Aware"], ["A", "1"], ["B", "2"]]) is None
+
+
+def test_grid_rows_keep_their_anchor_and_exclusive_tags():
+    from src.engines.questionnaire.table_questions import _statements
+
+    rows = [["1", "Bubble", "", ""], ["98", "Other (Specify) [ANCHOR]", "", ""],
+            ["99", "None of the above / [ANCHOR, EXCLUSIVE, TERMINATE IF S0=1]", "", ""]]
+    got = {o.code: (o.anchored, o.exclusive) for o in _statements(rows, [2, 3])}
+    assert got == {1: (False, False), 98: (True, False), 99: (True, True)}

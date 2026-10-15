@@ -488,3 +488,19 @@ def test_a_randomised_grid_shuffles_its_rows():
                  cols=[Option(code=1, label="Low"), Option(code=2, label="High")])
     element = _compile_question(q, {"G": q})
     assert element["rowsOrder"] == "random"
+
+
+def test_a_filtered_list_is_skipped_when_nothing_carries_over():
+    from src.core.survey_definition import Option, Question, QuestionType
+    from src.renderers.surveyjs_compiler import _compile_question
+
+    aware = Question(qid="Q2a", text="Aware?", type=QuestionType.MULTI,
+                     options=[Option(code=1, label="Bubble"), Option(code=2, label="Anua"),
+                              Option(code=99, label="None of these", exclusive=True)])
+    bought = Question(qid="Q2b", text="Bought?", type=QuestionType.MULTI,
+                      options=[Option(code=1, label="Bubble"), Option(code=2, label="Anua"),
+                               Option(code=99, label="None of these", exclusive=True)],
+                      validation={"techniques": {"masks": [{"source_qid": "Q2a",
+                                                            "mode": "selected"}]}})
+    element = _compile_question(bought, {"Q2a": aware, "Q2b": bought})
+    assert element["visibleIf"] == "{Q2a} anyof [1, 2]"

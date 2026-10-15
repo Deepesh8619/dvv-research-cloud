@@ -316,6 +316,8 @@ export interface QuestionOption {
   exclusive?: boolean
   anchored?: boolean
   open_other?: boolean
+  /** Shown only to respondents who meet this ("only if S11 = 1"); null = everyone. */
+  show_if?: Expression | null
 }
 
 export interface Question {

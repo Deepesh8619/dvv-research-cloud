@@ -112,3 +112,79 @@ def resolve_relative_bases(survey: SurveyDefinition) -> list[str]:
         )
         resolved.append(q.qid)
     return resolved
+
+
+# "[ASK IF MULTIPLE AT S6 SELECTED]": two or more answers ticked at S6.
+_MULTIPLE_AT = re.compile(
+    r"\bMULTIPLE\s+(?:ANSWERS\s+|RESPONSES\s+)?(?:SELECTED\s+)?(?:AT|IN)\s+"
+    r"(?P<qid>[A-Za-z][A-Za-z0-9_]*\d[A-Za-z0-9_]*)", re.I,
+)
+# "Ask if GA_GOOGLE_TOOL = 3-5 for at least one option": any row of a grid.
+_ANY_ROW = re.compile(
+    r"(?P<qid>[A-Za-z][A-Za-z0-9_]*)\s*=\s*(?P<codes>\d+(?:\s*[-–]\s*\d+)?(?:\s*(?:,|or)\s*\d+)*)"
+    r"\s+for\s+at\s+least\s+one\s+(?:option|row|item|statement|brand)", re.I,
+)
+_MAX_PAIRS = 120
+_ONLY_THOSE_ROWS = re.compile(
+    r"\bonly\s+show\s+(?:the\s+)?(?:options|rows|items|statements|tools|brands)\b", re.I
+)
+
+
+def _codes_in(spec: str) -> list[int]:
+    out: list[int] = []
+    for part in re.split(r"\s*(?:,|or)\s*", spec, flags=re.I):
+        low, _, high = part.replace("–", "-").partition("-")
+        out += range(int(low), int(high or low) + 1)
+    return out
+
+
+def resolve_counted_bases(survey: SurveyDefinition) -> list[str]:
+    """Bases that count answers or range over a grid's rows.
+
+    "MULTIPLE AT S6" is any two of S6's answers together — an OR of pairs, in
+    the ops the link and the data checks already evaluate. "= 3-5 for at least
+    one option" is any row of that grid answered 3-5. Left in words (flagged)
+    when the named question is not the shape the sentence needs.
+    """
+    by_upper = {q.qid.upper(): q for q in survey.questions}
+    resolved = []
+    for q in survey.questions:
+        if q.show_if is not None:
+            continue
+        said = " ".join(filter(None, [
+            (q.source_text or "").split("\n", 1)[0],
+            str((q.validation or {}).get("routing_verbatim") or ""),
+            str((q.extraction_evidence or {}).get("base") or ""),
+        ]))
+        many = _MULTIPLE_AT.search(said)
+        rows = _ANY_ROW.search(said)
+        if many and (source := by_upper.get(many.group("qid").upper())):
+            codes = [o.code for o in source.options or [] if not o.exclusive]
+            pairs = [(a, b) for i, a in enumerate(codes) for b in codes[i + 1:]]
+            if len(pairs) < 1 or len(pairs) > _MAX_PAIRS:
+                continue
+            q.show_if = Expression(op="or", verbatim_text=many.group(0), children=[
+                Expression(op="and", children=[
+                    Expression(op="selected", qid=source.qid, value=a),
+                    Expression(op="selected", qid=source.qid, value=b)])
+                for a, b in pairs])
+        elif rows and (source := by_upper.get(rows.group("qid").upper())) and source.rows:
+            codes = _codes_in(rows.group("codes"))
+            q.show_if = Expression(op="or", verbatim_text=rows.group(0), children=[
+                Expression(op="in", qid=source.qid, row=r.code, values=codes)
+                for r in source.rows])
+            if _ONLY_THOSE_ROWS.search(said) and q.rows:
+                # "Only show options familiar with from GA_GOOGLE_TOOL": each row
+                # of this grid only where the SAME row there was answered so.
+                theirs = {_norm(r.label): r.code for r in source.rows}
+                for row in q.rows:
+                    code = theirs.get(_norm(row.label))
+                    if code is not None and row.show_if is None:
+                        row.show_if = Expression(op="in", qid=source.qid, row=code,
+                                                 values=codes, verbatim_text=rows.group(0))
+        else:
+            continue
+        q.flags = [f for f in q.flags if f != schema.FLAG_AMBIGUOUS_ROUTING]
+        q.extraction_evidence["show_if"] = q.show_if.verbatim_text or ""
+        resolved.append(q.qid)
+    return resolved

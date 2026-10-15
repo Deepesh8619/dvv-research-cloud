@@ -527,6 +527,19 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
                 if exempt and mask.get("mode") in ("selected", None):
                     condition = f"({condition}) or {{item}} anyof [{', '.join(map(str, exempt))}]"
                 element[masked] = condition
+                carried = [o.code for o in own if o.code in offered and o.code not in exempt]
+                if (
+                    source is not None and carried and mask.get("mode") in ("selected", None)
+                    and source.type in (QuestionType.MULTI, QuestionType.SINGLE)
+                ):
+                    # Nothing to carry over means nothing to ask: someone who
+                    # picked none of Q2a's brands was shown Q2b with only
+                    # "None of these" left to tick.
+                    picked = f"{{{source.qid}}} anyof [{', '.join(map(str, carried))}]"
+                    element["visibleIf"] = (
+                        f"({element['visibleIf']}) and {picked}" if element.get("visibleIf")
+                        else picked
+                    )
                 break
 
     return element

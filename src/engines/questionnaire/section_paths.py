@@ -41,8 +41,10 @@ _SPLIT_QID = re.compile(r"^([A-Z]{0,4})(\d+)([A-Z]?)$")
 # "[PN: ASK Q15 IF Q14 = 1 OR 2]" — the same statement as a section path with
 # the clauses the other way round, and written against a single question.
 _FORWARD_ASK_RE = re.compile(
-    rf"\bASK\s+(?P<targets>{_QID}(?:\s*(?:-|–|—|,|\bto\b|\bthrough\b|\band\b)\s*{_QID})*)"
-    rf"\s+(?P<cond>\bIF\b[^\]\n.]+)",
+    rf"\b(?P<verb>ASK|SKIP)\s+(?P<targets>{_QID}(?:\s*(?:-|–|—|,|\bto\b|\bthrough\b|\band\b)\s*{_QID})*)"
+    # "IF …", or "OF SPLIT A (S0a=1)": who, then the exact condition in brackets.
+    # A dot ends the sentence, except inside "Q38.11" (row 11 of Q38).
+    rf"\s+(?P<cond>\bIF\b(?:[^\]\n.]|\.(?=\d))+|\bOF\b(?:[^\]\n.]|\.(?=\d))+)",
     re.I,
 )
 _RANGE_SEP_RE = re.compile(r"\s*(?:-|–|—|\bto\b|\bthrough\b)\s*", re.I)
@@ -57,6 +59,70 @@ _INTRO_RE = re.compile(
 )
 _NEXT_LABEL_RE = re.compile(rf"^\s*{_QID}\s*[.):]")
 _INTRO_MIN_CHARS = 60
+
+
+_AT_QID = re.compile(r"\b(?:AT|IN|FOR|FROM)\s+([A-Za-z][A-Za-z0-9_]*\d[A-Za-z0-9_]*)\b"
+                     r"|\b([A-Za-z][A-Za-z0-9_]*\d[A-Za-z0-9_]*)\s*=\s*YES\b", re.I)
+
+
+def _exact_in_brackets(text: str) -> Expression | None:
+    """ "OF SPLIT A (S0a=1)": the exact condition, in brackets."""
+    inner = re.search(r"\(([^)]*=[^)]*)\)", text)
+    return parse_routing(f"IF {inner.group(1)}") if inner else None
+
+
+def apply_worded_asks(survey: SurveyDefinition) -> list[str]:
+    """ "ASK Q12-Q19 IF EVER PURCHASED BUBBLE AT Q2b": the answer is named in
+    words. Run LATE, once answer lists are final — earlier, a table's leftover
+    cells were still answers and "Bubble" matched two of them."""
+    order = survey.question_order()
+    by_qid = {q.qid: q for q in survey.questions}
+    gated: list[str] = []
+    for question in survey.questions:
+        for match in _FORWARD_ASK_RE.finditer(question.source_text or ""):
+            if parse_routing(match.group("cond")) or _exact_in_brackets(match.group("cond")):
+                continue  # exact: already applied by apply_section_paths
+            condition = answer_named(match.group("cond"), by_qid)
+            if condition is None:
+                continue
+            if match.group("verb").upper() == "SKIP":
+                condition = Expression(op="not", children=[condition],
+                                       verbatim_text=condition.verbatim_text)
+            for qid in _targets(match.group("targets"), order):
+                target = by_qid.get(qid)
+                if target is None or qid == question.qid or target.show_if is not None:
+                    continue
+                target.show_if = Expression.from_dict(condition.to_dict())
+                target.extraction_evidence.setdefault("base", f"[{match.group(0).strip()}]")
+                gated.append(qid)
+    return gated
+
+
+def answer_named(text: str, by_qid: dict) -> Expression | None:
+    """ "IF EVER PURCHASED BUBBLE AT Q2b" / "Q2b = YES FOR BUBBLE": the answer is
+    named in words, at a question named by id. Exactly ONE of that question's
+    answers must appear in the words, as a whole word; otherwise None — two
+    candidates is a guess, and a person decides."""
+    inner = re.search(r"\(([^)]*=[^)]*)\)", text)
+    if text.upper().lstrip().startswith("OF") and inner:
+        exact = parse_routing(f"IF {inner.group(1)}")
+        if exact is not None:
+            return exact
+    found = _AT_QID.search(text)
+    if not found:
+        return None
+    name = found.group(1) or found.group(2)
+    upper = {k.upper(): k for k in by_qid}
+    source = by_qid.get(upper.get(name.upper(), ""))
+    if source is None:
+        return None
+    words = text.lower()
+    hits = [o for o in source.options or []
+            if len((o.label or "").strip()) >= 3
+            and re.search(rf"\b{re.escape(o.label.strip().lower())}\b", words)]
+    if len(hits) != 1:
+        return None
+    return Expression(op="in", qid=source.qid, values=[hits[0].code], verbatim_text=text.strip())
 
 
 def _targets(spec: str, order: list[str]) -> list[str]:
@@ -77,9 +143,12 @@ def _targets(spec: str, order: list[str]) -> list[str]:
             if band:
                 out.extend(band)
                 continue
+        # "ASK Q29a …": the name is upper-cased for the range logic, the
+        # question is Q29a — matched exactly, it was never found.
+        by_upper = {qid.upper(): qid for qid in order}
         for end in ends:
-            if end in order:
-                out.append(end)
+            if end in by_upper:
+                out.append(by_upper[end])
     return list(dict.fromkeys(out))
 
 
@@ -129,7 +198,12 @@ def apply_section_paths(survey: SurveyDefinition) -> list[dict]:
 
     for question in list(survey.questions):
         for match in _FORWARD_ASK_RE.finditer(question.source_text or ""):
-            condition = parse_routing(match.group("cond"))
+            condition = parse_routing(match.group("cond")) or _exact_in_brackets(
+                match.group("cond")
+            )
+            if condition is not None and match.group("verb").upper() == "SKIP":
+                condition = Expression(op="not", children=[condition],
+                                       verbatim_text=condition.verbatim_text)
             targets = [
                 qid
                 for qid in _targets(match.group("targets"), order)

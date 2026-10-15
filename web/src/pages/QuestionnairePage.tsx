@@ -15,6 +15,7 @@ import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { TableSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
+import OptionCondition from '../components/OptionCondition'
 import { flagInfo } from '../components/questionnaireFlags'
 import CorrectionBox from '../components/CorrectionBox'
 import QuestionAgent from '../components/review/QuestionAgent'
@@ -912,7 +913,8 @@ export function QuestionDetail({
           <span className="text-xs font-medium uppercase tracking-wide text-slate-500 block mb-2">Options</span>
           <div className="space-y-2">
             {state.options.map((o, i) => (
-              <div key={i} className="flex items-center gap-2">
+              <div key={i}>
+              <div className="flex items-center gap-2">
                 <input
                   type="number"
                   value={codeDrafts[i] ?? String(o.code)}
@@ -957,6 +959,13 @@ export function QuestionDetail({
                     ✕
                   </button>
                 )}
+              </div>
+              <OptionCondition
+                condition={o.show_if}
+                onChange={(next) => setOption(i, { show_if: next })}
+                qidOptions={priorQids}
+                disabled={!canWrite}
+              />
               </div>
             ))}
             {state.options.length === 0 && (
