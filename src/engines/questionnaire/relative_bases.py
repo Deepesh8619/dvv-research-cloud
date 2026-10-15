@@ -125,6 +125,9 @@ _ANY_ROW = re.compile(
     r"\s+for\s+at\s+least\s+one\s+(?:option|row|item|statement|brand)", re.I,
 )
 _MAX_PAIRS = 120
+_ONLY_THOSE_ROWS = re.compile(
+    r"\bonly\s+show\s+(?:the\s+)?(?:options|rows|items|statements|tools|brands)\b", re.I
+)
 
 
 def _codes_in(spec: str) -> list[int]:
@@ -170,6 +173,15 @@ def resolve_counted_bases(survey: SurveyDefinition) -> list[str]:
             q.show_if = Expression(op="or", verbatim_text=rows.group(0), children=[
                 Expression(op="in", qid=source.qid, row=r.code, values=codes)
                 for r in source.rows])
+            if _ONLY_THOSE_ROWS.search(said) and q.rows:
+                # "Only show options familiar with from GA_GOOGLE_TOOL": each row
+                # of this grid only where the SAME row there was answered so.
+                theirs = {_norm(r.label): r.code for r in source.rows}
+                for row in q.rows:
+                    code = theirs.get(_norm(row.label))
+                    if code is not None and row.show_if is None:
+                        row.show_if = Expression(op="in", qid=source.qid, row=code,
+                                                 values=codes, verbatim_text=rows.group(0))
         else:
             continue
         q.flags = [f for f in q.flags if f != schema.FLAG_AMBIGUOUS_ROUTING]
