@@ -533,3 +533,22 @@ def test_open_entry_with_a_number_range_is_a_number_and_without_one_stays_text()
     assert counted.qtype is QuestionType.NUMERIC and counted.bounds == {"min": 0, "max": 1000}
     said = parse_prose_question("Q9. What else would you like to tell us? [OE]\n_____", "Q9", None)
     assert said.qtype is QuestionType.OPEN_TEXT and said.bounds == {}
+
+
+def test_a_fill_in_with_a_range_and_whole_number_is_a_number():
+    from src.core.survey_definition import QuestionType
+    from src.engines.questionnaire.prose_directives import parse_prose_question
+
+    chunk = ("[BASE: ALL] How many patients do you see per week? Fill in. [0-1000, WHOLE NUMBER]\n"
+             "_____________ [OE]")
+    fields = parse_prose_question(chunk, candidate_qid="Q2")
+    assert fields.qtype is QuestionType.NUMERIC and fields.bounds == {"min": 0, "max": 1000}
+
+
+def test_rank_from_1_to_n_is_a_ranking():
+    from src.core.survey_definition import QuestionType
+    from src.engines.questionnaire.prose_directives import parse_prose_question
+
+    chunk = ("[BASE: ALL] What factors would most influence your decision? Please rank from 1 "
+             "to 3, with 1 being the most influential. [RANDOMIZE]\nEfficacy |\nSafety |\nCost |")
+    assert parse_prose_question(chunk, candidate_qid="Q24").qtype is QuestionType.RANK

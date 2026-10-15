@@ -92,7 +92,11 @@ from src.engines.questionnaire.study_understanding import (
     understand_study,
 )
 from src.engines.questionnaire.swallowed_options import repair_swallowed_options
-from src.engines.questionnaire.table_questions import labelled_sections, question_from_tables
+from src.engines.questionnaire.table_questions import (
+    entry_table,
+    labelled_sections,
+    question_from_tables,
+)
 from src.engines.questionnaire.trade_off import apply as flag_trade_offs
 from src.engines.questionnaire.verification import (
     covers_the_question,
@@ -693,6 +697,19 @@ def _apply_table_shape(question: Question, chunk: QuestionChunk) -> None:
         return
     tables = [b.rows for b in chunk.source_blocks if b.rows]
     if not tables:
+        return
+    entry = next((found for t in tables if (found := entry_table(t))), None)
+    if entry is not None and question.type is not QuestionType.GRID_SINGLE:
+        rows, percent = entry
+        question.type = QuestionType.NUMERIC
+        question.rows, question.options, question.cols = rows, [], None
+        if percent:
+            question.validation = {**(question.validation or {}), "min": 0, "max": 100}
+        question.extraction_evidence["options"] = (
+            f"{len(rows)} rows to fill in{' (a percentage each)' if percent else ''}"
+        )
+        if schema.FLAG_EMPTY_OPTIONS in question.flags:
+            question.flags.remove(schema.FLAG_EMPTY_OPTIONS)
         return
     shape = question_from_tables(tables, list(question.options))
     if shape is None:

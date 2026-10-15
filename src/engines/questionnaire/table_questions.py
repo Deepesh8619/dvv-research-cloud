@@ -413,3 +413,38 @@ def labelled_sections(lines: list[str]) -> tuple[list[Option], list[Option]]:
         return [Option(code=i, label=text) for i, text in enumerate(items, start=1)]
 
     return coded(rows), coded(cols)
+
+
+#: The header of a column you fill in: "% of TRD Patients", "Number of patients".
+_MEASURE_HEADER = re.compile(r"%|\bpercent|\bshare\b|\bnumber\b|#|\bcount\b|\bhow many\b", re.I)
+#: What a fill-in cell holds when it is not empty: a scripter note or a blank.
+_FILL_CELL = re.compile(r"^\s*(?:\[[^\]]*\]|_+\s*%?|%)?\s*$")
+
+
+def entry_table(rows: list[list[str]]) -> tuple[list[Option], bool] | None:
+    """Rows to type a number into, under a header naming the measure.
+
+        Treatment                     | % of TRD Patients
+        Treated with TMS Only         | [DROP DOWN % - TO BE CONFIRMED]
+        Treated with Spravato Only    |
+
+    Read as an answer list, the header became a choice and the respondent was
+    asked to pick ONE treatment instead of giving a share for each. Returns
+    the rows and whether the measure is a percentage; None for any other shape.
+    """
+    cleaned = []
+    for row in rows:
+        cells = [_clean(c) for c in row]
+        # Word repeats a merged cell's text across every column it spans.
+        cells = [c for i, c in enumerate(cells) if i == 0 or c != cells[i - 1] or not c]
+        if any(cells):
+            cleaned.append(cells)
+    if len(cleaned) < 1 + _MIN_GRID_ROWS:
+        return None
+    header, body = cleaned[0], cleaned[1:]
+    if len(header) != 2 or not header[0] or not _MEASURE_HEADER.search(header[1]):
+        return None
+    if any(len(row) != 2 or not row[0] or not _FILL_CELL.match(row[1]) for row in body):
+        return None
+    labels = [Option(code=i, label=row[0]) for i, row in enumerate(body, start=1)]
+    return labels, "%" in header[1] or "percent" in header[1].lower()

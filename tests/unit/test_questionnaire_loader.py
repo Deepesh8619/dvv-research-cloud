@@ -644,3 +644,14 @@ def test_a_bare_section_heading_is_not_a_screen() -> None:
     chunks = segment_into_questions(blocks)
     assert [c.candidate_qid for c in chunks] == ["Q1", "Q2"]
     assert all("ADOPTION INTENT" not in c.chunk_text for c in chunks)
+
+
+def test_a_closing_thank_you_after_the_last_table_is_not_an_answer() -> None:
+    blocks = [
+        DocumentBlock("paragraph", "[BASE: ALL] What words describe X? Select up to 4.", 0),
+        DocumentBlock("table", "", 1, rows=[["Novel", ""], ["Other (specify)", ""]]),
+        DocumentBlock("paragraph", "Thank you! We appreciate your input!", 2),
+    ]
+    chunks = segment_into_questions(blocks)
+    assert "Thank you" not in chunks[0].chunk_text
+    assert chunks[-1].chunk_text.startswith("Thank you")

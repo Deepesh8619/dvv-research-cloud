@@ -132,6 +132,9 @@ _NOTE_RE = re.compile(r"^\s*SCRIPTER\s*NOTE\b", re.IGNORECASE)
 # headings were swallowed into the question above it and never asked.
 _BASE_TAG_RE = re.compile(r"^\s*\[\s*BASE\b(?:\s*[:\-]|\s+)", re.IGNORECASE)
 
+# "Thank you! We appreciate your input!" — the end screen, not one more answer.
+_CLOSING = re.compile(r"^\s*(?:thank\s+you|thanks)\b.{0,120}$", re.I)
+
 # A Word list number drawn as a plain number: "7", "7.", "7)", "Q7.".
 _LIST_NUMBER = re.compile(r"^\s*Q?(\d{1,3})\s*[.)]?\s*$", re.I)
 
@@ -730,7 +733,8 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
         is_boundary, qid = _detect_label(block.text, base_tags_open)
         if (
             not is_boundary and base_tags_open and current
-            and current[-1].block_type == "table" and _CAPS_HEADING.match(block.text or "")
+            and current[-1].block_type == "table"
+            and (_CAPS_HEADING.match(block.text or "") or _CLOSING.match(block.text or ""))
         ):
             # "PRODUCT X PROFILE" after an answer table: a section heading, not
             # one more answer. Read as answers, it and the next heading were
