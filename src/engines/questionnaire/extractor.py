@@ -82,6 +82,7 @@ from src.engines.questionnaire.reconciler import reconcile_segmentation
 from src.engines.questionnaire.relative_bases import resolve_relative_bases
 from src.engines.questionnaire.section_paths import (
     apply_intro_screens,
+    apply_section_bases,
     apply_section_paths,
 )
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
@@ -1550,6 +1551,9 @@ def extract_survey_definition(
     # the base for questions in OTHER chunks, so it can only be applied now that
     # the whole survey exists. Also emits the path as a HID_ variable.
     apply_section_paths(survey)
+    # "BUBBLE CRM INTRODUCTION & SCREENER (S0=2)": a heading that gates the
+    # questions under it.
+    apply_section_bases(survey)
     apply_intro_screens(survey)
     # "Q2a. ever heard of? | Q2b. Ever purchased from?" across one brand list is
     # two questions, not one grid allowing a single answer per brand.

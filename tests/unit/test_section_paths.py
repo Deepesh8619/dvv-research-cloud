@@ -498,3 +498,24 @@ def test_a_mask_narrows_the_list_to_what_they_picked():
         masks = detect_techniques(wording).masks
         assert masks, wording
         assert (masks[0].mode, masks[0].source_qid) == (mode, "Q4A"), wording
+
+
+def test_a_capital_section_heading_with_a_condition_gates_its_questions():
+    from src.core.survey_definition import Option, Question, QuestionType, SurveyDefinition
+    from src.engines.questionnaire.section_paths import apply_section_bases
+
+    def q(qid, source):
+        return Question(qid=qid, text=qid, type=QuestionType.SINGLE, source_text=source,
+                        options=[Option(code=1, label="a")])
+
+    survey = SurveyDefinition(study_id="s", questions=[
+        q("S0", "S0. CODE SAMPLE SOURCE\nBUBBLE CRM INTRODUCTION & SCREENER (S0=2)\n"
+                "NOTE TO PROGRAMMER: NO TERMINATES FOR CRM (S0=2)"),
+        q("B1", "B1. Age?"),
+        q("B2", "B2. Gender?\nCODING AND FINAL SCREENER QUESTIONS (ALL RESPONDENTS)"),
+        q("C1", "C1. Region?\nAll Other (S11=3)"),
+        q("C2", "C2. Income?"),
+    ])
+    assert apply_section_bases(survey) == ["B1", "B2"]
+    assert survey.questions[1].show_if.values == [2]
+    assert survey.questions[3].show_if is None and survey.questions[4].show_if is None
