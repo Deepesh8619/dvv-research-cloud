@@ -120,3 +120,25 @@ def test_run_qa_reports_hidden_variable_and_notes_without_flagging_them():
     assert "QA_ISSUE" in h.flags and len(h.validation["qa_issues"]) == 1
     assert "QA_ISSUE" not in n.flags and n.validation["consistency_notes"]
     assert [e["status"] for e in record["entries"] if e["qid"] == "S1"] == ["note"]
+
+
+def test_a_terminating_answer_in_a_select_all_list_must_be_exclusive():
+    from src.core.survey_definition import Expression, Option, Question, QuestionType
+    from src.engines.questionnaire.consistency import terminating_answer_not_exclusive
+
+    q = Question(qid="Q3", text="Which pharmacies have you heard of?", type=QuestionType.MULTI,
+                 options=[Option(code=1, label="CVS"), Option(code=99, label="None of the above")],
+                 terminate_if=Expression(op="in", qid="Q3", values=[99]))
+    assert terminating_answer_not_exclusive(q, {})
+    q.options[1].exclusive = True
+    assert terminating_answer_not_exclusive(q, {}) == []
+
+
+def test_a_screening_industry_ticked_with_others_is_not_flagged():
+    from src.core.survey_definition import Expression, Option, Question, QuestionType
+    from src.engines.questionnaire.consistency import terminating_answer_not_exclusive
+
+    q = Question(qid="S2", text="Do you work in any of these industries?", type=QuestionType.MULTI,
+                 options=[Option(code=1, label="Advertising"), Option(code=2, label="Healthcare")],
+                 terminate_if=Expression(op="in", qid="S2", values=[1]))
+    assert terminating_answer_not_exclusive(q, {}) == []

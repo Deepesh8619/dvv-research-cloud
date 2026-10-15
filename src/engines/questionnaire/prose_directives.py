@@ -144,8 +144,10 @@ _TYPE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
                 r"\byears\b|\bage\b.*\bnumber\b|number\s+\d+\s*-\s*\d+|"
                 r"\d+\s*-\s*digit|num(?:ber)?\s*box", re.I),
      QuestionType.NUMERIC),
+    # "Please rank from 1 to 8, with 1 being the most influential".
     (re.compile(r"\brank\b.{0,20}\b(top|first|three|order)\b|\brank \d[, \d]*and\b|"
-                r"^\s*rank\b", re.I), QuestionType.RANK),
+                r"^\s*rank\b|\bplease rank\b|\brank\b.{0,30}\bfrom 1 to \d+", re.I),
+     QuestionType.RANK),
     # TEXTBOX (11x) and "OE: n-CHARACTER MINIMUM" (6x) are the commonest
     # open-text declarations in these documents and were both being missed.
     (re.compile(r"_\s*_\s*_|open[- ]?end|\btextbox\b|\boe\b|please describe|"
@@ -189,6 +191,15 @@ _ANCHOR_TAG = re.compile(r"\bANCHOR\b", re.I)
 _ENTRY_PROMPT = re.compile(r"^\s*(?:Fill\s+in|Enter|Record)\b", re.I)
 # "[0-100]", "[0-1,000]" — a pure number range, nothing else in the bracket.
 _NUMBER_RANGE = re.compile(r"(\d[\d,]*)\s*-\s*(\d[\d,]*)")
+# "[0-1000, WHOLE NUMBER]", "[0-100 RESPONSE, WHOLE NUMBER]", "[0-100%]": the
+# range plus how to type it. Only these words — "[0-100, MUST SUM TO 100%]"
+# is a total, not a single number.
+_NUMBER_RANGE_STATED = re.compile(
+    r"(?:(?:ENTER\s+)?(?:A\s+)?(?:NUMBER|RANGE|VALUE)\s*:?\s*)?"
+    r"(\d[\d,]*)\s*-\s*(\d[\d,]*)\s*%?\s*(?:RESPONSE)?\s*"
+    r"(?:,?\s*(?:WHOLE\s+NUMBERS?|INTEGERS?|NUMERIC|NUMBERS?\s+ONLY))?\s*",
+    re.I,
+)
 # Empty table cells at either end of a serialized row: "label |  | ".
 _EMPTY_CELLS = re.compile(r"^(?:\s*\|)+\s*|(?:\s*\|)+\s*$")
 
@@ -1142,8 +1153,14 @@ def parse_prose_question(
         any(_ENTRY_PROMPT.match(d) for d in directives)
         or fields.qtype is QuestionType.OPEN_TEXT
     )
-    span = next((m for d in directives if (m := _NUMBER_RANGE.fullmatch(d.strip()))), None)
-    if entry and span and not fields.options and fields.qtype in (None, QuestionType.OPEN_TEXT):
+    span = next((m for d in directives if (m := _NUMBER_RANGE_STATED.fullmatch(d.strip()))), None)
+    # "What is your age? [ENTER NUMBER 1-100]": already a number, and the
+    # range is its limits.
+    if span and not fields.options and fields.qtype is QuestionType.NUMERIC and not fields.bounds:
+        entry = True
+    if entry and span and not fields.options and fields.qtype in (
+        None, QuestionType.OPEN_TEXT, QuestionType.NUMERIC
+    ):
         low, high = (int(g.replace(",", "")) for g in span.groups())
         if low < high:
             fields.qtype = QuestionType.NUMERIC

@@ -289,9 +289,34 @@ def numeric_without_range(q: Question, by_qid: dict[str, Question]) -> list[Issu
     return [Issue("NUMERIC_NO_RANGE", f"{q.qid} accepts any number: {why} (suggestion only)", why)]
 
 
+# --- Screen-out answer that can be ticked with others ------------------------
+def terminating_answer_not_exclusive(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
+    """ "None of the above [ANCHOR, TERMINATE]" in a select-all question, not
+    exclusive: a respondent can tick it with real answers, and is then screened
+    out for an answer they contradicted."""
+    if q.type is not QuestionType.MULTI or q.terminate_if is None:
+        return []
+    screened = set()
+    if q.terminate_if.op == "in" and q.terminate_if.qid == q.qid:
+        screened = set(q.terminate_if.values or [])
+    # Only an opt-out ("None of the above", "Don't know", "No, I am not …"):
+    # a screening industry ("Advertising") is ticked WITH others by design.
+    loose = [o for o in q.options or [] if o.code in screened and not o.exclusive
+             and (_OPT_OUT.search(o.label or "") or re.match(r"\s*no\b", o.label or "", re.I))]
+    if not loose or len(loose) == len(q.options or []):
+        return []
+    return [Issue(
+        "TERMINATING_ANSWER_NOT_EXCLUSIVE",
+        f"{q.qid} screens out on {', '.join(str(o.code) for o in loose)} in a select-all list, "
+        "but those answers are not exclusive - a respondent can tick them with others",
+        "; ".join(o.label[:40] for o in loose),
+    )]
+
+
 _WARNINGS = (
     hidden_variable, select_all_on_single, directive_names_missing_code,
     conditional_wording_dropped, note_as_answer, renamed_duplicate, odd_qid,
+    terminating_answer_not_exclusive,
 )
 
 

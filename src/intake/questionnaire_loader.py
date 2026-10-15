@@ -59,6 +59,9 @@ class DocumentBlock:
     #: an ITEM rather than a sentence, and on the three real client documents it
     #: separates the answer list from the scripter notes sitting beside it.
     is_list_item: bool = False
+    #: The number Word draws in front of an auto-numbered paragraph ("2",
+    #: "Q2.", "a)"), as the reader sees it; None when it has none.
+    list_label: str | None = None
 
 
 @dataclass
@@ -128,6 +131,12 @@ _NOTE_RE = re.compile(r"^\s*SCRIPTER\s*NOTE\b", re.IGNORECASE)
 # the colon form was accepted, so that question, its answers and the next two
 # headings were swallowed into the question above it and never asked.
 _BASE_TAG_RE = re.compile(r"^\s*\[\s*BASE\b(?:\s*[:\-]|\s+)", re.IGNORECASE)
+
+# "Thank you! We appreciate your input!" — the end screen, not one more answer.
+_CLOSING = re.compile(r"^\s*(?:thank\s+you|thanks)\b.{0,120}$", re.I)
+
+# A Word list number drawn as a plain number: "7", "7.", "7)", "Q7.".
+_LIST_NUMBER = re.compile(r"^\s*Q?(\d{1,3})\s*[.)]?\s*$", re.I)
 
 # A section heading in an unnumbered document: ALL CAPS, two or more words.
 _CAPS_HEADING = re.compile(
@@ -335,10 +344,16 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
     para_map = {p._p: p for p in document.paragraphs}
     table_map = {t._tbl: t for t in document.tables}
 
+    from src.intake.word_numbering import ListNumbering
+
+    numbering = ListNumbering(document)
     for child in body.iterchildren():
         if child in para_map:
             para: Paragraph = para_map[child]
             text, removed = live_text(para)
+            # Advanced for every paragraph Word still numbers — an empty one
+            # included — and not for one deleted outright.
+            list_label = numbering.label(para) if (text or not removed) else None
             if not text:
                 # A line that is ENTIRELY struck out is gone from the survey —
                 # in the Vivo wave-2 document that is a whole question, which
@@ -359,6 +374,7 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
                     is_heading=is_heading,
                     removed=removed,
                     is_list_item=is_list_item,
+                    list_label=list_label,
                 )
             )
             para_index += 1
@@ -653,6 +669,27 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
     # reviewer can match back to the document they are reading.
     base_tags_open = _is_unnumbered(blocks)
     base_counter = 0
+    # Word list numbers, when the questions carry them: the document's own
+    # names. `listed` is the last one seen; `extra` counts unlisted questions
+    # after it (named Q5_2, Q5_3 rather than stealing Q6 from the next one).
+    listed: int | None = None
+    extra = 0
+
+    def next_qid(block: DocumentBlock) -> str:
+        nonlocal base_counter, listed, extra
+        number = _LIST_NUMBER.match(block.list_label or "")
+        if number:
+            listed, extra = int(number.group(1)), 0
+            return f"Q{listed}"
+        lettered = _LETTERED.match(block.text or "")
+        if listed is not None and lettered:
+            # "A. Thinking about…" under item 7 is 7a, as a reader cites it.
+            return f"Q{listed}{block.text.strip()[0].lower()}"
+        if listed is not None:
+            extra += 1
+            return f"Q{listed}_{extra + 1}"
+        base_counter += 1
+        return f"Q{base_counter}"
 
     def flush() -> None:
         if not current:
@@ -696,15 +733,15 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
         is_boundary, qid = _detect_label(block.text, base_tags_open)
         if (
             not is_boundary and base_tags_open and current
-            and current[-1].block_type == "table" and _CAPS_HEADING.match(block.text or "")
+            and current[-1].block_type == "table"
+            and (_CAPS_HEADING.match(block.text or "") or _CLOSING.match(block.text or ""))
         ):
             # "PRODUCT X PROFILE" after an answer table: a section heading, not
             # one more answer. Read as answers, it and the next heading were
             # offered to respondents as choices.
             is_boundary = True
         if is_boundary and qid is None and base_tags_open and _BASE_TAG_RE.match(block.text):
-            base_counter += 1
-            qid = f"Q{base_counter}"
+            qid = next_qid(block)
         elif (
             not is_boundary and base_tags_open and current and _asks_a_question(block)
             and (current[-1].block_type == "table" or _LETTERED.match(block.text))
@@ -717,8 +754,17 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
             # after one starts the next — a scripter reads it that way. Without
             # this, the TRD referrer study's settings question rode inside the
             # previous single-choice question and was never asked.
-            base_counter += 1
-            is_boundary, qid = True, f"Q{base_counter}"
+            is_boundary, qid = True, next_qid(block)
+        elif (
+            not is_boundary and base_tags_open and listed is not None
+            and (number := _LIST_NUMBER.match(block.list_label or ""))
+            and int(number.group(1)) == listed + 1
+        ):
+            # The next number of the question list ("15  Please describe why
+            # you…", "7  For the following questions…"): a question, even with
+            # no base tag and no question mark. Only the NEXT number: an answer
+            # list numbered "1. Yes / 2. No" never continues the question list.
+            is_boundary, qid = True, next_qid(block)
         if is_boundary:
             carried = _trailing_routing_directives(current)
             flush()

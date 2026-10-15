@@ -82,6 +82,7 @@ from src.engines.questionnaire.reconciler import reconcile_segmentation
 from src.engines.questionnaire.relative_bases import resolve_relative_bases
 from src.engines.questionnaire.section_paths import (
     apply_intro_screens,
+    apply_section_bases,
     apply_section_paths,
 )
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
@@ -92,7 +93,11 @@ from src.engines.questionnaire.study_understanding import (
     understand_study,
 )
 from src.engines.questionnaire.swallowed_options import repair_swallowed_options
-from src.engines.questionnaire.table_questions import labelled_sections, question_from_tables
+from src.engines.questionnaire.table_questions import (
+    entry_table,
+    labelled_sections,
+    question_from_tables,
+)
 from src.engines.questionnaire.trade_off import apply as flag_trade_offs
 from src.engines.questionnaire.verification import (
     covers_the_question,
@@ -544,6 +549,31 @@ def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Ques
     )
 
 
+_MAKE_EXCLUSIVE = re.compile(
+    r"\bmake\s+(\d{1,3}(?:\s*(?:,|and|&)\s*\d{1,3})*)\s+exclusive\b"
+    r"|\bexclusive\s*:?\s*(\d{1,3}(?:\s*(?:,|and|&)\s*\d{1,3})*)",
+    re.I,
+)
+
+
+def _limits_and_exclusives_from_cells(question: Question, fields: SpecTableFields) -> None:
+    """ "Q type: Custom >>> Multi-select up to 3" and "Other details: Make 99
+    exclusive" state an answer cap and an exclusive answer; both were read
+    for the type only and the rest dropped."""
+    from src.engines.questionnaire.select_limits import read_limits
+
+    stated = " ".join(filter(None, [fields.evidence.get("type"), fields.notes]))
+    limits = read_limits(stated) or {}
+    if limits.get("max_select") and question.type is QuestionType.MULTI:
+        question.validation = {**(question.validation or {}),
+                               "max_select": limits["max_select"]}
+    codes = {int(c) for m in _MAKE_EXCLUSIVE.finditer(fields.notes or "")
+             for c in re.findall(r"\d+", m.group(1) or m.group(2))}
+    for option in question.options or []:
+        if option.code in codes:
+            option.exclusive = True
+
+
 def _extract_via_spec_table(
     chunk: QuestionChunk,
     fields: SpecTableFields,
@@ -565,6 +595,7 @@ def _extract_via_spec_table(
     )
     question = _question_from_fields(fields, chunk)
     question.show_if = fields.show_if
+    _limits_and_exclusives_from_cells(question, fields)
     # Fields read straight from the table are not model guesses.
     confidence = {"text": 1.0, "type": 1.0, "options": 1.0, "routing": 1.0}
     if filled_from_datamap:
@@ -694,6 +725,19 @@ def _apply_table_shape(question: Question, chunk: QuestionChunk) -> None:
     tables = [b.rows for b in chunk.source_blocks if b.rows]
     if not tables:
         return
+    entry = next((found for t in tables if (found := entry_table(t))), None)
+    if entry is not None and question.type is not QuestionType.GRID_SINGLE:
+        rows, percent = entry
+        question.type = QuestionType.NUMERIC
+        question.rows, question.options, question.cols = rows, [], None
+        if percent:
+            question.validation = {**(question.validation or {}), "min": 0, "max": 100}
+        question.extraction_evidence["options"] = (
+            f"{len(rows)} rows to fill in{' (a percentage each)' if percent else ''}"
+        )
+        if schema.FLAG_EMPTY_OPTIONS in question.flags:
+            question.flags.remove(schema.FLAG_EMPTY_OPTIONS)
+        return
     shape = question_from_tables(tables, list(question.options))
     if shape is None:
         return
@@ -808,7 +852,53 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     if question.type is QuestionType.GRID_SINGLE and question.validation:
         for key in ("min_select", "max_select"):
             question.validation.pop(key, None)
+    _codes_from_list_numbers(question, chunk)
     return question
+
+
+_WORD_CODE = re.compile(r"^\s*(\d{1,3})\s*[.)]?\s*$")
+
+
+def _answer_key(text: str) -> str:
+    return " ".join(re.sub(r"\[[^\]]*\]", " ", text or "").lower().split())
+
+
+def _codes_from_list_numbers(question: Question, chunk: QuestionChunk) -> None:
+    """Answer codes as the document prints them, when Word draws them.
+
+    "Don't Know" numbered 99 by Word's list numbering is code 99 in the data;
+    counting the lines made it 6, and a tab of "Don't Know" read an empty
+    column. Applied only when EVERY answer carries a distinct printed number;
+    the question's own screen-out moves with the codes it names.
+    """
+    options = question.options or []
+    if not options:
+        return
+    printed: dict[str, int] = {}
+    for block in chunk.source_blocks:
+        number = _WORD_CODE.match(block.list_label or "")
+        if number and block.block_type != "table":
+            printed.setdefault(_answer_key(block.text), int(number.group(1)))
+    mapping = {o.code: printed.get(_answer_key(o.label)) for o in options}
+    codes = list(mapping.values())
+    if None in codes or len(set(codes)) != len(codes) or all(k == v for k, v in mapping.items()):
+        return
+    for option in options:
+        option.code = mapping[option.code]
+
+    def move(expr: Expression | None) -> None:
+        if expr is None:
+            return
+        if expr.qid == question.qid:
+            if expr.values:
+                expr.values = [mapping.get(v, v) for v in expr.values]
+            if expr.op in ("eq", "selected") and isinstance(expr.value, int):
+                expr.value = mapping.get(expr.value, expr.value)
+        for child in expr.children or []:
+            move(child)
+
+    move(question.terminate_if)
+    question.extraction_evidence["codes"] = "the numbers Word prints beside each answer"
 
 
 def _rebuild_table_rows(source_text: str) -> list[list[str]]:
@@ -1533,6 +1623,9 @@ def extract_survey_definition(
     # the base for questions in OTHER chunks, so it can only be applied now that
     # the whole survey exists. Also emits the path as a HID_ variable.
     apply_section_paths(survey)
+    # "BUBBLE CRM INTRODUCTION & SCREENER (S0=2)": a heading that gates the
+    # questions under it.
+    apply_section_bases(survey)
     apply_intro_screens(survey)
     # "Q2a. ever heard of? | Q2b. Ever purchased from?" across one brand list is
     # two questions, not one grid allowing a single answer per brand.
