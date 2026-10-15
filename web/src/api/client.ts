@@ -415,6 +415,19 @@ export interface QuestionnaireStatus {
   study_understanding?: StudyUnderstanding | null
   qa?: QARecord | null
   logic_review?: LogicReview | null
+  decoding?: Decoding | null
+}
+
+/** How the document was read: skills used, what none could read, what to teach. */
+export interface Decoding {
+  verdict: 'familiar' | 'unfamiliar'
+  questions: number
+  read_by_skills: number
+  read_share: number
+  format?: string | null
+  skills: { key: string; name: string; questions: number; examples: string[] }[]
+  not_read: string[]
+  teach: { fragment: string; questions: number; examples: string[]; suggest: string }[]
 }
 
 export interface LogicReview {
