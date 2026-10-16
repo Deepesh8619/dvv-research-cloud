@@ -52,9 +52,13 @@ _LABEL_WS_RE = re.compile(r"\s+")
 _LABEL_INSERT_RE = re.compile(r"\[[^\]]*\]")
 
 
+_OTHER_SPECIFY_RE = re.compile(r"^other\b[^a-z]*(?:\(?\s*(?:please\s+)?specify\b.*)?$", re.I)
+
+
 def _norm_label(label: str | None) -> str:
-    plain = _LABEL_INSERT_RE.sub(" ", label or "")
-    return _LABEL_WS_RE.sub(" ", plain.strip()).casefold()
+    plain = _LABEL_WS_RE.sub(" ", _LABEL_INSERT_RE.sub(" ", label or "").strip()).casefold()
+    # "Other (Specify)" in the document, "Other (please specify):" in the script.
+    return "other (specify)" if _OTHER_SPECIFY_RE.match(plain) else plain
 
 
 # Below this, a "match" is more likely to be a coincidence (a lone "Yes") than

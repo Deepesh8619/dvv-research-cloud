@@ -876,3 +876,33 @@ def test_loop_tick_boxes_take_their_codes_from_the_column_name(tmp_path):
         datamap=_datamap([(n, {0: "Unchecked", 1: "Checked"}) for n in names]),
     )
     assert not [f for f in report.findings if f.kind == "undeclared_code"]
+
+
+def test_a_masked_grid_is_checked_by_its_rows(tmp_path):
+    """Rows of Q2 are the brands chosen at Q1; the cells hold ratings, not codes."""
+    import polars as pl
+
+    grid = Question(qid="Q2", text="Rate each", type=QuestionType.GRID_SINGLE,
+                    rows=[Option(code=c, label=f"Brand {c}") for c in (1, 2, 3)],
+                    validation=_masked("selected").validation)
+    path = tmp_path / "grid_mask.parquet"
+    pl.DataFrame({
+        "Q1r1": [1, 1, 0], "Q1r2": [0, 0, 0], "Q1r3": [0, 0, 0],
+        "Q2r1": [5, 4, None], "Q2r2": [None, 3, None], "Q2r3": [None, None, 2],
+    }).write_parquet(path)  # row 2 rated brand 2 it never chose; row 3 chose nothing
+    links = [QuestionVariableLink(qid="Q1", variable_names=["Q1r1", "Q1r2", "Q1r3"]),
+             QuestionVariableLink(qid="Q2", variable_names=["Q2r1", "Q2r2", "Q2r3"])]
+    report = check_against_questionnaire(_survey([_AWARE, grid]), links, path)
+    finding = next(f for f in report.findings if f.kind == "mask_violated")
+    assert finding.example_rows == [2, 3]
+
+
+def test_a_masked_question_with_its_own_list_does_not_borrow_the_source_list():
+    from src.engines.qc.discrepancy import _borrowed_codes
+
+    own = _masked("selected")  # prints Brand 1-3 and filters them by Q1
+    source = Question(qid="Q1", text="Aware", type=QuestionType.MULTI,
+                      options=[Option(code=c, label=f"Brand {c}") for c in range(1, 21)])
+    assert _borrowed_codes(own, {"Q1": source}) == set()
+    own.options = []
+    assert _borrowed_codes(own, {"Q1": source}) == set(range(1, 21))

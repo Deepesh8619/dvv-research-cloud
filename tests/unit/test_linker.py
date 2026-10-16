@@ -334,3 +334,28 @@ def test_a_condition_on_one_grid_row_is_checked_against_that_row(tmp_path):
     [result] = [r for r in cross_validate_routing(
         SurveyDefinition(study_id="s", questions=[grid, follow]), links, path) if r.qid == "F"]
     assert result.checked and result.n_outside_base == 1  # row 2 answered 1 on record 2
+
+
+def test_a_grid_stored_cell_by_cell_links_to_all_its_cells():
+    from src.core.models import DataMap, Variable
+    from src.core.survey_definition import Option, Question, QuestionType, SurveyDefinition
+    from src.engines.questionnaire.linker import link_questions_to_datamap
+
+    q = Question(qid="Q14", text="Which types?", type=QuestionType.GRID_SINGLE,
+                 rows=[Option(code=1, label="A"), Option(code=2, label="B")])
+    dm = DataMap(variables=[Variable(name=n, label="x") for n in
+                            ("Q14r2c1", "Q14r1c10", "Q14r1c1", "Q14a")])
+    links = link_questions_to_datamap(SurveyDefinition(study_id="s", questions=[q]), dm).links
+    assert links[0].variable_names == ["Q14r1c1", "Q14r1c10", "Q14r2c1"]
+
+
+def test_a_question_does_not_take_the_column_of_the_next_lettered_question():
+    from src.core.models import DataMap, Variable
+    from src.core.survey_definition import Question, QuestionType, SurveyDefinition
+    from src.engines.questionnaire.linker import link_questions_to_datamap
+
+    qs = [Question(qid=q, text=q, type=QuestionType.SINGLE) for q in ("Q7", "Q7a")]
+    dm = DataMap(variables=[Variable(name="Q7_1", label="x"), Variable(name="Q7a", label="y")])
+    links = {link.qid: link.variable_names for link in link_questions_to_datamap(
+        SurveyDefinition(study_id="s", questions=qs), dm).links}
+    assert links == {"Q7": ["Q7_1"], "Q7a": ["Q7a"]}

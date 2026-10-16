@@ -42,7 +42,7 @@ from src.core.survey_definition import (
     evaluate,
 )
 from src.engines.qc.variable_roles import find_companions
-from src.engines.questionnaire.linker import _answered, _read_rows, _row_value
+from src.engines.questionnaire.linker import _answered, _grid_answer, _read_rows, _row_value
 
 # How many offending row numbers to keep per finding. Enough to start looking,
 # not so many that a systematically broken column produces a megabyte of noise.
@@ -278,7 +278,9 @@ def _borrowed_codes(question: Question, by_qid: dict) -> set[int]:
         if span:
             codes |= set(range(int(span.group(1)), int(span.group(2)) + 1))
         source = by_qid.get(mask.get("source_qid") or "")
-        if source is not None:
+        # A question printing its own list ("SHOW CORE BRANDS … ONLY THOSE
+        # AWARE AT Q2a") filters it; only a list-less one takes the source's.
+        if source is not None and not question.options:
             codes |= {o.code for o in source.options or []}
     return codes
 
@@ -731,9 +733,20 @@ def check_against_questionnaire(
             counts["mask"] += 1
             other = exclude_question if mode == "list_except" else source_question
             same_answer = _same_answer_codes(question, other)
+            grid_rows = (question.type is QuestionType.GRID_SINGLE
+                         and all(_PUNCH_CODE.search(v) for v in variables))
+            if grid_rows:
+                same_answer = _same_answer_codes(
+                    Question(qid=qid, text="", type=QuestionType.MULTI,
+                             options=list(question.rows or [])), other)
             hits = []
             for index, row in enumerate(rows, start=1):
-                shown = set(_selected_codes(row, variables, question)) - set(system_codes)
+                if grid_rows:
+                    # A masked GRID shows the chosen ROWS; the answers in them
+                    # are ratings, not codes of the source list.
+                    shown = set(_grid_answer(row, variables) or ()) - set(system_codes)
+                else:
+                    shown = set(_selected_codes(row, variables, question)) - set(system_codes)
                 if not shown:
                     continue  # never answered this question
                 shown = {same_answer.get(code, code) for code in shown}
@@ -742,9 +755,11 @@ def check_against_questionnaire(
                     if shown & barred:
                         hits.append(index)
                     continue
-                chosen = set(_selected_codes(row, source_vars, source_question))
-                if not chosen:
+                if not _answered(row, source_vars):
                     continue  # never answered the source; nothing to mask against
+                # Answered it but chose none of the list: nothing could be shown,
+                # so any answer here is outside the mask (Vivo Q18a).
+                chosen = set(_selected_codes(row, source_vars, source_question))
                 # `selected` may only hold what they chose there; `not_selected`
                 # may hold only what they did NOT. Both are the same question
                 # asked from opposite sides.

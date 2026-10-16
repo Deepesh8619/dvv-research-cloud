@@ -124,3 +124,10 @@ def test_inferred_codes_are_never_translated():
     links = LinkReport(links=[QuestionVariableLink(qid="Q9", variable_names=["Q9"])])
     assert questionnaire_to_data_codes(SurveyDefinition(study_id="s", questions=[q]),
                                        dm, links) == {}
+
+
+def test_other_specify_wordings_are_one_answer():
+    from src.engines.questionnaire.label_merge import _norm_label
+
+    assert _norm_label("Other (Specify)") == _norm_label("Other (please specify):")
+    assert _norm_label("Other brand") != _norm_label("Other (Specify)")

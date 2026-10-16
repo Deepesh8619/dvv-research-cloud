@@ -36,6 +36,7 @@ from rapidfuzz import fuzz
 from src.core.models import DataMap
 from src.core.survey_definition import (
     Question,
+    QuestionType,
     QuestionVariableLink,
     SurveyDefinition,
     evaluate,
@@ -140,7 +141,7 @@ def _stem(name: str) -> str:
 
 
 def _match_by_name(
-    question: Question, remaining: dict[str, str]
+    question: Question, remaining: dict[str, str], reserved: set[str] = frozenset()
 ) -> tuple[list[str], str, float] | None:
     """Try tiers 1-2 (exact, then normalized/suffix) for one question.
 
@@ -169,7 +170,10 @@ def _match_by_name(
     # One qid claims EVERY remaining variable that reduces to its stem. This is
     # "fuzzy" because the variable name is not identical to the qid (a suffix
     # had to be stripped to see the relationship).
-    stem_hits = [orig for norm, orig in remaining.items() if _stem(orig) == qnorm]
+    # A column named after ANOTHER question (Q14a) is that question's, not a
+    # sub-variable of Q14 — Q14 comes first in the document and took it.
+    stem_hits = [orig for norm, orig in remaining.items()
+                 if _stem(orig) == qnorm and norm not in reserved]
     if stem_hits:
         return stem_hits, "fuzzy", 1.0
 
@@ -204,6 +208,25 @@ def _match_by_label(
     if best_name is not None and best_score >= LABEL_MATCH_THRESHOLD:
         return [best_name], "fuzzy", round(best_score / 100.0, 4)
     return None
+
+
+def _match_grid_cells(
+    question: Question, remaining: dict[str, str]
+) -> tuple[list[str], str, float] | None:
+    """A grid stored cell by cell: Q14r<row>c<column>.
+
+    Unlinked, each row was rebuilt from the data map as a question of its own
+    (Q14r2) with the column numbers read as answer codes — 13 false "value not
+    scripted" findings on one study.
+    """
+    if question.type is not QuestionType.GRID_SINGLE:
+        return None
+    pattern = re.compile(rf"^{re.escape(question.qid)}r(\d+)c(\d+)$", re.I)
+    hits = [((int(m.group(1)), int(m.group(2))), name) for name in remaining.values()
+            if (m := pattern.match(name))]
+    if not hits:
+        return None
+    return [name for _, name in sorted(hits)], "exact", 0.95
 
 
 def _match_split_column(
@@ -277,6 +300,7 @@ def link_questions_to_datamap(
 
     # normalized-name -> original-name, for every unclaimed variable.
     remaining: dict[str, str] = {_normalize(v.name): v.name for v in datamap.variables}
+    qids = {_normalize(q.qid) for q in survey.questions}
 
     for qid in survey.question_order():
         if qid not in survey:
@@ -286,7 +310,8 @@ def link_questions_to_datamap(
         # Its own columns first: a script may keep both the split questions
         # (Q2ar*, Q2br*) and the grid they came from (Q2r*c*).
         match = (
-            _match_by_name(question, remaining)
+            _match_grid_cells(question, remaining)
+            or _match_by_name(question, remaining, reserved=qids - {_normalize(qid)})
             or _match_loop_columns(question, remaining)
             or _match_split_column(question, survey, remaining)
             or _match_by_label(question, datamap, remaining)
