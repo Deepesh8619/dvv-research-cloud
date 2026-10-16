@@ -317,10 +317,21 @@ def recover_missing(
     """
     questions: list[Question] = []
     links: list[QuestionVariableLink] = []
+    split_grids = {
+        (q.extraction_evidence or {}).get("split_from") for q in survey.questions
+    } - {None}
+    grid_cell = re.compile(
+        rf"^({'|'.join(map(re.escape, split_grids))})r\d+c\d+$", re.I
+    ) if split_grids else None
     for candidate in reconcile(survey, datamap).missing_from_questionnaire:
-        if linked and {v.name for v in candidate.variables} <= linked:
+        names = {v.name for v in candidate.variables}
+        if linked and names <= linked:
             # Its columns already belong to an extracted question (Q2r5c1 is
             # Q2a's): rebuilding it would check the same data twice, wrongly.
+            continue
+        if grid_cell and all(grid_cell.match(n) for n in names):
+            # The grid Q2a/Q2b were split from, kept by the script beside
+            # their own columns: a copy of questions we already have.
             continue
         questions.append(rebuild_question(candidate))
         links.append(

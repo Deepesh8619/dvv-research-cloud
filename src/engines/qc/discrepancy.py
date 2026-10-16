@@ -347,13 +347,86 @@ def _datamap_codes(
         # and its value labels are only {0: Unchecked, 1: Checked}. Reading
         # just the value labels made every punch beyond 1 look unscripted.
         suffix = name[len(qid):].lstrip("rR") if qid and name.startswith(qid) else ""
-        if suffix.isdigit():
+        # A loop pass (Q6_1 stored as Q6_Lr1r3) does not start with its qid;
+        # a 0/1 tick box still names its code in the r<code> ending.
+        punch = _PUNCH_CODE.search(name)
+        tick = (punch and len(variables) > 1
+                and set((variable.values or {}).keys()) <= {0, 1})
+        if suffix.isdigit() or tick:
             described = True
-            codes.add(int(suffix))
+            codes.add(int(suffix) if suffix.isdigit() else int(punch.group(1)))
         elif variable.values:
             described = True
             codes |= set(variable.values.keys())
     return codes if described else None
+
+
+def _same_answer_codes(question: Question, source: Question) -> dict[int, int]:
+    """This question's code -> the source's code for the same answer, by label.
+
+    A masked list is often renumbered: Q6 shows the core brands as 1-10 while
+    Q2a, the list it is masked from, numbers the same brands 1, 5, 14, ...
+    Comparing raw codes blamed 933 respondents for answers they did give.
+    """
+    def key(label: str) -> str:
+        return " ".join(re.sub(r"[^a-z0-9]+", " ", (label or "").lower()).split())
+
+    by_label = {key(o.label): o.code for o in source.options or [] if key(o.label)}
+    return {o.code: by_label[key(o.label)] for o in question.options or []
+            if key(o.label) in by_label}
+
+
+def _answer_rules(question: Question, variables: list[str], rows: list[dict],
+                  report: DiscrepancyReport, counts: dict) -> None:
+    """Rules the questionnaire states about a respondent's own answers.
+
+    An exclusive answer ticked with others, more answers than "select up to N"
+    allows, number boxes that miss the stated total. Each is exact: the rule is
+    printed in the document and the data either keeps it or not.
+    """
+    validation = question.validation or {}
+    tick_boxes = len(variables) > 1 and all(_PUNCH_CODE.search(v) for v in variables)
+    if question.type is QuestionType.MULTI and tick_boxes:
+        exclusive = {o.code for o in question.options or [] if o.exclusive}
+        if exclusive:
+            counts["exclusive"] += 1
+            hits = [i for i, row in enumerate(rows, start=1)
+                    if (chosen := set(_selected_codes(row, variables, question))) & exclusive
+                    and len(chosen) > 1]
+            if hits:
+                labels = [o.label for o in question.options if o.code in exclusive]
+                report.findings.append(Discrepancy(
+                    qid=question.qid, kind="exclusive_violated", severity="error",
+                    detail=(f"{question.qid}: \u201c{labels[0]}\u201d is exclusive, but some "
+                            "respondents ticked it together with other answers."),
+                    n_rows=len(hits), variables=variables, example_rows=hits[:MAX_EXAMPLES],
+                ))
+        cap = validation.get("max_select")
+        if isinstance(cap, int) and cap > 0:
+            counts["max_select"] += 1
+            hits = [i for i, row in enumerate(rows, start=1)
+                    if len(_selected_codes(row, variables, question)) > cap]
+            if hits:
+                report.findings.append(Discrepancy(
+                    qid=question.qid, kind="too_many_answers", severity="error",
+                    detail=f"{question.qid} allows up to {cap} answers; some gave more.",
+                    n_rows=len(hits), variables=variables, example_rows=hits[:MAX_EXAMPLES],
+                ))
+    total = validation.get("sum")
+    if isinstance(total, (int, float)) and len(variables) > 1:
+        counts["sum"] += 1
+        hits = []
+        for i, row in enumerate(rows, start=1):
+            values = [_as_number(row.get(v)) for v in variables]
+            values = [v for v in values if v is not None]
+            if values and abs(sum(values) - total) > 0.5:
+                hits.append(i)
+        if hits:
+            report.findings.append(Discrepancy(
+                qid=question.qid, kind="sum_not_total", severity="error",
+                detail=f"{question.qid}'s boxes must add up to {_bound_text(total)}; some do not.",
+                n_rows=len(hits), variables=variables, example_rows=hits[:MAX_EXAMPLES],
+            ))
 
 
 def check_against_questionnaire(
@@ -396,6 +469,9 @@ def check_against_questionnaire(
         "terminate": 0,
         "mask": 0,
         "pipe": 0,
+        "exclusive": 0,
+        "max_select": 0,
+        "sum": 0,
     }
     companions = find_companions(datamap) if datamap is not None else {}
 
@@ -538,6 +614,8 @@ def check_against_questionnaire(
                     )
                 )
 
+        _answer_rules(question, variables, rows, report, counts)
+
         if question.type is QuestionType.SINGLE and len(variables) > 1:
             held = {_as_number(row.get(v)) for row in rows for v in variables} - {None}
             if not held <= {0.0, 1.0}:
@@ -651,11 +729,14 @@ def check_against_questionnaire(
                 )
                 continue
             counts["mask"] += 1
+            other = exclude_question if mode == "list_except" else source_question
+            same_answer = _same_answer_codes(question, other)
             hits = []
             for index, row in enumerate(rows, start=1):
                 shown = set(_selected_codes(row, variables, question)) - set(system_codes)
                 if not shown:
                     continue  # never answered this question
+                shown = {same_answer.get(code, code) for code in shown}
                 if mode == "list_except":
                     barred = set(_selected_codes(row, exclude_vars, exclude_question))
                     if shown & barred:

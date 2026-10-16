@@ -283,3 +283,54 @@ def test_split_grid_questions_link_to_their_own_column():
     links = {link.qid: link.variable_names for link in link_questions_to_datamap(
         SurveyDefinition(study_id="s", questions=parts), dm).links}
     assert links == {"Q2a": ["Q2r1c1", "Q2r2c1"], "Q2b": ["Q2r1c2", "Q2r2c2"]}
+
+
+def test_split_questions_prefer_their_own_columns_over_the_source_grid():
+    """Bubble keeps both Q2r*c* and Q2ar*: the grid copy hid Q2a's exclusive rule."""
+    from src.core.models import DataMap, Variable
+    from src.core.survey_definition import Question, QuestionType, SurveyDefinition
+    from src.engines.questionnaire.datamap_recovery import recover_missing
+    from src.engines.questionnaire.linker import link_questions_to_datamap
+
+    parts = [Question(qid="Q2a", text="Aware", type=QuestionType.MULTI,
+                      extraction_evidence={"split_from": "Q2"})]
+    dm = DataMap(variables=[Variable(name=n, label="Brand") for n in
+                            ("Q2r1c1", "Q2r2c1", "Q2ar1", "Q2ar2")])
+    survey = SurveyDefinition(study_id="s", questions=parts)
+    links = link_questions_to_datamap(survey, dm).links
+    assert {link.qid: link.variable_names for link in links} == {"Q2a": ["Q2ar1", "Q2ar2"]}
+    linked = {n for link in links for n in link.variable_names}
+    recovered, _ = recover_missing(survey, dm, linked=linked)
+    assert not any(q.qid.upper().startswith("Q2R") for q in recovered)
+
+
+def test_a_loop_pass_links_to_its_loop_columns_not_the_other_specify_text():
+    from src.core.models import DataMap, Variable
+    from src.core.survey_definition import Question, QuestionType, SurveyDefinition
+    from src.engines.questionnaire.linker import link_questions_to_datamap
+
+    q = Question(qid="Q6_2", text="Which brands have you used?", type=QuestionType.MULTI,
+                 validation={"loop": {"of": "Q6", "index": 2}})
+    dm = DataMap(variables=[Variable(name=n, label="Which brands have you used?")
+                            for n in ("Q6_Lr1r1", "Q6_Lr2r10", "Q6_Lr2r2", "Q6_Lr2r98oe")])
+    links = link_questions_to_datamap(SurveyDefinition(study_id="s", questions=[q]), dm).links
+    assert links[0].variable_names == ["Q6_Lr2r2", "Q6_Lr2r10"]
+
+
+def test_a_condition_on_one_grid_row_is_checked_against_that_row(tmp_path):
+    """Google Ads TRUST: asked if any platform row was rated 3-5; was read 0%."""
+    import polars as pl
+
+    from src.core.survey_definition import Expression, Question, QuestionType, SurveyDefinition
+    from src.engines.questionnaire.linker import QuestionVariableLink, cross_validate_routing
+
+    grid = Question(qid="G", text="Rate", type=QuestionType.GRID_SINGLE)
+    follow = Question(qid="F", text="Why?", type=QuestionType.SINGLE,
+                      show_if=Expression(op="in", qid="G", values=[3, 4, 5], row=2))
+    path = tmp_path / "grid.parquet"
+    pl.DataFrame({"Gr1": [1, 5, 4], "Gr2": [4, 1, 5], "F": [1, 1, 1]}).write_parquet(path)
+    links = [QuestionVariableLink(qid="G", variable_names=["Gr1", "Gr2"]),
+             QuestionVariableLink(qid="F", variable_names=["F"])]
+    [result] = [r for r in cross_validate_routing(
+        SurveyDefinition(study_id="s", questions=[grid, follow]), links, path) if r.qid == "F"]
+    assert result.checked and result.n_outside_base == 1  # row 2 answered 1 on record 2

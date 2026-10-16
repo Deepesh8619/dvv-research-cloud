@@ -281,3 +281,81 @@ def remap_data_codes(parquet_path: str | Path, remaps: dict[str, dict[int, int]]
     tmp.replace(parquet_path)
     logger.info("remapped codes in %d columns of %s", len(present), parquet_path.name)
     return len(present)
+
+
+# --- The other direction: questionnaire codes -> the script's codes ----------
+
+_TICK_CODE_RE = re.compile(r"r(\d+)$", re.I)
+
+
+def questionnaire_to_data_codes(
+    survey: SurveyDefinition, datamap: DataMap, links: LinkReport
+) -> dict[str, dict[int, int]]:
+    """Per question, {questionnaire code: data code}, joined by answer label.
+
+    Only for codes the SCRIPT wrote (SPSS, a data map sheet): those are never
+    renumbered, so the questionnaire is translated to them instead. A document
+    listing "Extremely familiar" first (code 1) checked against a script that
+    coded it 6 reported half of one study as answering outside its base.
+    Questions whose labels do not join unambiguously are left alone.
+    """
+    out: dict[str, dict[int, int]] = {}
+    for link in links.links:
+        if link.qid not in survey or not survey[link.qid].options:
+            continue
+        question = survey[link.qid]
+        data_by_label: dict[str, int] = {}
+        names = [n for n in link.variable_names if n in datamap]
+        if not names or any(datamap[n].provenance in INFERRED_PROVENANCES for n in names):
+            continue
+        if len(names) == 1:
+            for code, label in (datamap[names[0]].values or {}).items():
+                data_by_label.setdefault(_norm_label(label), int(code))
+        else:
+            for name in names:
+                code = _TICK_CODE_RE.search(name)
+                if code:
+                    data_by_label.setdefault(_norm_label(datamap[name].label), int(code.group(1)))
+        mapping: dict[int, int] = {}
+        for option in question.options:
+            target = data_by_label.get(_norm_label(option.label))
+            if target is not None:
+                mapping[option.code] = target
+        if len(mapping) < MIN_LABEL_MATCHES_TO_ALIGN or len(set(mapping.values())) != len(mapping):
+            continue
+        if any(old != new for old, new in mapping.items()):
+            out[question.qid] = mapping
+    return out
+
+
+def translate_to_data_codes(
+    survey: SurveyDefinition, mapping: dict[str, dict[int, int]]
+) -> SurveyDefinition:
+    """A COPY of the survey speaking the data's codes: answers, conditions,
+    screen-outs and answer conditions. The stored questionnaire is untouched."""
+    if not mapping:
+        return survey
+    copy = SurveyDefinition.from_json(survey.to_json())
+
+    def move(expr):
+        if expr is None:
+            return
+        table = mapping.get(expr.qid or "")
+        if table:
+            if expr.values:
+                expr.values = [table.get(v, v) for v in expr.values]
+            if expr.op in ("eq", "ne", "selected") and isinstance(expr.value, int):
+                expr.value = table.get(expr.value, expr.value)
+        for child in expr.children or []:
+            move(child)
+
+    for question in copy.questions:
+        table = mapping.get(question.qid, {})
+        for option in question.options or []:
+            option.code = table.get(option.code, option.code)
+            move(option.show_if)
+        for row in question.rows or []:
+            move(row.show_if)
+        move(question.show_if)
+        move(question.terminate_if)
+    return copy

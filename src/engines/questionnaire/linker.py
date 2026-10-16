@@ -234,6 +234,26 @@ def _match_split_column(
     return names, "exact", 0.95
 
 
+def _match_loop_columns(
+    question: Question, remaining: dict[str, str]
+) -> tuple[list[str], str, float] | None:
+    """Q6_4, the 4th pass of loop Q6, is stored by the script as Q6_Lr4r<code>.
+
+    Without this, the label matcher gave each pass its "Other, specify" text
+    column (Q6_Lr4r98oe) and nothing of the answers was checked.
+    """
+    loop = (question.validation or {}).get("loop") or {}
+    parent, index = loop.get("of"), loop.get("index")
+    if not parent or not isinstance(index, int):
+        return None
+    pattern = re.compile(rf"^{re.escape(parent)}_?Lr{index}r(\d+)$", re.I)
+    hits = [(int(m.group(1)), name) for name in remaining.values()
+            if (m := pattern.match(name))]
+    if not hits:
+        return None
+    return [name for _, name in sorted(hits)], "exact", 0.95
+
+
 def link_questions_to_datamap(
     survey: SurveyDefinition, datamap: DataMap
 ) -> LinkReport:
@@ -263,9 +283,12 @@ def link_questions_to_datamap(
             continue
         question = survey[qid]
 
+        # Its own columns first: a script may keep both the split questions
+        # (Q2ar*, Q2br*) and the grid they came from (Q2r*c*).
         match = (
-            _match_split_column(question, survey, remaining)
-            or _match_by_name(question, remaining)
+            _match_by_name(question, remaining)
+            or _match_loop_columns(question, remaining)
+            or _match_split_column(question, survey, remaining)
             or _match_by_label(question, datamap, remaining)
         )
         if match is None:
@@ -309,6 +332,9 @@ class RoutingValidation:
     #: False when the base could not be evaluated at all. `agreement_pct` is
     #: meaningless then, and a reader must not mistake it for a score.
     checked: bool = True
+    #: Respondents who answered although the base says they should not have —
+    #: reported even when it is one person, which no percentage flag shows.
+    n_outside_base: int = 0
 
 
 def _links_by_qid(
@@ -465,6 +491,10 @@ def cross_validate_routing(
         link = link_map[q.qid]
         refs = sorted(q.show_if.referenced_qids())
 
+        # A condition on ONE row of a grid ("GA_GOOGLE_TOOL row 3 = 3-5") reads
+        # that row's answer; given the list of filled rows instead, it matched
+        # nobody and every respondent "broke" the base.
+        by_row = _row_conditioned(q.show_if)
         answered_rows = 0
         agree = 0
         for row in rows:
@@ -472,7 +502,9 @@ def cross_validate_routing(
                 continue
             answered_rows += 1
             answers = {
-                ref: _row_value(row, link_map[ref].variable_names) for ref in refs
+                ref: (_grid_answer(row, link_map[ref].variable_names)
+                      if ref in by_row else _row_value(row, link_map[ref].variable_names))
+                for ref in refs
             }
             if evaluate(q.show_if, answers):
                 agree += 1
@@ -501,8 +533,32 @@ def cross_validate_routing(
         )
         results.append(
             RoutingValidation(
-                qid=q.qid, agreement_pct=pct, flagged=flagged, detail=detail
+                qid=q.qid, agreement_pct=pct, flagged=flagged, detail=detail,
+                n_outside_base=disagree,
             )
         )
 
     return results
+
+
+def _row_conditioned(expr) -> set[str]:
+    """Questions this condition tests one ROW of."""
+    out: set[str] = set()
+    if expr is None:
+        return out
+    if expr.row is not None and expr.qid:
+        out.add(expr.qid)
+    for child in expr.children or []:
+        out |= _row_conditioned(child)
+    return out
+
+
+def _grid_answer(row: dict, variable_names: list[str]) -> dict | None:
+    """{row code: answer} for a grid stored as <qid>r<row> columns."""
+    out = {}
+    for name in variable_names:
+        code = _PUNCH_SUFFIX.search(name)
+        value = row.get(name)
+        if code and value is not None:
+            out[int(code.group(1))] = value
+    return out or None
