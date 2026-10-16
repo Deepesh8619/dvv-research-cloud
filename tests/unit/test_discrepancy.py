@@ -906,3 +906,15 @@ def test_a_masked_question_with_its_own_list_does_not_borrow_the_source_list():
     assert _borrowed_codes(own, {"Q1": source}) == set()
     own.options = []
     assert _borrowed_codes(own, {"Q1": source}) == set(range(1, 21))
+
+
+def test_a_base_naming_a_missing_question_is_reported_as_not_checked(tmp_path):
+    from src.engines.questionnaire.schema import FLAG_UNRESOLVED_ROUTING_QID
+
+    q = Question(qid="Q1", text="Used for?", type=QuestionType.MULTI,
+                 options=[Option(code=1, label="A")], flags=[FLAG_UNRESOLVED_ROUTING_QID])
+    report = check_against_questionnaire(
+        _survey([q]), [QuestionVariableLink(qid="Q1", variable_names=["Q1"])],
+        _parquet(tmp_path, {"Q1": [1]}),
+    )
+    assert any(s.startswith("Q1: its base names a question") for s in report.skipped)

@@ -43,6 +43,7 @@ from src.core.survey_definition import (
 )
 from src.engines.qc.variable_roles import find_companions
 from src.engines.questionnaire.linker import _answered, _grid_answer, _read_rows, _row_value
+from src.engines.questionnaire.schema import FLAG_UNRESOLVED_ROUTING_QID
 
 # How many offending row numbers to keep per finding. Enough to start looking,
 # not so many that a systematically broken column produces a megabyte of noise.
@@ -477,6 +478,15 @@ def check_against_questionnaire(
     }
     companions = find_companions(datamap) if datamap is not None else {}
 
+    for question in survey.questions:
+        if FLAG_UNRESOLVED_ROUTING_QID in (question.flags or ()):
+            # GA_META_ADV_SPEC's base names DA_META_ADV, which exists nowhere:
+            # no base to test, and silence would read as "base held".
+            report.skipped.append(
+                f"{question.qid}: its base names a question that is in neither the "
+                "questionnaire nor the data, so who should answer it was not checked"
+            )
+
     for qid, variables in sorted(link_map.items()):
         question = by_qid.get(qid)
         if question is None:
@@ -685,6 +695,15 @@ def check_against_questionnaire(
     # codes that respondent actually chose there. A mis-scripted mask shows the
     # wrong list to real people and is invisible in the output — no other check
     # in the pipeline can catch it.
+    for question in survey.questions:
+        if FLAG_UNRESOLVED_ROUTING_QID in (question.flags or ()):
+            # GA_META_ADV_SPEC's base names DA_META_ADV, which exists nowhere:
+            # no base to test, and silence would read as "base held".
+            report.skipped.append(
+                f"{question.qid}: its base names a question that is in neither the "
+                "questionnaire nor the data, so who should answer it was not checked"
+            )
+
     for qid, variables in sorted(link_map.items()):
         question = by_qid.get(qid)
         if question is None:
@@ -798,6 +817,15 @@ def check_against_questionnaire(
     # source is empty the respondent is shown a sentence with a hole in it —
     # "How satisfied are you with ?" — which no other check can see, because
     # every column involved looks perfectly valid on its own.
+    for question in survey.questions:
+        if FLAG_UNRESOLVED_ROUTING_QID in (question.flags or ()):
+            # GA_META_ADV_SPEC's base names DA_META_ADV, which exists nowhere:
+            # no base to test, and silence would read as "base held".
+            report.skipped.append(
+                f"{question.qid}: its base names a question that is in neither the "
+                "questionnaire nor the data, so who should answer it was not checked"
+            )
+
     for qid, variables in sorted(link_map.items()):
         question = by_qid.get(qid)
         if question is None:
