@@ -36,6 +36,7 @@ from rapidfuzz import fuzz
 from src.core.models import DataMap
 from src.core.survey_definition import (
     Question,
+    QuestionType,
     QuestionVariableLink,
     SurveyDefinition,
     evaluate,
@@ -140,7 +141,7 @@ def _stem(name: str) -> str:
 
 
 def _match_by_name(
-    question: Question, remaining: dict[str, str]
+    question: Question, remaining: dict[str, str], reserved: set[str] = frozenset()
 ) -> tuple[list[str], str, float] | None:
     """Try tiers 1-2 (exact, then normalized/suffix) for one question.
 
@@ -169,7 +170,10 @@ def _match_by_name(
     # One qid claims EVERY remaining variable that reduces to its stem. This is
     # "fuzzy" because the variable name is not identical to the qid (a suffix
     # had to be stripped to see the relationship).
-    stem_hits = [orig for norm, orig in remaining.items() if _stem(orig) == qnorm]
+    # A column named after ANOTHER question (Q14a) is that question's, not a
+    # sub-variable of Q14 — Q14 comes first in the document and took it.
+    stem_hits = [orig for norm, orig in remaining.items()
+                 if _stem(orig) == qnorm and norm not in reserved]
     if stem_hits:
         return stem_hits, "fuzzy", 1.0
 
@@ -206,6 +210,73 @@ def _match_by_label(
     return None
 
 
+def _match_grid_cells(
+    question: Question, remaining: dict[str, str]
+) -> tuple[list[str], str, float] | None:
+    """A grid stored cell by cell: Q14r<row>c<column>.
+
+    Unlinked, each row was rebuilt from the data map as a question of its own
+    (Q14r2) with the column numbers read as answer codes — 13 false "value not
+    scripted" findings on one study.
+    """
+    if question.type is not QuestionType.GRID_SINGLE:
+        return None
+    pattern = re.compile(rf"^{re.escape(question.qid)}r(\d+)c(\d+)$", re.I)
+    hits = [((int(m.group(1)), int(m.group(2))), name) for name in remaining.values()
+            if (m := pattern.match(name))]
+    if not hits:
+        return None
+    return [name for _, name in sorted(hits)], "exact", 0.95
+
+
+def _match_split_column(
+    question: Question, survey: SurveyDefinition, remaining: dict[str, str]
+) -> tuple[list[str], str, float] | None:
+    """Q2a / Q2b / Q2c split from one grid Q2 are its 1st / 2nd / 3rd columns.
+
+    The script stores that grid as Q2r<row>c<column>, so Q2a owns every
+    Q2r*c1. Without this, nothing linked the split questions, and the data map
+    recovery rebuilt each BRAND ROW (Q2r5) as a question of its own, with the
+    column numbers read as answer codes.
+    """
+    parent = (question.extraction_evidence or {}).get("split_from")
+    if not parent:
+        return None
+    siblings = [
+        q.qid for q in survey.questions
+        if (q.extraction_evidence or {}).get("split_from") == parent
+    ]
+    if question.qid not in siblings:
+        return None
+    column = siblings.index(question.qid) + 1
+    pattern = re.compile(rf"^{re.escape(parent)}r\d+c{column}$", re.I)
+    names = [original for original in remaining.values() if pattern.match(original)]
+    if not names:
+        return None
+    names.sort(key=lambda n: int(re.search(r"r(\d+)c", n, re.I).group(1)))
+    return names, "exact", 0.95
+
+
+def _match_loop_columns(
+    question: Question, remaining: dict[str, str]
+) -> tuple[list[str], str, float] | None:
+    """Q6_4, the 4th pass of loop Q6, is stored by the script as Q6_Lr4r<code>.
+
+    Without this, the label matcher gave each pass its "Other, specify" text
+    column (Q6_Lr4r98oe) and nothing of the answers was checked.
+    """
+    loop = (question.validation or {}).get("loop") or {}
+    parent, index = loop.get("of"), loop.get("index")
+    if not parent or not isinstance(index, int):
+        return None
+    pattern = re.compile(rf"^{re.escape(parent)}_?Lr{index}r(\d+)$", re.I)
+    hits = [(int(m.group(1)), name) for name in remaining.values()
+            if (m := pattern.match(name))]
+    if not hits:
+        return None
+    return [name for _, name in sorted(hits)], "exact", 0.95
+
+
 def link_questions_to_datamap(
     survey: SurveyDefinition, datamap: DataMap
 ) -> LinkReport:
@@ -229,14 +300,21 @@ def link_questions_to_datamap(
 
     # normalized-name -> original-name, for every unclaimed variable.
     remaining: dict[str, str] = {_normalize(v.name): v.name for v in datamap.variables}
+    qids = {_normalize(q.qid) for q in survey.questions}
 
     for qid in survey.question_order():
         if qid not in survey:
             continue
         question = survey[qid]
 
-        match = _match_by_name(question, remaining) or _match_by_label(
-            question, datamap, remaining
+        # Its own columns first: a script may keep both the split questions
+        # (Q2ar*, Q2br*) and the grid they came from (Q2r*c*).
+        match = (
+            _match_grid_cells(question, remaining)
+            or _match_by_name(question, remaining, reserved=qids - {_normalize(qid)})
+            or _match_loop_columns(question, remaining)
+            or _match_split_column(question, survey, remaining)
+            or _match_by_label(question, datamap, remaining)
         )
         if match is None:
             report.unmatched_questions.append(qid)
@@ -279,12 +357,18 @@ class RoutingValidation:
     #: False when the base could not be evaluated at all. `agreement_pct` is
     #: meaningless then, and a reader must not mistake it for a score.
     checked: bool = True
+    #: Respondents who answered although the base says they should not have —
+    #: reported even when it is one person, which no percentage flag shows.
+    n_outside_base: int = 0
 
 
 def _links_by_qid(
     links: list[QuestionVariableLink],
 ) -> dict[str, QuestionVariableLink]:
     return {link.qid: link for link in links}
+
+
+_PUNCH_SUFFIX = re.compile(r"r(\d+)$")
 
 
 def _row_value(row: dict, variable_names: list[str]) -> object | None:
@@ -305,14 +389,21 @@ def _row_value(row: dict, variable_names: list[str]) -> object | None:
         return non_missing[0][1]
 
     # Multi/grid: treat a dummy as "selected" when it is truthy (1, not 0).
+    # The code is the column's own: "S6r99" is code 99. Counting only the
+    # columns that held a value shifted every position after a blank one, and
+    # a position is not a code once a list has a 98 or a skipped number.
+    named = [_PUNCH_SUFFIX.search(name) for name in variable_names]
     selected: list[object] = []
-    for idx, (_name, val) in enumerate(non_missing, start=1):
+    for idx, (_name, val) in enumerate(present, start=1):
+        if val is None:
+            continue
         try:
             chosen = float(val) != 0.0
         except (TypeError, ValueError):
             chosen = bool(val)
         if chosen:
-            selected.append(idx)
+            match = named[idx - 1]
+            selected.append(int(match.group(1)) if all(named) else idx)
     return selected
 
 
@@ -425,6 +516,10 @@ def cross_validate_routing(
         link = link_map[q.qid]
         refs = sorted(q.show_if.referenced_qids())
 
+        # A condition on ONE row of a grid ("GA_GOOGLE_TOOL row 3 = 3-5") reads
+        # that row's answer; given the list of filled rows instead, it matched
+        # nobody and every respondent "broke" the base.
+        by_row = _row_conditioned(q.show_if)
         answered_rows = 0
         agree = 0
         for row in rows:
@@ -432,7 +527,9 @@ def cross_validate_routing(
                 continue
             answered_rows += 1
             answers = {
-                ref: _row_value(row, link_map[ref].variable_names) for ref in refs
+                ref: (_grid_answer(row, link_map[ref].variable_names)
+                      if ref in by_row else _row_value(row, link_map[ref].variable_names))
+                for ref in refs
             }
             if evaluate(q.show_if, answers):
                 agree += 1
@@ -461,8 +558,32 @@ def cross_validate_routing(
         )
         results.append(
             RoutingValidation(
-                qid=q.qid, agreement_pct=pct, flagged=flagged, detail=detail
+                qid=q.qid, agreement_pct=pct, flagged=flagged, detail=detail,
+                n_outside_base=disagree,
             )
         )
 
     return results
+
+
+def _row_conditioned(expr) -> set[str]:
+    """Questions this condition tests one ROW of."""
+    out: set[str] = set()
+    if expr is None:
+        return out
+    if expr.row is not None and expr.qid:
+        out.add(expr.qid)
+    for child in expr.children or []:
+        out |= _row_conditioned(child)
+    return out
+
+
+def _grid_answer(row: dict, variable_names: list[str]) -> dict | None:
+    """{row code: answer} for a grid stored as <qid>r<row> columns."""
+    out = {}
+    for name in variable_names:
+        code = _PUNCH_SUFFIX.search(name)
+        value = row.get(name)
+        if code and value is not None:
+            out[int(code.group(1))] = value
+    return out or None

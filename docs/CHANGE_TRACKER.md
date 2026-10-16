@@ -21,6 +21,37 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-16 — fielded data checked against the questionnaire (branch feat/data-audit)
+
+The questionnaire plus a fielded Excel/SPSS export: who answered when the base
+says they should not, screen-outs among completes, exclusive answers ticked
+with others, answer caps, totals, masks, codes outside the list.
+
+| Change | Evidence |
+|---|---|
+| Paradata (timers, device, geo, `dSample`, `vUserAgent`, `hCF*`) is not a question | Google Ads: 216 → 50 columns rebuilt as questions |
+| Screen-out check reads `status` (terminated / overquota / complete) | false violations among terminates gone |
+| Questionnaire codes translated to the script's by answer label (reversed or renumbered scales) | TRD1 Q10 no longer "53% outside base" |
+| Grid-row conditions tested per row; respondents outside a base reported even when most agree | Google Ads TRUST/SENTIMENT evaluable; TRD2 Q5 (1 respondent) found |
+| Exclusive answers, "select up to N", stated totals checked per record | Bubble Q2a: 4 respondents ticked "None" with brands |
+| Split questions use their own columns before the source grid; loop passes link to `<qid>_Lr<n>r<code>`; grids link cell by cell (`Q14r1c2`) | 36 false code findings removed (Vivo Q14/Q21, TRD1 Q20) |
+| A question no longer takes the next lettered question's column (`Q14` → `Q14a`) | linker test |
+| Masks compare renumbered lists by label; masked grids are checked by row | Bubble Q6: 933 false mask violations avoided |
+| `[PN: ASK Q19 OF ALL]` exempts Q19 from `ASK Q12-Q19 IF …` | Bubble Q19: 1,030 false "outside base" removed |
+| A base naming a question that exists nowhere is reported "not checked" | Google Ads GA_META_ADV_SPEC (document says `DA_META_ADV`) |
+
+Findings per study (start of the work → now): Bubble 72 → 19, Vivo 43 → 6,
+Google Ads 22 → 13, TRD1 12 → 1, TRD2 0 → 0, plus base checks. Against an
+independent audit (gold logic applied to raw columns, completes only) 6 of 9
+findings match with the same respondents; the other 3 are a reference error
+(two Google Ads questions with one name), a document variable that does not
+exist, and an ambiguous mask (Vivo Q18a shows the "Other" row selected at Q18).
+
+What remains is mostly real document-vs-script differences (`option_not_scripted`,
+`punch_not_in_questionnaire`). Known gaps: bipolar slider grids stored three
+times (`Q41Q41_1`, `Q41_LQ41_1`, `Q41_RQ41_1`) are rebuilt as questions; per-
+category brand subsets in a carousel (Bubble Q6_5/Q6_6) are not read.
+
 ## 2026-10-15 — answer conditions, bases written as notes (branch feat/answer-conditions)
 
 | Change | Evidence |
@@ -65,7 +96,8 @@ wrong-and-unflagged 176 → 139, defects caught 47 → 60.
 
 | Issue | Where seen | Needs |
 |---|---|---|
-| Per-category display rules in a carousel table (`[PN: DISPLAY CATEGORY IF] Q3.1=1-4 …`) | Bubble Q6 | code (carousel reader) |
+| Per-category display rules in a carousel table (`[PN: DISPLAY CATEGORY IF] Q3.1=1-4 …`); the document's 4th cell reads `OR 6 OR 7=1-4` (data shows Q3 rows 4–7) | Bubble Q6 | code (carousel reader) |
+| Bipolar slider grid stored three times (`Q41Q41_n`, `Q41_LQ41_n`, `Q41_RQ41_n`) | Bubble Q41/Q44 (data audit) | code (linker) |
 | Order rules: `KEEP ORDER, RANDOMIZE IF 1 SHOWS FIRST`, `FIRST AND SECOND POSITION ONLY` | Vivo | code + a model for conditional order |
 | Grid written as two labelled sub-tables (`24 A. Spravato` / `24 B. TMS`) | TRD1 Q23 | code |
 | Sliding-scale grid whose rows come from another question; rows/columns written the wrong way round | Google Ads DA_VID_EFFIC, DA_GOAL_PLATFORM | AI (residue) |

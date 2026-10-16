@@ -83,3 +83,51 @@ def test_merge_reports_unmatched_questions():
                     values={1: "1"}, provenance="csv_import"))
     result = merge_labels_into_datamap(_survey(), dm)
     assert set(result.unmatched_questions) == {"S1", "Q5"}
+
+
+def test_questionnaire_conditions_are_translated_to_the_scripts_codes():
+    """TRD1: the document lists "Extremely" as 1, the script stored it as 3."""
+    from src.core.survey_definition import Expression
+    from src.engines.questionnaire.label_merge import (
+        questionnaire_to_data_codes,
+        translate_to_data_codes,
+    )
+    from src.engines.questionnaire.linker import LinkReport, QuestionVariableLink
+
+    scale = ["Extremely", "Somewhat", "Not at all"]
+    q9 = Question(qid="Q9", text="How familiar?", type=QuestionType.SINGLE,
+                  options=[Option(code=i, label=lab) for i, lab in enumerate(scale, 1)])
+    q10 = Question(qid="Q10", text="Why?", type=QuestionType.SINGLE,
+                   options=[Option(code=1, label="Yes")],
+                   show_if=Expression(op="in", qid="Q9", values=[1, 2]))
+    dm = DataMap(variables=[
+        Variable(name="Q9", label="How familiar?", type=VarType.SINGLE, provenance="spss",
+                 values={3: "Extremely", 2: "Somewhat", 1: "Not at all"}),
+    ])
+    survey = SurveyDefinition(study_id="s", questions=[q9, q10])
+    links = LinkReport(links=[QuestionVariableLink(qid="Q9", variable_names=["Q9"])])
+    mapping = questionnaire_to_data_codes(survey, dm, links)
+    assert mapping == {"Q9": {1: 3, 2: 2, 3: 1}}
+    translated = translate_to_data_codes(survey, mapping)
+    assert sorted(translated["Q10"].show_if.values) == [2, 3]
+    assert survey["Q10"].show_if.values == [1, 2]  # the original is untouched
+
+
+def test_inferred_codes_are_never_translated():
+    from src.engines.questionnaire.label_merge import questionnaire_to_data_codes
+    from src.engines.questionnaire.linker import LinkReport, QuestionVariableLink
+
+    q = Question(qid="Q9", text="x", type=QuestionType.SINGLE,
+                 options=[Option(code=1, label="A"), Option(code=2, label="B")])
+    dm = DataMap(variables=[Variable(name="Q9", label="x", type=VarType.SINGLE,
+                                     provenance="excel_import", values={2: "A", 1: "B"})])
+    links = LinkReport(links=[QuestionVariableLink(qid="Q9", variable_names=["Q9"])])
+    assert questionnaire_to_data_codes(SurveyDefinition(study_id="s", questions=[q]),
+                                       dm, links) == {}
+
+
+def test_other_specify_wordings_are_one_answer():
+    from src.engines.questionnaire.label_merge import _norm_label
+
+    assert _norm_label("Other (Specify)") == _norm_label("Other (please specify):")
+    assert _norm_label("Other brand") != _norm_label("Other (Specify)")

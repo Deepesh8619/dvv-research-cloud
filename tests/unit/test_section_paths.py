@@ -551,3 +551,21 @@ def test_ask_notes_naming_an_answer_in_words_split_or_skip():
     assert by["Q29a"].show_if.qid == "S0a"
     assert evaluate(by["C8"].show_if, {"C1": 15}) is False
     assert evaluate(by["C8"].show_if, {"C1": 19}) is True
+
+
+def test_a_question_asked_of_all_is_exempt_from_a_worded_range_base():
+    """Bubble: "ASK Q12-Q19 IF EVER PURCHASED BUBBLE" then "[PN: ASK Q19 OF ALL]"."""
+    from src.core.survey_definition import SurveyDefinition
+    from src.engines.questionnaire.section_paths import apply_worded_asks
+
+    survey = SurveyDefinition(study_id="s", questions=[
+        _q("Q2b", "Q2b. Bought?\n[PN: ASK Q12-Q19 IF EVER PURCHASED BUBBLE AT Q2b]",
+           options=[(1, "Bubble"), (2, "Anua")]),
+        _q("Q12"),
+        _q("Q18", "Q18. Why?\n[PN: ASK Q19 OF ALL]"),
+        _q("Q19"),
+    ])
+    apply_worded_asks(survey)
+    by = {q.qid: q for q in survey.questions}
+    assert by["Q12"].show_if is not None and by["Q18"].show_if is not None
+    assert by["Q19"].show_if is None

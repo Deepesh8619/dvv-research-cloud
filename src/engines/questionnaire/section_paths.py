@@ -77,6 +77,7 @@ def apply_worded_asks(survey: SurveyDefinition) -> list[str]:
     cells were still answers and "Bubble" matched two of them."""
     order = survey.question_order()
     by_qid = {q.qid: q for q in survey.questions}
+    asked_of_all = _asked_of_all(survey, order)
     gated: list[str] = []
     for question in survey.questions:
         for match in _FORWARD_ASK_RE.finditer(question.source_text or ""):
@@ -90,12 +91,33 @@ def apply_worded_asks(survey: SurveyDefinition) -> list[str]:
                                        verbatim_text=condition.verbatim_text)
             for qid in _targets(match.group("targets"), order):
                 target = by_qid.get(qid)
-                if target is None or qid == question.qid or target.show_if is not None:
+                if (target is None or qid == question.qid or target.show_if is not None
+                        or qid in asked_of_all):
                     continue
                 target.show_if = Expression.from_dict(condition.to_dict())
                 target.extraction_evidence.setdefault("base", f"[{match.group(0).strip()}]")
                 gated.append(qid)
     return gated
+
+
+_ASK_ALL_RE = re.compile(
+    r"\bASK\s+(?P<targets>[A-Za-z][\w.]*\d[\w.]*(?:\s*[-–,]\s*[A-Za-z][\w.]*\d[\w.]*)*)"
+    # "OF ALL" must END the note: "ASK Q16 OF ALL EVER PURCHASED …" is a base.
+    r"\s+(?:OF|TO)\s+ALL(?:\s+RESPONDENTS)?\s*(?:[\].;)]|$)", re.I | re.M)
+
+
+def _asked_of_all(survey: SurveyDefinition, order: list[str]) -> set[str]:
+    """Questions the document says everyone answers: "[PN: ASK Q19 OF ALL]".
+
+    Inside "ASK Q12-Q19 IF EVER PURCHASED …" this exempts Q19; gating it
+    anyway reported 1,030 of 1,541 Bubble respondents as answering outside
+    their base.
+    """
+    out: set[str] = set()
+    for question in survey.questions:
+        for match in _ASK_ALL_RE.finditer(question.source_text or ""):
+            out.update(_targets(match.group("targets"), order))
+    return out
 
 
 def answer_named(text: str, by_qid: dict) -> Expression | None:

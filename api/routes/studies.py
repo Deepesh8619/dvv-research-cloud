@@ -1038,7 +1038,9 @@ def crosscheck_study(
     from src.engines.questionnaire.datamap_recovery import reconcile, recover_missing
     from src.engines.questionnaire.label_merge import (
         align_codes_to_questionnaire,
+        questionnaire_to_data_codes,
         remap_data_codes,
+        translate_to_data_codes,
     )
     from src.engines.questionnaire.linker import (
         cross_validate_routing,
@@ -1077,15 +1079,17 @@ def crosscheck_study(
     # wording comes from the script, not the client's document, and the two can
     # legitimately differ.
     agreement = reconcile(survey, datamap)
-    recovered, recovered_links = recover_missing(survey, datamap)
+
+    # Link the EXTRACTED questions first, then rebuild from the data map only
+    # what none of them claimed: a column an extracted question owns (Q2r5c1
+    # is Q2a's) rebuilt as a second question was checked twice, wrongly.
+    link_report = link_questions_to_datamap(survey, datamap)
+    linked = {name for link in link_report.links for name in link.variable_names}
+    recovered, recovered_links = recover_missing(survey, datamap, linked=linked)
     for question in recovered:
         survey.questions.append(question)
         if survey.blocks:
             survey.blocks[0].question_ids.append(question.qid)
-
-    # Link the EXTRACTED questions by matching, then add the recovered ones
-    # whose links are already known exactly.
-    link_report = link_questions_to_datamap(survey, datamap)
     already = {link.qid for link in link_report.links}
     link_report.links.extend(link for link in recovered_links if link.qid not in already)
 
@@ -1109,6 +1113,13 @@ def crosscheck_study(
     # single respondent row. A screen-out testing codes that were never punched
     # fires for nobody, and the data check would report zero violations — which
     # reads exactly like a clean result.
+    # The script's own codes are never renumbered; the questionnaire is
+    # translated to them instead, by answer label, for every check below. A
+    # document listing a scale top-down checked against a script that coded
+    # it bottom-up read half a study as answering outside its base.
+    translation = questionnaire_to_data_codes(survey, datamap, link_report)
+    survey = translate_to_data_codes(survey, translation)
+
     condition_audit = audit_conditions(survey, link_report.links, datamap)
 
     # The run directory is ephemeral on the free tier, so the rows can be gone
@@ -1157,6 +1168,11 @@ def crosscheck_study(
         **report.to_dict(),
         "linked_questions": len(link_report.links),
         "data_file_available": has_rows,
+        # Questions whose document codes differ from the script's, checked in
+        # the script's codes (joined by answer label).
+        "questionnaire_codes_translated": {
+            qid: {str(k): v for k, v in table.items()} for qid, table in translation.items()
+        },
         "codes_aligned_to_questionnaire": {
             "variables": sorted(alignment.code_remaps),
             "n_values": alignment.n_codes_aligned,
@@ -1182,9 +1198,10 @@ def crosscheck_study(
                     "agreement_pct": round(r.agreement_pct, 1),
                     "detail": r.detail,
                     "checked": r.checked,
+                    "n_outside_base": r.n_outside_base,
                 }
                 for r in routing
-                if r.flagged or not r.checked
+                if r.flagged or not r.checked or r.n_outside_base
             ],
         },
         # A variable name in the data need not equal the qid in the document.

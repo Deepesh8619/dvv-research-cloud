@@ -744,3 +744,177 @@ def test_a_pipe_the_document_names_in_scripter_terms_is_reported_not_passed(tmp_
 
     assert not [f for f in report.findings if f.kind == "pipe_source_empty"]
     assert any("PHARMACY" in s for s in report.skipped)
+
+
+def test_one_answer_per_screen_columns_are_not_several_answers(tmp_path):
+    # MAXDIFF_ANCHOR asked on each of three screens: three answers, one per column.
+    path = _parquet(tmp_path, {"Q1_1": [2, 1], "Q1_2": [2, 3], "Q1_3": [1, 1]})
+    report = check_against_questionnaire(
+        _survey([SINGLE_Q]),
+        [QuestionVariableLink(qid="Q1", variable_names=["Q1_1", "Q1_2", "Q1_3"])],
+        path,
+    )
+    assert "single_multi" not in [f.kind for f in report.findings]
+
+
+def _status_map():
+    from src.core.models import DataMap, Variable
+
+    return DataMap(variables=[
+        Variable(name="status", label="Status",
+                 values={1: "Terminated", 2: "Overquota", 3: "Qualified", 4: "Partial"}),
+        Variable(name="AGE", label="Age"), Variable(name="Q2", label="Q2"),
+    ])
+
+
+def test_a_screen_out_is_judged_by_the_respondents_status(tmp_path):
+    from src.core.survey_definition import Expression
+
+    age = Question(qid="AGE", text="Age?", type=QuestionType.NUMERIC,
+                   terminate_if=Expression(op="lt", qid="AGE", value=25))
+    later = Question(qid="Q2", text="Later?", type=QuestionType.NUMERIC)
+    # row 1 terminated (fine), row 2 qualified despite age 20 (violation), row 3 ok
+    path = _parquet(tmp_path, {"status": [1, 3, 3], "AGE": [20, 20, 40], "Q2": [5, 5, 5]})
+    report = check_against_questionnaire(
+        _survey([age, later]),
+        [QuestionVariableLink(qid="AGE", variable_names=["AGE"]),
+         QuestionVariableLink(qid="Q2", variable_names=["Q2"])],
+        path, datamap=_status_map(),
+    )
+    violated = next(f for f in report.findings if f.kind == "terminate_violated")
+    assert violated.example_rows == [2]
+    held = next(f for f in report.findings if f.kind == "terminate_recorded")
+    assert held.example_rows == [1]
+
+
+def test_a_negated_screen_out_does_not_fire_on_a_blank_answer(tmp_path):
+    from src.core.survey_definition import Expression
+
+    role = Question(qid="R", text="Role?", type=QuestionType.SINGLE,
+                    options=[Option(code=1, label="Ads"), Option(code=2, label="Other")],
+                    terminate_if=Expression(op="not", children=[
+                        Expression(op="in", qid="R", values=[1])]))
+    later = Question(qid="Q2", text="Later?", type=QuestionType.NUMERIC)
+    path = _parquet(tmp_path, {"R": [None, 1], "Q2": [5, 5]})
+    report = check_against_questionnaire(
+        _survey([role, later]),
+        [QuestionVariableLink(qid="R", variable_names=["R"]),
+         QuestionVariableLink(qid="Q2", variable_names=["Q2"])],
+        path,
+    )
+    assert "terminate_violated" not in [f.kind for f in report.findings]
+
+
+def test_tick_box_codes_come_from_the_column_names(tmp_path):
+    """A document that skips code 4 numbers differently from the script; the
+    column name says which code a tick box is."""
+    top = Question(qid="TOP", text="Top?", type=QuestionType.SINGLE,
+                   options=[Option(code=c, label=f"L{c}") for c in (1, 2, 3, 5, 9)],
+                   validation={"techniques": {"masks": [{"source_qid": "ALL",
+                                                         "mode": "selected"}]}})
+    every = Question(qid="ALL", text="All?", type=QuestionType.MULTI,
+                     options=[Option(code=c, label=f"L{c}") for c in (1, 2, 3, 5, 9)])
+    path = _parquet(tmp_path, {"ALLr1": [1], "ALLr2": [0], "ALLr9": [1], "TOP": [9]})
+    report = check_against_questionnaire(
+        _survey([every, top]),
+        [QuestionVariableLink(qid="ALL", variable_names=["ALLr1", "ALLr2", "ALLr9"]),
+         QuestionVariableLink(qid="TOP", variable_names=["TOP"])],
+        path,
+    )
+    assert "mask_violated" not in [f.kind for f in report.findings]
+
+
+def test_exclusive_cap_and_total_rules_are_checked(tmp_path):
+    brands = Question(qid="B", text="Brands?", type=QuestionType.MULTI,
+                      options=[Option(code=1, label="A"), Option(code=2, label="B"),
+                               Option(code=99, label="None of these", exclusive=True)],
+                      validation={"max_select": 1})
+    share = Question(qid="S", text="Share?", type=QuestionType.NUMERIC,
+                     rows=[Option(code=1, label="X"), Option(code=2, label="Y")],
+                     validation={"sum": 100})
+    path = _parquet(tmp_path, {"Br1": [1, 1, 0], "Br2": [0, 1, 0], "Br99": [1, 0, 1],
+                               "S_1": [60, 50, 70], "S_2": [40, 40, 30]})
+    report = check_against_questionnaire(
+        _survey([brands, share]),
+        [QuestionVariableLink(qid="B", variable_names=["Br1", "Br2", "Br99"]),
+         QuestionVariableLink(qid="S", variable_names=["S_1", "S_2"])],
+        path,
+    )
+    by = {f.kind: f.example_rows for f in report.findings}
+    assert by["exclusive_violated"] == [1]          # None ticked with A
+    assert by["too_many_answers"] == [1, 2]         # cap of 1
+    assert by["sum_not_total"] == [2]               # 50 + 40
+
+
+def test_a_renumbered_masked_list_is_compared_by_answer_not_code(tmp_path):
+    """Q2 lists Q1's brands 3, 1 as codes 1, 2: same answers, new numbers."""
+    import polars as pl
+
+    masked = _masked("selected")
+    masked.options = [Option(code=1, label="Brand 3"), Option(code=2, label="Brand 1")]
+    path = tmp_path / "renumbered.parquet"
+    pl.DataFrame({
+        "Q1_1": [1, 1], "Q1_2": [0, 0], "Q1_3": [0, 0],
+        "Q2_1": [0, 1], "Q2_2": [1, 0], "Q2_3": [0, 0],
+    }).write_parquet(path)  # row 1: Brand 1 (chosen); row 2: Brand 3 (not chosen)
+    report = check_against_questionnaire(_survey([_AWARE, masked]), _MASK_LINKS, path)
+    finding = next(f for f in report.findings if f.kind == "mask_violated")
+    assert finding.example_rows == [2]
+
+
+def test_loop_tick_boxes_take_their_codes_from_the_column_name(tmp_path):
+    """Q6_1 is stored as Q6_Lr1r<code> with 0/1 labels: brands 2-10 were "unscripted"."""
+    import polars as pl
+
+    q = Question(qid="Q6_1", text="Brands used", type=QuestionType.MULTI,
+                 options=[Option(code=c, label=f"Brand {c}") for c in (1, 2, 3)])
+    names = ["Q6_Lr1r1", "Q6_Lr1r2", "Q6_Lr1r3"]
+    path = tmp_path / "loop.parquet"
+    pl.DataFrame({"Q6_Lr1r1": [1, 0], "Q6_Lr1r2": [0, 1], "Q6_Lr1r3": [1, 1]}).write_parquet(path)
+    report = check_against_questionnaire(
+        _survey([q]), [QuestionVariableLink(qid="Q6_1", variable_names=names)], path,
+        datamap=_datamap([(n, {0: "Unchecked", 1: "Checked"}) for n in names]),
+    )
+    assert not [f for f in report.findings if f.kind == "undeclared_code"]
+
+
+def test_a_masked_grid_is_checked_by_its_rows(tmp_path):
+    """Rows of Q2 are the brands chosen at Q1; the cells hold ratings, not codes."""
+    import polars as pl
+
+    grid = Question(qid="Q2", text="Rate each", type=QuestionType.GRID_SINGLE,
+                    rows=[Option(code=c, label=f"Brand {c}") for c in (1, 2, 3)],
+                    validation=_masked("selected").validation)
+    path = tmp_path / "grid_mask.parquet"
+    pl.DataFrame({
+        "Q1r1": [1, 1, 0], "Q1r2": [0, 0, 0], "Q1r3": [0, 0, 0],
+        "Q2r1": [5, 4, None], "Q2r2": [None, 3, None], "Q2r3": [None, None, 2],
+    }).write_parquet(path)  # row 2 rated brand 2 it never chose; row 3 chose nothing
+    links = [QuestionVariableLink(qid="Q1", variable_names=["Q1r1", "Q1r2", "Q1r3"]),
+             QuestionVariableLink(qid="Q2", variable_names=["Q2r1", "Q2r2", "Q2r3"])]
+    report = check_against_questionnaire(_survey([_AWARE, grid]), links, path)
+    finding = next(f for f in report.findings if f.kind == "mask_violated")
+    assert finding.example_rows == [2, 3]
+
+
+def test_a_masked_question_with_its_own_list_does_not_borrow_the_source_list():
+    from src.engines.qc.discrepancy import _borrowed_codes
+
+    own = _masked("selected")  # prints Brand 1-3 and filters them by Q1
+    source = Question(qid="Q1", text="Aware", type=QuestionType.MULTI,
+                      options=[Option(code=c, label=f"Brand {c}") for c in range(1, 21)])
+    assert _borrowed_codes(own, {"Q1": source}) == set()
+    own.options = []
+    assert _borrowed_codes(own, {"Q1": source}) == set(range(1, 21))
+
+
+def test_a_base_naming_a_missing_question_is_reported_as_not_checked(tmp_path):
+    from src.engines.questionnaire.schema import FLAG_UNRESOLVED_ROUTING_QID
+
+    q = Question(qid="Q1", text="Used for?", type=QuestionType.MULTI,
+                 options=[Option(code=1, label="A")], flags=[FLAG_UNRESOLVED_ROUTING_QID])
+    report = check_against_questionnaire(
+        _survey([q]), [QuestionVariableLink(qid="Q1", variable_names=["Q1"])],
+        _parquet(tmp_path, {"Q1": [1]}),
+    )
+    assert any(s.startswith("Q1: its base names a question") for s in report.skipped)
