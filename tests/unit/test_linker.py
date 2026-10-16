@@ -280,6 +280,6 @@ def test_split_grid_questions_link_to_their_own_column():
                       extraction_evidence={"split_from": "Q2"}) for q in ("Q2a", "Q2b")]
     dm = DataMap(variables=[Variable(name=f"Q2r{r}c{c}", label=f"Brand {r}")
                             for r in (1, 2) for c in (1, 2)])
-    links = {l.qid: l.variable_names for l in link_questions_to_datamap(
+    links = {link.qid: link.variable_names for link in link_questions_to_datamap(
         SurveyDefinition(study_id="s", questions=parts), dm).links}
     assert links == {"Q2a": ["Q2r1c1", "Q2r2c1"], "Q2b": ["Q2r1c2", "Q2r2c2"]}
