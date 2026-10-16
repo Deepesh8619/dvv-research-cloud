@@ -221,6 +221,68 @@ def _downstream_variables(
     ]
 
 
+_DISPOSITION_WORDS = (
+    ("terminated", re.compile(r"terminat|screen|disqualif|\bterm\b", re.I)),
+    ("overquota", re.compile(r"over\s*quota|quota\s*full", re.I)),
+    # Before "complete": "Incomplete" contains it.
+    ("partial", re.compile(r"partial|incomplete|drop|abandon", re.I)),
+    ("complete", re.compile(r"qualified|complete", re.I)),
+)
+
+
+def _disposition_labels(datamap: DataMap | None) -> tuple[str | None, dict[int, str]]:
+    """The respondent-status column and what each of its codes means.
+
+    Decipher exports `status` with 1 Terminated / 2 Overquota / 3 Qualified /
+    4 Partial. Without it, a respondent the script screened out was judged by
+    whether ANY later column was filled — and paradata is filled for everyone.
+    """
+    if datamap is None:
+        return None, {}
+    for variable in datamap.variables:
+        if variable.name.lower() not in ("status", "disposition", "dispcode", "resp_status"):
+            continue
+        meaning: dict[int, str] = {}
+        for code, label in (variable.values or {}).items():
+            for outcome, pattern in _DISPOSITION_WORDS:
+                # "Disqualified" is a terminate, not a qualified complete.
+                if pattern.search(str(label)):
+                    meaning[int(code)] = outcome
+                    break
+        if meaning:
+            return variable.name, meaning
+    return None, {}
+
+
+def _as_code(value: object) -> int | None:
+    number = _as_number(value)
+    return int(number) if number is not None and float(number).is_integer() else None
+
+
+_UNREAD_FLAGS = frozenset(
+    {"EXTRACTION_UNAVAILABLE", "EXTRACTION_CONFIG_ERROR", "EXTRACTION_MODEL_ERROR"}
+)
+_LIST_RANGE = re.compile(r"(\d{1,3})\s*[-–]\s*(\d{1,3})\s*$")
+
+
+def _borrowed_codes(question: Question, by_qid: dict) -> set[int]:
+    """Codes the question offers by taking them from another question.
+
+    "[INSERT CURRENTLY USED BRANDS FROM DA_USAGE 9-13]" adds codes 9 to 13 to
+    the list. They are offered, just not printed, and reporting them as
+    "never offered" made every piped list a finding."""
+    codes: set[int] = set()
+    techniques = (question.validation or {}).get("techniques") or {}
+    for mask in techniques.get("masks") or []:
+        span = _LIST_RANGE.search(str(mask.get("verbatim") or ""))
+        if span:
+            codes |= set(range(int(span.group(1)), int(span.group(2)) + 1))
+        source = by_qid.get(mask.get("source_qid") or "")
+        if source is not None:
+            codes |= {o.code for o in source.options or []}
+    return codes
+
+
 def _declared_codes(question: Question) -> set[int]:
     return {o.code for o in question.options or []}
 
@@ -231,6 +293,9 @@ def _numeric_range(question: Question) -> tuple[float | None, float | None]:
     lo = validation.get("min", validation.get("minimum"))
     hi = validation.get("max", validation.get("maximum"))
     return _as_number(lo), _as_number(hi)
+
+
+_PUNCH_CODE = re.compile(r"r(\d+)$")
 
 
 def _selected_codes(row: dict, variables: list[str], question: Question) -> list[int]:
@@ -247,6 +312,12 @@ def _selected_codes(row: dict, variables: list[str], question: Question) -> list
     if not isinstance(value, list):
         number = _as_number(value)
         return [int(number)] if number is not None and number == int(number) else []
+    # "DA_SUCCESSr9" IS code 9, and `_row_value` already returns it. Mapping a
+    # position through the DOCUMENT's list went wrong whenever the two number
+    # differently (a document that skips 4 shifted every answer by one, and 35
+    # respondents were reported for an answer they had ticked).
+    if variables and all(_PUNCH_CODE.search(v) for v in variables):
+        return [int(c) for c in value]
     codes = [o.code for o in question.options or []]
     return [codes[i - 1] for i in value if 1 <= i <= len(codes)]
 
@@ -309,6 +380,9 @@ def check_against_questionnaire(
         return report
 
     columns = sorted({name for names in link_map.values() for name in names})
+    status_column, dispositions = _disposition_labels(datamap)
+    if status_column:
+        columns.append(status_column)
     rows = _read_rows(Path(parquet_path), columns)
     report.n_rows = len(rows)
     if not rows:
@@ -329,8 +403,14 @@ def check_against_questionnaire(
         question = by_qid.get(qid)
         if question is None:
             continue
+        if set(question.flags or ()) & _UNREAD_FLAGS:
+            # The parser could not read this question, so its "options" are
+            # not the document's. Comparing them to the data blames the data
+            # for a reading that never happened.
+            report.skipped.append(f"{qid}: not compared — the questionnaire text could not be read")
+            continue
 
-        declared = _declared_codes(question)
+        declared = _declared_codes(question) | _borrowed_codes(question, by_qid)
         # Without a datamap the questionnaire is the only authority we have, so
         # judge against it. With one, the datamap wins: it describes what the
         # column actually holds, and `None` from it means "open response", not
@@ -459,6 +539,15 @@ def check_against_questionnaire(
                 )
 
         if question.type is QuestionType.SINGLE and len(variables) > 1:
+            held = {_as_number(row.get(v)) for row in rows for v in variables} - {None}
+            if not held <= {0.0, 1.0}:
+                # MAXDIFF_ANCHOR_1/_2/_3 hold 1, 2, 3: one ANSWER per screen or
+                # loop turn, each in its own column — not 0/1 tick boxes.
+                report.skipped.append(
+                    f"{qid}: single-vs-multi not checked — its columns are repeats "
+                    "(one answer each), not tick boxes"
+                )
+                continue
             if _type_is_unresolved(question):
                 report.skipped.append(
                     f"{qid}: single-vs-multi not checked — the extraction could "
@@ -552,6 +641,15 @@ def check_against_questionnaire(
                 )
                 continue
 
+            if source_question is not None and source_question.type is QuestionType.GRID_SINGLE:
+                # "ONLY OF PHARMACIES USED AT Q4A" where Q4a is a grid of 1/2
+                # answers: which answer means "used" is not something the check
+                # can read, and guessing reported 641 respondents of one study.
+                report.skipped.append(
+                    f"{qid}: list comes from the grid {source}; which of its answers "
+                    "admits a row is not stated, so it was not checked"
+                )
+                continue
             counts["mask"] += 1
             hits = []
             for index, row in enumerate(rows, start=1):
@@ -673,9 +771,19 @@ def check_against_questionnaire(
                 for ref in referenced
                 if link_map.get(ref)
             }
+            if any(value in (None, "", []) for value in answers.values()):
+                continue  # not answered: "1 not selected" says nothing about a blank
             if not evaluate(question.terminate_if, answers):
                 continue
-            if downstream and _answered(row, downstream):
+            outcome = dispositions.get(_as_code(row.get(status_column))) if status_column else None
+            if outcome in ("terminated", "overquota"):
+                # The file itself says the interview ended here: the screen-out
+                # held, whatever system columns were filled in afterwards.
+                stopped.append(index)
+            elif outcome == "complete":
+                # Matched the screen-out and still finished the survey.
+                continued.append(index)
+            elif downstream and _answered(row, downstream):
                 continued.append(index)
             else:
                 stopped.append(index)

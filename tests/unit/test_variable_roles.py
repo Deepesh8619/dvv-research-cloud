@@ -156,3 +156,13 @@ def test_the_longest_matching_question_wins():
         "HID_SS_AD_SPEND", "noanswerSS_AD_SPEND_r99"
     }
     assert "SS_AD" not in companions
+
+
+def test_platform_paradata_and_timers_are_system_columns():
+    from src.engines.qc.variable_roles import classify_variable
+
+    for name in ["DayTime", "ipAddress", "VendorID", "dSample", "vUserAgent", "hCFDeviceWidth",
+                 "GeoInfor1", "RespInfor3", "Question_TimeC_AIc1", "QINMAX2_Timer", "RID"]:
+        assert classify_variable(name) == "system", name
+    for name in ["DA_SHARE", "dQ5", "SS_EMP", "LEISURE_TIME", "GA_AI_GOOGLE"]:
+        assert classify_variable(name) == "question", name

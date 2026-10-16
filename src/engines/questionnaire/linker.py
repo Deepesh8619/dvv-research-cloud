@@ -206,6 +206,34 @@ def _match_by_label(
     return None
 
 
+def _match_split_column(
+    question: Question, survey: SurveyDefinition, remaining: dict[str, str]
+) -> tuple[list[str], str, float] | None:
+    """Q2a / Q2b / Q2c split from one grid Q2 are its 1st / 2nd / 3rd columns.
+
+    The script stores that grid as Q2r<row>c<column>, so Q2a owns every
+    Q2r*c1. Without this, nothing linked the split questions, and the data map
+    recovery rebuilt each BRAND ROW (Q2r5) as a question of its own, with the
+    column numbers read as answer codes.
+    """
+    parent = (question.extraction_evidence or {}).get("split_from")
+    if not parent:
+        return None
+    siblings = [
+        q.qid for q in survey.questions
+        if (q.extraction_evidence or {}).get("split_from") == parent
+    ]
+    if question.qid not in siblings:
+        return None
+    column = siblings.index(question.qid) + 1
+    pattern = re.compile(rf"^{re.escape(parent)}r\d+c{column}$", re.I)
+    names = [original for original in remaining.values() if pattern.match(original)]
+    if not names:
+        return None
+    names.sort(key=lambda n: int(re.search(r"r(\d+)c", n, re.I).group(1)))
+    return names, "exact", 0.95
+
+
 def link_questions_to_datamap(
     survey: SurveyDefinition, datamap: DataMap
 ) -> LinkReport:
@@ -235,8 +263,10 @@ def link_questions_to_datamap(
             continue
         question = survey[qid]
 
-        match = _match_by_name(question, remaining) or _match_by_label(
-            question, datamap, remaining
+        match = (
+            _match_split_column(question, survey, remaining)
+            or _match_by_name(question, remaining)
+            or _match_by_label(question, datamap, remaining)
         )
         if match is None:
             report.unmatched_questions.append(qid)
@@ -287,6 +317,9 @@ def _links_by_qid(
     return {link.qid: link for link in links}
 
 
+_PUNCH_SUFFIX = re.compile(r"r(\d+)$")
+
+
 def _row_value(row: dict, variable_names: list[str]) -> object | None:
     """The answer a row gave to a question, read from its linked column(s).
 
@@ -305,14 +338,21 @@ def _row_value(row: dict, variable_names: list[str]) -> object | None:
         return non_missing[0][1]
 
     # Multi/grid: treat a dummy as "selected" when it is truthy (1, not 0).
+    # The code is the column's own: "S6r99" is code 99. Counting only the
+    # columns that held a value shifted every position after a blank one, and
+    # a position is not a code once a list has a 98 or a skipped number.
+    named = [_PUNCH_SUFFIX.search(name) for name in variable_names]
     selected: list[object] = []
-    for idx, (_name, val) in enumerate(non_missing, start=1):
+    for idx, (_name, val) in enumerate(present, start=1):
+        if val is None:
+            continue
         try:
             chosen = float(val) != 0.0
         except (TypeError, ValueError):
             chosen = bool(val)
         if chosen:
-            selected.append(idx)
+            match = named[idx - 1]
+            selected.append(int(match.group(1)) if all(named) else idx)
     return selected
 
 

@@ -269,3 +269,17 @@ def test_show_if_referencing_unlinked_qid_is_reported_as_unchecked(tmp_path):
     assert results[0].checked is False
     assert results[0].flagged is False
     assert "Q1" in results[0].detail
+
+
+def test_split_grid_questions_link_to_their_own_column():
+    from src.core.models import DataMap, Variable
+    from src.core.survey_definition import Question, QuestionType, SurveyDefinition
+    from src.engines.questionnaire.linker import link_questions_to_datamap
+
+    parts = [Question(qid=q, text=q, type=QuestionType.MULTI,
+                      extraction_evidence={"split_from": "Q2"}) for q in ("Q2a", "Q2b")]
+    dm = DataMap(variables=[Variable(name=f"Q2r{r}c{c}", label=f"Brand {r}")
+                            for r in (1, 2) for c in (1, 2)])
+    links = {l.qid: l.variable_names for l in link_questions_to_datamap(
+        SurveyDefinition(study_id="s", questions=parts), dm).links}
+    assert links == {"Q2a": ["Q2r1c1", "Q2r2c1"], "Q2b": ["Q2r1c2", "Q2r2c2"]}

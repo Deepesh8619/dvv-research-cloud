@@ -1077,15 +1077,17 @@ def crosscheck_study(
     # wording comes from the script, not the client's document, and the two can
     # legitimately differ.
     agreement = reconcile(survey, datamap)
-    recovered, recovered_links = recover_missing(survey, datamap)
+
+    # Link the EXTRACTED questions first, then rebuild from the data map only
+    # what none of them claimed: a column an extracted question owns (Q2r5c1
+    # is Q2a's) rebuilt as a second question was checked twice, wrongly.
+    link_report = link_questions_to_datamap(survey, datamap)
+    linked = {name for link in link_report.links for name in link.variable_names}
+    recovered, recovered_links = recover_missing(survey, datamap, linked=linked)
     for question in recovered:
         survey.questions.append(question)
         if survey.blocks:
             survey.blocks[0].question_ids.append(question.qid)
-
-    # Link the EXTRACTED questions by matching, then add the recovered ones
-    # whose links are already known exactly.
-    link_report = link_questions_to_datamap(survey, datamap)
     already = {link.qid for link in link_report.links}
     link_report.links.extend(link for link in recovered_links if link.qid not in already)
 

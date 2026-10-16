@@ -305,7 +305,7 @@ def index_by_qid(datamap: DataMap) -> dict[str, DatamapQuestion]:
 
 
 def recover_missing(
-    survey: SurveyDefinition, datamap: DataMap
+    survey: SurveyDefinition, datamap: DataMap, linked: set[str] | None = None
 ) -> tuple[list[Question], list[QuestionVariableLink]]:
     """Every question the data map describes and the questionnaire lacks.
 
@@ -318,6 +318,10 @@ def recover_missing(
     questions: list[Question] = []
     links: list[QuestionVariableLink] = []
     for candidate in reconcile(survey, datamap).missing_from_questionnaire:
+        if linked and {v.name for v in candidate.variables} <= linked:
+            # Its columns already belong to an extracted question (Q2r5c1 is
+            # Q2a's): rebuilding it would check the same data twice, wrongly.
+            continue
         questions.append(rebuild_question(candidate))
         links.append(
             QuestionVariableLink(

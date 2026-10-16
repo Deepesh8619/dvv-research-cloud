@@ -48,12 +48,25 @@ _NO_ANSWER_RE = re.compile(r"^noanswer", re.I)
 # reliable signal, and the two together miss nothing in the studies seen.
 _HIDDEN_NAME_RE = re.compile(r"^(hid[_a-z]*|h_)", re.I)
 _HIDDEN_LABEL_RE = re.compile(
-    r"\b(hidden|dummy)\s+(variable|question)\b|^\s*hidden\s*:", re.I
+    r"\b(hidden|dummy)\s+(variable|question)\b|^\s*hidden\s*(?::|for\b)", re.I
 )
 _MAXDIFF_NAME_RE = re.compile(r"maxdiff|^md_|(best|worst)$", re.I)
 _SYSTEM_NAMES = frozenset(
-    {"record", "uuid", "date", "status", "country", "markers", "vos", "start_date"}
+    {"record", "uuid", "date", "status", "country", "markers", "vos", "start_date",
+     # Platform paradata (Decipher et al.): who, when, where and on what device.
+     # Read as questions, they were "answered" by every respondent — so anyone
+     # screened out at the first question looked as if they had carried on.
+     "daytime", "realstart", "laststart", "starttime", "endtime", "ipaddress",
+     "useragent", "rid", "vendorid", "otherVariables", "othervariables", "zeroratio",
+     "dcua", "md", "q_ans", "geoinfo", "respinfo"}
 )
+# Timers and device/tracking fields, by the shape of the name.
+_SYSTEM_NAME_RE = re.compile(
+    r"^(question_?time|geoinfor?|respinfor?|fp_|vget|vuser|qinmax\d*_)|_?timer$", re.I
+)
+# dSample, vUserAgent, hCFDeviceWidth: a one-letter lower-case platform prefix
+# on a camel-case name. Case-sensitive on purpose: DA_SHARE and dQ5 are questions.
+_PLATFORM_CAMEL_RE = re.compile(r"^[dvh][A-Z][A-Za-z]*[a-z][A-Za-z]*$")
 
 ROLE_LABELS = {
     "question": "Question",
@@ -88,7 +101,8 @@ def classify_variable(name: str, label: str = "", question_ref: str | None = Non
     """The role one column plays. Order matters — the tests pin the precedence."""
     lowered_label = (label or "").lower()
 
-    if name.lower() in _SYSTEM_NAMES:
+    if (name.lower() in _SYSTEM_NAMES or _SYSTEM_NAME_RE.search(name)
+            or _PLATFORM_CAMEL_RE.match(name)):
         return "system"
     if "virtual variable" in lowered_label:
         return "qa_flag"

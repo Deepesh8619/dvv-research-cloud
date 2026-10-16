@@ -744,3 +744,81 @@ def test_a_pipe_the_document_names_in_scripter_terms_is_reported_not_passed(tmp_
 
     assert not [f for f in report.findings if f.kind == "pipe_source_empty"]
     assert any("PHARMACY" in s for s in report.skipped)
+
+
+def test_one_answer_per_screen_columns_are_not_several_answers(tmp_path):
+    # MAXDIFF_ANCHOR asked on each of three screens: three answers, one per column.
+    path = _parquet(tmp_path, {"Q1_1": [2, 1], "Q1_2": [2, 3], "Q1_3": [1, 1]})
+    report = check_against_questionnaire(
+        _survey([SINGLE_Q]),
+        [QuestionVariableLink(qid="Q1", variable_names=["Q1_1", "Q1_2", "Q1_3"])],
+        path,
+    )
+    assert "single_multi" not in [f.kind for f in report.findings]
+
+
+def _status_map():
+    from src.core.models import DataMap, Variable
+
+    return DataMap(variables=[
+        Variable(name="status", label="Status",
+                 values={1: "Terminated", 2: "Overquota", 3: "Qualified", 4: "Partial"}),
+        Variable(name="AGE", label="Age"), Variable(name="Q2", label="Q2"),
+    ])
+
+
+def test_a_screen_out_is_judged_by_the_respondents_status(tmp_path):
+    from src.core.survey_definition import Expression
+
+    age = Question(qid="AGE", text="Age?", type=QuestionType.NUMERIC,
+                   terminate_if=Expression(op="lt", qid="AGE", value=25))
+    later = Question(qid="Q2", text="Later?", type=QuestionType.NUMERIC)
+    # row 1 terminated (fine), row 2 qualified despite age 20 (violation), row 3 ok
+    path = _parquet(tmp_path, {"status": [1, 3, 3], "AGE": [20, 20, 40], "Q2": [5, 5, 5]})
+    report = check_against_questionnaire(
+        _survey([age, later]),
+        [QuestionVariableLink(qid="AGE", variable_names=["AGE"]),
+         QuestionVariableLink(qid="Q2", variable_names=["Q2"])],
+        path, datamap=_status_map(),
+    )
+    violated = next(f for f in report.findings if f.kind == "terminate_violated")
+    assert violated.example_rows == [2]
+    held = next(f for f in report.findings if f.kind == "terminate_recorded")
+    assert held.example_rows == [1]
+
+
+def test_a_negated_screen_out_does_not_fire_on_a_blank_answer(tmp_path):
+    from src.core.survey_definition import Expression
+
+    role = Question(qid="R", text="Role?", type=QuestionType.SINGLE,
+                    options=[Option(code=1, label="Ads"), Option(code=2, label="Other")],
+                    terminate_if=Expression(op="not", children=[
+                        Expression(op="in", qid="R", values=[1])]))
+    later = Question(qid="Q2", text="Later?", type=QuestionType.NUMERIC)
+    path = _parquet(tmp_path, {"R": [None, 1], "Q2": [5, 5]})
+    report = check_against_questionnaire(
+        _survey([role, later]),
+        [QuestionVariableLink(qid="R", variable_names=["R"]),
+         QuestionVariableLink(qid="Q2", variable_names=["Q2"])],
+        path,
+    )
+    assert "terminate_violated" not in [f.kind for f in report.findings]
+
+
+def test_tick_box_codes_come_from_the_column_names(tmp_path):
+    """A document that skips code 4 numbers differently from the script; the
+    column name says which code a tick box is."""
+    top = Question(qid="TOP", text="Top?", type=QuestionType.SINGLE,
+                   options=[Option(code=c, label=f"L{c}") for c in (1, 2, 3, 5, 9)],
+                   validation={"techniques": {"masks": [{"source_qid": "ALL",
+                                                         "mode": "selected"}]}})
+    every = Question(qid="ALL", text="All?", type=QuestionType.MULTI,
+                     options=[Option(code=c, label=f"L{c}") for c in (1, 2, 3, 5, 9)])
+    path = _parquet(tmp_path, {"ALLr1": [1], "ALLr2": [0], "ALLr9": [1], "TOP": [9]})
+    report = check_against_questionnaire(
+        _survey([every, top]),
+        [QuestionVariableLink(qid="ALL", variable_names=["ALLr1", "ALLr2", "ALLr9"]),
+         QuestionVariableLink(qid="TOP", variable_names=["TOP"])],
+        path,
+    )
+    assert "mask_violated" not in [f.kind for f in report.findings]
