@@ -53,6 +53,7 @@ from src.core.survey_definition import (
 from src.engines.fielding.paradata import DEVICE_CODES
 from src.engines.fielding.paradata import summarise as summarise_paradata
 from src.engines.fielding.rotation import ROTATION_VARIABLE, rotating_blocks
+from src.engines.questionnaire.write_ins import write_in_name, write_ins
 
 logger = logging.getLogger(__name__)
 
@@ -159,8 +160,56 @@ def _grid_cell(value: Any, row_code: int) -> int | None:
     return _to_int(raw)
 
 
+def picked_option(question: Question, code: int, value: Any) -> bool:
+    """Whether this answer chose option (or grid row) `code`."""
+    if question.type is QuestionType.GRID_SINGLE:
+        return _grid_cell(value, code) is not None
+    if question.type is QuestionType.NUMERIC:
+        return (_to_float(_grid_cell(value, code)) or 0) > 0
+    if isinstance(value, (list, tuple, set)):
+        return code in _selected_codes(value)
+    return _to_int(value) == code
+
+
+def _write_in_specs(question: Question) -> list[_ColumnSpec]:
+    """The text typed behind each "Other (Specify)", one TEXT column per option.
+
+    Named like Decipher's `<qid>r<code>oe`. Empty unless that option was picked,
+    so text left in the box after the respondent changed their mind never lands
+    in the file.
+    """
+    specs = []
+    for option in write_ins(question):
+        name = write_in_name(question.qid, option.code)
+        text = question.text or question.qid
+
+        def read(a, q=question, code=option.code, key=name):
+            raw = a.get(key)
+            if raw is None or not picked_option(q, code, a.get(q.qid)):
+                return None
+            return str(raw).strip() or None
+
+        specs.append(_ColumnSpec(
+            Variable(
+                name=name,
+                label=f"{text} — {option.label} (text)",
+                type=VarType.TEXT,
+                question_ref=question.qid,
+                question_text=text,
+                provenance="fielding",
+            ),
+            read,
+        ))
+    return specs
+
+
 def _specs_for_question(question: Question) -> list[_ColumnSpec]:
     """Emit the DataMap column spec(s) for one question (empty for info)."""
+    return [*_question_specs(question), *_write_in_specs(question)]
+
+
+def _question_specs(question: Question) -> list[_ColumnSpec]:
+    """The columns of the question's own answer."""
     qid = question.qid
     text = question.text or qid
     qtype = question.type

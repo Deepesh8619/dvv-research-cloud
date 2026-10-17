@@ -59,7 +59,7 @@ def test_collect_flags_speeder_and_rule():
 
 
 def test_collect_flags_duplicate():
-    df = pl.DataFrame({"Q1": [1, 2, 3, 1], "Q2": [4, 5, 6, 4], "Q3": [1, 1, 2, 1]})
+    df = pl.DataFrame({f"Q{i}": [1, 2, 3, 1] for i in range(1, 19)})
     dm = DataMap()
     for c in df.columns:
         dm.add(Variable(name=c, type=VarType.NUMERIC))

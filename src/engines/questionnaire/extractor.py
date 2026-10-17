@@ -27,6 +27,7 @@ import os
 import re
 import sys
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -87,6 +88,12 @@ from src.engines.questionnaire.relative_bases import (
     resolve_counted_bases,
     resolve_relative_bases,
 )
+from src.engines.questionnaire.routing_prose import (
+    apply_choice_bands,
+    apply_placeholder_pipes,
+    apply_skips,
+    hoist_loose_routing,
+)
 from src.engines.questionnaire.section_paths import (
     apply_intro_screens,
     apply_section_bases,
@@ -112,6 +119,7 @@ from src.engines.questionnaire.verification import (
     failed,
     verify_against_source,
 )
+from src.engines.questionnaire.write_ins import mark_write_ins
 from src.intake.questionnaire_loader import DocumentBlock, QuestionChunk
 
 # Question types whose whole point is a fixed answer list; an empty option list
@@ -150,6 +158,17 @@ _VERIFICATION_ERROR_KEY = "verification_error"
 # cause (a missing key / dead backend), not N review items, and shouldn't cost
 # 2*N doomed LLM attempts to discover.
 _CIRCUIT_BREAKER_CHUNKS = 3
+
+#: Set once the circuit breaker has tripped: the rest of the document is then read
+#: by the deterministic parsers alone, and no further model call is attempted.
+_MODEL_OFF: ContextVar[bool] = ContextVar("dvv_extract_model_off", default=False)
+
+
+def _ask_model(*args: Any, **kwargs: Any) -> AIResponse:
+    """`run_task`, unless the breaker has already shown the model unreachable."""
+    if _MODEL_OFF.get():
+        raise BackendUnavailable("model calls stopped for this run (circuit breaker)")
+    return run_task(*args, **kwargs)
 
 # Exception-based review (product decision): a question is auto-approved
 # (pre-cleared so a human only reviews exceptions) ONLY when the pipeline is
@@ -649,7 +668,7 @@ def _extract_via_spec_table(
         study_context=study_context,
     )
     try:
-        response = run_task(
+        response = _ask_model(
             "questionnaire.extract", prompt, schema.residue_schema(fields.missing)
         )
     except (BackendUnavailable, ModelOutputError, KeyError):
@@ -1005,6 +1024,7 @@ def reread_question(
     result = ExtractionResult(question=new_question)
     _flag_derived_variable(result, chunk, patterns)
     _validate_question(result, {})
+    mark_write_ins([new_question])
     return new_question
 
 
@@ -1057,7 +1077,7 @@ def _extract_via_prose(
         study_context=study_context,
     )
     try:
-        response = run_task(
+        response = _ask_model(
             "questionnaire.extract", prompt, schema.residue_schema(fields.missing)
         )
     except (BackendUnavailable, ModelOutputError, KeyError):
@@ -1153,7 +1173,7 @@ def extract_question(
         chunk.chunk_text, chunk.candidate_qid, profile_hint, learned_rules, study_context
     )
     try:
-        response: AIResponse = run_task(
+        response: AIResponse = _ask_model(
             "questionnaire.extract", prompt, schema.EXTRACTION_SCHEMA
         )
     except (BackendUnavailable, ModelOutputError, KeyError) as exc:
@@ -1237,7 +1257,7 @@ def verify_question(chunk: QuestionChunk, result: ExtractionResult) -> Extractio
     """
     prompt = schema.build_verification_prompt(chunk.chunk_text, result.question.to_dict())
     try:
-        response = run_task("questionnaire.verify", prompt, schema.VERIFICATION_SCHEMA)
+        response = _ask_model("questionnaire.verify", prompt, schema.VERIFICATION_SCHEMA)
     except (BackendUnavailable, ModelOutputError, KeyError) as exc:
         result.add_flag(schema.FLAG_VERIFICATION_UNAVAILABLE)
         _stash_error(result.question, _VERIFICATION_ERROR_KEY, exc)
@@ -1522,6 +1542,10 @@ def extract_survey_definition(
         if on_progress is not None:
             on_progress(0, len(chunks))
 
+    # "Base: ..." lines written above a question arrive at the tail of the
+    # question before it; screen-out lines below a question can arrive alone.
+    chunks = hoist_loose_routing(chunks)
+
     # Read the study's instructions before any question, as an analyst does:
     # what the survey is for, its groups, and the rules that govern later
     # questions. One model call per document; each question's own model call
@@ -1543,6 +1567,8 @@ def extract_survey_definition(
 
     results: list[ExtractionResult] = []
     consecutive_backend_failures = 0
+    tripped: BackendUnavailable | None = None
+    _MODEL_OFF.set(False)
     for chunk in chunks:
         key = normalize_qid(chunk.candidate_qid or "")
         not_asked = datamap_not_asked.get(key)
@@ -1578,12 +1604,17 @@ def extract_survey_definition(
                 on_checkpoint, checkpoint_every,
             )
             if (
-                len(results) == consecutive_backend_failures
+                tripped is None
+                and len(results) == consecutive_backend_failures
                 and consecutive_backend_failures >= _CIRCUIT_BREAKER_CHUNKS
             ):
                 err = (result.question.validation or {}).get(_EXTRACTION_ERROR_KEY, {})
                 detail = err.get("error_detail", "backend unavailable")
-                raise BackendUnavailable(
+                # Stop asking the model, but keep reading: a document whose first
+                # chunks are front matter would otherwise lose every question the
+                # deterministic parsers can read on their own. The error is
+                # raised below only if NOTHING was readable that way.
+                tripped = BackendUnavailable(
                     f"extraction aborted after {consecutive_backend_failures} consecutive "
                     f"backend failures (circuit breaker): {detail}",
                     config_error=bool(
@@ -1591,6 +1622,7 @@ def extract_survey_definition(
                         and schema.FLAG_EXTRACTION_CONFIG_ERROR in result.flags
                     ),
                 )
+                _MODEL_OFF.set(True)
             continue
 
         # Extraction succeeded (or failed in a non-backend way, e.g. MODEL_ERROR):
@@ -1616,6 +1648,11 @@ def extract_survey_definition(
             results, chunks, study_id, detection, reconcile_meta,
             on_checkpoint, checkpoint_every,
         )
+
+    if tripped is not None:
+        _MODEL_OFF.set(False)
+        if all(_is_backend_unavailable_result(r) for r in results):
+            raise tripped
 
     # What a question's tables state beyond its own answers: a carousel of
     # categories, a brand list named once for a range of questions. Captured
@@ -1710,11 +1747,19 @@ def extract_survey_definition(
     if blocks is not None:
         survey.metadata["document_markers"] = document_markers(blocks)
 
+    # "Other (Specify)": the option that asks the respondent to type. After
+    # every pass that builds or copies option lists (loops, datamap recovery).
+    mark_write_ins(survey)
+
     # "[BASE: ANSWERED YES ABOVE]": a base that points instead of naming. Before
     # QA, so QA judges the survey with these bases applied.
     resolve_relative_bases(survey)
     # "ASK Q12-Q19 IF EVER PURCHASED BUBBLE AT Q2b" — needs the final lists.
     apply_worded_asks(survey)
+    # "IF A3 = 3 OR 4 SKIP TO A6": gates the questions the skip jumps over.
+    apply_skips(survey)
+    apply_choice_bands(survey)
+    apply_placeholder_pipes(survey)
     # "MULTIPLE AT S6", "= 3-5 for at least one option".
     resolve_counted_bases(survey)
     # A loop turn's base, pointing at a hidden variable that names its brand.

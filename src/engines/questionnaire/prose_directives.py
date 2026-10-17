@@ -41,7 +41,7 @@ from src.engines.questionnaire.learned import (
     learned_screen_out_range,
     learned_type,
 )
-from src.engines.questionnaire.routing_prose import parse_routing
+from src.engines.questionnaire.routing_prose import loose_base, loose_terminate, parse_routing
 from src.engines.questionnaire.select_limits import read_limits
 from src.intake.questionnaire_loader import (
     bracket_bodies,
@@ -135,12 +135,16 @@ _OPTION_TAG_RE = re.compile(r"\s*(?P<tags>\[[^\][]*\](?:\s*\[[^\][]*\])*)\s*$")
 # client documents — 116 distinct shapes. Numeric forms are checked before the
 # open-text ones, because "NUMERIC OE" and "OE" both contain "OE".
 _TYPE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
-    (re.compile(r"select all that apply|choose all that apply|multiple answers",
+    (re.compile(r"(?:select|choose|check|tick|mark)\s+(?:all|every)\b|all that apply|"
+                r"multiple (?:answers?|responses?|choices?)|more than one (?:answer|response)|"
+                r"\bmulti[- ]?(?:code|select|punch)\b",
                 re.I), QuestionType.MULTI),
-    (re.compile(r"select one|choose one|single answer|select your", re.I),
+    (re.compile(r"drop[- ]?down|\bpick[- ]?list\b", re.I), QuestionType.DROPDOWN),
+    (re.compile(r"select one|choose one|single answer|select your|"
+                r"\bsingle[- ]?(?:code|select|punch)\b(?!\s*(?:for\s+)?(?:each|per)\b)", re.I),
      QuestionType.SINGLE),
     # NUMERIC first: "NUMERIC OE: 3-DIGIT MINIMUM" is a number, not a verbatim.
-    (re.compile(r"numeric\s*oe|record number|enter (a )?number|\bnumeric\b|"
+    (re.compile(r"^\s*number\s*$|numeric\s*oe|record number|enter (a )?number|\bnumeric\b|"
                 r"\byears\b|\bage\b.*\bnumber\b|number\s+\d+\s*-\s*\d+|"
                 r"\d+\s*-\s*digit|num(?:ber)?\s*box", re.I),
      QuestionType.NUMERIC),
@@ -150,7 +154,7 @@ _TYPE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
      QuestionType.RANK),
     # TEXTBOX (11x) and "OE: n-CHARACTER MINIMUM" (6x) are the commonest
     # open-text declarations in these documents and were both being missed.
-    (re.compile(r"_\s*_\s*_|open[- ]?end|\btextbox\b|\boe\b|please describe|"
+    (re.compile(r"^\s*open\s*$|_\s*_\s*_|open[- ]?end|\btextbox\b|\boe\b|please describe|"
                 r"in your own words|type your|enter response|verbatim", re.I),
      QuestionType.OPEN_TEXT),
 ]
@@ -162,9 +166,11 @@ _TYPE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
 # brand names, so searching them against the whole question text would invent
 # types. Tried after `_TYPE_PATTERNS` so "[NUMBER BOX WITH SP]" stays numeric.
 _PUNCH_DIRECTIVE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
-    (re.compile(r"\bMP\b|\bmulti(?:ple)?\s*(?:punch|select)\b|\bcheck\s*all\b", re.I),
+    (re.compile(r"\bMP\b|\bmulti(?:ple)?\s*(?:punch|select|code)?\s*$|"
+                r"\bmulti(?:ple)?\s*(?:punch|select)\b|\bcheck\s*all\b", re.I),
      QuestionType.MULTI),
-    (re.compile(r"\bSP\b|\bsingle\s*(?:punch|select)\b|\bradio\b", re.I),
+    (re.compile(r"\bSP\b|\bsingle\s*(?:punch|select|code)?\s*$|"
+                r"\bsingle\s*(?:punch|select)\b|\bradio\b", re.I),
      QuestionType.SINGLE),
     (re.compile(r"\bTXT\b", re.I), QuestionType.OPEN_TEXT),
 ]
@@ -195,7 +201,7 @@ _NUMBER_RANGE = re.compile(r"(\d[\d,]*)\s*-\s*(\d[\d,]*)")
 # range plus how to type it. Only these words — "[0-100, MUST SUM TO 100%]"
 # is a total, not a single number.
 _NUMBER_RANGE_STATED = re.compile(
-    r"(?:(?:ENTER\s+)?(?:A\s+)?(?:NUMBER|RANGE|VALUE)\s*:?\s*)?"
+    r"(?:(?:ENTER\s+)?(?:A\s+)?(?:NUMERIC\s+|NUMBER|RANGE|VALUE)\s*:?\s*)?(?:RANGE\s*)?"
     r"(\d[\d,]*)\s*-\s*(\d[\d,]*)\s*%?\s*(?:RESPONSE)?\s*"
     r"(?:,?\s*(?:WHOLE\s+NUMBERS?|INTEGERS?|NUMERIC|NUMBERS?\s+ONLY))?\s*",
     re.I,
@@ -687,14 +693,89 @@ def _parallel_to_next(line: str, body_lines: list[str], position: int) -> bool:
     )
 
 
+# An option table with its CODE on the right ("Yes | 1", "Aurex / 1", "Yes<tab>1")
+# or on the left ("1 | Yes"). Read per LINE group, never per cell: a pair only
+# counts when two or more lines share the shape and their codes differ, so a
+# stray "Wave 2 / 3" in the wording is left alone. Rewritten to the "1. Yes"
+# form the rest of the parser already reads as a written code.
+_CODE_RIGHT = re.compile(r"^(?P<label>[^|\t]*?[A-Za-z0-9][^|\t]*?)\s*(?:\t+|\|| / )\s*(?P<code>\d{1,3})\s*$")  # noqa: E501
+_CODE_LEFT = re.compile(r"^(?P<code>\d{1,3})\s*(?:\t+|\|)\s*(?P<label>[^|\t]*[A-Za-z][^|\t]*?)\s*$")
+
+
+# "SWITCHING", "C – ELECTRIC VEHICLES": a section banner left under the last
+# answer. Capitals only, 4+ letters, so "DK", "N/A" and "NONE" stay answers.
+_CAPS_BANNER = re.compile(r"(?:[A-Z]{1,3}\s*[–-]\s*)?(?!(?:NONE|OTHER|REFUSED)\b)[A-Z][A-Z &/]{3,40}")  # noqa: E501
+_SCRIPTER_LINE = re.compile(
+    r"\(?\s*(?:(?:RANDOMI[SZ]E|ROTATE|FLIP|ANCHOR|KEEP|READ|PN|NOTE)\b[^a-z]{0,60}"
+    r"|(?:SHOW|DISPLAY|PIPE|INSERT)\b[\s:]+[^a-z\s][^a-z]{2,60})\)?"  # noqa: E501
+)
+
+
+def _code_column_lines(chunk_text: str) -> tuple[list[str], set[str]]:
+    """The text with code-column lines rewritten, and the labels that were."""
+    raw = chunk_text.splitlines()
+    labels: set[str] = set()
+    for shape in (_CODE_RIGHT, _CODE_LEFT):
+        hits = [
+            (i, m) for i, ln in enumerate(raw)
+            if ln.strip() and not _LABEL_RE.match(ln) and (m := shape.match(ln.strip()))
+        ]
+        if len(hits) >= 2 and len({m.group("code") for _, m in hits}) == len(hits):
+            for i, m in hits:
+                raw[i] = f"{m.group('code')}. {m.group('label').strip()}"
+                labels.add(m.group("label").strip())
+            break
+    return raw, labels
+
+
+# A run of capitals after the last sentence of the wording is the scripter
+# talking, not the respondent's question: "Are you… (SINGLE)", "…nearest pound.
+# NUMERIC RANGE 1-200", "…Select up to 2. MULTICODE (MAX 3)". Moved out of the
+# wording into directives, where the type and limit readers already look.
+_SENTENCE_END = re.compile(r"[.?!…]")
+
+
+def _split_tag_tail(text: str) -> tuple[str, list[str]]:
+    ends = [m.end() for m in _SENTENCE_END.finditer(text)]
+    if not ends or "[" in text[ends[-1]:]:
+        return text, []
+    stem, tail = text[: ends[-1]].rstrip(), text[ends[-1]:].strip()
+    if (
+        not tail or len(tail) > 90 or not re.search(r"[A-Z]", tail)
+        or any(c.islower() for c in tail) or not any(c.islower() for c in stem)
+    ):
+        return text, []
+    pieces = [p.strip(" ()") for p in re.findall(r"\([^()]*\)|[^()]+", tail)]
+    return stem, [p for p in pieces if p]
+
+
 def parse_prose_question(
     chunk_text: str,
     candidate_qid: str | None,
     patterns: list[LearnedPattern] | None = None,
 ) -> ProseFields | None:
     """Extract what a prose question states. None if it has no usable id."""
-    lines = [ln.replace("\t", " ").strip() for ln in (chunk_text or "").splitlines()]
+    column_lines, column_labels = _code_column_lines(chunk_text or "")
+    lines = [ln.replace("\t", " ").strip() for ln in column_lines]
     lines = _join_wrapped_directives([ln for ln in lines if ln])
+    # Routing written as plain lines ("Base: ...", "TERMINATE INTERVIEW IF S1 = 1")
+    # is lifted out before anything can read it as wording or as an answer.
+    loose_bases: list[tuple[str, Expression | None]] = []
+    loose_terms: list[str] = []
+    kept: list[str] = []
+    for ln in lines:
+        is_base, base_expr = loose_base(ln)
+        if is_base:
+            loose_bases.append((ln, base_expr))
+        elif loose_terminate(ln)[0]:
+            loose_terms.append(ln)
+        elif _SCRIPTER_LINE.fullmatch(ln):
+            # "(ROTATE)", "RANDOMISE LIST", "SHOW: CODES CHOSEN AT B1": the
+            # scripter's note, written without brackets. Same treatment as one.
+            kept.append(f"[{ln.strip('() ')}]")
+        else:
+            kept.append(ln)
+    lines = kept
     if not lines:
         return None
 
@@ -722,6 +803,9 @@ def parse_prose_question(
         directives.extend(bracket_bodies(inline_directive.group("tags")))
         question_text = _OPTION_TAG_RE.sub("", question_text).strip()
 
+    question_text, tag_tail = _split_tag_tail(question_text)
+    directives.extend(tag_tail)
+
     # A base written INSIDE the question-text line — "D3. [ASK IF C1=18+] What
     # is your marital status?" — reached nothing: only directive-ONLY lines were
     # read for routing, so the bracket was dropped entirely, not even kept as a
@@ -737,6 +821,7 @@ def parse_prose_question(
     show_if: Expression | None = None
     show_if_verbatim = ""
     written_codes: list[int | None] = []
+    written_letters: list[str | None] = []
     stem_wraps_used = False
     last_option_marked = False
     randomize = False
@@ -787,6 +872,24 @@ def parse_prose_question(
                 # directive nobody noticed is worse than an untidy one.
                 question_text = _strip_bracket(question_text, body)
                 instruction_text = _strip_bracket(instruction_text, body)
+
+    for base_line, base_expr in loose_bases:
+        directives.append(base_line)
+        if (
+            show_if is None
+            and base_expr is not None
+            and qid.upper() not in {r.upper() for r in base_expr.referenced_qids()}
+        ):
+            show_if = base_expr
+            show_if_verbatim = base_line
+    loose_term_exprs: list[Expression] = []
+    for term_line in loose_terms:
+        directives.append(term_line)
+        term_expr = loose_terminate(term_line, qid)[1]
+        if term_expr is None:
+            terminate_lines.append(term_line)
+        else:
+            loose_term_exprs.append(term_expr)
 
     for position, line in enumerate(body_lines):
         if is_directive_only(line):
@@ -892,7 +995,10 @@ def parse_prose_question(
             directives.append(line.strip())
             continue
 
-        if options and is_section_header(line):
+        if options and (is_section_header(line) or (
+            _CAPS_BANNER.fullmatch(line)
+            and any(c.islower() for o in options for c in o.label)
+        )):
             # "CONSUMER PANEL INTRODUCTION & SCREENER (S0=1)" opens the NEXT
             # section; read as an answer it became option 3 of the sample split.
             # Everything under it is that section's, not this question's.
@@ -968,6 +1074,7 @@ def parse_prose_question(
             last_option_marked = False
         else:
             written_codes.append(int(written.group(1)) if written else None)
+            written_letters.append(lettered.group(1) if lettered else None)
             option = Option(code=len(options) + 1, label=label)
             last_option_marked = marker is not None
 
@@ -1000,6 +1107,16 @@ def parse_prose_question(
     # distinct. A partial list (wrapped option text, an unnumbered "Other")
     # keeps positional numbering rather than mixing two schemes.
     _adopt_glued_codes(options, written_codes)
+    # a) b) d) e): a lettered list codes by LETTER (a=1), so a skipped letter
+    # leaves its code unused instead of renumbering everything after it.
+    if (
+        len(written_letters) == len(options) >= 2
+        and all(written_letters) and all(c is None for c in written_codes)
+        and written_letters[0] in ("a", "A")
+        and len({x.isupper() for x in written_letters}) == 1
+        and [ord(x.lower()) for x in written_letters] == sorted({ord(x.lower()) for x in written_letters})  # noqa: E501
+    ):
+        written_codes[:] = [ord(x.lower()) - 96 for x in written_letters]
     if (
         options
         and len(written_codes) == len(options)
@@ -1098,6 +1215,13 @@ def parse_prose_question(
     # ("[SP]") still wins, but before escalation, so a capped question does not
     # cost a model call to type something the sentence already says.
     limits = read_limits(instruction_text)
+    for tag in directives:
+        for key, number in read_limits(tag).items():
+            limits.setdefault(key, number)
+    for tag in directives:
+        capped = re.fullmatch(r"(MAX|MIN)\s*(\d{1,2})", tag.strip(), re.I)
+        if capped:
+            limits[f"{capped.group(1).lower()}_select"] = int(capped.group(2))
     if limits:
         fields.select_limits = limits
         ceiling = limits.get("max_select")
@@ -1119,6 +1243,13 @@ def parse_prose_question(
         fields.terminate_if = range_terminate
         fields.terminate_verbatim = range_terminate.verbatim_text
         fields.evidence["terminate"] = range_terminate_evidence
+    elif loose_term_exprs and not terminate_codes and not terminate_lines:
+        fields.terminate_if = (
+            loose_term_exprs[0] if len(loose_term_exprs) == 1
+            else Expression(op="or", children=loose_term_exprs)
+        )
+        fields.terminate_verbatim = "; ".join(loose_terms)
+        fields.evidence["terminate"] = "; ".join(loose_terms)
     elif terminate_codes:
         fields.terminate_if = Expression.from_dict(
             {
@@ -1153,7 +1284,9 @@ def parse_prose_question(
         kept = [
             option
             for option, written in zip(options, written_codes, strict=False)
-            if written is not None
+            # a code-column rewrite is a GUESS at a table's shape; the question
+            # states it takes no list, so its furniture is not special codes
+            if written is not None and not option.label.startswith(tuple(column_labels))
         ]
         if len(kept) != len(options):
             fields.options = kept

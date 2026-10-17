@@ -38,7 +38,9 @@ from src.engines.fielding.decisions import (
     terminating_question,
     unsatisfiable_conditions,
 )
+from src.engines.fielding.materialize import picked_option
 from src.engines.questionnaire.grid_masks import mask_codes
+from src.engines.questionnaire.write_ins import write_in_name, write_ins
 
 DEFAULT_RESPONDENTS = 500
 MAX_RESPONDENTS = 5000
@@ -177,6 +179,16 @@ def _answer(
             ["it was fine", "nothing to add", "too expensive", "good value", "not sure"]
         )
     return None
+
+
+_WRITE_IN_TEXTS = ["a different one", "something else", "my own words", "not listed", "varies"]
+
+
+def _fill_write_ins(question: Question, answers: dict, rng: random.Random) -> None:
+    """Type something behind each "Other (Specify)" this respondent picked."""
+    for option in write_ins(question):
+        if picked_option(question, option.code, answers.get(question.qid)):
+            answers[write_in_name(question.qid, option.code)] = rng.choice(_WRITE_IN_TEXTS)
 
 
 #: Share of synthetic respondents who are on-target and pass every screener.
@@ -330,6 +342,7 @@ def simulate(
                 value = _qualifying(survey, question, rng, allowed, answers, value)
             if value is not None:
                 answers[qid] = value
+                _fill_write_ins(question, answers, rng)
 
             terminated = terminating_question(survey, answers)
             if terminated is not None:
@@ -450,6 +463,7 @@ def path_to(
                     value = _qualifying(survey, question, rng, allowed, answers, value)
                 if value is not None:
                     answers[qid] = value
+                    _fill_write_ins(question, answers, rng)
             if terminating_question(survey, answers) is not None:
                 failed = True
                 break

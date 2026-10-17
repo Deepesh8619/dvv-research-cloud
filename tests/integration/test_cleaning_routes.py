@@ -13,7 +13,7 @@ from api.db import Base, QuestionnaireDB, StudyDB, UserDB, get_db
 from api.main import app
 from src.core.models import DataMap, Variable
 
-COLS = [f"Q{i}" for i in range(1, 7)]
+COLS = [f"Q{i}" for i in range(1, 19)]  # >= MIN_DUP_ANSWERS answered columns
 
 
 @pytest.fixture

@@ -86,7 +86,9 @@ class QuestionChunk:
 # suffix class silently glued every uppercase sub-question onto the preceding
 # question (SHED 2014: D4A/D4B/D4C/D8A all lost). The suffix is kept as
 # written — it is the variable name the data map will carry.
-_QID_RE = re.compile(r"^\s*([A-Za-z]{1,3})(\d+)([A-Za-z]?)[.):]")
+# A sub-item suffix "_1" (Q7_1) is part of the name, and a label may be followed
+# by two spaces or a tab instead of punctuation ("Q7_1  NUM 1-60 How many...").
+_QID_RE = re.compile(r"^\s*([A-Za-z]{1,3})(\d+)([A-Za-z]?(?:_\d+)?)(?:[.):]|\s{2,}\S|\t)")
 # SECTION B, SECTION 2 — a labelled section boundary with no question number.
 _SECTION_RE = re.compile(r"^\s*SECTION\s+[A-Z0-9]", re.IGNORECASE)
 # Strong instruction/boundary markers even without a question-number prefix.
@@ -203,6 +205,28 @@ _ROUTING_DIRECTIVE_RE = re.compile(
 )
 
 
+# One identifier token; what follows it may be stray punctuation ("C_TEAM_S(ZE")
+# but not more words, so a sentence never reads as an id.
+_TOKEN_RE = re.compile(r"([A-Za-z][A-Za-z0-9_]*)(?=$|[^\w\s])")
+
+
+def _rows_qid(rows: list[list[str]] | None) -> str | None:
+    """The qid of a spec table, read from its rows: some row's label is one of
+    the client's names for "question id" (Q Name, Variable, Question ID...,
+    FIELD_ALIASES["qid"] in spec_table) and its value is one identifier token.
+    Label wording lives in that one alias set, not here."""
+    from src.engines.questionnaire.spec_table import FIELD_ALIASES, _norm_label
+
+    for row in rows or ():
+        cells = [c.strip() for c in row if c and c.strip()]
+        if (
+            len(cells) >= 2 and _norm_label(cells[0]) in FIELD_ALIASES["qid"]
+            and (m := _TOKEN_RE.match(cells[1]))
+        ):
+            return m.group(1)
+    return None
+
+
 def _table_qid(block: DocumentBlock) -> str | None:
     """The token qid of a table-per-question block, or None for other blocks.
 
@@ -211,8 +235,35 @@ def _table_qid(block: DocumentBlock) -> str | None:
     default 'attach to preceding chunk' behavior)."""
     if block.block_type != "table":
         return None
+    if qid := _rows_qid(block.rows):
+        return qid
     m = _QNAME_RE.search(block.text)
     return m.group(1) if m else None
+
+
+# A question named by an identifier on its own line (AGE, MAIN_BANK, LIFESTAGE
+# (derived)), with no Q-number. Single ALL-CAPS token; only trusted when the
+# document has several, so a lone "SCREENER" or "NONE" never opens a question.
+_IDENT_LINE_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]{1,39})(?:\s*\(.{0,60}\))?\s*$")
+_IDENT_STOP = frozenset(
+    "NONE OTHER TERMINATE CLOSE END SCREENER INTRO DEMOGRAPHICS YES NO ALL "
+    "NA REFUSED THANKS CONTINUE ROWS COLUMNS".split()
+)
+
+
+def _ident_qid(block: DocumentBlock) -> str | None:
+    if block.block_type != "paragraph":
+        return None
+    m = _IDENT_LINE_RE.match(block.text)
+    return m.group(1) if m and m.group(1) not in _IDENT_STOP else None
+
+
+def _has_ident_questions(blocks: list[DocumentBlock]) -> bool:
+    """Several identifier lines AND no Q-number or spec table anywhere: in a
+    numbered document an ALL-CAPS line is a heading or a scripter note."""
+    return sum(1 for b in blocks if _ident_qid(b)) >= 3 and not any(
+        _QID_RE.match(b.text) or _table_qid(b) is not None for b in blocks
+    )
 
 
 def _clean_cell(value: str) -> str:
@@ -249,7 +300,7 @@ def _serialize_qname_table(rows: list[list[str]]) -> str:
     for row in rows:
         if not row:
             continue
-        label = row[0].strip()
+        label = row[0].strip().rstrip(":").strip()
         value = _row_value(row[1:]) if len(row) > 1 else ""
         if not label:
             # No label cell (a 'Response list:' header, or an option value whose
@@ -277,7 +328,7 @@ def _is_unnumbered(blocks: list[DocumentBlock]) -> bool:
     its base tags stay directives. Only a document with no names anywhere has to
     fall back to base tags to find its question boundaries.
     """
-    return not any(
+    return not _has_ident_questions(blocks) and not any(
         _QID_RE.match(b.text) or _table_qid(b) is not None for b in blocks
     )
 
@@ -387,7 +438,7 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
             # (merged-cell duplication + boilerplate removed); generic tables
             # (quota grids, outlines) keep the untouched pipe-join.
             clean = _serialize_qname_table(rows)
-            serialized = clean if _QNAME_RE.search(clean) else "\n".join(
+            serialized = clean if _rows_qid(rows) else "\n".join(
                 " | ".join(r) for r in rows
             )
             blocks.append(
@@ -668,6 +719,7 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
     # UI, approval and the data column all use, and "UNKNOWN_7" is not one a
     # reviewer can match back to the document they are reading.
     base_tags_open = _is_unnumbered(blocks)
+    ident_named = _has_ident_questions(blocks)
     base_counter = 0
     # Word list numbers, when the questions carry them: the document's own
     # names. `listed` is the last one seen; `extra` counts unlisted questions
@@ -702,9 +754,17 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
             # names a section; it is not a screen, and documents say outright
             # "do not show section headers".
             return
+        # An identifier line names the question (candidate_qid); the wording
+        # is what follows, so the id is not also read as the question text.
+        shown = list(current)
+        if ident_named and current_qid:
+            for i, b in enumerate(shown):
+                if _ident_qid(b) == current_qid:
+                    del shown[i]
+                    break
         chunks.append(
             QuestionChunk(
-                chunk_text="\n".join(b.text for b in current).strip(),
+                chunk_text="\n".join(b.text for b in shown).strip(),
                 candidate_qid=current_qid,
                 source_blocks=list(current),
                 provenance=_provenance(current[0]),
@@ -731,6 +791,8 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
             continue
 
         is_boundary, qid = _detect_label(block.text, base_tags_open)
+        if not is_boundary and ident_named and (ident := _ident_qid(block)):
+            is_boundary, qid = True, ident
         if (
             not is_boundary and base_tags_open and current
             and current[-1].block_type == "table"
