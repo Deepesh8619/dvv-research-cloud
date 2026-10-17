@@ -62,7 +62,7 @@ _MASK_PATTERNS: list[tuple[re.Pattern, str]] = [
         "selected",
     ),
     (
-        re.compile(rf"NOT\s+SELECTED\s+(?:AT|IN)\s+(?P<source>{_QID})", re.I),
+        re.compile(rf"NOT\s+(?:SELECTED|CHOSEN|PICKED|USED|MENTIONED)\s+(?:AT|IN)\s+(?P<source>{_QID})", re.I),  # noqa: E501
         "not_selected",
     ),
     (
@@ -108,7 +108,13 @@ _MASK_PATTERNS: list[tuple[re.Pattern, str]] = [
 # --- Piping ----------------------------------------------------------------
 # A qid-bearing pipe can be resolved; a named one ("[INSERT PHARMACY]") refers
 # to a scripter-side variable and is recorded, never guessed at.
-_PIPE_QID_RE = re.compile(rf"INSERT\s+(?:RESPONSE\s+(?:FROM|FOR)\s+)?(?P<source>{_QID})\b", re.I)
+_PIPE_QID_RE = re.compile(
+    rf"(?:INSERT|PIPE)\s*:?\s*(?:RESPONSE\s+(?:FROM|FOR)\s+)?(?P<source>{_QID})\b"
+    # "<<Q6>>", "{B2}", "«MAIN_BANK»", "[Q3 answer]": the marker IS the pipe.
+    rf"|(?:<<|<|\{{|«)\s*(?P<marked>[A-Za-z]{{1,3}}\d+[a-z]?)\s*(?:>>|>|\}}|»)"
+    rf"|\[\s*(?P<named>[A-Za-z]{{1,3}}\d+[a-z]?)\s+(?:ANSWER|RESPONSE|SELECTION)\s*\]",
+    re.I,
+)
 _PIPE_NAMED_RE = re.compile(r"INSERT\s+(?P<name>[A-Z][A-Z ]{2,30}?)\s*\]", re.I)
 # "[#1 RANK FROM Q8]" — a pipe written without the word INSERT. Both other
 # forms require it, so this one was not read as a pipe at all: the compiler
@@ -218,7 +224,7 @@ def detect_techniques(*fragments: str) -> Techniques:
             break  # most specific pattern wins; do not double-count
 
         for match in _PIPE_QID_RE.finditer(fragment):
-            source = match.group("source").upper()
+            source = (match.group("source") or match.group("marked") or match.group("named")).upper()  # noqa: E501
             if (source, None) not in seen_pipes:
                 seen_pipes.add((source, None))
                 pipes.append(Pipe(source_qid=source, name=None, verbatim=match.group(0).strip()))

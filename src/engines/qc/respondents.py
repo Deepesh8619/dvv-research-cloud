@@ -199,7 +199,16 @@ def detect_straightliners(df: pl.DataFrame, datamap: DataMap) -> tuple[list[int]
     return sorted(flagged), checked
 
 
-def detect_duplicates(df: pl.DataFrame, datamap: DataMap) -> list[int]:
+# A repeated answer pattern only means something when it is long enough that two real
+# people are unlikely to share it. On an 8-question survey many genuine respondents
+# match each other, so a row must carry at least this many answered question columns
+# to be called a duplicate (measured: a short survey flagged most of its respondents).
+MIN_DUP_ANSWERS = 15
+
+
+def detect_duplicates(
+    df: pl.DataFrame, datamap: DataMap, min_answers: int | None = None
+) -> list[int]:
     """Respondents whose full answer pattern duplicates an earlier row.
 
     Compares only question variables (from the DataMap), never system columns
@@ -222,10 +231,15 @@ def detect_duplicates(df: pl.DataFrame, datamap: DataMap) -> list[int]:
     ]
     if not cols:
         return []
+    if min_answers is None:
+        min_answers = MIN_DUP_ANSWERS
     # Pack the answer columns into one struct series: duplicated-and-not-first
     # marks every later copy of an identical full answer pattern.
     packed = df.select(pl.struct(cols).alias("_pattern"))["_pattern"]
-    mask = packed.is_duplicated() & ~packed.is_first_distinct()
+    answered = df.select(
+        pl.sum_horizontal([pl.col(c).is_not_null() for c in cols]).alias("_n")
+    )["_n"]
+    mask = packed.is_duplicated() & ~packed.is_first_distinct() & (answered >= min_answers)
     return mask.arg_true().to_list()
 
 

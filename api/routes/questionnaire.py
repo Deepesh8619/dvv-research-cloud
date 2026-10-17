@@ -1938,10 +1938,12 @@ def _rerun_reread_safe_passes(survey: SurveyDefinition) -> None:
     from src.engines.questionnaire.carousel import apply as apply_carousels
     from src.engines.questionnaire.constant_sum import apply as apply_constant_sums
     from src.engines.questionnaire.list_sources import fill_lists
+    from src.engines.questionnaire.write_ins import mark_write_ins
 
     fill_lists(survey)
     apply_carousels(survey)
     apply_constant_sums(survey)
+    mark_write_ins(survey)
 
 
 @router.post("/studies/{study_id}/questionnaire/questions/{qid}/reread")
