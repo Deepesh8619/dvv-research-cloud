@@ -1,85 +1,141 @@
 # DVV Research Cloud
 
-Turn a client's questionnaire — a Word document written for a human scripter —
-into a fielded survey, collected data, and a tabbed deck, without a person
-re-typing any of it.
+**A client's questionnaire in, a fielded survey and trustworthy data out — with
+every decision shown, checked, and explained.**
 
-**What it is good at:** reading a real questionnaire correctly, saying what it
-could not read, and refusing to field something that would produce unusable
-data. **What it is not:** a finished Decipher replacement. See
-[Scope](#scope-what-it-does-and-does-not-do).
+A market-research study starts as a Word document written for a human scripter:
+forty pages of questions, answer lists, "ask only if" notes, screen-outs, masks
+and pipes. Today someone rebuilds that by hand in Decipher or Qualtrics, over
+days, and the mistakes surface in field — after real money has been spent on
+real respondents.
+
+DVV Research Cloud reads that document the way a senior scripter does, builds
+the survey, proves its logic before anyone sees it, runs the link, and then
+checks every respondent's answers against the questionnaire they were collected
+under. It does this deterministically wherever it can, so the same document
+always gives the same answer and every answer points back to a line of the
+document.
+
+```mermaid
+flowchart LR
+  A["Word / PDF<br/>questionnaire"] --> B["Read<br/>rules first, AI for the rest"]
+  B --> C["Second look<br/>whole questionnaire in view"]
+  C --> D["Researcher reviews<br/>one plain sentence per issue"]
+  D --> E["Proven before field<br/>dry run · pre-link check"]
+  E --> F["Live link<br/>server decides every route"]
+  F --> G["Data checked against<br/>the questionnaire"]
+  G --> H["SPSS · Excel · tables · deck"]
+```
 
 ---
 
-## How it works
+## What it does
 
-[**docs/METHODS.md**](docs/METHODS.md) explains every technique, model and
-method in the system — from how a Word document is read to how a significance
-letter is computed — assuming no prior knowledge of market research or of this
-codebase. Start there to understand *why* the system is built the way it is.
+**1 · Reads the questionnaire.** Word or PDF, in both conventions agencies use:
+prose (`Q7. How satisfied… [ASK IF Q3=1]`) and spec tables (`Q Name:` /
+`Response list:` / `Among who:`). Out come questions, types, answer lists with
+their real punch codes, bases, screen-outs, grids, loops, carousels, constant
+sums, masks, pipes, rotation, quotas and hidden variables — each with a note
+saying which line of the document it came from. Tracked changes and
+strikethrough are honoured.
 
-## The path a study takes
+**2 · Takes a second look, with the whole questionnaire in mind.** After every
+question is read, each flagged one is revisited the way a senior scripter
+would: stale alarms are cleared, causes the document itself settles are fixed
+by rule, and the rest go to an open-weight model shown the questions it names,
+its neighbours and a cleanly read question of the same kind. A model's answer
+may only use wording the document contains, and is kept only if the same checks
+that raised the flag now find less wrong. The reviewer sees one sentence per
+question — *fixed automatically* (undo), *fix ready* (apply), *note*, or *needs
+you* with the recommended next step — instead of a row of flag codes.
 
-```
-  .docx / .pdf  ->  extraction  ->  review  ->  preflight  ->  link
-                                                                 |
-   deck (.xlsx)  <-  crosstabs  <-  coding  <-  data (.sav)  <-  respondents
-```
+> **A real example.** A Google Ads questionnaire says, for a rating grid,
+> `[INSERT SELECTIONS FROM DA_VID_EFFIC]` — naming the grid itself, a copy slip.
+> The system notices the self-reference, finds that `DA_VID_MEASURE` just before
+> it holds the list and is asked of the same people, reads the 10-point scale
+> from the response list, parses the audience `DA_PLACEMENT = 3 and/or 4`, and
+> offers the finished grid with one button. A person still decides; they no
+> longer have to work it out.
 
-**1 · Intake and extraction.** A Word or PDF questionnaire is read into a
-canonical `SurveyDefinition`: questions, answer lists, grids, routing, quotas,
-loops. Deterministic first — around two thirds of questions need no model call
-at all — with a local open-source model only for the residue. Tracked changes
-and strikethrough are honoured: a question struck out of the document is not
-fielded.
+**3 · Learns your house style.** When a reviewer corrects a misread, they can
+teach the convention instead ("in this client's documents, this phrase means a
+multi-select"). The lesson applies to the whole questionnaire at once and to
+every future document of that format. A taught pattern is a literal fragment,
+never a regular expression — safer, and a skill a research executive already has.
 
-It reads both conventions real agencies use: **prose** (`Q7. How satisfied…
-[ASK IF Q3=1]`) and **spec tables** (`Q Name:` / `Q type:` / `Response list:`).
+**4 · Proves the survey before anyone takes it.** Four independent gates stand
+between a mistake and a respondent: review flags that block approval, a dry run
+that drives synthetic respondents through every rule, a server-side pre-link
+check that can refuse to create the link, and a soft-launch hold so the first
+completes are checked before full field.
 
-**2 · Comprehension.** It distinguishes what is asked from what is not (intro
-screens, transitions, hidden variables the programmer computes), reads the
-relations between questions (bases, masks, pipes, list sources) into a graph,
-and reads the study's own structure out of scripter notes. See
-[`docs/questionnaire-comprehension.md`](docs/questionnaire-comprehension.md).
+**5 · Runs the link.** One question per screen, built for a phone. Screen-outs,
+quotas, masks, pipes and block rotation are all decided on the
+server, never in the respondent's browser. Rotating blocks and MaxDiff versions
+are assigned least-fill, so arms stay balanced across the sample. Vendor redirects use the status
+codes panels expect; paradata (device, place check) is recorded with the IP
+hashed, never stored.
 
-**3 · Review.** Every question shows what the parser read, what it could not,
-and the evidence for each decision — beside the client's own document,
-rendered with its colour, highlights and strikethrough intact. Founders can
-teach the parser a client's conventions, and the lesson applies to every
-future document of that type (the correction loop).
+**6 · Checks fielded data against the questionnaire.** Give it the
+questionnaire and a data export — from this system or from Decipher, Qualtrics
+or anyone else — and it finds, respondent by respondent: answers outside the
+base, completes who match a screen-out, "None of these" ticked with other
+answers, more answers than allowed, totals that don't add up, answers outside a
+mask, and codes the list never offered. Document codes and script codes are
+joined by answer label, so a reversed or renumbered scale is never reported as
+an error.
 
-After everything is read, a **second look** goes back to every flagged question
-with the whole questionnaire in view: stale flags are cleared, what the document
-settles is fixed by rule, and the rest goes to a model shown the questions it
-names and its neighbours (its answer may only use the document's wording). Each
-question then carries one plain resolution — *fixed automatically* (undo), *fix
-ready* (apply), *note*, or *needs you* with the recommended next step — instead
-of a row of flag codes.
+**7 · Delivers.** A labelled `.sav` with its codebook (value labels, measure
+levels, declared missing codes), `.xlsx`, weighted crosstabs with significance
+letters, verbatim coding with a reusable codeframe library, an Excel deck, a
+read-only client link, and a copilot that answers questions about the project
+and acts only through cards a person confirms.
 
-**4 · Preflight and fielding.** Before a link exists the whole instrument is
-re-read as a respondent and the data file will meet it: questions with no
-answers, conditions nobody can satisfy, screen-outs that never fire, masks
-that cannot narrow. A 300-respondent dry run runs the routing for real. Then a
-public link, quotas, soft launch, paradata, and a live field report.
+## Why it is built this way
 
-**5 · Data and delivery.** Responses become a labelled `.sav` with its codebook
-— value labels, measure levels and declared missing codes — plus `.xlsx`,
-weighted crosstabs with significance testing, verbatim coding, and an Excel
-deck.
+- **Deterministic first.** Parsers that know market-research conventions read
+  most of a questionnaire with no AI at all. Same document, same answer, no
+  cost, and a line of the document to point at when someone asks why.
+- **Verified, not just automated.** The industry's open problem is trust — bad
+  data and AI that can't show its work. Every reading carries its evidence,
+  every survey is proven before field, and every respondent can be checked
+  against the instrument.
+- **It says what it could not read.** A guessed base is worse than no base, so
+  an unclear rule is shown to a person with the reason, never silently applied.
+- **Client data stays where it belongs.** One private stack per client;
+  open-weight models only (Qwen3-32B on AWS Bedrock, Mumbai region by default) — no OpenAI or
+  Anthropic models in the product. Client questionnaires never go to free AI
+  tiers.
+- **Measured on real documents.** Every change is scored against blind expert
+  readings of real client questionnaires, item by item, before it merges.
 
-**Fielded data checked against the questionnaire.** Given the questionnaire and
-an exported data file (Excel or SPSS, from this system or another platform), the
-*Questionnaire checks* tab finds, respondent by respondent: answers outside the
-base, completes that match a screen-out, exclusive answers ticked with others,
-more answers than allowed, totals that do not add up, answers outside a mask,
-and codes the list never offered. Document and script codes are joined by
-answer label, so a reversed or renumbered scale is not reported as an error.
+## Measured
 
-Throughout: **it refuses rather than guesses.** A MaxDiff it cannot analyse, a
-grid with no columns — each is named and blocked at preflight rather than
-fielded as something that looks like data.
+Against blind expert readings of six real client questionnaires — 372
+questions — scored strictly: one differing attribute fails the question.
+AI switched off, so these are the deterministic floor.
 
-## Scope: what it does and does not do
+| | Start of October | Now |
+|---|---|---|
+| Survey link behaves exactly as the document says | 145 | **197** |
+| Question read field-perfect | 101 | **166** |
+| Document mistakes caught and flagged | 47 | **60** of 169 |
+
+Most remaining differences come from a few causes, several of them open product
+decisions (required by default, keep "Other" last when the document is silent) —
+all listed in [`docs/CHANGE_TRACKER.md`](docs/CHANGE_TRACKER.md).
+
+| On fielded data (five real studies) | |
+|---|---|
+| False alarms removed while building the data check | Bubble 72 → 19, Vivo 43 → 6, TRD1 12 → 1 |
+| Agreement with an independent audit | 6 of 9 findings, same respondents; the other 3 traced to the reference or the document |
+| Flagged questions after the second look | 106 → 80, every one with a next step |
+| Public questionnaires read blind (Federal Reserve SHED) | 3 → 104 questions found, 93–97% matching the real data columns |
+
+**1,801 backend tests and 123 web tests**, each named for a behaviour a person
+would notice.
+
+## Scope
 
 **Does**
 
@@ -87,43 +143,32 @@ fielded as something that looks like data.
 - Single, multi, single-answer grids, numeric, open text, dropdown, ranking,
   info screens; constant sum; loops and carousels; "Other, specify" text boxes
 - Routing, screen-outs, section paths, masking, piping, list sources, answer
-  conditions, randomisation with anchors, block rotation, quotas
+  conditions, randomisation with anchors, least-fill block rotation, quotas
 - MaxDiff design and screens
-- Preflight, dry run, test links, soft launch, vendor redirects
-- `.sav` (in and out), `.xlsx`, weighted crosstabs, sig testing, tracking,
-  verbatim coding
+- Preflight, dry run, test links, soft launch, vendor redirects, paradata
 - Fielded data checked against the questionnaire, per respondent
+- `.sav` (in and out), `.xlsx`, weighted crosstabs, significance testing,
+  tracking, verbatim coding, client share links
 - Self-hosted per client — one Compose stack, the client's data never leaves it
 
-**Does not, yet** — see [`docs/ROADMAP.md`](docs/ROADMAP.md)
+**Not yet** — see [`docs/ROADMAP.md`](docs/ROADMAP.md) and
+[`docs/PRODUCT_STRATEGY.md`](docs/PRODUCT_STRATEGY.md)
 
-- Multi-select grids (`GRID_MULTI`)
-- Image or video stimulus, so ad/pack/concept testing cannot run
+- Multi-select grids (`GRID_MULTI`), image and video stimulus
 - MaxDiff analysis (utilities) and conjoint
-- Multi-language
-- Panel APIs (Cint/Lucid/Dynata) beyond redirect templating
+- Multi-language, panel APIs beyond redirect templating
 
-**Not yet proven:** no study has been fielded end to end for a client. Every
-quality claim below is measured on extraction, not on collected data.
+**Next milestone:** the first client study fielded end to end. Every number
+above is measured on real client documents and real client data files; the
+first full run through our own link is the proof still to come.
 
-## Measured
+## Where it is going
 
-Six real client questionnaires (372 questions), AI off, against independent
-readings of the same documents — scored by `scripts/eval_compare.py`; every
-change and its measurement is in [`docs/CHANGE_TRACKER.md`](docs/CHANGE_TRACKER.md).
-
-| Questionnaire | Parser matches the reading | Survey link matches |
-|---|---|---|
-| Bubble Consumer Research | 45.7% | 42.4% |
-| Google Ads SMB (two versions) | 45.9% / 47.9% | 68.9% / 70.4% |
-| TRD prescriber (study 1) | 70.0% | 70.0% |
-| TRD referrer (study 2) | 42.9% | 53.6% |
-| Vivo AU Wave 2 | 29.9% | 27.3% |
-
-Most remaining differences are a few causes (open product decisions such as
-required-by-default, randomisation and anchoring) — listed in the tracker.
-
-1801 backend tests, 123 web tests.
+The direction is **verified research**: logic proven before field, respondents
+verified as real and consistent (typing, timing and logic evidence already in
+the exports), every number traceable to rows and a rule, and every sentence of
+insight cited to a number. Seven pillars, with the evidence behind each, are in
+[`docs/PRODUCT_STRATEGY.md`](docs/PRODUCT_STRATEGY.md).
 
 ## Quickstart
 
@@ -144,14 +189,15 @@ src/
 ├── intake/      # readers: .docx, .pdf, tabular, tracked changes
 ├── adapters/    # external formats in and out (SPSS)
 ├── engines/
-│   ├── questionnaire/   # extraction, comprehension, second look, correction loop (46 modules)
-│   ├── fielding/        # preflight, dry run, quotas, paradata, field report
-│   ├── tabs/            # crosstabs, weighting, significance, tracking
-│   ├── coding/          # verbatim coding
+│   ├── questionnaire/   # reading, comprehension, second look, correction loop (46 modules)
+│   ├── fielding/        # preflight, dry run, quotas, rotation, MaxDiff design, paradata
 │   ├── qc/              # data vs questionnaire, condition audit, cleaning, fraud
+│   ├── tabs/            # crosstabs, weighting, significance, tracking
+│   ├── coding/          # verbatim coding, codeframe library
+│   ├── analysis/        # pivots, charts, quality
 │   └── rag/             # per-study embeddings for the copilot
 ├── renderers/   # SurveyJS compiler, Excel deck
-└── ai/          # model router — open-source models only
+└── ai/          # model router — open-weight models only
 api/             # FastAPI
 web/             # React review + respondent app
 ```
@@ -163,11 +209,11 @@ engine reads a source file format directly.
 
 | File | What it is |
 |---|---|
-| [`docs/METHODS.md`](docs/METHODS.md) | Every technique, model and method, from first principles |
+| [`docs/METHODS.md`](docs/METHODS.md) | Every technique, model and method, from first principles — start here |
 | [`docs/PRODUCT_STRATEGY.md`](docs/PRODUCT_STRATEGY.md) | Where the product is going: "verified research", seven pillars |
 | [`docs/CHANGE_TRACKER.md`](docs/CHANGE_TRACKER.md) | Every change with its measurement; open decisions and known issues |
 | [`docs/RESEARCH_TASKS.md`](docs/RESEARCH_TASKS.md) | Research tasks for the team, each with what to hand back |
-| [`docs/artifacts/`](docs/artifacts/README.md) | Archive of every published write-up (dossier, audits, walkthrough, briefing) |
+| [`docs/artifacts/`](docs/artifacts/README.md) | Archive of every published write-up (briefing, audits, walkthrough) |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | What is left, ordered, split by what compounds and what does not |
 | [`docs/questionnaire-comprehension.md`](docs/questionnaire-comprehension.md) | How a questionnaire is understood, and what is still not understood |
 | [`docs/CHANGELOG-questionnaire-comprehension.md`](docs/CHANGELOG-questionnaire-comprehension.md) | Build log — why each parser decision exists |
@@ -183,4 +229,4 @@ engine reads a source file format directly.
 
 Conventional commits · feature branches, never direct to `main` · `pytest` and
 `ruff` clean before PR · secrets only in `.env`, never committed ·
-open-source models only.
+open-weight models only · client documents and data never committed.

@@ -1,0 +1,283 @@
+<title>DVV Research Cloud</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a briefing that reads like a questionnaire being marked up — document
+   excerpts set in mono on the left, the system's reading annotated beside them,
+   prose sections in one comfortable column, a scripter's highlighter used sparingly. */
+:root{
+  --paper:#F5F7F5; --sheet:#FFFFFF; --rule:#D5DCD8; --ink:#17201C; --ink-2:#47534E; --ink-3:#74807A;
+  --pen:#1D4FA8; --pen-wash:#E3EBF8; --mark:#F1DF7A; --ok:#1F6B47; --ok-wash:#DDEFE4; --warn:#8C5A10; --warn-wash:#F5EAD3;
+  --stop:#9A3226; --stop-wash:#F6E2DE;
+  --f-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --f-body:"Source Serif 4",Georgia,"Times New Roman",serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#0F1513; --sheet:#161E1B; --rule:#2B3631; --ink:#E6ECE9; --ink-2:#B1BEB8; --ink-3:#83908A;
+  --pen:#8FB2F2; --pen-wash:#18253B; --mark:#6B5E1C; --ok:#79C79A; --ok-wash:#15291E; --warn:#DDAA5E; --warn-wash:#2D2414;
+  --stop:#E68A7D; --stop-wash:#2E1A17; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --paper:#0F1513; --sheet:#161E1B; --rule:#2B3631; --ink:#E6ECE9; --ink-2:#B1BEB8; --ink-3:#83908A;
+  --pen:#8FB2F2; --pen-wash:#18253B; --mark:#6B5E1C; --ok:#79C79A; --ok-wash:#15291E; --warn:#DDAA5E; --warn-wash:#2D2414;
+  --stop:#E68A7D; --stop-wash:#2E1A17; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--f-body);font-size:17px;line-height:1.62;
+  -webkit-font-smoothing:antialiased;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.page{max-width:1040px;margin:0 auto;padding-block:48px 80px;display:grid;gap:64px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0}
+h1{font-weight:800;font-stretch:80%;font-size:clamp(40px,7vw,76px);line-height:.95;letter-spacing:-.02em}
+h2{font-weight:700;font-stretch:85%;font-size:clamp(26px,3.6vw,36px);line-height:1.08;letter-spacing:-.01em}
+h3{font-weight:700;font-size:17px;letter-spacing:.005em}
+p{margin:0;max-width:66ch}
+.eyebrow{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--pen)}
+.lede{font-size:clamp(18px,2.2vw,21px);color:var(--ink-2);max-width:58ch}
+strong{font-weight:600;color:var(--ink)}
+section{display:grid;gap:22px}
+.head{display:grid;gap:8px}
+code{font-family:var(--f-mono);font-size:.84em;background:var(--pen-wash);padding:.08em .34em;border-radius:3px;color:var(--ink)}
+mark{background:var(--mark);color:inherit;padding:0 .15em}
+
+/* hero */
+.hero{display:grid;gap:26px}
+.hero-top{display:grid;gap:16px}
+.read{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);border:1px solid var(--rule);background:var(--sheet)}
+.doc,.reading{padding:20px 22px;min-width:0}
+.doc{border-right:1px solid var(--rule);font-family:var(--f-mono);font-size:13px;line-height:1.75;color:var(--ink-2);overflow-x:auto}
+.doc .lbl,.reading .lbl{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);display:block;margin-bottom:10px}
+.doc .ln{display:block;white-space:pre-wrap}
+.doc .dim{color:var(--ink-3)}
+.reading{display:grid;gap:12px;align-content:start}
+.note{display:grid;gap:3px;border-left:2px solid var(--pen);padding-left:12px}
+.note b{font-family:var(--f-display);font-size:14.5px;font-weight:700;color:var(--ink)}
+.note span{font-size:15px;color:var(--ink-2)}
+.note.slip{border-left-color:var(--stop)}
+.verdict{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:var(--f-mono);font-size:12px;color:var(--ink-2);border-top:1px solid var(--rule);padding-top:12px}
+.chip{display:inline-flex;align-items:center;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.c-ready{background:var(--pen-wash);color:var(--pen)}
+.c-fixed{background:var(--ok-wash);color:var(--ok)}
+.c-note{background:var(--rule);color:var(--ink-2)}
+.c-you{background:var(--warn-wash);color:var(--warn)}
+.caption{font-size:14.5px;color:var(--ink-3);max-width:70ch}
+
+/* capability list */
+.caps{display:grid;border-top:1px solid var(--rule)}
+.cap{display:grid;grid-template-columns:minmax(0,15rem) minmax(0,1fr);gap:8px 28px;padding:16px 0;border-bottom:1px solid var(--rule)}
+.cap h3{padding-top:2px}
+.cap p{color:var(--ink-2);font-size:16px}
+
+/* gates — a real sequence */
+.gates{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.gate{background:var(--sheet);padding:18px;display:grid;gap:8px;align-content:start}
+.gate .n{font-family:var(--f-mono);font-size:12px;color:var(--pen)}
+.gate p{font-size:15px;color:var(--ink-2)}
+
+/* findings */
+.finds{display:grid;gap:2px}
+.find{display:grid;grid-template-columns:5px minmax(0,1fr) auto;gap:0 14px;align-items:center;background:var(--sheet);border:1px solid var(--rule)}
+.find .s{align-self:stretch;background:var(--stop)}
+.find .s.w{background:var(--warn)}
+.find .t{padding:12px 0;font-size:15.5px;color:var(--ink-2)}
+.find .t b{color:var(--ink);font-family:var(--f-display);font-weight:700;font-size:15px;display:block}
+.find .n{font-family:var(--f-mono);font-size:13px;padding-right:14px;font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
+
+/* numbers */
+.tablewrap{overflow-x:auto;border:1px solid var(--rule);background:var(--sheet)}
+table{border-collapse:collapse;width:100%;font-size:15.5px;min-width:520px}
+th,td{text-align:left;padding:11px 16px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);font-weight:500;background:var(--paper)}
+tr:last-child td{border-bottom:0}
+td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.now{font-weight:600;color:var(--ok)}
+td.was{color:var(--ink-3)}
+
+/* principles */
+.pillars{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:26px 30px}
+.pillar{display:grid;gap:6px;border-top:2px solid var(--ink);padding-top:12px}
+.pillar p{font-size:15.5px;color:var(--ink-2)}
+
+/* ask */
+.ask{background:var(--sheet);border:1px solid var(--rule);padding:22px 24px;display:grid;gap:12px}
+.ask ol{margin:0;padding-left:20px;display:grid;gap:10px;color:var(--ink-2);max-width:66ch}
+.ask li b{color:var(--ink)}
+footer{border-top:1px solid var(--rule);padding-top:18px;font-size:14px;color:var(--ink-3)}
+
+@media (max-width:820px){
+  .read{grid-template-columns:1fr}
+  .doc{border-right:0;border-bottom:1px solid var(--rule)}
+  .gates{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cap{grid-template-columns:1fr}
+}
+@media (max-width:460px){.gates{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:no-preference){
+  .reading .note{animation:in .45s ease both}
+  .reading .note:nth-child(3){animation-delay:.12s}.reading .note:nth-child(4){animation-delay:.24s}.reading .note:nth-child(5){animation-delay:.36s}
+  @keyframes in{from{transform:translateX(6px)}to{transform:none}}
+}
+</style>
+
+<main class="page">
+
+<header class="hero">
+  <div class="hero-top">
+    <span class="eyebrow">DVV Research Cloud · briefing · October 2026</span>
+    <h1>It reads the questionnaire like a senior scripter.</h1>
+    <p class="lede">A client's Word document goes in. A proven survey link, checked data and finished tables come out — and every decision on the way points back to a line of the document.</p>
+  </div>
+
+  <div class="read" aria-label="A real questionnaire excerpt and how the system read it">
+    <div class="doc">
+      <span class="lbl">The document, as written</span>
+      <span class="ln dim">VIDEO MEASUREMENT EFFICACY</span>
+      <span class="ln">Q Name: DA_VID_EFFIC</span>
+      <span class="ln">How effective is this source for monitoring /</span>
+      <span class="ln">measuring the performance, ROI, and cross-channel</span>
+      <span class="ln">impact of your video advertisements?</span>
+      <span class="ln dim">Variable list:</span>
+      <span class="ln"><mark>[INSERT SELECTIONS FROM DA_VID_EFFIC]</mark></span>
+      <span class="ln dim">Response list:</span>
+      <span class="ln">10: Extremely effective</span>
+      <span class="ln dim">9: (blank)   8: (blank)   …   2: (blank)</span>
+      <span class="ln">1: Extremely ineffective</span>
+      <span class="ln">Among who: <mark>DA_PLACEMENT = 3 and/or 4</mark></span>
+      <span class="ln">AND 1-98 selected at DA_VID_EFFIC</span>
+    </div>
+    <div class="reading">
+      <span class="lbl">How the system read it</span>
+      <div class="note slip"><b>A copy slip, caught</b><span>The question names itself as the source of its rows. The question just before it, DA_VID_MEASURE, holds the list and is asked of the same people.</span></div>
+      <div class="note"><b>A rating grid, built</b><span>Each tool chosen at DA_VID_MEASURE becomes a row; "None of these" is left out. Scale 10 → 1, blank points labelled.</span></div>
+      <div class="note"><b>Who is asked</b><span><code>DA_PLACEMENT</code> any of 3 or 4 — "and/or" read as either or both — and only people with something to rate.</span></div>
+      <div class="verdict"><span class="chip c-ready">Fix ready</span><span>One click puts it in the editor. A person still approves.</span></div>
+    </div>
+  </div>
+  <p class="caption">A real line from a real client questionnaire. The first pass flagged it three times without saying why. The second look, which reads each flagged question with the whole document in view, worked it out.</p>
+</header>
+
+<section>
+  <div class="head">
+    <span class="eyebrow">The problem</span>
+    <h2>Scripting is the slowest, riskiest step in every study</h2>
+  </div>
+  <p>Someone reads forty pages and rebuilds them by hand in a survey tool — every answer list, every "ask only if", every screen-out, mask and pipe. It takes days, it caps how many studies a team can run, and its mistakes are found in field: a base pointing at the wrong question, a screen-out that fires on everyone, a brand list showing brands the respondent never named. By then the sample has been paid for.</p>
+  <p>The industry's sharper problem is trust. Data quality is the obstacle researchers name most often, and fast AI tools that cannot show their work make it worse. DVV Research Cloud is built to be fast <strong>and provably right</strong>.</p>
+</section>
+
+<section>
+  <div class="head">
+    <span class="eyebrow">What it does</span>
+    <h2>From document to delivery, in one system</h2>
+  </div>
+  <div class="caps">
+    <div class="cap"><h3>Reads the questionnaire</h3><p>Word or PDF, prose or spec tables. Questions, types, answer codes, bases, screen-outs, grids, loops, carousels, masks, pipes, rotation and hidden variables — each with the line it came from. Rules read most of it with no AI at all; an open-weight model handles only the residue.</p></div>
+    <div class="cap"><h3>Takes a second look</h3><p>Every flagged question is revisited with the whole questionnaire in view, fixed by rule where the document settles it, or by a model shown the questions it names. A model may only use the document's own wording. The reviewer gets one plain sentence per question and a button: undo, apply, or decide.</p></div>
+    <div class="cap"><h3>Learns your house style</h3><p>A reviewer teaches a convention once — "in this client's documents, this phrase means select all" — and it applies to the whole document and every future one in that format.</p></div>
+    <div class="cap"><h3>Runs the survey</h3><p>A phone-first link where screen-outs, quotas, masks, pipes and rotation are decided on the server, never in the browser. Panel redirects, soft launch, device and place paradata with the IP hashed.</p></div>
+    <div class="cap"><h3>Checks fielded data</h3><p>Questionnaire plus data export — from this system or any other platform — and it finds, respondent by respondent, everyone who broke the questionnaire's rules.</p></div>
+    <div class="cap"><h3>Delivers</h3><p>Labelled SPSS with its codebook, Excel, weighted crosstabs with significance letters, verbatim coding, an Excel deck, a client share link, and a copilot that acts only through cards a person confirms.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <span class="eyebrow">Before a respondent sees it</span>
+    <h2>Four gates stand between a mistake and the field</h2>
+    <p>Each catches what the others miss. A survey cannot go live while a blocking issue is open.</p>
+  </div>
+  <div class="gates">
+    <div class="gate"><span class="n">1 · Review</span><h3>One sentence per issue</h3><p>Unclear rules are shown with their reason and a recommended fix. Approval is blocked until they are settled.</p></div>
+    <div class="gate"><span class="n">2 · Dry run</span><h3>Synthetic respondents</h3><p>Hundreds of simulated people walk every path: conditions that never fire, questions nobody can reach.</p></div>
+    <div class="gate"><span class="n">3 · Pre-link check</span><h3>Server refuses bad links</h3><p>The finished instrument is re-checked on the server. Overriding a failure is possible, and logged.</p></div>
+    <div class="gate"><span class="n">4 · Soft launch</span><h3>Hold at the first completes</h3><p>The link pauses after the first interviews so real data is checked before full field.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <span class="eyebrow">After the field</span>
+    <h2>Every respondent checked against the questionnaire</h2>
+    <p>Run on five real client data files. A sample of what it reported, in its own words:</p>
+  </div>
+  <div class="finds">
+    <div class="find"><span class="s"></span><span class="t"><b>"None of the above" ticked with brands</b>A skincare study's awareness question: an exclusive answer chosen alongside others.</span><span class="n">4 people</span></div>
+    <div class="find"><span class="s"></span><span class="t"><b>Several answers on a one-answer question</b>A B2B study's channel question was scripted to accept several answers while the document asks for one.</span><span class="n">62 people</span></div>
+    <div class="find"><span class="s w"></span><span class="t"><b>Answered although the base says skip</b>A physician study: respondents outside the stated audience still answered.</span><span class="n">27 people</span></div>
+    <div class="find"><span class="s w"></span><span class="t"><b>A document rule the data contradicts</b>A category shown to people the questionnaire's display rule excludes — traced to a truncated rule in the document itself.</span><span class="n">149 people</span></div>
+  </div>
+  <p class="caption">Document codes and script codes are matched by answer wording, so a reversed or renumbered scale is never mistaken for bad data. Against an independent audit of the same files, 6 of 9 findings matched with the same respondents; the other 3 traced to the reference reading or the document.</p>
+</section>
+
+<section>
+  <div class="head">
+    <span class="eyebrow">Measured, not claimed</span>
+    <h2>Scored against blind expert readings</h2>
+    <p>Six real client questionnaires, 372 questions, read independently by an expert and compared item by item. Strict scoring: one differing attribute fails the whole question. AI switched off, so this is the floor.</p>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Measure</th><th>Start of October</th><th>17 October</th></tr></thead>
+      <tbody>
+        <tr><td>Survey link behaves exactly as the document says</td><td class="num was">145</td><td class="num now">197</td></tr>
+        <tr><td>Question read field-perfect</td><td class="num was">101</td><td class="num now">166</td></tr>
+        <tr><td>Document mistakes caught and flagged (of 169)</td><td class="num was">47</td><td class="num now">60</td></tr>
+        <tr><td>Automated tests (backend and web), each named for a behaviour</td><td class="num was">1,740</td><td class="num now">1,924</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="caption">The second look took flagged questions across the six documents from 106 to 80 — and every one left now carries a plain reason and a next step. Many remaining differences come from a few open product decisions — required by default, keeping "Other" last when the document is silent — rather than misreadings. On public questionnaires the system had never seen (Federal Reserve SHED), it went from finding 3 questions to 104, with 93–97% matching the real data columns.</p>
+</section>
+
+<section>
+  <div class="head">
+    <span class="eyebrow">Why it can be trusted</span>
+    <h2>Four decisions that are hard to copy</h2>
+  </div>
+  <div class="pillars">
+    <div class="pillar"><h3>Rules before AI</h3><p>Market-research conventions are parsed, not guessed. Same document, same answer, every time — with a line to point at when someone asks why.</p></div>
+    <div class="pillar"><h3>It says what it could not read</h3><p>A guessed base is worse than none. Anything unclear reaches a person with its reason and a recommended fix, never silently.</p></div>
+    <div class="pillar"><h3>It gets better with every client</h3><p>Each correction can become a taught convention. The tool that reads a client's tenth study is measurably better than the one that read their first.</p></div>
+    <div class="pillar"><h3>Data stays private</h3><p>One private stack per client. Open-weight models only, on AWS Bedrock — no OpenAI or Anthropic models in the product, no client document sent to free AI services.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <span class="eyebrow">Scope, plainly</span>
+    <h2>What is ready, and what is not yet</h2>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Capability</th><th>Status</th><th>Detail</th></tr></thead>
+      <tbody>
+        <tr><td>Document → reviewed survey, second look, teaching</td><td><span class="chip c-fixed">Working</span></td><td>Measured on real client documents</td></tr>
+        <tr><td>Live link, screen-outs, quotas, rotation, soft launch</td><td><span class="chip c-fixed">Working</span></td><td>Every decision on the server</td></tr>
+        <tr><td>Fielded data checked against the questionnaire</td><td><span class="chip c-fixed">Working</span></td><td>Works on exports from any platform</td></tr>
+        <tr><td>SPSS, Excel, weighted tables, coding, deck</td><td><span class="chip c-fixed">Working</span></td><td>Labelled .sav with missing codes</td></tr>
+        <tr><td>MaxDiff</td><td><span class="chip c-ready">Partly</span></td><td>Design and screens built; analysis next</td></tr>
+        <tr><td>Respondent authenticity score</td><td><span class="chip c-ready">Next</span></td><td>Typing, timing and logic evidence already in client exports</td></tr>
+        <tr><td>Image and video stimulus, multi-select grids, multi-language</td><td><span class="chip c-note">Not yet</span></td><td>On the roadmap</td></tr>
+        <tr><td>First client study fielded end to end</td><td><span class="chip c-you">The proof to come</span></td><td>Everything above is measured; this is the run that proves it in practice</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <span class="eyebrow">What we need</span>
+    <h2>Three decisions, in order</h2>
+  </div>
+  <div class="ask">
+    <ol>
+      <li><b>One real study to run end to end</b> — a live project with a deadline, so the last gaps show where we can fix them.</li>
+      <li><b>The product defaults</b> — required unless stated, and "Other" kept last when silent. Two choices that close most of the remaining differences.</li>
+      <li><b>Who owns approval</b> — the system replaces scripting, not judgement. Someone signs off that the survey is what the client asked for.</li>
+    </ol>
+  </div>
+</section>
+
+<footer>Every figure here is measured on real client documents and data, as of 17 October 2026; examples are anonymised. The full method is in the repository's <code>docs/METHODS.md</code>, every change and its measurement in <code>docs/CHANGE_TRACKER.md</code>.</footer>
+
+</main>
