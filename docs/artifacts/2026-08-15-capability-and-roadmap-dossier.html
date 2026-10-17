@@ -1,0 +1,285 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
+<title>DVV Research Cloud — Capability & Roadmap Dossier</title>
+<style>
+  :root{
+    --paper:#F6F7F9; --card:#FFFFFF; --sunken:#EEF1F4;
+    --ink:#1B2230; --ink-soft:#5A6474; --ink-faint:#8B94A3;
+    --line:#E1E5EA; --line-strong:#CBD2DC; --navy:#26364F; --gold:#B08325;
+    --ship:#2E7D5B; --ship-bg:#E7F3EC; --part:#B7791F; --part-bg:#FAF2E2;
+    --plan:#5A6474; --plan-bg:#EEF1F4; --gap:#C0392B; --gap-bg:#FBEDEC;
+    --shadow:0 1px 2px rgba(27,34,48,.04), 0 8px 24px -12px rgba(27,34,48,.14);
+    --serif:"Charter","Iowan Old Style",Georgia,"Times New Roman",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --paper:#14181F;--card:#1C222C;--sunken:#232A35;--ink:#E7E9EE;--ink-soft:#A6AEBC;--ink-faint:#727C8C;
+    --line:#2C333F;--line-strong:#3A4250;--navy:#9DB2D6;--gold:#D6A94E;
+    --ship:#79C99C;--ship-bg:#1B3227;--part:#E3B663;--part-bg:#332A17;--plan:#A6AEBC;--plan-bg:#232A35;
+    --gap:#F0938A;--gap-bg:#33211F;--shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px -14px rgba(0,0,0,.6);}}
+  :root[data-theme="dark"]{--paper:#14181F;--card:#1C222C;--sunken:#232A35;--ink:#E7E9EE;--ink-soft:#A6AEBC;--ink-faint:#727C8C;--line:#2C333F;--line-strong:#3A4250;--navy:#9DB2D6;--gold:#D6A94E;--ship:#79C99C;--ship-bg:#1B3227;--part:#E3B663;--part-bg:#332A17;--plan:#A6AEBC;--plan-bg:#232A35;--gap:#F0938A;--gap-bg:#33211F;--shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px -14px rgba(0,0,0,.6);}
+  :root[data-theme="light"]{--paper:#F6F7F9;--card:#FFFFFF;--sunken:#EEF1F4;--ink:#1B2230;--ink-soft:#5A6474;--ink-faint:#8B94A3;--line:#E1E5EA;--line-strong:#CBD2DC;--navy:#26364F;--gold:#B08325;--ship:#2E7D5B;--ship-bg:#E7F3EC;--part:#B7791F;--part-bg:#FAF2E2;--plan:#5A6474;--plan-bg:#EEF1F4;--gap:#C0392B;--gap-bg:#FBEDEC;--shadow:0 1px 2px rgba(27,34,48,.04),0 8px 24px -12px rgba(27,34,48,.14);}
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:940px;margin:0 auto;padding:34px 22px 90px;}
+  svg{display:block}
+  .glyph{width:1em;height:1em;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none;}
+
+  .mast{position:relative;padding-bottom:20px;margin-bottom:30px;}
+  .mast::after{content:"";position:absolute;left:0;bottom:0;width:100%;height:2px;background:linear-gradient(90deg,var(--gold) 0 72px,var(--line-strong) 72px);}
+  .mast-top{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+  .seal{width:38px;height:38px;color:var(--navy);flex:none;}
+  .mast-meta{font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-faint);}
+  .mast h1{font-family:var(--serif);font-weight:600;font-size:clamp(28px,4.6vw,44px);line-height:1.04;letter-spacing:-.015em;margin:0 0 12px;text-wrap:balance;}
+  .mast .lede{color:var(--ink-soft);max-width:64ch;margin:0;font-size:16px;}
+
+  section{margin-bottom:38px;}
+  .eyebrow{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin-bottom:6px;}
+  .eyebrow .glyph{font-size:15px;color:var(--gold);}
+  h2{font-family:var(--serif);font-weight:600;font-size:26px;letter-spacing:-.01em;margin:0 0 6px;text-wrap:balance;}
+  .sub{color:var(--ink-soft);max-width:70ch;margin:0 0 18px;}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  @media(max-width:680px){.grid2{grid-template-columns:1fr}}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:18px 20px;}
+  .panel h3{margin:0 0 8px;font-size:15px;font-weight:650;display:flex;align-items:center;gap:8px;}
+  .panel h3 .glyph{font-size:18px;color:var(--navy);}
+  .panel p{margin:0;color:var(--ink-soft);font-size:14px;}
+  .panel ul{margin:8px 0 0;padding-left:2px;list-style:none;display:grid;gap:6px;}
+  .panel li{color:var(--ink-soft);font-size:13.5px;display:flex;gap:8px;align-items:flex-start;}
+  .panel li .glyph{font-size:14px;color:var(--navy);margin-top:3px;flex:none;}
+
+  /* capability rows */
+  .cap{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;}
+  .cap-head{display:flex;align-items:center;gap:10px;padding:13px 18px;background:var(--sunken);border-bottom:1px solid var(--line);}
+  .cap-head .glyph{font-size:19px;color:var(--navy);}
+  .cap-head h3{margin:0;font-size:14px;font-weight:650;}
+  .cap-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start;padding:13px 18px;border-bottom:1px solid var(--line);}
+  .cap-row:last-child{border-bottom:none;}
+  .cap-row .what{min-width:0;}
+  .cap-row .name{font-weight:600;font-size:14px;margin-bottom:2px;}
+  .cap-row .desc{color:var(--ink-soft);font-size:13px;line-height:1.5;}
+  .status{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:650;letter-spacing:.02em;padding:4px 10px;border-radius:999px;white-space:nowrap;}
+  .status .dot{width:8px;height:8px;border-radius:50%;flex:none;}
+  .s-ship{color:var(--ship);background:var(--ship-bg);} .s-ship .dot{background:var(--ship);}
+  .s-part{color:var(--part);background:var(--part-bg);} .s-part .dot{background:var(--part);box-shadow:inset 0 0 0 1.5px var(--part);background:transparent;}
+  .s-plan{color:var(--plan);background:var(--plan-bg);} .s-plan .dot{background:transparent;box-shadow:inset 0 0 0 1.5px var(--plan);}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 16px;font-size:12.5px;color:var(--ink-soft);}
+  .legend span{display:inline-flex;align-items:center;gap:7px;}
+  .legend .dot{width:9px;height:9px;border-radius:50%;flex:none;}
+
+  .verdict{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:14px;box-shadow:var(--shadow);padding:20px 22px;}
+  .verdict h2{margin-top:0;}
+  .verdict p{color:var(--ink-soft);}
+  .verdict strong{color:var(--ink);font-weight:650;}
+  .kpis{display:flex;gap:12px;flex-wrap:wrap;margin:2px 0 24px;}
+  .kpi{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px;}
+  .kpi .n{font-family:var(--serif);font-size:26px;font-weight:600;color:var(--navy);font-variant-numeric:tabular-nums;line-height:1;}
+  .kpi .l{font-size:12px;color:var(--ink-soft);margin-top:5px;}
+  .flag{display:flex;gap:10px;background:var(--gap-bg);border:1px solid var(--line);border-radius:12px;padding:13px 16px;align-items:flex-start;margin-top:14px;}
+  .flag .glyph{font-size:18px;color:var(--gap);margin-top:1px;flex:none;}
+  .flag .t{font-size:13.5px;color:var(--ink-soft);} .flag .t b{color:var(--gap);}
+
+  .road{display:grid;gap:12px;}
+  .phase{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:16px 18px;display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:start;}
+  .phase .num{font-family:var(--mono);font-size:12px;font-weight:600;color:#fff;background:var(--navy);width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none;}
+  .phase h3{margin:0 0 3px;font-size:15px;font-weight:650;}
+  .phase .when{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--gold);margin-bottom:6px;}
+  .phase p{margin:0;color:var(--ink-soft);font-size:13.5px;}
+  footer{margin-top:36px;padding-top:18px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;letter-spacing:.05em;color:var(--ink-faint);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-seal" viewBox="0 0 24 24"><circle cx="12" cy="10" r="6"/><path d="M9.4 9.8l1.8 1.8 3.4-3.6"/><path d="M8 15l-1 6 5-2.5L17 21l-1-6"/></symbol>
+  <symbol id="i-market" viewBox="0 0 24 24"><path d="M4 19h16M6 19v-6M10 19V8m4 11v-9m4 9V6"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M9 9h7M9 13h7M9 17h4"/></symbol>
+  <symbol id="i-field" viewBox="0 0 24 24"><circle cx="12" cy="18" r="1.4"/><path d="M8.5 14.5a5 5 0 017 0M5.5 11.5a9 9 0 0113 0"/></symbol>
+  <symbol id="i-data" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6m-14 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></symbol>
+  <symbol id="i-ai" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1m0-12.8l-2.1 2.1M7.7 16.3l-2.1 2.1"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6"/></symbol>
+  <symbol id="i-gap" viewBox="0 0 24 24"><path d="M12 8v5m0 3.5v.1"/><path d="M10.3 3.9L2.5 18a2 2 0 001.7 3h15.6a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></symbol>
+  <symbol id="i-grow" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 7v5m0-5h-5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5m0 3v.1"/></symbol>
+</defs></svg>
+
+<div class="wrap">
+  <header class="mast">
+    <div class="mast-top"><svg class="seal" aria-hidden="true"><use href="#i-seal"/></svg>
+      <span class="mast-meta">DVV Research Cloud · Capability &amp; Roadmap · Internal — for expert review</span></div>
+    <h1>What we've built, what the field needs, and where it grows</h1>
+    <p class="lede">An honest map of the platform against how agency-side market research actually works —
+      graded so an industry practitioner can tell shipped-and-proven from partial from planned at a glance.
+      No claim here is marketing; every "shipped" line is running code with tests behind it.</p>
+  </header>
+
+  <div class="kpis">
+    <div class="kpi"><div class="n">480</div><div class="l">automated tests passing (0 failures)</div></div>
+    <div class="kpi"><div class="n">4</div><div class="l">workflow pillars covered end-to-end</div></div>
+    <div class="kpi"><div class="n">8</div><div class="l">question types, safe routing, quotas</div></div>
+    <div class="kpi"><div class="n">$0→$7</div><div class="l">infra cost to production-harden</div></div>
+  </div>
+
+  <!-- THE DOMAIN -->
+  <section>
+    <div class="eyebrow"><svg class="glyph"><use href="#i-market"/></svg>The domain</div>
+    <h2>What agency-side market research actually requires</h2>
+    <p class="sub">A quant study moves through four hands. The incumbents (Forsta/Decipher, Qualtrics) each own
+      pieces of this at enterprise price points; small and mid agencies — especially in India/APAC — are
+      priced out and stitch the workflow together by hand. That seam is the opening.</p>
+    <div class="grid2">
+      <div class="panel"><h3><svg class="glyph"><use href="#i-doc"/></svg>1 · Program</h3>
+        <p>Turn a client's questionnaire (usually a Word/scripter doc) into a live, routed, quota'd survey —
+          screeners, skip logic, terminates, randomization, piping.</p></div>
+      <div class="panel"><h3><svg class="glyph"><use href="#i-field"/></svg>2 · Field</h3>
+        <p>Serve it to respondents, enforce screening and quotas server-side, hand traffic to/from panel
+          vendors, and monitor completes in real time.</p></div>
+      <div class="panel"><h3><svg class="glyph"><use href="#i-data"/></svg>3 · Process</h3>
+        <p>Ingest the response file, weight it, run significance-tested crosstabs, code the open-ends,
+          and quality-check the sample.</p></div>
+      <div class="panel"><h3><svg class="glyph"><use href="#i-check"/></svg>4 · Deliver</h3>
+        <p>Ship tables, a deck, and the labelled data file (.sav) the client's own team expects —
+          fast, and without a five-figure seat licence.</p></div>
+    </div>
+  </section>
+
+  <!-- CAPABILITY MAP -->
+  <section>
+    <div class="eyebrow"><svg class="glyph"><use href="#i-check"/></svg>The build</div>
+    <h2>Capability map — graded honestly</h2>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--ship)"></span> Shipped — running, tested</span>
+      <span><span class="dot" style="background:transparent;box-shadow:inset 0 0 0 1.5px var(--part)"></span> Partial — works, has a known ceiling</span>
+      <span><span class="dot" style="background:transparent;box-shadow:inset 0 0 0 1.5px var(--plan)"></span> Planned — designed, not built</span>
+    </div>
+    <div id="caps" style="display:grid;gap:16px;"></div>
+  </section>
+
+  <!-- DIFFERENTIATOR -->
+  <section>
+    <div class="eyebrow"><svg class="glyph"><use href="#i-ai"/></svg>The edge</div>
+    <h2>What the incumbents structurally can't do</h2>
+    <p class="sub">The moat isn't matching Decipher feature-for-feature — it's the AI layer woven through the
+      whole workflow, which their architectures predate.</p>
+    <div class="grid2">
+      <div class="panel"><h3><svg class="glyph"><use href="#i-ai"/></svg>Document → live survey</h3>
+        <p>Email us the questionnaire from your last study; it's extracted, routed and reviewable as a live
+          test link — minutes, not a day of manual scripting. Self-heals on document formats it hasn't seen.</p></div>
+      <div class="panel"><h3><svg class="glyph"><use href="#i-ai"/></svg>Chat with your data</h3>
+        <p>Ask the dataset questions in plain English — "satisfaction by age, sig-tested" — and get a real
+          crosstab, grounded in the actual variables, not a hallucination.</p></div>
+      <div class="panel"><h3><svg class="glyph"><use href="#i-ai"/></svg>Routing checked against reality</h3>
+        <p>Every extracted skip/terminate is cross-validated against the real response data — hallucinated
+          logic is detectable, not just reviewable. Nothing on the market does this.</p></div>
+      <div class="panel"><h3><svg class="glyph"><use href="#i-ai"/></svg>Automated quality &amp; coding</h3>
+        <p>Speeders, straightliners and open-end coding handled by the platform on ingest — the tedious DP
+          labour, compressed.</p></div>
+    </div>
+  </section>
+
+  <!-- GAPS -->
+  <section>
+    <div class="eyebrow"><svg class="glyph"><use href="#i-gap"/></svg>The honest gaps</div>
+    <h2>What an expert will probe — and where we actually are</h2>
+    <p class="sub">These are the questions a practitioner asks in the first ten minutes. Answering them
+      straight is more credible than a feature list.</p>
+    <div id="gaps" style="display:grid;gap:10px;"></div>
+  </section>
+
+  <!-- ROADMAP -->
+  <section>
+    <div class="eyebrow"><svg class="glyph"><use href="#i-grow"/></svg>Scope of growth</div>
+    <h2>The roadmap, in the order that earns trust</h2>
+    <div class="road" id="road"></div>
+  </section>
+
+  <!-- VERDICT -->
+  <section>
+    <div class="verdict">
+      <div class="eyebrow"><svg class="glyph"><use href="#i-alert"/></svg>The straight read</div>
+      <h2>Where this stands for a pitch</h2>
+      <p><strong>The platform is real and the code is clean</strong> — the full quant workflow runs end to
+        end (program → field → process → deliver), 480 tests green, no errors. For an industry expert the
+        honest positioning is: <strong>a paid pilot on a live, low-stakes study today</strong>, with core
+        production migration gated on three things — a parallel-run that matches an existing study's tables
+        to the decimal, hardened infrastructure, and the three table-stakes consumer-study features (loops,
+        piping polish, multi-language).</p>
+      <div class="flag"><svg class="glyph"><use href="#i-alert"/></svg>
+        <div class="t"><b>Current status, stated plainly:</b> the application code is healthy; the live demo
+          backend is down because the free-tier database expired (a $7/mo fix that also removes the expiry
+          and the cold-start lag). This is an operations decision, not a product defect — and it's exactly
+          the "harden the infra before you pitch" lesson, arriving on schedule.</div></div>
+    </div>
+  </section>
+
+  <footer><span>DVV Research Cloud · DVV Analytics</span><span>Graded against running code · 480 tests green</span></footer>
+</div>
+
+<script>
+const CAPS = [
+  {icon:"i-doc", title:"Program — questionnaire & authoring", rows:[
+    ["Word/PDF extraction to structured survey","ship","LLM extraction incl. Google/GBK scripter-table format; a self-healing pass catches question formats the rules miss; clean questions auto-approve, only ambiguous ones need review."],
+    ["From-scratch survey builder","ship","8 question types, options, grids, required, randomization, answer-piping, and a visual routing editor — authored surveys join the exact same approve→field path as extracted ones."],
+    ["Safe routing logic (no arbitrary code)","ship","A serializable condition language (eq/in/and/or/not…) — never Decipher-style embedded code, so routing can be validated, compiled and reasoned about."],
+    ["Human review & correction","ship","Per-question confidence, flags, verbatim source shown beside structured logic; qid-rename and delta-validation so a messy doc can actually be repaired."],
+    ["Loops / dynamic blocks","plan","Repeat a battery per selected brand — the #1 real-study gap; researched, scoped, not built."],
+  ]},
+  {icon:"i-field", title:"Field — the Collector", rows:[
+    ["Public respondent runtime","ship","Themed, one-question-per-page, mobile-first survey links; welcome/complete/screen-out screens; resume support."],
+    ["Server-authoritative screening","ship","Terminates are enforced on the server against accumulated answers — never shipped to the browser, so they can't be bypassed."],
+    ["Quota cells","part","Hard per-cell limit enforcement with atomic counting. Ceiling: no least-fill assignment yet — a respondent matching a full cell is screened out rather than routed to their least-full open cell."],
+    ["Vendor redirects & status protocol","ship","Complete/terminate/security/overquota with Lucid/Cint-standard codes and {pid}/{rid} redirect substitution — agency panel traffic plugs in."],
+    ["Live field monitor","ship","Per-link counts across all five status buckets, quota progress, one-click close and materialize."],
+    ["Panel server-to-server APIs","plan","Beyond redirects: signed callbacks, quota sync. Redirect-only today — matches how most agency traffic actually runs."],
+  ]},
+  {icon:"i-data", title:"Process — the DP core", rows:[
+    ["SPSS / CSV / Excel intake → canonical model","ship","Real Decipher/SPSS exports map into one variable-dictionary model; system/paradata variables auto-filtered."],
+    ["Crosstabs — sig testing, weighting, nets","ship","Column-proportions z-test with letters, RIM weighting, auto Top/Bottom-box nets, means — the agency-DP core, on a fast columnar engine."],
+    ["Verbatim coding","ship","AI codeframe generation from a sample + confidence-gated auto-coding + a human review queue for the low-confidence tail."],
+    ["Respondent-quality QC","ship","Speeders (vs median LOI), straightliners across grids, duplicates, gibberish open-ends — flagged on ingest, surfaced to the analyst."],
+    ["Fielded data → the same analysis engines","ship","Live responses materialize into the identical DataMap+table stack as uploaded studies — one platform, not two."],
+    ["Questionnaire↔data linking + routing check","ship","Matches questions to data columns and cross-validates extracted routing against real missingness — hallucinated logic becomes measurable."],
+  ]},
+  {icon:"i-check", title:"Deliver & platform", rows:[
+    ["Excel deck rendering","ship","Formatted crosstab workbook with base rows, low-base flags, bold nets — for uploaded and fielded studies alike."],
+    ["SPSS .sav export","ship","Writes labelled .sav — the file a client's own analytics team expects back. (Ingest AND export.)"],
+    ["Client sharing & roles","ship","JWT auth with owner/analyst/reviewer, public read-only share links gated on delivery status."],
+    ["PowerPoint narrative deck","part","Renderer exists; AI narrative quality is early — usable, not yet client-final."],
+    ["Multi-language surveys","plan","Hindi + regionals is mandatory for Indian consumer fieldwork; storage/localization designed, not built."],
+    ["Production infrastructure","part","Runs on free Render+Vercel — fine for demo, not for client data (no backups, 90-day DB expiry, cold-start lag). ~$7/mo removes all three."],
+  ]},
+];
+const GAPS = [
+  ["“Does it do least-fill quotas?”","No — hard per-cell enforcement only. A matched-but-full cell screens out rather than balancing to the least-full open cell. Known, scoped as the next quota upgrade."],
+  ["“Loops and conjoint/MaxDiff?”","Not yet. Loops are researched and next on the feature roadmap. Conjoint/MaxDiff (design generation + hierarchical-Bayes analysis) is a deliberate later phase, not v1."],
+  ["“Can I trust the numbers?”","The math is standard and tested, but the credibility move is a parallel-run: reproduce one of your finished studies' tables to the decimal before anything real migrates. That's the launch gate, not a feature."],
+  ["“Where does my data live?”","Durable in Postgres by design — but today on a free tier with no backups. Honest answer: not yet safe for client data; the hardening is cheap and identified."],
+  ["“Multi-language?”","Not built. For India consumer work this is table-stakes, so it sits high on the roadmap, named — not hidden."],
+];
+const ROAD = [
+  ["Harden for a real pilot","This week","Paid database (kills the 90-day expiry + cold-start), backups, custom domain, delete the demo-seed admin. Blocks everything client-facing; smallest spend on the board."],
+  ["Close the table-stakes gaps","Near","Least-fill quotas, loops/dynamic blocks, multi-language. The three things a consumer study hits in its first questionnaire."],
+  ["Prove it — a parallel-run case study","Near","One friendly agency, one real study: our tables vs theirs, identical, and “programmed in 3 hours vs 2 days.” The reference that closes future pitches."],
+  ["Deepen the deliverables","Later","Client-final PPT narratives, richer dashboards, SAV/tab polish — the last mile of “looks like it came from a big shop.”"],
+  ["Scale the moat","Later","Conjoint/MaxDiff, panel S2S, multi-tenant SaaS with per-tenant data residency — the enterprise features, once the core is a reference-able product."],
+];
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const gl=id=>`<svg class="glyph" aria-hidden="true"><use href="#${id}"/></svg>`;
+const stMap={ship:["s-ship","Shipped"],part:["s-part","Partial"],plan:["s-plan","Planned"]};
+document.getElementById('caps').innerHTML = CAPS.map(c=>`
+  <div class="cap">
+    <div class="cap-head">${gl(c.icon)}<h3>${esc(c.title)}</h3></div>
+    ${c.rows.map(([name,st,desc])=>`<div class="cap-row">
+      <div class="what"><div class="name">${esc(name)}</div><div class="desc">${esc(desc)}</div></div>
+      <span class="status ${stMap[st][0]}"><span class="dot"></span>${stMap[st][1]}</span>
+    </div>`).join('')}
+  </div>`).join('');
+document.getElementById('gaps').innerHTML = GAPS.map(([q,a])=>`
+  <div class="panel"><h3 style="font-family:var(--serif);font-size:16px">${esc(q)}</h3><p style="margin-top:5px">${esc(a)}</p></div>`).join('');
+document.getElementById('road').innerHTML = ROAD.map(([t,when,p],i)=>`
+  <div class="phase"><div class="num">${String(i+1).padStart(2,'0')}</div>
+    <div><div class="when">${esc(when)}</div><h3>${esc(t)}</h3><p>${esc(p)}</p></div></div>`).join('');
+</script>
+
+</body></html>

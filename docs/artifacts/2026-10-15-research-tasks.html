@@ -1,0 +1,185 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>DVV Research Tasks</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: a briefing sheet — summary and rules up top, then one card per task, grouped by area, owner chip on each. */
+:root {
+  --bg: #f6f7f9; --surface: #ffffff; --ink: #1b2330; --muted: #5a6577; --line: #dde2ea;
+  --accent: #2f5d8a; --vishal: #2f5d8a; --vaibhav: #8a4f2f; --warn: #9a6a00;
+  --display: "Fraunces", Georgia, serif; --body: "Source Sans 3", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161d; --surface: #1a2029; --ink: #e6eaf0; --muted: #9aa5b5; --line: #2c3442;
+  --accent: #7fb0e0; --vishal: #7fb0e0; --vaibhav: #e0a27f; --warn: #e3b64f; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12161d; --surface: #1a2029; --ink: #e6eaf0; --muted: #9aa5b5; --line: #2c3442;
+  --accent: #7fb0e0; --vishal: #7fb0e0; --vaibhav: #e0a27f; --warn: #e3b64f; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 32px 64px; }
+main { max-width: 960px; margin: 0 auto; display: grid; gap: 32px; }
+h1 { font: 650 clamp(28px, 4vw, 40px)/1.15 var(--display); margin: 0; text-wrap: balance; }
+h2 { font: 600 13px/1 var(--body); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+h3 { font: 600 20px/1.25 var(--display); margin: 0; text-wrap: balance; }
+p { margin: 0; max-width: 68ch; }
+.lede { color: var(--muted); font-size: 18px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+.stat b { display: block; font: 500 22px/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 14px; }
+.rules { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--warn); border-radius: 8px; padding: 16px 18px; display: grid; gap: 8px; }
+.rules li { max-width: 72ch; }
+.rules ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.area { display: grid; gap: 14px; }
+.task { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: grid; gap: 10px; min-width: 0; }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.id { font: 500 13px var(--mono); color: var(--muted); }
+.owner { margin-left: auto; font: 600 12px var(--body); letter-spacing: .06em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; border: 1px solid currentColor; }
+.owner.vishal { color: var(--vishal); } .owner.vaibhav { color: var(--vaibhav); }
+dl { margin: 0; display: grid; grid-template-columns: 120px 1fr; gap: 6px 16px; }
+dt { color: var(--muted); font-size: 14px; font-weight: 600; }
+dd { margin: 0; min-width: 0; }
+@media (max-width: 560px) { dl { grid-template-columns: 1fr; } dt { margin-top: 6px; } }
+footer { color: var(--muted); font-size: 14px; }
+</style>
+<main>
+<header style="display:grid;gap:10px">
+  <h1>Research tasks for DVV Research Cloud</h1>
+  <p class="lede">Fourteen research questions that stand between today's product and one a research agency trusts without re-checking every question. You research and recommend; Deepesh applies the result.</p>
+</header>
+
+<section>
+  <h2>Where we stand · 15 Oct 2026 · six real questionnaires, 372 questions read independently</h2>
+  <div class="stats">
+    <div class="stat"><b>142 / 372</b><span>read exactly as the document states</span></div>
+    <div class="stat"><b>195 / 372</b><span>work correctly in the survey link</span></div>
+    <div class="stat"><b>139</b><span>still wrong with no warning</span></div>
+    <div class="stat"><b>60 / 169</b><span>document mistakes caught</span></div>
+  </div>
+</section>
+
+<section class="rules">
+  <h2 style="margin:0">Rules for every task</h2>
+  <ul>
+    <li><strong>No client questionnaire or client data leaves our machines</strong> — not into ChatGPT, Claude.ai, Gemini, Groq or any free tool. Use public, synthetic or self-written questionnaires.</li>
+    <li>Cite every claim with a link, page and date. "Industry standard" needs a source.</li>
+    <li>Hand back a short report in <code>docs/research/&lt;task-id&gt;.md</code>: recommendation first, then evidence, plus any sample files.</li>
+    <li>When a task asks for test questionnaires, also write the correct reading (what each question asks, who sees it, how it ends) so the product can be scored against it automatically.</li>
+  </ul>
+</section>
+
+<section class="area">
+  <h2>Reading questionnaires</h2>
+
+  <article class="task"><div class="head"><span class="id">R1</span><h3>How agencies write questionnaires</h3><span class="owner vishal">Vishal</span></div>
+  <dl><dt>Question</dt><dd>In how many ways do agencies write the same things: who is asked, screen-outs, grids, loops, piping, conditions on answers, randomisation, hidden variables?</dd>
+  <dt>Why</dt><dd>Every big miss fixed this month was a convention we had never seen (a pointer to the next table cell, Word's automatic numbering, a base tag without a colon, section headings that carry a condition). Each new client brings new ones.</dd>
+  <dt>Look at</dt><dd>Public questionnaires with documentation: Federal Reserve SHED, CDC BRFSS, Pew methodology appendices, ESOMAR and Insights Association samples, university archives, published academic questionnaires, platform example surveys.</dd>
+  <dt>Deliver</dt><dd>20+ questionnaires from at least 8 authors; a table of conventions with examples; 10 of them with a correct reading in our format.</dd>
+  <dt>Done when</dt><dd>The comparison script scores the product on those 10.</dd></dl></article>
+
+  <article class="task"><div class="head"><span class="id">R2</span><h3>Getting everything out of Word and PDF</h3><span class="owner vishal">Vishal</span></div>
+  <dl><dt>Question</dt><dd>What does a .docx or .pdf hold that our reader misses?</dd>
+  <dt>Why</dt><dd>Numbers drawn by Word were invisible until this month. Tracked changes, comments, highlights, text boxes and PDF tables are still partly unread.</dd>
+  <dt>Look at</dt><dd>python-docx limits, docx2python, Mammoth, pandoc, LibreOffice headless; for PDF pdfplumber, Camelot, PyMuPDF, Docling, Unstructured, AWS Textract (data terms first).</dd>
+  <dt>Deliver</dt><dd>What each tool recovers on 10 test documents (numbering, tables, tracked changes, comments, colour, text boxes, footnotes), speed, licence, recommendation.</dd>
+  <dt>Done when</dt><dd>Each gap in our loader has a tool or technique that closes it.</dd></dl></article>
+
+  <article class="task"><div class="head"><span class="id">R3</span><h3>What counts as a correct reading</h3><span class="owner vishal">Vishal</span></div>
+  <dl><dt>Question</dt><dd>How do we decide a reading is right when two careful readers differ?</dd>
+  <dt>Why</dt><dd>Our reference readings sometimes assume what the document does not say: an answer code that is never printed, "keep Other last" where the document is silent.</dd>
+  <dt>Look at</dt><dd>Cohen's and Fleiss' kappa, Krippendorff's alpha, annotation-guideline practice in document-AI benchmarks, how survey QA teams double-check programming.</dd>
+  <dt>Deliver</dt><dd>A reading protocol (who reads, how disagreements are settled, "the document says" versus "a reader assumed") and an agreement score on 3 questionnaires you both read.</dd>
+  <dt>Done when</dt><dd>The protocol is in the eval folder and the agreement numbers are known.</dd></dl></article>
+
+  <article class="task"><div class="head"><span class="id">R4</span><h3>Which open model reads what rules cannot</h3><span class="owner vishal">Vishal</span></div>
+  <dl><dt>Question</dt><dd>For the parts no rule can read, which open-weight model on AWS Bedrock gives the best structured answer per rupee and per second?</dd>
+  <dt>Why</dt><dd>Production runs open models on Bedrock only. Some questions can only be read with AI today.</dd>
+  <dt>Look at</dt><dd>Open-weight models offered in ap-south-1 (Qwen, Llama, Mistral, DeepSeek families), JSON output reliability, context length, price, latency, Bedrock data-use and retention terms.</dd>
+  <dt>Deliver</dt><dd>A benchmark on synthetic and public questionnaires only: accuracy per field, valid-JSON rate, cost and time per questionnaire, a recommendation for each task (extract, read the brief, logic review, question agent).</dd>
+  <dt>Done when</dt><dd>A table we can turn straight into the model setting per task.</dd></dl></article>
+</section>
+
+<section class="area">
+  <h2>Survey logic and the respondent link</h2>
+
+  <article class="task"><div class="head"><span class="id">R5</span><h3>How survey platforms express logic</h3><span class="owner vishal">Vishal</span></div>
+  <dl><dt>Question</dt><dd>What logic do Decipher (Forsta), Qualtrics, Confirmit, Alchemer and SurveyJS support, and how does each map onto ours?</dd>
+  <dt>Why</dt><dd>Counted conditions, grid-row conditions and answer conditions were added this month. Still missing: conditional order ("keep order unless 1 shows first"), position rules, quota-driven routing, loops over a selection with logic per turn.</dd>
+  <dt>Look at</dt><dd>Each platform's documentation for display and skip logic, masking, piping, loops, randomisation blocks, quotas and terminates.</dd>
+  <dt>Deliver</dt><dd>A mapping table (feature, each platform, our model, gap) and for every gap how a questionnaire writes it, how the platform stores it, and a proposed representation for us.</dd>
+  <dt>Done when</dt><dd>Every gap has a proposal Deepesh can build or reject.</dd></dl></article>
+
+  <article class="task"><div class="head"><span class="id">R6</span><h3>MaxDiff and conjoint done properly</h3><span class="owner vishal">Vishal</span></div>
+  <dl><dt>Question</dt><dd>What does it take to field and analyse MaxDiff, and later choice-based conjoint, at agency quality?</dd>
+  <dt>Why</dt><dd>MaxDiff appears in client work and is flagged as not supported for analysis.</dd>
+  <dt>Look at</dt><dd>Balanced incomplete block designs, screens and items per screen, design efficiency, analysis by counts, multinomial logit and hierarchical Bayes, open-source tools (R support.BWS, ChoiceModelR, Python xlogit, Stan), how results are reported.</dd>
+  <dt>Deliver</dt><dd>A design recipe, an analysis recipe with an open-source implementation, a worked example on synthetic data, the client deliverable.</dd>
+  <dt>Done when</dt><dd>Deepesh can build design and analysis from the recipe.</dd></dl></article>
+
+  <article class="task"><div class="head"><span class="id">R7</span><h3>Conditions on number boxes</h3><span class="owner vishal">Vishal</span></div>
+  <dl><dt>Question</dt><dd>How do we hide one box in an "add up to 100%" question for some respondents, and what other per-item conditions can SurveyJS not express?</dd>
+  <dt>Why</dt><dd>A box meant only for users of one ad platform cannot be hidden today; it is flagged instead.</dd>
+  <dt>Look at</dt><dd>SurveyJS matrixdropdown, multipletext, custom widgets, expression validators and totals; what each option changes in the stored answers.</dd>
+  <dt>Deliver</dt><dd>Options with the data-shape impact of each (saved responses and exports) and a recommendation.</dd>
+  <dt>Done when</dt><dd>A decision Deepesh can take with the cost known.</dd></dl></article>
+</section>
+
+<section class="area">
+  <h2>Respondents, data quality and standards</h2>
+
+  <article class="task"><div class="head"><span class="id">R8</span><h3>The respondent experience on a phone</h3><span class="owner vaibhav">Vaibhav</span></div>
+  <dl><dt>Question</dt><dd>Which layouts give the best data on mobile (carousel or grid, sliders or buttons, long lists, open-ends) and what makes people drop out?</dd>
+  <dt>Why</dt><dd>The link is what the client sees, and most panel respondents answer on phones.</dd>
+  <dt>Look at</dt><dd>Survey-methodology research (Journal of Survey Statistics and Methodology, Public Opinion Quarterly, AAPOR, ESOMAR, Pew methods) and WCAG 2.2 for forms.</dd>
+  <dt>Deliver</dt><dd>Recommendations per question type with evidence, and an accessibility checklist for the link.</dd>
+  <dt>Done when</dt><dd>A short list of layout rules Deepesh can apply.</dd></dl></article>
+
+  <article class="task"><div class="head"><span class="id">R9</span><h3>Catching bad respondents</h3><span class="owner vaibhav">Vaibhav</span></div>
+  <dl><dt>Question</dt><dd>Which signals reliably identify speeders, straight-liners, bots, duplicates and AI-written open-ends, and at what thresholds?</dd>
+  <dt>Why</dt><dd>Cleaning checks exist, but their thresholds are our guesses, not evidence.</dd>
+  <dt>Look at</dt><dd>Academic and industry studies on survey fraud, panel providers' quality standards, AI-text detection research and its false-positive rates.</dd>
+  <dt>Deliver</dt><dd>Each signal with a threshold, its known false-positive rate and sources; which to flag and which to remove automatically.</dd>
+  <dt>Done when</dt><dd>Thresholds Deepesh can put into the cleaning rules.</dd></dl></article>
+
+  <article class="task"><div class="head"><span class="id">R10</span><h3>Defaults the industry expects</h3><span class="owner vaibhav">Vaibhav</span></div>
+  <dl><dt>Question</dt><dd>When a questionnaire is silent: required or optional? "None / Other / Don't know" kept last? Exclusive? Randomised?</dd>
+  <dt>Why</dt><dd>These are the largest disagreements with the reference readings: 49 on "required", about 45 on "kept last".</dd>
+  <dt>Look at</dt><dd>ISO 20252, ESOMAR, MRS and Insights Association codes, platform defaults, agency scripting guides.</dd>
+  <dt>Deliver</dt><dd>A recommended default for each, with sources and exceptions.</dd>
+  <dt>Done when</dt><dd>Deepesh can set the defaults and cite why.</dd></dl></article>
+
+  <article class="task"><div class="head"><span class="id">R11</span><h3>Tables a client trusts</h3><span class="owner vaibhav">Vaibhav</span></div>
+  <dl><dt>Question</dt><dd>Do our crosstabs, significance tests and weighting match SPSS, Q, WinCross or MarketSight?</dd>
+  <dt>Why</dt><dd>One number that differs from the client's own tool ends their trust.</dd>
+  <dt>Look at</dt><dd>Column-proportion tests, effective base under weighting, rim weighting, how each tool reports.</dd>
+  <dt>Deliver</dt><dd>One synthetic dataset tabulated in two reference tools and ours, every difference explained.</dd>
+  <dt>Done when</dt><dd>No unexplained differences remain.</dd></dl></article>
+
+  <article class="task"><div class="head"><span class="id">R12</span><h3>Compliance for our clients</h3><span class="owner vaibhav">Vaibhav</span></div>
+  <dl><dt>Question</dt><dd>What do India's DPDP Act, GDPR and healthcare-professional research codes (EphMRA, BHBIA, Insights Association) require of us?</dd>
+  <dt>Why</dt><dd>Healthcare and international studies are in the pipeline. Consent, erasure and retention are built but not checked against the law.</dd>
+  <dt>Look at</dt><dd>The regulations, the codes, AWS Bedrock and S3 residency and processing terms.</dd>
+  <dt>Deliver</dt><dd>A checklist of obligations, what we do, what is missing, a draft data-processing note for clients.</dd>
+  <dt>Done when</dt><dd>Each missing item is a concrete task.</dd></dl></article>
+
+  <article class="task"><div class="head"><span class="id">R13</span><h3>Competitors and what agencies pay</h3><span class="owner vaibhav">Vaibhav</span></div>
+  <dl><dt>Question</dt><dd>What do agencies pay for programming, hosting and tabulation, and where do Decipher, Qualtrics, Alchemer, SurveyMonkey Enterprise, Conjointly and Indian vendors fall short?</dd>
+  <dt>Why</dt><dd>Positioning and price.</dd>
+  <dt>Look at</dt><dd>Public pricing, agency forums, case studies, conversations with 2 or 3 agency programmers (no client data).</dd>
+  <dt>Deliver</dt><dd>A comparison table (features, turnaround, price), the top 5 pains agencies describe, a pricing recommendation.</dd>
+  <dt>Done when</dt><dd>A one-page positioning and price proposal.</dd></dl></article>
+
+  <article class="task"><div class="head"><span class="id">R14</span><h3>Teaching the system and trusting it</h3><span class="owner vaibhav">Vaibhav</span></div>
+  <dl><dt>Question</dt><dd>How do the best document-AI and data tools let a non-programmer correct them once and have it stick, and show what they did not understand?</dd>
+  <dt>Why</dt><dd>"Teach this" and "How this questionnaire was read" are our answer to every client writing differently. They must be obvious to a research executive.</dd>
+  <dt>Look at</dt><dd>Human-in-the-loop extraction products, correction UX, explainability patterns; 3 to 5 short usability sessions on our review page with a synthetic questionnaire.</dd>
+  <dt>Deliver</dt><dd>Findings, the 5 most confusing things on the review page, concrete changes.</dd>
+  <dt>Done when</dt><dd>Changes Deepesh can apply to the review page.</dd></dl></article>
+</section>
+
+<footer>Owners are a suggestion: swap freely. The same list lives in the repository at <code>docs/RESEARCH_TASKS.md</code>; what has changed and what is still open is in <code>docs/CHANGE_TRACKER.md</code>.</footer>
+</main>
+
+</body></html>

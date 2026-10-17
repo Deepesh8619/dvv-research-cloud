@@ -1,0 +1,727 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Inside DVV Research Cloud</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap">
+<style>
+  :root {
+    --ground: #f3f6f6;
+    --surface: #ffffff;
+    --surface-2: #eaf0f0;
+    --ink: #101719;
+    --ink-2: #384449;
+    --muted: #5f6f74;
+    --rule: #d7e0e1;
+    --accent: #0c6b63;
+    --accent-soft: #e2f1ef;
+    --caution: #9a6212;
+    --caution-soft: #fbf0df;
+    --danger: #9f3a31;
+    --plate: #fbfcfc;
+    --plate-ink: #16212a;
+    --code-bg: #0f1a1d;
+    --code-ink: #dbe8e6;
+    --code-dim: #7d9a96;
+    --code-key: #7fd6c5;
+    --code-str: #e6c88a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0d1214;
+      --surface: #141b1e;
+      --surface-2: #1a2427;
+      --ink: #e8f0f0;
+      --ink-2: #c3d1d2;
+      --muted: #91a3a5;
+      --rule: #263336;
+      --accent: #59cfc0;
+      --accent-soft: #14312e;
+      --caution: #d9a55e;
+      --caution-soft: #2b2314;
+      --danger: #e08379;
+      --plate: #f4f7f7;
+      --plate-ink: #16212a;
+      --code-bg: #08110f;
+      --code-ink: #d6e6e3;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0d1214;
+    --surface: #141b1e;
+    --surface-2: #1a2427;
+    --ink: #e8f0f0;
+    --ink-2: #c3d1d2;
+    --muted: #91a3a5;
+    --rule: #263336;
+    --accent: #59cfc0;
+    --accent-soft: #14312e;
+    --caution: #d9a55e;
+    --caution-soft: #2b2314;
+    --danger: #e08379;
+    --plate: #f4f7f7;
+    --plate-ink: #16212a;
+    --code-bg: #08110f;
+    --code-ink: #d6e6e3;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding-inline: 20px;
+    padding-block: 0 72px;
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 48px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; gap: 0; } }
+
+  /* ---- masthead ---- */
+  .masthead {
+    border-bottom: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  .masthead .inner {
+    max-width: 1180px; margin: 0 auto;
+    padding-inline: 20px; padding-block: 40px 32px;
+  }
+  .kicker {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 14px;
+  }
+  h1 {
+    font-family: "Newsreader", Georgia, serif;
+    font-weight: 500; font-size: clamp(34px, 5.2vw, 52px);
+    line-height: 1.08; letter-spacing: -0.015em; margin: 0 0 16px;
+    text-wrap: balance; color: var(--ink);
+  }
+  .standfirst {
+    font-family: "Newsreader", Georgia, serif;
+    font-size: clamp(17px, 2.2vw, 20px); line-height: 1.5;
+    color: var(--ink-2); margin: 0; max-width: 60ch;
+  }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 8px 28px; margin-top: 26px;
+    font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted);
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  /* ---- contents rail ---- */
+  nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); padding-top: 44px; }
+  @media (max-width: 900px) {
+    nav.toc { position: static; padding-top: 28px; padding-bottom: 8px; }
+  }
+  nav.toc p {
+    font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.13em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 12px;
+  }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: toc; }
+  nav.toc a {
+    display: flex; gap: 10px; padding: 5px 8px; margin-left: -8px;
+    border-radius: 5px; color: var(--ink-2); text-decoration: none; font-size: 13.5px; line-height: 1.35;
+  }
+  nav.toc a:hover { background: var(--surface-2); color: var(--ink); }
+  nav.toc a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  nav.toc a .n {
+    font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted);
+    padding-top: 2px; min-width: 16px;
+  }
+
+  main { padding-top: 44px; min-width: 0; }
+  section { padding-block: 10px 40px; border-bottom: 1px solid var(--rule); }
+  section:last-of-type { border-bottom: 0; }
+  h2 {
+    font-family: "Newsreader", Georgia, serif; font-weight: 500;
+    font-size: clamp(25px, 3.4vw, 32px); line-height: 1.15; letter-spacing: -0.01em;
+    margin: 26px 0 6px; text-wrap: balance;
+  }
+  h2 .num {
+    display: block; font-family: "IBM Plex Mono", monospace; font-size: 11.5px;
+    letter-spacing: 0.16em; color: var(--accent); text-transform: uppercase;
+    margin-bottom: 8px; font-weight: 500;
+  }
+  h3 {
+    font-size: 15px; font-weight: 600; letter-spacing: -0.005em;
+    margin: 30px 0 8px; color: var(--ink);
+  }
+  p { margin: 0 0 14px; max-width: 68ch; color: var(--ink-2); }
+  p.lede { font-size: 17px; color: var(--ink); }
+  strong { color: var(--ink); font-weight: 600; }
+  a { color: var(--accent); }
+  ul, ol.steps { max-width: 68ch; padding-left: 20px; margin: 0 0 16px; color: var(--ink-2); }
+  li { margin-bottom: 7px; }
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.875em;
+    background: var(--surface-2); padding: 1px 5px; border-radius: 4px; color: var(--ink);
+  }
+
+  /* ---- code block ---- */
+  figure { margin: 20px 0; }
+  .code {
+    background: var(--code-bg); border-radius: 8px; overflow: hidden;
+    border: 1px solid var(--rule);
+  }
+  .code .path {
+    font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--code-dim);
+    padding: 9px 14px; border-bottom: 1px solid rgba(255,255,255,0.07);
+    display: flex; justify-content: space-between; gap: 12px;
+  }
+  .code pre {
+    margin: 0; padding: 14px; overflow-x: auto;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12.5px; line-height: 1.65; color: var(--code-ink);
+  }
+  .code .c { color: var(--code-dim); font-style: italic; }
+  .code .k { color: var(--code-key); }
+  .code .s { color: var(--code-str); }
+  figcaption {
+    font-size: 13px; color: var(--muted); margin-top: 8px; max-width: 68ch;
+  }
+
+  /* ---- callout: a rule, not a card ---- */
+  .note {
+    border-left: 3px solid var(--accent); padding: 2px 0 2px 16px;
+    margin: 20px 0; max-width: 66ch;
+  }
+  .note.trap { border-left-color: var(--caution); }
+  .note p { margin-bottom: 8px; }
+  .note p:last-child { margin-bottom: 0; }
+  .note .tag {
+    font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 5px;
+  }
+  .note.trap .tag { color: var(--caution); }
+
+  /* ---- diagram plate: always light, so mermaid reads in both themes ---- */
+  .plate {
+    background: var(--plate); border: 1px solid var(--rule); border-radius: 8px;
+    padding: 18px; overflow-x: auto; color: var(--plate-ink);
+  }
+  .plate pre.mermaid { margin: 0; background: none; text-align: center; }
+
+  /* ---- tables ---- */
+  .tablewrap { overflow-x: auto; margin: 18px 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 460px; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th {
+    font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500; background: var(--surface-2);
+  }
+  tr:last-child td { border-bottom: 0; }
+  td code { background: none; padding: 0; color: var(--accent); }
+  td.num { font-variant-numeric: tabular-nums; font-family: "IBM Plex Mono", monospace; }
+
+  /* ---- measured figures ---- */
+  .figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; margin: 20px 0; }
+  .fig { background: var(--surface); padding: 16px 18px; }
+  .fig .v { font-family: "IBM Plex Mono", monospace; font-size: 26px; font-weight: 500; color: var(--accent); font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .fig .l { font-size: 12.5px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+
+  .chart { margin: 22px 0; }
+  .chart svg { width: 100%; height: auto; display: block; }
+
+  footer.end {
+    max-width: 1180px; margin: 0 auto; padding-inline: 20px; padding-block: 34px 60px;
+    border-top: 1px solid var(--rule); color: var(--muted); font-size: 13px;
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<header class="masthead">
+  <div class="inner">
+    <p class="kicker">Engineering walkthrough · September 2026</p>
+    <h1>Inside DVV Research Cloud</h1>
+    <p class="standfirst">How a Word questionnaire becomes a live survey, a clean data file and a set of tables — the techniques at each stage, the traps that cost us, and the code that does the work.</p>
+    <div class="meta">
+      <span><b>32,047</b> lines of Python</span>
+      <span><b>62</b> engine modules</span>
+      <span><b>1,199</b> tests green</span>
+      <span><b>0</b> proprietary AI vendors in the code</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="toc" aria-label="Contents">
+    <p>Contents</p>
+    <ol>
+      <li><a href="#domain"><span class="n">00</span><span>The vocabulary first</span></a></li>
+      <li><a href="#pipeline"><span class="n">01</span><span>The whole pipeline</span></a></li>
+      <li><a href="#extraction"><span class="n">02</span><span>Reading the document</span></a></li>
+      <li><a href="#passes"><span class="n">03</span><span>Shapes a parser must know</span></a></li>
+      <li><a href="#routing"><span class="n">04</span><span>Routing as data, not code</span></a></li>
+      <li><a href="#teaching"><span class="n">05</span><span>Teaching the parser</span></a></li>
+      <li><a href="#gates"><span class="n">06</span><span>Four gates before a link</span></a></li>
+      <li><a href="#fielding"><span class="n">07</span><span>In the field</span></a></li>
+      <li><a href="#data"><span class="n">08</span><span>The deliverable</span></a></li>
+      <li><a href="#rag"><span class="n">09</span><span>Search by meaning</span></a></li>
+      <li><a href="#tests"><span class="n">10</span><span>How it is tested</span></a></li>
+      <li><a href="#deploy"><span class="n">11</span><span>How it ships</span></a></li>
+      <li><a href="#start"><span class="n">12</span><span>Where to start reading</span></a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <section id="domain">
+      <h2><span class="num">00</span>The vocabulary first</h2>
+      <p class="lede">Every technique below is shaped by market-research conventions. Nine words carry most of it.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Term</th><th>What it means</th><th>Why the code cares</th></tr></thead>
+          <tbody>
+            <tr><td><b>Screener</b></td><td>The opening questions that decide who qualifies</td><td>A wrong screener wastes real money on the wrong people</td></tr>
+            <tr><td><b>Base</b></td><td>Who is asked a question — "ask if Q2 = 1"</td><td>Stored as <code>show_if</code>, an expression tree</td></tr>
+            <tr><td><b>Screen-out</b></td><td>A rule that ends the interview</td><td><code>terminate_if</code>, judged on the server only</td></tr>
+            <tr><td><b>Punch code</b></td><td>The number an answer gets in the data file (Yes = 1)</td><td>Masks compare codes, not labels</td></tr>
+            <tr><td><b>Data map</b></td><td>Every column the study will produce, with labels</td><td>Fixed at approval, before a single respondent</td></tr>
+            <tr><td><b>Mask</b></td><td>Show only the brands this person knew earlier</td><td>Needs codes to line up across questions</td></tr>
+            <tr><td><b>Pipe</b></td><td>Drop an earlier answer into later wording</td><td>"Why did you choose <i>Bubble</i>?"</td></tr>
+            <tr><td><b>Incidence</b></td><td>Share of judged respondents who qualified</td><td>Priced into every project; watched hourly in field</td></tr>
+            <tr><td><b>LOI</b></td><td>Length of interview, in minutes</td><td>Median measured from real sessions, not estimated</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">
+        <span class="tag">The job being replaced</span>
+        <p>A scripter reads a 40-page Word document and hand-builds the survey in Decipher or Qualtrics: types, answer lists, bases, screen-outs, masks, pipes, quotas. Days of work, and every misread line is a mistake a respondent meets. This system does that reading, and puts a person in front of the result before anyone is let in.</p>
+      </div>
+    </section>
+
+    <section id="pipeline">
+      <h2><span class="num">01</span>The whole pipeline</h2>
+      <p>One document in, one delivery out. Everything between is either deterministic code or a person deciding — the model is a narrow helper in the middle, never the spine.</p>
+      <figure>
+        <div class="plate">
+<pre class="mermaid">
+flowchart TD
+  A["Word / PDF questionnaire"] --> B["Intake: segment into question chunks"]
+  B --> C["Deterministic parsers<br/>spec tables · prose · table reader"]
+  C --> D{"Anything left<br/>unresolved?"}
+  D -- no --> F["Survey-level passes"]
+  D -- yes --> E["Open-weight model<br/>on the residue only"]
+  E --> F
+  F --> G["Review screen<br/>edit · connect · teach · re-read"]
+  G --> H["Approve → data map fixed"]
+  H --> I["Dry run + pre-link check"]
+  I --> J["Live link · server decides every route"]
+  J --> K["Materialize: data file + data map"]
+  K --> L["Tables · deck · client share link"]
+</pre>
+        </div>
+        <figcaption>The spine. The model sits on one branch of one decision, and what it returns is checked by the same validators as everything else.</figcaption>
+      </figure>
+    </section>
+
+    <section id="extraction">
+      <h2><span class="num">02</span>Reading the document</h2>
+      <p class="lede">The central design decision: <strong>deterministic first, model last.</strong></p>
+      <p>Questionnaires are not free prose. They are written to house conventions — a spec table with <code>Type / Options / Base</code> rows, a numbered question followed by an indented answer list, bracketed programmer notes like <code>[PN: SHOW CORE BRANDS]</code>. Conventions are parseable. So three readers run in order, and only what none of them could resolve is sent to a model.</p>
+
+      <div class="chart" role="img" aria-label="Bar chart: 64 percent of questions are resolved with no model call at all on the benchmark set">
+        <svg viewBox="0 0 680 150" xmlns="http://www.w3.org/2000/svg">
+          <text x="0" y="14" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor" opacity="0.65">WHERE A QUESTION'S MEANING COMES FROM — BENCHMARK SET</text>
+          <rect x="0" y="30" width="435" height="34" fill="#0c6b63"></rect>
+          <rect x="435" y="30" width="245" height="34" fill="#c5d3d4"></rect>
+          <text x="14" y="52" font-family="IBM Plex Sans, sans-serif" font-size="13" fill="#ffffff" font-weight="600">Deterministic parsers — 64%</text>
+          <text x="449" y="52" font-family="IBM Plex Sans, sans-serif" font-size="13" fill="#16212a" font-weight="600">Model residue — 36%</text>
+          <text x="0" y="90" font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor" opacity="0.75">Every deterministic result is reproducible: same document, same answer, no cost,</text>
+          <text x="0" y="108" font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor" opacity="0.75">no network, and a line of the document to point at when a reviewer asks why.</text>
+          <text x="0" y="134" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="currentColor" opacity="0.5">Measured on the internal benchmark questionnaires, 2026.</text>
+        </svg>
+      </div>
+
+      <h3>Why not just ask a model everything?</h3>
+      <ul>
+        <li><strong>Reproducibility.</strong> A reviewer who asks "why is Q14 a grid?" gets a line of the document, not a sampled token.</li>
+        <li><strong>Cost and latency.</strong> Nothing is charged or awaited for the 64% a regex settles.</li>
+        <li><strong>Confidentiality.</strong> Client questionnaires that never leave the server cannot be trained on by a free tier.</li>
+        <li><strong>It gets better permanently.</strong> A parser fix applies to every future document; a better prompt is a coin toss each run.</li>
+      </ul>
+
+      <h3>A real reader: numbers that must add up</h3>
+      <p>The document writes a constant-sum question as blanks. Read as an answer list it looked like a single choice between two underscores, and the data file had no column for either share.</p>
+      <figure>
+        <div class="code">
+          <div class="path"><span>src/engines/questionnaire/constant_sum.py</span><span>parser</span></div>
+<pre><span class="c"># "___ % Brands I already know and trust"</span>
+_BOX_LINE = re.compile(r<span class="s">"^\s*_{2,}\s*%?\s*(?P&lt;label&gt;\S.*?)\s*$"</span>)
+<span class="c"># "MUST SUM TO 100", "should add up to 100%", "Total: 100%"</span>
+_TOTAL = re.compile(r<span class="s">"(?:SUM\s+TO|ADD\s+UP\s+TO|TOTAL\s*[:=]?)\s*(?P&lt;n&gt;\d{1,4})\s*%?"</span>, re.I)
+
+<span class="k">def</span> apply(survey):
+    <span class="k">for</span> q <span class="k">in</span> survey.questions:
+        items = [m.group(<span class="s">"label"</span>) <span class="k">for</span> line <span class="k">in</span> (q.source_text <span class="k">or</span> <span class="s">""</span>).splitlines()
+                 <span class="k">if</span> (m := _BOX_LINE.match(line))]
+        <span class="k">if</span> len(items) &lt; 2: <span class="k">continue</span>
+        q.type = QuestionType.NUMERIC
+        q.rows = [Option(code=i, label=l) <span class="k">for</span> i, l <span class="k">in</span> enumerate(items, start=1)]
+        q.extraction_evidence[<span class="s">"type"</span>] = f<span class="s">"{len(items)} boxes to fill"</span></pre>
+        </div>
+        <figcaption>Two properties worth copying: the question records <em>why</em> it became what it became (<code>extraction_evidence</code>), and the pass is a pure function over the survey — it can run again on a re-read with no side effects.</figcaption>
+      </figure>
+    </section>
+
+    <section id="passes">
+      <h2><span class="num">03</span>Shapes a parser must know</h2>
+      <p>Extraction gets each question roughly right. A second family of passes runs over the <em>whole</em> survey, because these shapes are only visible once every question exists.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Pass</th><th>What the document says</th><th>What it becomes</th></tr></thead>
+          <tbody>
+            <tr><td><code>split_subquestion_grids</code></td><td>One grid holding three unrelated asks</td><td>Three questions, each with its own base</td></tr>
+            <tr><td><code>apply_carousels</code></td><td>"FOR Q6–Q10 REFER TO CORE SET OF 4 BRANDS"</td><td>One question per category, each with its own brand list</td></tr>
+            <tr><td><code>fill_lists</code></td><td>"SHOW Q26 LIST"</td><td>The actual answer list, codes preserved</td></tr>
+            <tr><td><code>expand_loops</code></td><td>"ASK FOR EACH BRAND SELECTED"</td><td>N real questions with real data columns</td></tr>
+            <tr><td><code>apply_section_paths</code></td><td>Section A / B routing prose</td><td>Hidden variables <code>HID_</code> a tab plan can cut by</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">
+        <span class="tag">Why this matters more than it looks</span>
+        <p>Each of these was a question a respondent could not answer, or a column a client would not receive. On one real study, questions rendering blank went <strong>11 → 1 → 0</strong> as these passes landed. Nothing about that is model quality; it is knowing the document conventions of an industry.</p>
+      </div>
+    </section>
+
+    <section id="routing">
+      <h2><span class="num">04</span>Routing as data, not code</h2>
+      <p class="lede">No generated code, no <code>eval</code>, ever. A base is a tree, and one pure function walks it.</p>
+      <figure>
+        <div class="code">
+          <div class="path"><span>src/core/survey_definition.py</span><span>the evaluator</span></div>
+<pre><span class="k">def</span> evaluate(expression, answers) -> bool:
+    <span class="s">"""Pure function of (expression, answers) -> bool: no I/O, no eval."""</span>
+    op = expression.op
+    <span class="k">if</span> op == <span class="s">"and"</span>:  <span class="k">return</span> all(evaluate(c, answers) <span class="k">for</span> c <span class="k">in</span> expression.children <span class="k">or</span> [])
+    <span class="k">if</span> op == <span class="s">"or"</span>:   <span class="k">return</span> any(evaluate(c, answers) <span class="k">for</span> c <span class="k">in</span> expression.children <span class="k">or</span> [])
+    <span class="k">if</span> op == <span class="s">"not"</span>:  <span class="k">return</span> <span class="k">not</span> any(evaluate(c, answers) <span class="k">for</span> c <span class="k">in</span> expression.children <span class="k">or</span> [])
+
+    qid = expression.qid
+    <span class="k">if</span> qid <span class="k">is</span> None <span class="k">or</span> qid <span class="k">not</span> <span class="k">in</span> answers:
+        <span class="k">return</span> False   <span class="c"># unanswered is "not satisfied", never an exception</span></pre>
+        </div>
+        <figcaption>Routing survives incomplete data by construction: real respondent records have skip-logic gaps by design.</figcaption>
+      </figure>
+
+      <div class="note trap">
+        <span class="tag">The trap that taught us the most</span>
+        <p>A negated screen-out — "TERMINATE if code 1 is <em>not</em> selected" — is stored as <code>not(in [1])</code>. Against an <em>empty</em> answer set the inner <code>in</code> is false, so <code>not false</code> is true, and <strong>every respondent was screened out on their first submit</strong>. The fix is not in the evaluator; it is a guard in front of it.</p>
+      </div>
+
+      <figure>
+        <div class="code">
+          <div class="path"><span>src/engines/fielding/decisions.py</span><span>the guard</span></div>
+<pre><span class="k">def</span> is_decidable(expression, answers) -> bool:
+    <span class="s">"""A condition must not be judged before the answers it depends on exist."""</span>
+    <span class="k">if</span> expression <span class="k">is</span> None: <span class="k">return</span> False
+    <span class="k">return</span> expression.referenced_qids().issubset(answers.keys())
+
+<span class="k">def</span> terminating_question(survey, answers):
+    <span class="k">for</span> question <span class="k">in</span> survey.questions:
+        <span class="k">if</span> question.terminate_if <span class="k">is</span> None: <span class="k">continue</span>
+        <span class="k">if</span> <span class="k">not</span> is_decidable(question.terminate_if, answers): <span class="k">continue</span>
+        <span class="k">if</span> evaluate(question.terminate_if, answers): <span class="k">return</span> question
+    <span class="k">return</span> None</pre>
+        </div>
+        <figcaption>The live route and the dry-run simulator both call this. If they didn't, the rehearsal and the real thing would disagree about who qualifies — which is the worst possible bug to find in field.</figcaption>
+      </figure>
+    </section>
+
+    <section id="teaching">
+      <h2><span class="num">05</span>Teaching the parser</h2>
+      <p>When a reviewer sees a misread, the cheap fix is to edit that one question. The valuable fix is to teach the convention, so every future document from that client reads correctly. Both exist; the second is the product.</p>
+      <p>A taught pattern is a <strong>literal fragment</strong> — the reviewer types what they see in the document — matched by substring. Never a regex.</p>
+      <figure>
+        <div class="code">
+          <div class="path"><span>src/engines/questionnaire/learned.py</span><span>matching</span></div>
+<pre><span class="k">def</span> _matches(pattern, haystack) -> bool:
+    needle = pattern.needle          <span class="c"># lowercased, brackets stripped</span>
+    <span class="k">return</span> bool(needle) <span class="k">and</span> needle <span class="k">in</span> (haystack <span class="k">or</span> <span class="s">""</span>).lower()</pre>
+        </div>
+        <figcaption>Three lines, deliberately.</figcaption>
+      </figure>
+      <div class="note">
+        <span class="tag">Why a literal, not a regex</span>
+        <p>A regex typed into a web form is an injection surface and a denial-of-service surface at once — a catastrophically backtracking pattern can hang a worker on a document that never finishes parsing. It is also a skill our reviewers should not need. "Write what you see" is a better interface <em>and</em> a smaller attack surface; those rarely line up so cleanly.</p>
+      </div>
+      <p>Patterns come in kinds — <code>type_signal</code>, <code>field_alias</code>, <code>option_tag</code>, <code>randomize_signal</code>, <code>screen_out_range</code>, <code>hidden_variable</code> — and a "Re-read all" applies the new knowledge across the whole questionnaire with no re-upload.</p>
+    </section>
+
+    <section id="gates">
+      <h2><span class="num">06</span>Four gates before a link</h2>
+      <p>The system's real promise is not "it reads documents". It is <strong>a mistake does not reach a respondent</strong>. Four independent gates stand in the way, each catching what the others cannot.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>#</th><th>Gate</th><th>Catches</th></tr></thead>
+          <tbody>
+            <tr><td class="num">1</td><td>Review flags</td><td>Ambiguous routing, empty answer lists, unresolved references — Finalize refuses while any remain</td></tr>
+            <tr><td class="num">2</td><td>Dry run</td><td>Synthetic respondents through every rule: conditions that never fire, questions nobody can reach</td></tr>
+            <tr><td class="num">3</td><td>Pre-link check</td><td>Re-validates the finished instrument on the <em>server</em>; a real link is refused on failures unless someone overrides — and the override is logged</td></tr>
+            <tr><td class="num">4</td><td>Soft launch</td><td>Holds the link at ~50 completes for QC against live data before full field</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="figures">
+        <div class="fig"><div class="v">20 → 6</div><div class="l">Questions no synthetic respondent could reach, before and after hidden-variable assignment, on one real study</div></div>
+        <div class="fig"><div class="v">11 → 0</div><div class="l">Questions rendering blank to a respondent on the same study, across three fixes</div></div>
+        <div class="fig"><div class="v">0</div><div class="l">Pre-link check failures on that document once the gates were satisfied</div></div>
+      </div>
+    </section>
+
+    <section id="fielding">
+      <h2><span class="num">07</span>In the field</h2>
+      <p class="lede">Every rule is judged on the server. The browser renders; it never decides who qualifies.</p>
+      <figure>
+        <div class="plate">
+<pre class="mermaid">
+sequenceDiagram
+  participant R as Respondent
+  participant S as Server
+  R->>S: open /r/{token}
+  S->>S: link open? soft-launch hold? duplicate panel id?
+  S->>S: record device + hashed IP + location
+  S-->>R: welcome, then one question per screen
+  R->>S: POST answers for this page
+  S->>S: evaluate screen-outs, quotas, masks, pipes
+  alt a screen-out fires
+    S-->>R: redirect to the panel as "not a match"
+  else continues
+    S-->>R: the next question they qualify for
+  end
+</pre>
+        </div>
+        <figcaption>A tampered browser can change what is drawn on screen. It cannot change a disposition, because the disposition is decided on the other side of the wire.</figcaption>
+      </figure>
+
+      <h3>Paradata: what the interview says besides the answers</h3>
+      <p>Two things clients ask on every study that nobody can reconstruct afterwards: what device were they on, and were they really where they said. Both are recorded at entry.</p>
+      <figure>
+        <div class="code">
+          <div class="path"><span>src/engines/fielding/paradata.py</span><span>device + privacy</span></div>
+<pre>_MOBILE = re.compile(r<span class="s">"\b(iphone|ipod|android.*mobile|windows phone|blackberry)\b"</span>, re.I)
+_TABLET = re.compile(r<span class="s">"\b(ipad|tablet|playbook|silk|kindle)\b|android(?!.*\bmobile\b)"</span>, re.I)
+
+<span class="k">def</span> device_of(user_agent):
+    <span class="s">"""Order matters: an Android tablet says 'Android' without 'Mobile',
+    and every phone string also matches a desktop pattern."""</span>
+    ...
+
+<span class="k">def</span> hashed_ip(ip, salt):
+    <span class="s">"""A stable pseudonym for one connection. Not reversible to the address."""</span>
+    <span class="k">return</span> hashlib.sha256(f<span class="s">"{salt}:{ip}"</span>.encode()).hexdigest()[:32]</pre>
+        </div>
+        <figcaption>The IP itself is never stored. Location is looked up in an offline MaxMind file on the server — no respondent address is sent to a third-party service, and with no file the verdict is "unknown", never "mismatch".</figcaption>
+      </figure>
+      <div class="note trap">
+        <span class="tag">A judgement, not a rule</span>
+        <p>When someone types a New York ZIP and the connection looks Californian, the interview is <strong>flagged, never dropped</strong>. A VPN, a work laptop and a neighbouring postcode are all ordinary. Silently discarding those interviews would do more damage than the fraud it is meant to catch — so the system records a verdict and lets a human decide.</p>
+      </div>
+    </section>
+
+    <section id="data">
+      <h2><span class="num">08</span>The deliverable</h2>
+      <p>At approval the data map is fixed — a client asking "what columns will I get?" is answered before the first respondent, not after. At close, completes are materialised into that exact shape.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Disposition</th><th>Code</th><th>Set by</th></tr></thead>
+          <tbody>
+            <tr><td>Complete</td><td class="num">10</td><td>Reached the end and passed quotas</td></tr>
+            <tr><td>Screened out</td><td class="num">20</td><td>A <code>terminate_if</code> fired, with the rule recorded</td></tr>
+            <tr><td>Security</td><td class="num">30</td><td>Duplicate panel id</td></tr>
+            <tr><td>Over quota</td><td class="num">40</td><td>A cell was full when they arrived at it</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Paradata rides along as ordinary single-coded columns — <code>vDevice</code>, <code>vPlaceCheck</code>, <code>vCountry</code>, <code>vRegion</code> — so a tab plan can cut by them like any other variable.</p>
+    </section>
+
+    <section id="rag">
+      <h2><span class="num">09</span>Search by meaning</h2>
+      <p>Substring search finds "price" in a question that says price. A client asks "which question covers price sensitivity" and the document says "how much would you be willing to pay" — no word in common. Vectors close that gap.</p>
+      <figure>
+        <div class="code">
+          <div class="path"><span>src/engines/rag/embeddings.py</span><span>local, with a fallback</span></div>
+<pre><span class="k">def</span> embed(texts, kind=<span class="s">"document"</span>):
+    <span class="s">"""(one unit vector per text, the name of what made them)."""</span>
+    vectors = _ollama([_prefixed(t, kind) <span class="k">for</span> t <span class="k">in</span> texts], timeout)
+    <span class="k">if</span> vectors <span class="k">is</span> <span class="k">not</span> None:
+        <span class="k">return</span> vectors, _model_name()
+    <span class="k">return</span> [lexical_vector(t) <span class="k">for</span> t <span class="k">in</span> texts], LEXICAL   <span class="c"># no model installed</span></pre>
+        </div>
+        <figcaption>Embedding runs on the server, through an open-weight model. The text includes client questionnaires and respondent verbatims, and free hosted tiers may train on what they are sent — so this one never leaves the building.</figcaption>
+      </figure>
+
+      <h3>Two lessons worth stealing</h3>
+      <p><strong>Task prefixes are behaviour, not decoration.</strong> <code>nomic-embed-text</code> is trained with <code>search_document:</code> and <code>search_query:</code> prefixes. Without them, a probe for "net promoter score" ranked an <em>age</em> question above "how likely are you to recommend". With them, every probe ranked correctly:</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Query</th><th>Question it found</th><th>Rank</th></tr></thead>
+          <tbody>
+            <tr><td>price sensitivity</td><td>How much would you be willing to pay…</td><td class="num">1</td></tr>
+            <tr><td>net promoter score</td><td>How likely are you to recommend…</td><td class="num">1</td></tr>
+            <tr><td>brand awareness</td><td>Which brands have you heard of?</td><td class="num">1</td></tr>
+            <tr><td>where the respondent lives</td><td>In which state do you live?</td><td class="num">1</td></tr>
+            <tr><td>packaging problems</td><td><i>did not reach</i> "the pump broke after two weeks"</td><td class="num">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>Never mix embedding spaces.</strong> Vectors from two different models are meaningless to each other, so every row stores its maker and a change of maker rebuilds rather than scoring across spaces. Each row also carries a fingerprint of the exact text it was built from: a re-read or correction rebuilds it, because a copilot quoting wording that was fixed yesterday is worse than one that says it cannot find it.</p>
+      <div class="note">
+        <span class="tag">Lazy on purpose</span>
+        <p>Search is a dot product over one project's rows in Python — no vector database. A questionnaire is hundreds of chunks, not millions of documents. The code says so out loud: <code># ponytail: brute-force scan; move to pgvector if a project ever gets large.</code></p>
+      </div>
+    </section>
+
+    <section id="tests">
+      <h2><span class="num">10</span>How it is tested</h2>
+      <p>1,199 tests, and the names are the specification. A test is named for the behaviour a person would miss, not the function it calls:</p>
+      <figure>
+        <div class="code">
+          <div class="path"><span>tests/</span><span>real names from the suite</span></div>
+<pre>test_only_completed_interviews_are_indexed
+test_a_condition_written_without_its_question_is_flagged_not_guessed
+test_vectors_from_two_different_makers_are_never_compared
+test_the_copilot_searches_what_people_typed_behind_the_data_rule
+test_a_phone_and_a_stated_place_are_recorded_at_entry
+test_re_reading_the_questionnaire_does_not_throw_the_verbatims_away</pre>
+        </div>
+        <figcaption>Read top to bottom, that list is the product's behaviour. A failing test names the promise that broke.</figcaption>
+      </figure>
+      <ul>
+        <li><strong>Integration tests drive the real endpoints</strong> — a respondent test posts to <code>/r/{token}</code> like a browser would, with a phone user-agent and a forwarding header.</li>
+        <li><strong>No network in the suite.</strong> Model calls are faked at one boundary; embedding tests run with no model installed, because that is the state a bare server is in.</li>
+        <li><strong>Access rules are tested as behaviour</strong>: an analyst is refused respondent answers before the soft launch hits its hold, and the refusal says what would change it.</li>
+      </ul>
+    </section>
+
+    <section id="deploy">
+      <h2><span class="num">11</span>How it ships</h2>
+      <p>One Docker Compose stack per client, hosted by us: app, Postgres, Caddy for TLS, a nightly backup, optional offsite copy to S3, and an optional local model container.</p>
+      <figure>
+        <div class="code">
+          <div class="path"><span>deploy/dvv upgrade</span><span>one command, with a way back</span></div>
+<pre>backup → git pull → build → start → health check
+                                     ↓ unhealthy
+                              roll back to the previous image</pre>
+        </div>
+        <figcaption>A deploy that cannot verify itself is a deploy you cannot trust; a deploy that cannot roll itself back is one you will not run on a Friday.</figcaption>
+      </figure>
+      <p>Optional pieces are Compose profiles, so a client who wants no outside AI at all runs <code>COMPOSE_PROFILES=local-ai</code> and gets an in-house model container — same code, different posture.</p>
+    </section>
+
+    <section id="start">
+      <h2><span class="num">12</span>Where to start reading</h2>
+      <p>If you open the repository cold, this is the order that makes it make sense.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Read</th><th>To understand</th></tr></thead>
+          <tbody>
+            <tr><td><code>src/core/survey_definition.py</code></td><td>The one data structure everything else transforms</td></tr>
+            <tr><td><code>src/engines/questionnaire/extractor.py</code></td><td>How a document becomes that structure</td></tr>
+            <tr><td><code>src/engines/fielding/decisions.py</code></td><td>Who qualifies, and why that is server-side</td></tr>
+            <tr><td><code>src/engines/fielding/materialize.py</code></td><td>How answers become the columns a client receives</td></tr>
+            <tr><td><code>docs/LIFECYCLE_AND_ARCHITECTURE.md</code></td><td>The same story as flowcharts</td></tr>
+            <tr><td><code>tests/integration/</code></td><td>What the system actually promises</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">
+        <span class="tag">The habit behind all of it</span>
+        <p>Every non-obvious decision in this codebase is written down beside the code that makes it — why a guard exists, which bug it stopped, what was measured. Six months later that comment is the difference between a fix and a regression.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer class="end">
+  DVV Research Cloud — engineering walkthrough. Figures are measured on internal benchmark documents and one live study; where a technique has a known limit, the limit is stated rather than smoothed over.
+</footer>
+
+<!--claude-mermaid-runtime-begin:3477-->
+<style>.mermaid-diagram{margin-block:4px}.mermaid-diagram svg{display:block;margin:0 auto;max-width:100%;height:auto}</style>
+<script src="/_runtime/mermaid-11.16.1.min.js"></script>
+<script>(function(){
+var CFG={"palettes":{"light":{"surface":"#f4efe4","text":"#42392e","line":"#8a7f6d","border":"#7a6c52","bg":"#fffdf8"},"dark":{"surface":"#262b34","text":"#f2f3f5","line":"#a8adb8","border":"#9aa4b8","bg":"#1f232b"}}};
+if(typeof mermaid==='undefined')return;
+var pres=Array.prototype.slice.call(document.querySelectorAll('pre.mermaid')).filter(function(p){if(p.hasAttribute('data-claude-mermaid-claimed'))return false;p.setAttribute('data-claude-mermaid-claimed','1');return true;});
+if(!pres.length)return;
+var mq=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
+var root=document.documentElement;
+var items=pres.map(function(pre){
+var mount=document.createElement('div');mount.className='mermaid-diagram';
+return {pre:pre,mount:mount,src:pre.textContent||''};
+});
+var seq=0;
+var renderGen=0;
+var lastKey='';
+function pageBg(fallback){
+var els=[document.body,document.documentElement];
+for(var i=0;i<els.length;i++){
+var c=els[i]&&getComputedStyle(els[i]).backgroundColor;
+if(c&&c!=='transparent'&&c!=='rgba(0, 0, 0, 0)')return c;
+}
+return fallback;
+}
+function render(){
+var theme=root.getAttribute('data-theme');
+var dark=theme==='dark'||(!!(mq&&mq.matches)&&theme!=='light');
+var pal=dark?CFG.palettes.dark:CFG.palettes.light;
+var bg=pageBg(pal.bg);
+var key=(dark?'d':'l')+'|'+bg;
+if(key===lastKey)return;
+lastKey=key;
+var gen=++renderGen;
+var font=getComputedStyle(document.body).fontFamily||'sans-serif';
+var nat={useMaxWidth:false};
+mermaid.initialize({
+startOnLoad:false,securityLevel:'strict',theme:'base',
+flowchart:nat,sequence:nat,er:nat,state:nat,class:nat,pie:nat,
+gantt:nat,journey:nat,timeline:nat,gitGraph:nat,mindmap:nat,xyChart:nat,
+quadrantChart:nat,sankey:nat,c4:nat,requirement:nat,block:nat,
+packet:nat,kanban:nat,architecture:nat,radar:nat,
+themeVariables:{background:bg,mainBkg:pal.surface,primaryColor:pal.surface,
+primaryTextColor:pal.text,lineColor:pal.line,primaryBorderColor:pal.border,
+nodeBorder:pal.border,clusterBorder:pal.border,edgeLabelBackground:bg,
+clusterBkg:'rgba(127,127,127,0.07)',titleColor:pal.text,
+darkMode:dark,rowOdd:bg,rowEven:'rgba(127,127,127,0.07)',
+attributeBackgroundColorOdd:bg,attributeBackgroundColorEven:'rgba(127,127,127,0.07)',
+fontSize:'16px',fontFamily:font},
+themeCSS:'.node rect, .node circle, .node polygon, .node path, .cluster rect { stroke-width: 2px; }'
+});
+items.forEach(function(it){
+var id='claude-mermaid-'+seq++;
+mermaid.render(id,it.src).then(function(r){
+if(gen!==renderGen)return;
+var prev=it.pre.previousElementSibling;
+if(prev&&prev.className==='mermaid-diagram'&&prev!==it.mount)return;
+it.mount.innerHTML=r.svg;
+if(!it.mount.parentNode)it.pre.parentNode.insertBefore(it.mount,it.pre);
+it.pre.style.display='none';
+},function(){
+var scratch=document.getElementById(id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+scratch=document.getElementById('d'+id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+if(gen!==renderGen)return;
+if(it.mount.parentNode)it.mount.parentNode.removeChild(it.mount);
+it.pre.style.display='';
+});
+});
+}
+render();
+if(mq&&mq.addEventListener)mq.addEventListener('change',render);
+if(typeof MutationObserver!=='undefined')new MutationObserver(render).observe(root,{attributes:true,attributeFilter:['data-theme']});
+})();</script>
+<!--claude-mermaid-runtime-end-->
+
+</body></html>
