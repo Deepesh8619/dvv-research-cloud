@@ -37,6 +37,11 @@ from src.engines.questionnaire.learned import (
     learned_type,
 )
 from src.engines.questionnaire.prose_directives import is_single_select_wording
+from src.engines.questionnaire.routing_prose import (
+    _IN_LIST,
+    _letters_to_codes,
+)
+from src.engines.questionnaire.routing_prose import _condition as _routing_parse
 from src.intake.questionnaire_loader import DocumentBlock
 
 # Row-label synonyms, by the field they populate. ADD A CLIENT'S WORDING HERE —
@@ -45,19 +50,23 @@ from src.intake.questionnaire_loader import DocumentBlock
 FIELD_ALIASES: dict[str, set[str]] = {
     "qid": {
         "q name", "qname", "question id", "questionid", "qid", "variable",
-        "variable name", "q no", "q number", "question name", "q",
+        "variable name", "q no", "q number", "question name", "q", "variable id",
+        "var name", "varname", "question no", "question number", "var",
     },
     "type": {
         "q type", "qtype", "question type", "type", "punch type", "punch",
-        "answer type", "response type", "format",
+        "answer type", "response type", "format", "question format", "item type",
     },
     "base": {
         "among who", "amongwho", "base", "universe", "asked of", "ask of",
-        "who", "sample", "filter", "base definition",
+        "who", "sample", "filter", "base definition", "asked to", "who is asked",
+        "respondent base", "respondents", "audience", "target", "ask if",
+        "show only if", "only if", "universe base", "population",
     },
     "show": {
         "show hv", "show / hv", "show", "show if", "display logic", "skip logic",
-        "routing", "logic", "condition",
+        "routing", "logic", "condition", "hv", "show hidden", "visibility",
+        "display", "show to",
     },
     "randomize": {
         "randomize", "randomise", "randomize response list", "rotation",
@@ -70,18 +79,25 @@ FIELD_ALIASES: dict[str, set[str]] = {
     "notes": {
         "other details", "notes", "note", "instructions", "scripter notes",
         "programming notes", "programmer notes", "comments", "special instructions",
+        "scripter instructions", "scripter instruction", "scripting notes",
+        "script notes", "programming instructions", "programmer instructions",
+        "pn", "p n", "programming note", "programmer note", "scripting instructions",
+        "validation", "restrictions",
     },
     "text": {
-        "question text", "question", "wording", "q text", "text",
+        "question text", "question", "wording", "q text", "text", "question wording",
+        "stem", "question stem", "q wording", "prompt", "screen text", "text to show",
     },
 }
 
 # Markers that introduce the answer list rather than being content.
 _LIST_MARKERS = ("response list", "answer list", "options", "response options",
                  "code frame", "codes", "scale", "variable list", "statement list",
-                 "item list", "row list")
+                 "item list", "row list", "answers", "answer options", "rows", "columns",
+                 "statements", "items")
 # What is being rated, versus the scale it is rated on.
-_ROW_LIST_MARKERS = ("variable list", "statement list", "item list", "row list")
+_ROW_LIST_MARKERS = ("variable list", "statement list", "item list", "row list", "rows",
+                      "statements", "items")
 # A scale labelled only at its ends: "10: Strongly Agree / 9: (blank) / ... /
 # 1: Strongly Disagree". The blanks are real scale points — dropping them turned
 # a ten-point scale into a two-point one.
@@ -157,6 +173,69 @@ def _value_of(row: list[str]) -> str:
     return ""
 
 
+
+#: A whole answer list written in ONE cell, not one row per answer:
+#:     "1: Yes   2: No   99: Don't know"      (spaces between items)
+#:     "1 = Yes // 2 = No"                    (// between items)
+#:     "1 = Yes⏎2 = No"                       (a line per item)
+_INLINE_SPLIT = re.compile(r"\s*//\s*|[\r\n]+|\s{2,}(?=\[?\d{1,3}\]?\s*[:=.)]\s*\S)")
+_INLINE_ITEM = re.compile(r"^\[?(\d{1,3})\]?\s*[:=.)]\s*(\S.*)$")
+#: "SMB (10-99) = SS_EMPLOYEES = 3": the label, then how a hidden variable derives it.
+_DERIVATION = re.compile(r"\s+=\s+(?=[A-Za-z][A-Za-z0-9_]*\s*(?:=|in\b))")
+_TAG_WORDS = (r"anchor(?:ed)?|exclusive|fix(?:ed)?(?:\s+position)?|single|"
+              r"screen\s*-?\s*out|terminate|close")
+_TRAILING_TAG = re.compile(
+    rf"\s*[\[(]\s*((?:{_TAG_WORDS})(?:\s*[,/&+]\s*(?:{_TAG_WORDS}))*)\s*[\])]\s*$", re.I
+)
+
+
+def _split_option_tags(label: str) -> tuple[str, dict[str, bool]]:
+    """"None of these [ANCHOR] (exclusive)" -> ("None of these", flags).
+
+    Only the scripter words are taken. "(please specify)" and "(10-99)" are part
+    of what the respondent reads and stay in the label.
+    """
+    flags: dict[str, bool] = {}
+    while (m := _TRAILING_TAG.search(label)):
+        tag = m.group(1).lower()
+        if "anchor" in tag or "fix" in tag:
+            flags["anchored"] = True
+        if "exclusive" in tag or "single" in tag:
+            flags["exclusive"] = True
+        if "screen" in tag or "terminate" in tag or "close" in tag:
+            flags["terminate"] = True
+        label = label[: m.start()].rstrip()
+    return label, flags
+
+
+def _inline_items(row: list[str], minimum: int = 2) -> list[tuple[int, str, dict[str, bool], str | None]] | None:
+    """(code, label, tags, derivation) per answer of a one-cell list, else None.
+
+    All-or-nothing: one piece that is not a coded answer means this is a sentence
+    that happens to contain digits, and reading part of it would invent answers.
+    """
+    cells = [c for c in (row or [])[1:] if (c or "").strip()]
+    if not cells:
+        return None
+    pieces = [p.strip() for p in _INLINE_SPLIT.split(cells[0]) if p and p.strip()]
+    if len(pieces) < minimum:
+        return None
+    items = []
+    for piece in pieces:
+        m = _INLINE_ITEM.match(piece)
+        if not m:
+            return None
+        label, tags = _split_option_tags(m.group(2).strip())
+        derivation = None
+        if (d := _DERIVATION.search(label)):
+            label, derivation = label[: d.start()].rstrip(), label[d.end():].strip()
+        if not label:
+            return None
+        items.append((int(m.group(1)), label, tags, derivation))
+    if len({i[0] for i in items}) != len(items):
+        return None
+    return items
+
 _ALL_RESPONDENTS = re.compile(r"^\s*(?:all(?:\s+respondents)?|everyone|total)\s*\.?\s*$", re.I)
 #: "C_ACCOUNT = 2", "HID_GOOGLE_USER = 2 or 3", "DA_PLACEMENT = 3 and/or 4", "S1=1-3".
 _CODED_BASE = re.compile(
@@ -189,6 +268,27 @@ def base_condition(base: str | None) -> Expression | None:
         values += range(low, high + 1)
     return Expression(op="in", qid=found[0].group("qid"), values=values,
                       verbatim_text=base.strip())
+
+
+_BASE_PREAMBLE = re.compile(
+    r"^\s*(?:only\s+)?(?:ask\s+|show\s+|display\s+)?(?:(?:those|respondents?)\s+)?"
+    r"(?:where|who|if)\b\s*[:\-]?\s*", re.I)
+
+
+def _routing_condition(base: str | None) -> Expression | None:
+    """A base written as a plain test: "IF SVOD_AWARE in (1-6)", "Q3 in (1,3)",
+    "Those where SW_CONSIDER = 1 or 2", "HH_SIZE >= 2".
+
+    The whole text must be the condition: routing_prose reads it exactly or not
+    at all, so "aware of X (S2 = 1) and 1-98 at Q7" is still left to a person.
+    """
+    text = _BASE_PREAMBLE.sub("", (base or "").strip()).rstrip(".")
+    if not text:
+        return None
+    found = _routing_parse(_IN_LIST.sub(r" = \1", _letters_to_codes(text)))
+    if found is not None:
+        found.verbatim_text = base.strip()
+    return found
 
 
 #: The header of the column a hidden variable states its derivation in.
@@ -229,6 +329,14 @@ def _definition_in(row: list[str], column: int | None) -> str | None:
 
 
 _CODE_RE = re.compile(r"^\d{1,3}$")
+#: Programming instructions that turn up in a cell labelled "Logic" / "Show".
+_SCRIPTER_DIRECTIVE = re.compile(
+    r"\brandomi[sz]e|\brotate\b|\bmax(?:imum)?\s+\d|\ballow\w*\s+(?:range|\d)|\brange\b|"
+    r"\bmust\s+(?:total|sum)|\btotal\b|\bexclusive\b|\banchor|\bdisplay\s+only\b|"
+    r"\bkeep\b|\brank\s+(?:top\s+)?\d",
+    re.I,
+)
+_RANDOMIZE_WORD = re.compile(r"\brandomi[sz]e|\brotate\b", re.I)
 
 # Screen-out wording varies by client: TERMINATE / TERM / SCREEN OUT / SCREENOUT.
 _TERMINATE_RE = re.compile(
@@ -240,7 +348,10 @@ _TERMINATE_RE = re.compile(
     # screens nobody out.
     # "TERMINATE if selects punch 1, 10, or 99": the verb and "punch" are
     # filler, and "or" joins codes like a comma does.
-    r"(?:if|when)?\s*(?:selects?\s+)?(?:punch(?:es)?\s+|code[s]?\s*)?([\d,\-\u2013\s&andor]+?)\s*"
+    r"(?:if|when)?\s*(?:selects?\s+)?(?:punch(?:es)?\s+|code[s]?\s*)?"
+    # "TERMINATE if AGE_BAND = 1, 8": the question and an equals sign, then codes.
+    r"(?:(?P<on>[A-Za-z][A-Za-z0-9_]{1,40})\s*(?:=|==|\bin\b|\bis\b)\s*)?"
+    r"([\d,\-\u2013\s&andor]+?)\s*"
     r"(not\s+selected|is\s+not|selected|chosen|$)",
     re.IGNORECASE,
 )
@@ -256,7 +367,9 @@ _CODE_RANGE_RE = re.compile(r"^\s*(\d{1,3})\s*[-\u2013]\s*(\d{1,3})\s*$")
 # question became a single choice with one option.
 _NUMERIC_ENTRY_RE = re.compile(r"\[\s*numeric\b[^\]]*\]|\bnumeric\s+(?:OE|open)", re.I)
 # "Allow 0-999 to be entered"
-_ALLOWED_RANGE_RE = re.compile(r"\ballow\w*\s+(\d+)\s*(?:-|\u2013|to)\s*(\d+)", re.I)
+_ALLOWED_RANGE_RE = re.compile(
+    r"\b(?:allow\w*|range|between)(?:\s+range)?(?:\s+of)?\s*[:=]?\s*"
+    r"(-?\d[\d,]*)\s*(?:-|\u2013|to)\s*(\d[\d,]*)", re.I)
 # "3-digit max"
 _DIGIT_MAX_RE = re.compile(r"(\d)\s*-?\s*digits?\s*max", re.I)
 # "age<25", "age >= 65": a screen-out on the number typed.
@@ -281,11 +394,22 @@ _LAYOUT_QUALIFIER = re.compile(r"\b(?:multi|single|one)[\s-]*line\b", re.I)
 # words, because "Text Only" contains "text" and would otherwise win.
 _DISPLAY_ONLY = re.compile(
     r"\btext\s*only\b|\bdisplay\s+(?:text|only)\b|\bno\s+response\b|"
-    r"\binfo(?:rmation)?\b|\bintro(?:duction)?\b|\btransition\b",
+    r"\binfo(?:rmation)?\b|\bintro(?:duction)?\b|\btransition\b|"
+    r"\bderived\b|\bcomputed\b|\bnot\s+shown\b|\bhidden\b",
     re.I,
 )
 
+#: A type that says the answers are numbers typed per item: "Constant sum
+#: (numeric per row)", "Number entry per statement (sum)".
+_SUM_BOXES = re.compile(r"constant\s*sum|\b(?:numeric|number)\b.*\bper\b|\bsum\b", re.I)
+#: "Sum must be 100", "Rows must total 100", "Total = 100%".
+_STATED_SUM = re.compile(r"\b(?:sum|total|add(?:s)?\s+up)\b\D{0,24}?(\d{1,6})\s*%?", re.I)
+#: A type cell that says the row is computed, not asked.
+_DERIVED_TYPE = re.compile(r"\b(?:derived|computed|calculated|hidden)\b", re.I)
+
 _TYPE_WORDS = [
+    ("matrix", QuestionType.GRID_SINGLE),
+    ("grid", QuestionType.GRID_SINGLE),
     ("multi", QuestionType.MULTI),
     ("multiple", QuestionType.MULTI),
     ("checkbox", QuestionType.MULTI),
@@ -297,8 +421,7 @@ _TYPE_WORDS = [
     ("open", QuestionType.OPEN_TEXT),
     ("verbatim", QuestionType.OPEN_TEXT),
     ("text", QuestionType.OPEN_TEXT),
-    ("grid", QuestionType.GRID_SINGLE),
-    ("matrix", QuestionType.GRID_SINGLE),
+    ("rank", QuestionType.RANK),
 ]
 
 
@@ -360,7 +483,7 @@ def _parse_terminate(
     match = _TERMINATE_RE.search(notes or "")
     if not match:
         return None
-    raw = match.group(1) or ""
+    raw = match.group(2) or ""
     known = {o.code for o in options}
 
     # A screen-out can sit on another question's answer: "TERMINATE if 13-99
@@ -369,6 +492,10 @@ def _parse_terminate(
     # range should be read against.
     named = _TERMINATE_AT_RE.search(notes or "")
     other_question = bool(named and named.group(1).upper() != qid.upper())
+    on = match.group("on")
+    if on and on.upper() != qid.upper() and not other_question:
+        # "TERMINATE if SS_REVENUE = 3": written on another question's answer.
+        other_question, named = True, re.match(r"(.+)", on)
 
     band = _CODE_RANGE_RE.match(raw)
     if band:
@@ -392,7 +519,7 @@ def _parse_terminate(
         codes = [int(c) for c in re.findall(r"\d+", raw)]
     if not codes:
         return None
-    negated = "not" in (match.group(2) or "").lower()
+    negated = "not" in (match.group(3) or "").lower()
 
     if known and not other_question and not set(codes).issubset(known):
         return None  # refers to codes this question does not have — do not guess
@@ -488,7 +615,7 @@ def _numeric_range(text: str) -> dict[str, int]:
     """The range a typed number may take, when the document states one."""
     allowed = _ALLOWED_RANGE_RE.search(text)
     if allowed:
-        low, high = int(allowed.group(1)), int(allowed.group(2))
+        low, high = (int(g.replace(",", "")) for g in allowed.groups())
         if low <= high:
             return {"min": low, "max": high}
     digits = _DIGIT_MAX_RE.search(text)
@@ -619,8 +746,33 @@ def parse_spec_table(
 
     table_text = "\n".join(" ".join(_cells(row)) for row in rows)
     definition_col = _definition_column(rows)
+    tag_terminate: list[int] = []
     for row in rows:
         cells = _cells(row)
+
+        # A whole answer list in one cell ("1: Yes   2: No", "1 = Yes // 2 = No").
+        # Whatever the row's label is, a cell that is nothing BUT coded answers is
+        # a list; a labelled list marker is enough on its own with a single answer.
+        if len(cells) > 1 and cells[0] and not _CODE_RE.match(cells[0]) and (
+            _field_for(cells[0], patterns) is None
+        ):
+            low_label = cells[0].strip().lower()
+            is_marker = any(low_label.startswith(m) for m in _LIST_MARKERS)
+            inline = _inline_items(row, 1 if is_marker else 2)
+            if inline:
+                in_list = True
+                in_row_list = any(low_label.startswith(m) for m in _ROW_LIST_MARKERS)
+                for code, label, tags, derivation in inline:
+                    option = Option(
+                        code=code, label=label, definition=derivation,
+                        exclusive=tags.get("exclusive", False),
+                        anchored=tags.get("anchored", False),
+                    )
+                    (row_items if in_row_list else options).append(option)
+                    last_option = option
+                    if tags.get("terminate") and not in_row_list:
+                        tag_terminate.append(code)
+                continue
 
         # A marker line switches which list the codes below it belong to, and it
         # is written with an EMPTY first cell — the label sits in the merged
@@ -688,6 +840,14 @@ def parse_spec_table(
                     base_clash.append(f"marked '{value}' but specifies: {stated}")
                     value = stated
             found.setdefault(name, value)
+            if name in ("show", "notes") and _SCRIPTER_DIRECTIVE.search(value):
+                # "Logic: Randomize response list // Max 3 selections": the cell
+                # holds programming instructions, not (only) a routing rule.
+                # Keep them where the randomisation, limit and range readers look.
+                if name == "show":
+                    found["notes"] = " // ".join(filter(None, [found.get("notes"), value]))
+                if _RANDOMIZE_WORD.search(value):
+                    found.setdefault("randomize", value)
             if name == "qid":
                 seen_qid_row = True
             continue
@@ -722,6 +882,9 @@ def parse_spec_table(
     # seen so far.
     text = (found.get("text") or "").strip() or (unlabelled[0] if unlabelled else None)
     notes = found.get("notes", "")
+    if notes and not found.get("randomize") and _RANDOMIZE_WORD.search(notes):
+        # "Scripter instructions: Rotate answers" — randomisation said in the notes.
+        found["randomize"] = notes
 
     # Two lists means a grid: the variable list is rated ON the response list.
     # One list is an ordinary answer list, exactly as before.
@@ -744,6 +907,9 @@ def parse_spec_table(
         # The rows are real; the columns come from the directive, which is
         # recorded in `list_from` for the pass that fills lists.
         grid_rows, grid_cols = row_items, []
+    elif row_items and not options and _SUM_BOXES.search(stated_shape):
+        # "Number entry per statement (sum)": one box per item, not a choice.
+        grid_rows, grid_cols = [], []
     elif row_items:
         # Labelled "variable list" but nothing rates it and the type does not
         # say grid: then that list IS the answer list.
@@ -751,6 +917,9 @@ def parse_spec_table(
         grid_rows, grid_cols = [], []
     else:
         grid_rows, grid_cols = [], []
+
+    if _DERIVED_TYPE.search(found.get("type", "")) and not found.get("show"):
+        found["show"] = found["type"]  # "Derived variable (not shown)" says it outright
 
     fields = SpecTableFields(
         qid=qid,
@@ -824,6 +993,29 @@ def parse_spec_table(
             )
     else:
         fields.terminate_if = _parse_terminate(notes, options, qid)
+        if fields.terminate_if is None and tag_terminate:
+            # "5: Student / not employed [SCREEN OUT]" on the answers themselves.
+            fields.terminate_if = Expression(
+                op="in", qid=qid, values=sorted(set(tag_terminate)),
+                verbatim_text="screen-out tags on answers " + ", ".join(map(str, tag_terminate)),
+            )
+            notes = notes or fields.terminate_if.verbatim_text or ""
+    if row_items and not grid_rows and fields.qtype is QuestionType.NUMERIC:
+        # One box per item: the items are ROWS of a number question.
+        fields.rows, fields.options = list(row_items), []
+        total = _STATED_SUM.search(table_text) if _SUM_BOXES.search(stated_shape) else None
+        fields.numeric_range = _numeric_range(table_text)
+        if total:
+            n = int(total.group(1))
+            fields.numeric_range = {"min": 0, "max": n, **fields.numeric_range, "sum": n}
+            fields.evidence["sum"] = total.group(0).strip()
+    if fields.qtype is QuestionType.NUMERIC and not fields.numeric_range:
+        # "Numeric OE" with "Allowable range 0-30" in the logic cell.
+        fields.numeric_range = _numeric_range(table_text)
+        if fields.numeric_range:
+            fields.evidence["range"] = (
+                f"{fields.numeric_range['min']}-{fields.numeric_range['max']}"
+            )
     if fields.terminate_if is not None:
         fields.terminate_verbatim = notes.strip()
         fields.evidence["terminate"] = notes.strip()
@@ -851,7 +1043,7 @@ def parse_spec_table(
     # A base in prose ("those aware of the brand") needs judgment; a blank base
     # means everyone and needs none; a coded one ("S1=1-3") is already usable.
     if fields.base and not _ALL_RESPONDENTS.match(fields.base):
-        fields.show_if = base_condition(fields.base)
+        fields.show_if = base_condition(fields.base) or _routing_condition(fields.base)
         if fields.show_if is None:
             fields.missing.append("base")
     if notes and re.search(r"terminate|term\b|screen\s*-?\s*out", notes, re.IGNORECASE):

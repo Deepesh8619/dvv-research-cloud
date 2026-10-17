@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -139,6 +139,40 @@ _CLOSING = re.compile(r"^\s*(?:thank\s+you|thanks)\b.{0,120}$", re.I)
 
 # A Word list number drawn as a plain number: "7", "7.", "7)", "Q7.".
 _LIST_NUMBER = re.compile(r"^\s*Q?(\d{1,3})\s*[.)]?\s*$", re.I)
+
+# "7." / "7)" typed at the start of a line, followed by the wording.
+_TYPED_NUMBER = re.compile(r"^\s*(\d{1,3})\s*[.)]\s*(\S.*)$", re.S)
+# A typed number only opens a question when what follows reads like one: a
+# numbered answer line ("2. No") is the same shape and must not.
+_MIN_TYPED_QUESTION = 25
+# Word draws "Q7." from the list format: the qid lives in the label, not the text.
+_LABEL_QID = re.compile(r"^[A-Za-z]{1,3}\d+[A-Za-z]?(?:_\d+)?[.):]?$")
+
+
+def _typed_question_number(block: DocumentBlock, last: int | None) -> int | None:
+    """N of a typed "N.<tab>wording" line that is the next question, else None.
+
+    The next number after `last`, or up to two further on when the wording is
+    long (a struck-out question leaves a gap in the numbering).
+    """
+    m = _TYPED_NUMBER.match(block.text or "")
+    if not m or block.block_type != "paragraph":
+        return None
+    n, wording = int(m.group(1)), m.group(2).strip()
+    gap = n - (last or 0)
+    if gap == 1 and len(wording) >= _MIN_TYPED_QUESTION:
+        return n
+    # ponytail: length is the only guard against a numbered answer line
+    return n if 2 <= gap <= 3 and len(wording) >= 3 * _MIN_TYPED_QUESTION else None
+
+
+def _named_text(block: DocumentBlock) -> str:
+    """The text with a Word-drawn question name ("Q7.") put back in front."""
+    label = (block.list_label or "").strip()
+    if _LABEL_QID.match(label):
+        return f"{label.rstrip('.):')}. {block.text}"
+    return block.text
+
 
 # A section heading in an unnumbered document: ALL CAPS, two or more words.
 _CAPS_HEADING = re.compile(
@@ -262,7 +296,7 @@ def _has_ident_questions(blocks: list[DocumentBlock]) -> bool:
     """Several identifier lines AND no Q-number or spec table anywhere: in a
     numbered document an ALL-CAPS line is a heading or a scripter note."""
     return sum(1 for b in blocks if _ident_qid(b)) >= 3 and not any(
-        _QID_RE.match(b.text) or _table_qid(b) is not None for b in blocks
+        _QID_RE.match(_named_text(b)) or _table_qid(b) is not None for b in blocks
     )
 
 
@@ -329,7 +363,7 @@ def _is_unnumbered(blocks: list[DocumentBlock]) -> bool:
     fall back to base tags to find its question boundaries.
     """
     return not _has_ident_questions(blocks) and not any(
-        _QID_RE.match(b.text) or _table_qid(b) is not None for b in blocks
+        _QID_RE.match(_named_text(b)) or _table_qid(b) is not None for b in blocks
     )
 
 
@@ -772,6 +806,14 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
         )
 
     for block in blocks:
+        typed_open = False
+        if base_tags_open and (typed := _typed_question_number(block, listed)):
+            # "7.<tab>wording" typed by hand: the number is the question's
+            # name, read the way a Word list number is, and not part of the
+            # wording (where it would also read as answer code 7).
+            wording = _TYPED_NUMBER.match(block.text).group(2).strip()
+            block = replace(block, text=wording, list_label=f"{typed}.")
+            typed_open = True
         table_qid = _table_qid(block)
         if table_qid is not None:
             # A table-per-question block is its own chunk. Peel any immediately-
@@ -790,7 +832,7 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
             seen_label = True
             continue
 
-        is_boundary, qid = _detect_label(block.text, base_tags_open)
+        is_boundary, qid = _detect_label(_named_text(block), base_tags_open)
         if not is_boundary and ident_named and (ident := _ident_qid(block)):
             is_boundary, qid = True, ident
         if (
@@ -821,12 +863,19 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
             not is_boundary and base_tags_open and listed is not None
             and (number := _LIST_NUMBER.match(block.list_label or ""))
             and int(number.group(1)) == listed + 1
-        ):
+        ) or (not is_boundary and typed_open):
             # The next number of the question list ("15  Please describe why
             # you…", "7  For the following questions…"): a question, even with
             # no base tag and no question mark. Only the NEXT number: an answer
             # list numbered "1. Yes / 2. No" never continues the question list.
             is_boundary, qid = True, next_qid(block)
+        if (
+            not is_boundary and block.is_heading and current and seen_label
+            and block.block_type == "heading"
+        ):
+            # A Word heading ("Store usage") names a section; left in the
+            # chunk it became the last answer of the question above it.
+            is_boundary, qid = True, None
         if is_boundary:
             carried = _trailing_routing_directives(current)
             flush()

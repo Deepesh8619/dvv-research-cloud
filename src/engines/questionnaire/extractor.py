@@ -501,7 +501,9 @@ def _randomize_from_cell(stated: str | None) -> bool:
 #: "Show / HV: Hidden variable" — the spec table stating that this row is
 #: computed rather than asked. Deliberately narrow: "Show respondent directly"
 #: is the other value of that same cell and must never match.
-_HIDDEN_VARIABLE = re.compile(r"\bhidden\b.{0,12}\bvariable\b|\bHV\b\s*$", re.I)
+_HIDDEN_VARIABLE = re.compile(
+    r"\b(?:hidden|derived|computed)\b.{0,12}\bvariable\b|\bHV\b\s*$", re.I
+)
 
 
 def _question_from_fields(fields: SpecTableFields, chunk: QuestionChunk) -> Question:
