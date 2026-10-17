@@ -55,6 +55,11 @@ export default function CrosscheckPanel({
   // as a dirty one.
   const problems = (report?.findings ?? []).filter((f) => f.severity !== 'info')
   const [running, setRunning] = useState(false)
+  // The data file shown and checked. A project started from its questionnaire
+  // had no data and no way to add it here, so the check could never run.
+  const [dataName, setDataName] = useState<string | null>(dataFilename ?? null)
+  const [dataState, setDataState] = useState<'idle' | 'uploading' | 'processing' | 'ready' | 'failed'>('idle')
+  const [dataPct, setDataPct] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -86,6 +91,36 @@ export default function CrosscheckPanel({
       cancelled = true
     }
   }, [studyId])
+
+  const attach = async (file: File) => {
+    setError(null)
+    setDataState('uploading')
+    setDataPct(0)
+    try {
+      await studiesApi.attachData(studyId, file, setDataPct)
+      setDataName(file.name)
+      setDataState('processing')
+      // Reading the file builds its data map; the check needs it. Wait for the
+      // project to leave "classifying" (a few seconds for most files).
+      for (let i = 0; i < 100; i++) {
+        await new Promise((r) => setTimeout(r, 3000))
+        const status = (await studiesApi.get(studyId)).data.status
+        if (status === 'error') {
+          setDataState('failed')
+          return
+        }
+        if (status !== 'classifying') {
+          setDataState('ready')
+          return
+        }
+      }
+      setDataState('failed')
+    } catch (err) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null
+      setError(typeof detail === 'string' ? detail : 'The data file could not be uploaded.')
+      setDataState('idle')
+    }
+  }
 
   const run = async () => {
     setRunning(true)
@@ -177,22 +212,58 @@ export default function CrosscheckPanel({
         </div>
         <div className="flex flex-wrap items-baseline gap-x-2">
           <dt className="text-slate-500">Data file</dt>
-          {dataFilename ? (
+          {dataName ? (
             <>
-              <dd className="font-medium text-slate-800">{dataFilename}</dd>
-              <button
-                type="button"
-                onClick={() => studiesApi.download(studyId, 'source', dataFilename)}
-                className="text-xs font-medium text-primary-600 hover:underline"
-              >
-                Download
-              </button>
+              <dd className="font-medium text-slate-800">{dataName}</dd>
+              {dataState === 'idle' && (
+                <button
+                  type="button"
+                  onClick={() => studiesApi.download(studyId, 'source', dataName)}
+                  className="text-xs font-medium text-primary-600 hover:underline"
+                >
+                  Download
+                </button>
+              )}
             </>
           ) : (
             <dd className="text-slate-400">None uploaded</dd>
           )}
+          {dataState !== 'uploading' && dataState !== 'processing' && (
+            <label className="text-xs font-medium text-primary-600 hover:underline cursor-pointer">
+              {dataName ? 'Replace' : 'Upload data file (.xlsx, .sav, .csv)'}
+              <input
+                id="crosscheck-data-file"
+                type="file"
+                accept=".xlsx,.sav,.csv"
+                className="sr-only"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ''
+                  if (f) void attach(f)
+                }}
+              />
+            </label>
+          )}
         </div>
       </dl>
+
+      {dataState !== 'idle' && (
+        <p
+          role="status"
+          className={`text-sm rounded-md px-3 py-2 mt-4 border ${
+            dataState === 'failed'
+              ? 'text-amber-800 bg-amber-50 border-amber-200'
+              : dataState === 'ready'
+                ? 'text-emerald-800 bg-emerald-50 border-emerald-200'
+                : 'text-slate-700 bg-slate-50 border-slate-200'
+          }`}
+        >
+          {dataState === 'uploading' && `Uploading the data file… ${dataPct}%`}
+          {dataState === 'processing' && 'Reading the data file and its variables… this usually takes under a minute.'}
+          {dataState === 'ready' && 'Data file ready. Run the cross-check to compare it with the questionnaire.'}
+          {dataState === 'failed' && 'The data file could not be read. Check that it is the respondent-level export (one row per respondent) and try again.'}
+        </p>
+      )}
 
       {report?.data_file_available === false && (
         <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mt-4">

@@ -151,3 +151,42 @@ def test_survey_only_study_reaches_fielding(client):
     assert link.status_code == 200
     assert link.json()["token"]
     assert link.json()["status"] == "open"
+
+
+def test_a_data_file_can_be_attached_to_a_project_started_from_its_questionnaire(
+    client, tmp_path, monkeypatch
+):
+    """The questionnaire-first project had nowhere to put the client's export."""
+    import api.routes.studies as sroutes
+
+    test_client, _, _ = client
+    monkeypatch.setattr(sroutes, "STUDIES_DIR", tmp_path)
+    ran = []
+
+    class _NoThread:
+        def __init__(self, target, args, daemon):
+            self.target, self.args = target, args
+
+        def start(self):
+            ran.append(self.args)
+
+    monkeypatch.setattr(sroutes.threading, "Thread", _NoThread)
+
+    study_id = test_client.post("/api/studies", json={"client_name": "Q first"}).json()["id"]
+    (tmp_path / study_id).mkdir()
+    (tmp_path / study_id / "old_wave.xlsx").write_bytes(b"old")
+
+    resp = test_client.post(
+        f"/api/studies/{study_id}/data",
+        files={"file": ("fielded.xlsx", b"PK fake workbook", "application/octet-stream")},
+    )
+    assert resp.status_code == 200 and resp.json()["source"] == "fielded.xlsx"
+    assert [p.name for p in (tmp_path / study_id).iterdir()] == ["fielded.xlsx"]
+    assert ran and ran[0][0] == study_id and ran[0][2].name == "fielded.xlsx"
+    assert test_client.get(f"/api/studies/{study_id}").json()["status"] == "classifying"
+
+    bad = test_client.post(
+        f"/api/studies/{study_id}/data",
+        files={"file": ("notes.docx", b"x", "application/octet-stream")},
+    )
+    assert bad.status_code == 400

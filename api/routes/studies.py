@@ -327,6 +327,52 @@ def create_empty_study(
     )
 
 
+_DATA_SUFFIXES = (".sav", ".csv", ".xlsx")
+
+
+@router.post("/studies/{study_id}/data")
+async def attach_data_file(
+    study_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Attach a fielded data file to an existing project. (Owner/Analyst)
+
+    A project started from its questionnaire had no way to receive the client's
+    data export afterwards: the data upload only existed as "start a new
+    project", so the questionnaire and its data ended up in two projects and
+    the data-vs-questionnaire check had nothing to run on. This puts the file
+    in THIS project and runs the same processing a data upload runs. The
+    questionnaire is untouched; a previous data file is replaced.
+    """
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    name = Path(file.filename or "").name
+    if not name.lower().endswith(_DATA_SUFFIXES):
+        raise HTTPException(
+            status_code=400,
+            detail="Only SPSS (.sav), CSV and Excel (.xlsx) data files are supported",
+        )
+    upload_dir = STUDIES_DIR / study_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    # One data file per project: re-processing picks the file it finds here.
+    for old in upload_dir.iterdir():
+        if old.is_file() and old.suffix.lower() in _DATA_SUFFIXES:
+            old.unlink()
+    file_path = upload_dir / name
+    with open(file_path, "wb") as f:
+        while chunk := await file.read(1024 * 1024):
+            f.write(chunk)
+    update_study_status(db, study_id, "classifying", {"data_attached_by": user.name})
+    threading.Thread(
+        target=_run_orchestration_job, args=(study_id, study.client_name, file_path), daemon=True
+    ).start()
+    logger.info(f"[{study_id}] Data file attached by {user.name}: {name}")
+    return {"study_id": study_id, "status": "classifying", "source": name}
+
+
 @router.post("/studies/{study_id}/reprocess")
 def reprocess_study(
     study_id: str,

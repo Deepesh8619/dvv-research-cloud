@@ -360,9 +360,10 @@ function NoDataState() {
         title="No data yet"
         description={
           <>
-            Field this survey or upload responses to unlock tables and reports. Use the{' '}
-            <span className="font-medium text-slate-700">Questionnaire</span> and{' '}
-            <span className="font-medium text-slate-700">Fielding</span> links above to get started.
+            Field this survey with the{' '}
+            <span className="font-medium text-slate-700">Fielding</span> link above, or, if the
+            study was fielded elsewhere, upload its data file in the{' '}
+            <span className="font-medium text-slate-700">Questionnaire checks</span> tab.
           </>
         }
       />

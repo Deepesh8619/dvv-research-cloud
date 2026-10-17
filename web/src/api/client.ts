@@ -271,6 +271,21 @@ export const studiesApi = {
     )
   },
 
+  /** Attach (or replace) the fielded data file of an existing project. */
+  attachData: async (id: string, file: File, onProgress?: (pct: number) => void) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<{ study_id: string; status: string; source: string }>(
+      `/studies/${id}/data`,
+      formData,
+      {
+        onUploadProgress: (e) => {
+          if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100))
+        },
+      },
+    )
+  },
+
   /** Check the collected data against the questionnaire it was collected under. */
   crosscheck: async (id: string) => {
     return api.post<CrosscheckReport>(`/studies/${id}/crosscheck`, {})
