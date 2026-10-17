@@ -216,6 +216,9 @@ def _condition(text: str) -> Expression | None:
 _CONDITION_IN_PROSE = re.compile(r"\(([^()]*[A-Za-z][A-Za-z0-9]{0,5}\s*=\s*\d[^()]*)\)")
 
 
+_AND_OR_RE = re.compile(r"\s+and\s*/\s*or\s+", re.I)
+
+
 def parse_routing(directive: str) -> Expression | None:
     """The `show_if` a routing directive states, or None if it is not exact.
 
@@ -226,7 +229,8 @@ def parse_routing(directive: str) -> Expression | None:
     m = _PREAMBLE_RE.match(directive)
     if not m:
         return None
-    body = directive[m.end() :]
+    # "= 3 and/or 4" on a select-all list means either or both: any of them.
+    body = _AND_OR_RE.sub(" or ", directive[m.end() :])
     condition = _condition(body)
     if condition is None:
         # The exact condition may be parenthesised inside an explanation:

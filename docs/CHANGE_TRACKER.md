@@ -21,6 +21,42 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-17 — second look: every flagged question re-checked, solved or explained (branch feat/second-look)
+
+A reviewer met DA_VID_EFFIC as three flags ("Empty options", "Verification
+discrepancy", "QA found a problem") for one cause, none saying how to fix it.
+After everything is read, each flagged question is now re-checked with the
+whole questionnaire in view and ends in one plain resolution: **fixed
+automatically** (Undo), **fix ready** (Apply), **note**, or **needs you** with the
+recommended next step. Flags stay, folded under "Technical details".
+
+| Solved by rule | Example |
+|---|---|
+| Stale flags cleared (a grid "with no rows" that a later pass filled) | Bubble Q2c, Q8–Q10; Vivo Q5–Q7 |
+| Rows inserted from another question, scale from a spec-table response list, "Among who" base (`and/or` now read) | Google Ads DA_VID_EFFIC (fixed; a ready fix where the document names itself) |
+| Base written as a group a hidden variable defines | GA_AI_GOOGLE → HID_AWARE = 1; loop passes → current/lapsed users |
+| Name used twice (renamed) → note | SS_ADVERT_DECMAKER_2, S6_2 |
+| "Indicate all" on a one-answer question → ready fix | SS_CHANNELS |
+| Typed number read as a list → ready fix | SS_EMP (0–9,999,999) |
+| Screen-out answer in a select-all list → ready fix: exclusive | Vivo S6, Q3 |
+| Two answers with one code → ready fix: next free code | C_BUS_TOOLS |
+| Programmer note read as an answer → removed and obeyed | Vivo Q21 "[PN: RANDOMIZE]" |
+| Missing name → likely real one in the advice | DA_USAGE → DA_PLATFORM_USAGE, C_ZIP → C_GEO_ZIP |
+
+What rules cannot settle goes to a model (task `questionnaire.resolve`) with the
+questions it names, its neighbours, a cleanly read question of the same kind, and
+the study overview. Its answer may only use the document's wording and is kept
+only when QA finds less wrong. A person's save re-checks that question.
+
+Also fixed: a fix or agent suggestion applied in the editor lost a grid's rows,
+scale and masks on save (the form never sent them).
+
+Measured (AI off, 6 documents): flagged 106 → 80, every remaining one with a
+next step. Against the independent readings, no question got worse; four Google
+Ads bases and DA_VID_EFFIC improved. **Known gap:** Bubble Q8–Q10 rows carry
+Q2a's codes where the document numbers its core brands 1–10 — wrong before and
+after, but their stale flag (wrong reason) is now gone, so they are unflagged.
+
 ## 2026-10-16 — fielded data checked against the questionnaire (branch feat/data-audit)
 
 The questionnaire plus a fielded Excel/SPSS export: who answered when the base

@@ -156,13 +156,19 @@ def _describe(other: Question) -> str:
     return " | ".join(parts)
 
 
-def _prompt(q: Question, instruction: str, related: list[Question]) -> str:
+def _prompt(q: Question, instruction: str, related: list[Question],
+            document: str = "") -> str:
     current = {k: v for k, v in _as_dict(q).items()
                if k in ("qid", "text", "type", "options", "rows", "cols", "validation")}
-    context = (
-        "Other questions the analyst refers to (you may reuse their answers):\n"
-        + "\n".join(_describe(o) for o in related) + "\n\n"
-    ) if related else ""
+    if document:
+        context = f"The questionnaire around it:\n{document}\n\n"
+    elif related:
+        context = (
+            "Other questions the analyst refers to (you may reuse their answers):\n"
+            + "\n".join(_describe(o) for o in related) + "\n\n"
+        )
+    else:
+        context = ""
     return (
         "You are a senior survey programmer fixing ONE question for an analyst.\n\n"
         f"The analyst says: {instruction}\n\n"
@@ -185,10 +191,15 @@ def _prompt(q: Question, instruction: str, related: list[Question]) -> str:
 
 def revise(q: Question, instruction: str, by_qid: dict[str, Question]) -> dict:
     """A model's revision of the question, following the analyst's words."""
-    related = _related(q, instruction, by_qid)
+    return revise_with_context(q, instruction, by_qid, _related(q, instruction, by_qid))
+
+
+def revise_with_context(q: Question, instruction: str, by_qid: dict[str, Question],
+                        related: list[Question], document: str = "",
+                        task: str = "questionnaire.revise") -> dict:
+    """`revise`, given the questions around it. Labels may come from any of them."""
     try:
-        response = run_task("questionnaire.revise", _prompt(q, instruction, related),
-                            REVISE_SCHEMA)
+        response = run_task(task, _prompt(q, instruction, related, document), REVISE_SCHEMA)
     except BackendUnavailable:
         return {"error": (
             "No AI model could be reached just now, so the agent could not follow "
