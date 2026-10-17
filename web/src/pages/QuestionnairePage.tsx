@@ -19,6 +19,11 @@ import OptionCondition from '../components/OptionCondition'
 import { flagInfo } from '../components/questionnaireFlags'
 import CorrectionBox from '../components/CorrectionBox'
 import QuestionAgent from '../components/review/QuestionAgent'
+import ResolutionCard, {
+  ResolutionBadge,
+  SecondLookSummary,
+  resolutionOf,
+} from '../components/review/ResolutionCard'
 import QuestionPreview from '../components/review/QuestionPreview'
 import { removeAndRenumber } from '../lib/optionCodes'
 import ExtractionProvenance from '../components/ExtractionProvenance'
@@ -282,12 +287,18 @@ function QuestionRow({
       {summary.length > 0 && (
         <p className="mt-1 truncate text-[11px] text-slate-400">↳ {summary.join(' · ')}</p>
       )}
-      {q.flags.length > 0 && (
+      {resolutionOf(q) ? (
         <div className="flex flex-wrap gap-1 mt-1.5">
-          {q.flags.map((f) => (
-            <FlagBadge key={f} code={f} />
-          ))}
+          <ResolutionBadge resolution={resolutionOf(q)!} />
         </div>
+      ) : (
+        q.flags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {q.flags.map((f) => (
+              <FlagBadge key={f} code={f} />
+            ))}
+          </div>
+        )
       )}
     </button>
   )
@@ -307,6 +318,21 @@ interface DetailState {
   terminateIf: FlatRouting
   showIfVerbatim: string | null
   terminateIfVerbatim: string | null
+  /** A whole question put in the editor by a fix or the agent: the parts this
+   * form does not edit (a grid's rows and scale, masks, limits) are saved with
+   * it, or "Apply this fix" on a grid would save it without its rows. */
+  carried?: { rows?: QuestionOption[] | null; cols?: QuestionOption[] | null; validation?: Record<string, unknown> }
+}
+
+// What a fix may set that the form has no field for. Review bookkeeping
+// (resolution, qa_issues, verification_checks) is never carried back.
+const CARRIED_VALIDATION = ['techniques', 'randomize', 'min', 'max', 'sum', 'sum_min', 'max_select', 'lifted_notes']
+
+function fromCandidate(q: Question): DetailState {
+  const validation = Object.fromEntries(
+    Object.entries(q.validation ?? {}).filter(([k]) => CARRIED_VALIDATION.includes(k)),
+  )
+  return { ...buildDetailState(q), carried: { rows: q.rows ?? null, cols: q.cols ?? null, validation } }
 }
 
 function buildDetailState(q: Question): DetailState {
@@ -656,6 +682,11 @@ export function QuestionDetail({
       show_if: (showIf as unknown as Record<string, unknown>) ?? null,
       terminate_if: (terminateIf as unknown as Record<string, unknown>) ?? null,
     }
+    if (state.carried && !isConstantSum) {
+      if (state.carried.rows !== undefined) patch.rows = state.carried.rows
+      if (state.carried.cols !== undefined) patch.cols = state.carried.cols
+      if (Object.keys(state.carried.validation ?? {}).length) patch.validation = state.carried.validation
+    }
     if (isConstantSum) {
       patch.rows = state.rows.map((r) => ({ code: r.code, label: r.label }))
       patch.validation = { min: 0, max: state.sumTotal, sum: state.sumTotal }
@@ -691,6 +722,47 @@ export function QuestionDetail({
   }
 
   const openBlockingFlag = q.flags.some((f) => flagInfo(f).blocking)
+
+  // The technical flags: shown directly when the second look left no resolution,
+  // folded under the resolution's "Technical details" when it did.
+  const flagList = (
+    <div className="space-y-1.5">
+          {q.flags.map((f) => {
+            const info = flagInfo(f)
+            return (
+              <div
+                key={f}
+                className={`text-xs rounded-md px-3 py-2 ${
+                  info.severity === 'error' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'
+                }`}
+              >
+                <span className="font-medium">{info.label}</span>
+                {info.blocking && <span className="ml-1 text-[10px] uppercase">(blocks approval)</span>}
+                <span className="block mt-0.5 opacity-90">{info.description}</span>
+                {q.flag_reasons?.[f] && (
+                  <span className="block mt-1 font-medium">{q.flag_reasons[f]}</span>
+                )}
+                {f === 'QA_ISSUE' &&
+                  (Array.isArray(q.validation?.qa_issues) ? (q.validation.qa_issues as string[]) : []).map(
+                    (issue) => (
+                      <q key={issue} className="block mt-1 italic">
+                        {issue}
+                      </q>
+                    ),
+                  )}
+                {f === 'BRIEF_RULE' &&
+                  (Array.isArray(q.validation?.brief_rules) ? (q.validation.brief_rules as string[]) : []).map(
+                    (rule) => (
+                      <q key={rule} className="block mt-1 italic">
+                        {rule}
+                      </q>
+                    ),
+                  )}
+              </div>
+            )
+          })}
+        </div>
+  )
 
   const handleApprove = async () => {
     setApproving(true)
@@ -758,44 +830,19 @@ export function QuestionDetail({
         </div>
       )}
 
-      {q.flags.length > 0 && (
-        <div className="space-y-1.5">
-          {q.flags.map((f) => {
-            const info = flagInfo(f)
-            return (
-              <div
-                key={f}
-                className={`text-xs rounded-md px-3 py-2 ${
-                  info.severity === 'error' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'
-                }`}
-              >
-                <span className="font-medium">{info.label}</span>
-                {info.blocking && <span className="ml-1 text-[10px] uppercase">(blocks approval)</span>}
-                <span className="block mt-0.5 opacity-90">{info.description}</span>
-                {q.flag_reasons?.[f] && (
-                  <span className="block mt-1 font-medium">{q.flag_reasons[f]}</span>
-                )}
-                {f === 'QA_ISSUE' &&
-                  (Array.isArray(q.validation?.qa_issues) ? (q.validation.qa_issues as string[]) : []).map(
-                    (issue) => (
-                      <q key={issue} className="block mt-1 italic">
-                        {issue}
-                      </q>
-                    ),
-                  )}
-                {f === 'BRIEF_RULE' &&
-                  (Array.isArray(q.validation?.brief_rules) ? (q.validation.brief_rules as string[]) : []).map(
-                    (rule) => (
-                      <q key={rule} className="block mt-1 italic">
-                        {rule}
-                      </q>
-                    ),
-                  )}
-              </div>
-            )
-          })}
-        </div>
+      {resolutionOf(q) && (
+        <ResolutionCard
+          resolution={resolutionOf(q)!}
+          canWrite={canWrite}
+          onUse={(candidate) => {
+            setState(fromCandidate(candidate))
+            setSavedOk(false)
+          }}
+          details={q.flags.length > 0 ? flagList : undefined}
+        />
       )}
+
+      {!resolutionOf(q) && q.flags.length > 0 && flagList}
 
       {canWrite && (
         <QuestionAgent
@@ -803,7 +850,7 @@ export function QuestionDetail({
           qid={q.qid}
           current={patchFromState}
           onUse={(candidate) => {
-            setState(buildDetailState(candidate))
+            setState(fromCandidate(candidate))
             setSavedOk(false)
           }}
           onTeach={canCorrect ? (text) => setTeachText({ text, nonce: Date.now() }) : undefined}
@@ -818,7 +865,7 @@ export function QuestionDetail({
         onTeach={(fragment) => setTeachRequest({ fragment, nonce: Date.now() })}
       />
 
-      {looksBlank(q) && (
+      {looksBlank(q) && !['fixed', 'ready'].includes(resolutionOf(q)?.status ?? '') && (
         <BlankAnswerTriage
           canWrite={canWrite}
           canTeach={canCorrect && !!profile?.slug}
@@ -1614,6 +1661,7 @@ export default function QuestionnairePage() {
         <>
           <StudyUnderstandingPanel understanding={status.study_understanding} onGoTo={goTo} />
           <DecodingPanel decoding={status.decoding} onGoTo={goTo} />
+          <SecondLookSummary record={status.second_look} />
           <QAPanel
             qa={status.qa}
             canRun={canWrite}

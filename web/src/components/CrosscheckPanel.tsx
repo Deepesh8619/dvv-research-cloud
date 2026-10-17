@@ -28,6 +28,9 @@ const KIND_LABELS: Record<string, string> = {
   mask_violated: 'Answer outside the masked option list',
   pipe_source_empty: 'Piped text with nothing to pipe in',
   coded_in_companion: 'Open response — its codes live in a derived variable',
+  exclusive_violated: 'An exclusive answer (e.g. "None of these") ticked with others',
+  too_many_answers: 'More answers than the question allows',
+  sum_not_total: 'Number boxes that do not add up to the stated total',
 }
 
 const CHECK_LABELS: Record<string, string> = {

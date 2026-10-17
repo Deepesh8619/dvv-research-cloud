@@ -418,6 +418,29 @@ export interface QuestionnaireStatus {
   qa?: QARecord | null
   logic_review?: LogicReview | null
   decoding?: Decoding | null
+  second_look?: SecondLookRecord | null
+}
+
+/** What the second look did with each flagged question (second_look.py). */
+export interface Resolution {
+  status: 'fixed' | 'ready' | 'explained' | 'needs_you'
+  summary: string
+  detail: string
+  source: string
+  issues: string[]
+  /** The fix, for status 'ready': put in the editor by "Apply this fix". */
+  proposed?: Question
+  /** The question before an automatic fix, for status 'fixed': "Undo". */
+  before?: Question
+}
+
+export interface SecondLookRecord {
+  checked: number
+  fixed: number
+  ready: number
+  explained: number
+  needs_you: number
+  entries: { qid: string; status: Resolution['status']; summary: string; source: string }[]
 }
 
 /** How the document was read: skills used, what none could read, what to teach. */
