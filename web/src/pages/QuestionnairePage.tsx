@@ -1664,6 +1664,7 @@ export default function QuestionnairePage() {
           <SecondLookSummary record={status.second_look} />
           <QAPanel
             qa={status.qa}
+            secondLook={status.second_look}
             canRun={canWrite}
             onGoTo={goTo}
             onRun={async () => {

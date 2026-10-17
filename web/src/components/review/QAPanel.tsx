@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { LogicReview, QARecord } from '../../api/client'
+import type { LogicReview, QARecord, SecondLookRecord } from '../../api/client'
 
 /**
  * The QA loop's record: the QA agent tested every question as a respondent
@@ -91,8 +91,12 @@ export default function QAPanel({
   onGoTo,
   logicReview,
   onRunLogicReview,
+  secondLook,
 }: {
   qa: QARecord | null | undefined
+  /** The second look's verdict per question. A question it fixed or explained
+   * is no longer "needs you" here — two panels must not disagree. */
+  secondLook?: SecondLookRecord | null
   canRun: boolean
   onRun: () => Promise<void>
   onGoTo: (qid: string) => void
@@ -109,7 +113,13 @@ export default function QAPanel({
     }
   }
   const entries = qa?.entries ?? []
-  const open = entries.filter((e) => e.status === 'needs_you')
+  const settled = new Set(
+    (secondLook?.entries ?? [])
+      .filter((e) => e.status === 'fixed' || e.status === 'explained')
+      .map((e) => e.qid),
+  )
+  const open = entries.filter((e) => e.status === 'needs_you' && !settled.has(e.qid))
+  const needsYou = new Set(open.map((e) => e.qid)).size
   const fixed = entries.filter((e) => e.status === 'fixed')
   return (
     <details open={open.length > 0} className="bg-white border border-slate-200 rounded-md p-4 mb-4">
@@ -118,8 +128,8 @@ export default function QAPanel({
         {qa ? (
           <span className="font-normal text-slate-500">
             — {qa.checked} checked · {qa.fixed} fixed by the programmer agent ·{' '}
-            <span className={qa.needs_you ? 'text-amber-700 font-medium' : ''}>
-              {qa.needs_you} need{qa.needs_you === 1 ? 's' : ''} you
+            <span className={needsYou ? 'text-amber-700 font-medium' : ''}>
+              {needsYou} need{needsYou === 1 ? 's' : ''} you
             </span>
           </span>
         ) : (

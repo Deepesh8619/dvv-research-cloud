@@ -55,4 +55,31 @@ describe('QAPanel second opinion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Q10' }))
     expect(onGoTo).toHaveBeenCalledWith('Q10')
   })
+
+  it('drops a question the second look settled, so the two panels agree', () => {
+    render(
+      <QAPanel
+        canRun={false}
+        onRun={async () => {}}
+        onGoTo={() => {}}
+        qa={{
+          ran_at: '2026-10-17T19:38:51+00:00', checked: 28, fixed: 0, needs_you: 2,
+          entries: [
+            { qid: 'Q23', agent: 'qa', status: 'needs_you', check: 'x', detail: "the respondent would read a scripter's note" },
+            { qid: 'S6_2', agent: 'qa', status: 'needs_you', check: 'QID_RENAMED', detail: 'the document names two questions S6' },
+          ],
+        }}
+        secondLook={{
+          checked: 31, fixed: 0, ready: 0, explained: 1, needs_you: 1,
+          entries: [
+            { qid: 'S6_2', status: 'explained', summary: 'Saved as S6_2.', source: 'rule' },
+            { qid: 'Q23', status: 'needs_you', summary: 'Note on screen.', source: 'rule' },
+          ],
+        }}
+      />,
+    )
+    expect(screen.getByText('1 needs you')).toBeTruthy()
+    expect(screen.queryByText(/the document names two questions S6/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Q23' })).toBeTruthy()
+  })
 })

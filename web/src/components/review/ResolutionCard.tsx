@@ -126,7 +126,7 @@ export function SecondLookSummary({ record }: { record?: SecondLookRecord | null
   const parts: [number, string, string][] = [
     [record.fixed, 'fixed automatically', 'text-emerald-700'],
     [record.ready, 'fixes ready to apply', 'text-sky-700'],
-    [record.explained, 'notes', 'text-slate-600'],
+    [record.explained, record.explained === 1 ? 'note' : 'notes', 'text-slate-600'],
     [record.needs_you, 'need you', 'text-amber-700'],
   ]
   return (
