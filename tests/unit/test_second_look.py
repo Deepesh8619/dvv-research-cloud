@@ -246,3 +246,14 @@ def test_looking_again_at_one_question_keeps_the_rest_of_the_record():
     record = sl.second_look(survey, use_model=False, only={"Q2"})
     assert sl.RESOLUTION_KEY not in (q.validation or {})
     assert [e["qid"] for e in record["entries"]] == ["Q9"]
+
+
+def test_an_information_screen_renamed_for_a_duplicate_name_is_not_reported():
+    from src.engines.questionnaire.consistency import renamed_duplicate
+
+    q = Question(qid="info_1_2", type=QuestionType.INFO, text="Thank you.",
+                 validation={"original_qid": "info_1"})
+    assert renamed_duplicate(q, {"info_1_2": q}) == []
+    asked = Question(qid="S6_2", type=QuestionType.SINGLE, text="Again?",
+                     options=[Option(1, "Yes")], validation={"original_qid": "S6"})
+    assert renamed_duplicate(asked, {"S6_2": asked})

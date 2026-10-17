@@ -248,6 +248,10 @@ def renamed_duplicate(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
     original = (q.validation or {}).get("original_qid")
     if not original or original == "UNKNOWN":
         return []
+    if q.type is QuestionType.INFO:
+        # An information screen has no data column and nothing routes on it:
+        # its new name changes nothing anyone has to check.
+        return []
     return [Issue(
         "QID_RENAMED",
         f"the document names two questions {original}; this later one was renamed {q.qid} - "
