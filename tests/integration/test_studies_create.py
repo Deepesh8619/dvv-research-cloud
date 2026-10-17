@@ -190,3 +190,17 @@ def test_a_data_file_can_be_attached_to_a_project_started_from_its_questionnaire
         files={"file": ("notes.docx", b"x", "application/octet-stream")},
     )
     assert bad.status_code == 400
+
+
+def test_the_project_names_its_archived_data_file(client):
+    """The name on the Data file row and its download button came back empty."""
+    from api.db import set_study_artifacts
+
+    test_client, session_factory, _ = client
+    study_id = test_client.post("/api/studies", json={"client_name": "Named"}).json()["id"]
+    db = session_factory()
+    set_study_artifacts(db, study_id, source_filename="fielded.xlsx", source_file_b64="eA==")
+    db.close()
+    assert test_client.get(f"/api/studies/{study_id}").json()["source_filename"] == "fielded.xlsx"
+    listed = test_client.get("/api/studies").json()["studies"]
+    assert [s["source_filename"] for s in listed if s["id"] == study_id] == ["fielded.xlsx"]

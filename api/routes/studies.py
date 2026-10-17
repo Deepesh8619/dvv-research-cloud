@@ -324,6 +324,7 @@ def create_empty_study(
         approval_chain=[],
         excel_path=study.excel_path,
         pptx_path=study.pptx_path,
+        source_filename=study.source_filename,
     )
 
 
@@ -453,6 +454,7 @@ def list_all_studies(
             approval_chain=approval_records,
             excel_path=s.excel_path,
             pptx_path=s.pptx_path,
+            source_filename=s.source_filename,
         )
         study_responses.append(study_response)
 
@@ -508,6 +510,7 @@ def get_study_detail(
         approval_chain=approval_records,
         excel_path=study.excel_path,
         pptx_path=study.pptx_path,
+        source_filename=study.source_filename,
     )
 
 
@@ -1139,7 +1142,17 @@ def crosscheck_study(
     already = {link.qid for link in link_report.links}
     link_report.links.extend(link for link in recovered_links if link.qid not in already)
 
-    parquet_path = STUDIES_DIR / study_id / "data.parquet"
+    # The respondent rows live in the processing run's folder (beside the deck),
+    # not the upload folder. Reading only the upload folder reported "the server
+    # restarted" and skipped every row-level check on any project whose data
+    # came from an upload.
+    from api.routes.chat import _study_dir
+
+    parquet_path = next(
+        (p for p in (_study_dir(study) / "data.parquet", STUDIES_DIR / study_id / "data.parquet")
+         if p.exists()),
+        STUDIES_DIR / study_id / "data.parquet",
+    )
 
     # A CSV/Excel export that ships answer TEXT has no codes of its own, so the
     # importer numbers the answers alphabetically. The questionnaire's codes are
