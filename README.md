@@ -167,6 +167,7 @@ engine reads a source file format directly.
 | [`docs/PRODUCT_STRATEGY.md`](docs/PRODUCT_STRATEGY.md) | Where the product is going: "verified research", seven pillars |
 | [`docs/CHANGE_TRACKER.md`](docs/CHANGE_TRACKER.md) | Every change with its measurement; open decisions and known issues |
 | [`docs/RESEARCH_TASKS.md`](docs/RESEARCH_TASKS.md) | Research tasks for the team, each with what to hand back |
+| [`docs/artifacts/`](docs/artifacts/README.md) | Archive of every published write-up (dossier, audits, walkthrough, briefing) |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | What is left, ordered, split by what compounds and what does not |
 | [`docs/questionnaire-comprehension.md`](docs/questionnaire-comprehension.md) | How a questionnaire is understood, and what is still not understood |
 | [`docs/CHANGELOG-questionnaire-comprehension.md`](docs/CHANGELOG-questionnaire-comprehension.md) | Build log — why each parser decision exists |

@@ -1,0 +1,432 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style></head><body>
+<title>Blind Instrument Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#F1F3EF; --surface:#FBFCFA; --sunk:#E8EBE5;
+  --ink:#171A14; --ink-2:#454B41; --muted:#6E7568; --rule:#D6DACF;
+  --accent:#2F5D50; --accent-soft:#DDE7E2;
+  --crit:#8F2A22; --warn:#8A6413; --ok:#3B6B4E; --idle:#8C9385;
+  --shadow:0 1px 2px rgba(23,26,20,.06), 0 6px 20px -12px rgba(23,26,20,.22);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#12150F; --surface:#1A1E17; --sunk:#232820;
+    --ink:#E7EAE1; --ink-2:#B4BAAC; --muted:#8B9384; --rule:#2E3429;
+    --accent:#7FB79F; --accent-soft:#23342D;
+    --crit:#D98A81; --warn:#D7AC5C; --ok:#88BE9D; --idle:#6B7364;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 26px -14px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#12150F; --surface:#1A1E17; --sunk:#232820;
+  --ink:#E7EAE1; --ink-2:#B4BAAC; --muted:#8B9384; --rule:#2E3429;
+  --accent:#7FB79F; --accent-soft:#23342D;
+  --crit:#D98A81; --warn:#D7AC5C; --ok:#88BE9D; --idle:#6B7364;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 8px 26px -14px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:16px; line-height:1.6; margin:0;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px; margin:0 auto; padding:clamp(28px,5vw,72px) clamp(18px,4vw,40px) 96px}
+.col{max-width:70ch}
+h1,h2,h3{font-family:Fraunces,Georgia,serif; font-weight:600; text-wrap:balance; margin:0}
+h1{font-size:clamp(2.1rem,5.2vw,3.3rem); line-height:1.06; letter-spacing:-.015em}
+h2{font-size:clamp(1.35rem,2.6vw,1.75rem); line-height:1.15; letter-spacing:-.01em}
+h3{font-size:1.02rem; font-family:"IBM Plex Sans",sans-serif; font-weight:600; letter-spacing:.01em}
+p{margin:0}
+a{color:var(--accent)}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.tab{font-variant-numeric:tabular-nums}
+
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace; font-size:.68rem; font-weight:500;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--muted);
+}
+.lede{font-size:1.12rem; color:var(--ink-2); max-width:64ch}
+
+header.masthead{
+  display:flex; flex-direction:column; gap:20px;
+  padding-bottom:32px; border-bottom:2px solid var(--ink);
+}
+.stamp{
+  display:flex; flex-wrap:wrap; gap:10px 26px; align-items:baseline;
+  font-family:"IBM Plex Mono",monospace; font-size:.74rem; color:var(--muted);
+}
+.stamp b{color:var(--ink-2); font-weight:500}
+
+section{margin-top:clamp(44px,6vw,76px); display:flex; flex-direction:column; gap:22px}
+.sechead{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap}
+
+/* ---- scoreboard ---- */
+.score{
+  display:grid; gap:1px; background:var(--rule);
+  grid-template-columns:repeat(auto-fit,minmax(168px,1fr));
+  border:1px solid var(--rule); border-radius:3px; overflow:hidden;
+}
+.score div{background:var(--surface); padding:16px 18px; display:flex; flex-direction:column; gap:4px}
+.score .k{font-family:"IBM Plex Mono",monospace; font-size:.66rem; letter-spacing:.11em; text-transform:uppercase; color:var(--muted)}
+.score .v{font-family:Fraunces,serif; font-size:2rem; line-height:1; font-variant-numeric:tabular-nums}
+.score .n{font-size:.8rem; color:var(--muted)}
+.score .v small{font-size:.9rem; font-family:"IBM Plex Mono",monospace; color:var(--muted); margin-left:4px}
+
+/* ---- pipeline ---- */
+.pipe{display:flex; flex-direction:column; gap:2px}
+.stage{
+  display:grid; grid-template-columns:2.2rem 1fr minmax(0,1fr) 5.2rem;
+  gap:14px; align-items:center; background:var(--surface);
+  border:1px solid var(--rule); border-radius:3px; padding:11px 14px;
+}
+.stage .no{font-family:"IBM Plex Mono",monospace; font-size:.72rem; color:var(--muted)}
+.stage .nm{font-weight:500; font-size:.92rem}
+.stage .nm em{display:block; font-style:normal; font-size:.76rem; color:var(--muted); font-family:"IBM Plex Mono",monospace}
+.bar{height:9px; background:var(--sunk); border-radius:1px; overflow:hidden}
+.bar i{display:block; height:100%; background:var(--accent)}
+.stage .ms{font-family:"IBM Plex Mono",monospace; font-size:.8rem; text-align:right; font-variant-numeric:tabular-nums; color:var(--ink-2)}
+
+/* ---- before/after ---- */
+table{border-collapse:collapse; width:100%; font-size:.9rem}
+.scroll{overflow-x:auto; border:1px solid var(--rule); border-radius:3px; background:var(--surface)}
+th,td{text-align:left; padding:10px 14px; border-bottom:1px solid var(--rule); vertical-align:top}
+thead th{
+  font-family:"IBM Plex Mono",monospace; font-size:.66rem; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--muted); font-weight:500; white-space:nowrap;
+  background:var(--sunk);
+}
+tbody tr:last-child td{border-bottom:none}
+td.num{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; white-space:nowrap}
+.was{color:var(--muted)}
+.now{color:var(--accent); font-weight:600}
+
+/* ---- findings ---- */
+.findings{display:flex; flex-direction:column; gap:2px}
+.find{
+  display:grid; grid-template-columns:6px 8.5rem 1fr 4.5rem; gap:0 14px; align-items:center;
+  background:var(--surface); border:1px solid var(--rule); border-radius:3px; overflow:hidden;
+}
+.find>.stripe{align-self:stretch}
+.find .kind{font-family:"IBM Plex Mono",monospace; font-size:.74rem; color:var(--ink-2); padding:10px 0}
+.find .txt{font-size:.87rem; padding:10px 0; color:var(--ink-2)}
+.find .n{font-family:"IBM Plex Mono",monospace; font-size:.8rem; text-align:right; padding:10px 14px 10px 0; font-variant-numeric:tabular-nums}
+.s-crit .stripe{background:var(--crit)} .s-warn .stripe{background:var(--warn)}
+.s-ok .stripe{background:var(--ok)} .s-idle .stripe{background:var(--idle)}
+
+.legend{display:flex; gap:18px; flex-wrap:wrap; font-size:.78rem; color:var(--muted)}
+.legend span{display:flex; align-items:center; gap:7px}
+.legend i{width:11px; height:11px; border-radius:2px; display:block}
+
+/* ---- notes ---- */
+.notes{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(258px,1fr))}
+.note{
+  background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+  border-top:3px solid var(--accent); padding:16px 18px;
+  display:flex; flex-direction:column; gap:8px;
+}
+.note.limit{border-top-color:var(--warn)}
+.note.open{border-top-color:var(--idle)}
+.note p{font-size:.87rem; color:var(--ink-2)}
+.note .tag{font-family:"IBM Plex Mono",monospace; font-size:.64rem; letter-spacing:.12em; text-transform:uppercase; color:var(--muted)}
+
+ul.plain{margin:0; padding-left:1.15em; display:flex; flex-direction:column; gap:9px; color:var(--ink-2); font-size:.93rem}
+ul.plain code, p code, td code{font-family:"IBM Plex Mono",monospace; font-size:.85em; background:var(--sunk); padding:.1em .34em; border-radius:2px}
+
+.callout{
+  border-left:3px solid var(--accent); background:var(--accent-soft);
+  padding:16px 20px; border-radius:0 3px 3px 0; display:flex; flex-direction:column; gap:8px;
+}
+.callout p{font-size:.93rem; color:var(--ink-2)}
+.callout strong{color:var(--ink)}
+
+footer{margin-top:72px; padding-top:22px; border-top:1px solid var(--rule); color:var(--muted); font-size:.8rem}
+@media (max-width:640px){
+  .stage{grid-template-columns:1.7rem 1fr 4.4rem; }
+  .stage .bar{grid-column:2 / 4; height:7px}
+  .find{grid-template-columns:5px 1fr 4rem}
+  .find .kind{padding:9px 0 0; grid-column:2}
+  .find .txt{grid-column:2; padding-top:2px}
+  .find .n{grid-column:3; grid-row:1 / 3}
+}
+</style>
+
+<div class="wrap">
+<header class="masthead">
+  <span class="eyebrow">DVV Research Cloud &middot; Data Processing QA</span>
+  <h1>Blind Instrument Audit</h1>
+  <p class="lede">We ran three questionnaires the platform had never seen — two Federal Reserve household surveys and the CDC's national health interview script — straight through the pipeline, with every language-model call disabled. Fifteen defects surfaced on the first two. All fifteen are fixed; the third instrument found the wall we have not climbed yet.</p>
+  <div class="stamp">
+    <span><b>Instruments</b> SHED 2013 &amp; 2014, BRFSS 2023 (PDF)</span>
+    <span><b>Data</b> 5,896 &times; 323 public microdata (2014)</span>
+    <span><b>Model calls made</b> 0</span>
+    <span><b>Run</b> 3 Sep 2026</span>
+  </div>
+</header>
+
+<section>
+  <div class="sechead"><span class="eyebrow">01 &middot; Result</span><h2>What changed on an unseen document</h2></div>
+  <p class="col">Every number below is measured on the same file, with the same command, before and after this session's changes. The three client questionnaires we already support were re-parsed field-by-field as a control: <strong>zero regressions</strong>, and four questions on a real client document got a fix they had been quietly missing.</p>
+
+  <div class="score">
+    <div><span class="k">Questions found</span><span class="v">104<small>was 3</small></span><span class="n">out of ~104 in the document</span></div>
+    <div><span class="k">Resolved with no model</span><span class="v">80<small>%</small></span><span class="n">83 of 104 questions</span></div>
+    <div><span class="k">Bases compiled</span><span class="v">47<small>was 0</small></span><span class="n">routing conditions now checkable</span></div>
+    <div><span class="k">Full pipeline</span><span class="v">7.6<small>s</small></span><span class="n">read, link and QC 1.9M cells</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="eyebrow">02 &middot; Defects</span><h2>Fifteen ways a foreign document broke us</h2></div>
+  <p class="col">None of these were visible on our own client documents, because each client writes to one house convention and our parsers had quietly learned that one house. A federal instrument writes differently — and every difference was a silent failure, not an error message.</p>
+
+  <div class="scroll">
+  <table>
+    <thead><tr><th>What went wrong</th><th>Why it was invisible</th><th class="tab">Before</th><th class="tab">After</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>The PDF reader joined each visual block's lines into one string, so a question label sitting behind the previous question's answer list was never seen.</td>
+        <td>Word documents put every paragraph in its own block, so labels always landed at character&nbsp;0.</td>
+        <td class="num was">3 questions</td><td class="num now">104 questions</td>
+      </tr>
+      <tr>
+        <td>A sub-question suffix had to be lowercase, so <code>D4A</code>, <code>D8A</code> and <code>BK49A</code> were glued onto the question above them.</td>
+        <td>Decipher documents write <code>A1a</code>; federal ones write <code>D4A</code>.</td>
+        <td class="num was">0 of 9</td><td class="num now">9 of 9</td>
+      </tr>
+      <tr>
+        <td>A line holding several directives — <code>[SP] [IF D2 = 1]</code> — matched none of them, so <code>[SP]</code> became the question's wording and the real question became option&nbsp;1.</td>
+        <td>Our documents write one directive per line.</td>
+        <td class="num was">unparsed</td><td class="num now">all read</td>
+      </tr>
+      <tr>
+        <td>Directives authored <em>above</em> a question stayed with the question above them, so every base and punch type was attributed to the wrong question.</td>
+        <td>Spec-table documents state the base inside the question's own table.</td>
+        <td class="num was">30+ wrong</td><td class="num now">carried forward</td>
+      </tr>
+      <tr>
+        <td>Option codes were counted down the list and the written marker was left in the label, so a 5&ndash;4&ndash;3&ndash;2&ndash;1 scale was renumbered 1&ndash;2&ndash;3&ndash;4&ndash;5 and every code disagreed with the data.</td>
+        <td>Descending scales and skipped codes (<code>98</code>, <code>99</code>) are normal everywhere except the documents we had.</td>
+        <td class="num was">reversed</td><td class="num now">as written</td>
+      </tr>
+      <tr>
+        <td>A question whose wording wrapped to a second line donated that line to the answer list as option&nbsp;1.</td>
+        <td>Also wrong on a client document — four questions there.</td>
+        <td class="num was">4 client Qs</td><td class="num now">fixed</td>
+      </tr>
+      <tr>
+        <td>Any CSV that is not UTF-8 crashed the upload with a raw traceback.</td>
+        <td>Every file we had tested was UTF-8. Excel, SPSS and government portals emit cp1252.</td>
+        <td class="num was">crash</td><td class="num now">reads</td>
+      </tr>
+      <tr>
+        <td>An <em>option's</em> wording wraps too. SHED's <code>S2</code> wraps each of its three housing answers, so a 3-code question came out with six codes that matched nothing.</td>
+        <td>Same cause as the wrapped stem, one level down — and <code>S2</code> is the base for eleven other questions.</td>
+        <td class="num was">6 codes</td><td class="num now">3 codes</td>
+      </tr>
+      <tr>
+        <td>Option labels were compared with the scripter's inserts still in them, so <code>I [IF PPMARIT=1, INSERT: (and/or my spouse)] own [our/my] home</code> never recognised the data map's resolved wording.</td>
+        <td>A bracketed insert is addressed to the scripter, not the respondent. Both sides are stripped now.</td>
+        <td class="num was">no join</td><td class="num now">joins</td>
+      </tr>
+      <tr>
+        <td>A "Refused" value the questionnaire never prints was reported as a disagreement, once per question.</td>
+        <td>Non-response was recognised by its <em>number</em> (98/99). A label-encoded file has no conventional numbers at all.</td>
+        <td class="num was">34 findings</td><td class="num now">5 findings</td>
+      </tr>
+      <tr>
+        <td>A section divider (<code>***** END OF RENT SECTION *****</code>) and the rule the answer is written on (<code>_____</code>, <code>____ %</code>) were both read as answer options.</td>
+        <td>They gave every number-box question phantom options, which made the data map's "this column is an open response" look like a disagreement.</td>
+        <td class="num was">7 questions</td><td class="num now">0</td>
+      </tr>
+      <tr>
+        <td>Bracketed directives <em>nest</em> — <code>[ASK IF (K2_b=1 OR [K14a=2]) AND (D3=1 or 2)]</code> — and the pattern stopped at the inner bracket.</td>
+        <td>The line fell through to the answer parser and was glued onto the option above it.</td>
+        <td class="num was">not read</td><td class="num now">read</td>
+      </tr>
+      <tr>
+        <td><code>[SP]</code> beside a number box was taken as the question's type.</td>
+        <td>It describes how the special codes punch, not what the question collects. An explicit widget directive now wins.</td>
+        <td class="num was">single</td><td class="num now">numeric</td>
+      </tr>
+      <tr>
+        <td><code>gt</code>/<code>lt</code> could not compare a number stored as text, so <code>[IF I2 &gt; 0]</code> failed for every respondent.</td>
+        <td>A column of <code>0</code>&ndash;<code>100</code> mixed with "Refused" imports as text. String order would have been worse than the error: <code>"100" &lt; "25"</code>.</td>
+        <td class="num was">0% pass</td><td class="num now">compares</td>
+      </tr>
+      <tr>
+        <td>A backend outage threw away everything the parsers had already read.</td>
+        <td><code>ED0</code>'s nine options are read perfectly; only single-vs-multi is unstated. One failed model call turned it into an empty placeholder, and every condition written against it stopped being checkable.</td>
+        <td class="num was">placeholder</td><td class="num now">kept</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="eyebrow">03 &middot; Breadth</span><h2>Three instruments, one control</h2></div>
+  <p class="col">The same measurement, run at the previous commit and again after the fixes. Two prose questionnaires jumped by more than an order of magnitude; the third barely moved, and that is the honest headline of this section.</p>
+
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Instrument</th><th>Layout</th><th class="tab">Questions before</th><th class="tab">after</th><th class="tab">Found in the real data</th><th class="tab">Base compiled</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>SHED 2013</strong><br><span class="was">Fed household survey</span></td>
+        <td>Prose, single column</td>
+        <td class="num was">6</td><td class="num now">125</td><td class="num">97%</td><td class="num">24</td>
+      </tr>
+      <tr>
+        <td><strong>SHED 2014</strong><br><span class="was">Fed household survey</span></td>
+        <td>Prose, single column</td>
+        <td class="num was">3</td><td class="num now">104</td><td class="num">93%</td><td class="num">33</td>
+      </tr>
+      <tr>
+        <td><strong>BRFSS 2023</strong><br><span class="was">CDC telephone script</span></td>
+        <td>127-page CATI grid</td>
+        <td class="num was">10</td><td class="num">24</td><td class="num">&mdash;</td><td class="num">0</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout">
+    <p><strong>BRFSS is laid out as a table, and that defeats us.</strong> Every question is a row across five narrow columns — number, wording, variable name, responses, skip note. The PDF reader returns 8,103 fragments (&ldquo;Thank you&rdquo;, &ldquo;very much,&rdquo;, &ldquo;but I seem to&rdquo;) because each cell wraps every two or three words. PyMuPDF's own table finder reads some pages cleanly and returns noise on others, so building on it would produce results that vary page to page. This needs a real layout engine, not another rule.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="eyebrow">04 &middot; Routing</span><h2>The base is written down. Now we read it.</h2></div>
+  <p class="col">Prose questionnaires state who gets asked each question in the margin — <code class="mono">[IF S2 = 2 or S2=3]</code>, <code class="mono">[ONLY ASK H0&nbsp;&ndash;&nbsp;H6 IF S2 = 1]</code>, <code class="mono">[IF (D1 = 3, 4, 5, OR 6)]</code>. We were keeping those as decorative strings. They are now compiled into real conditions, which means the two checks that depend on them have something to check for the first time on a prose document.</p>
+
+  <div class="score">
+    <div><span class="k">Bases parsed</span><span class="v">47<small>was 0</small></span><span class="n">of 104 questions</span></div>
+    <div><span class="k">Validated against data</span><span class="v">28<small>was 0</small></span><span class="n">routing vs. who answered</span></div>
+    <div><span class="k">Conditions audited</span><span class="v">46<small>was 0</small></span><span class="n">vs. the data map</span></div>
+    <div><span class="k">Dead conditions found</span><span class="v">6</span><span class="n">test a variable or code that does not exist</span></div>
+  </div>
+
+  <div class="callout">
+    <p><strong>The parser refuses more than it accepts, on purpose.</strong> <code>A AND B OR C</code> has no agreed precedence in a questionnaire margin, so it returns nothing and the directive stays as prose for a human. A guessed base is worse than no base: it silently reclassifies real respondents as routing violations, and nobody looks twice at a number the system produced confidently.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="eyebrow">05 &middot; Codes</span><h2>Same answers, different numbers</h2></div>
+  <p class="col">Reading the base was only half of it. A file that ships answer <em>text</em> — <code>Employed now</code> rather than <code>1</code> — has no codes of its own, so the importer invents them alphabetically. The questionnaire's codes are the real ones: the screen-outs, the routing and the tab plan are all written against them. The two described the same answers under different numbers, and every code-level check was quietly comparing apples to oranges. Qualtrics exports choice text by default, so this is the ordinary case.</p>
+  <p class="col">The option labels already matched exactly. So the fix is to join on them and renumber the data to the questionnaire &mdash; the data map and the data file together, or neither.</p>
+
+  <div class="score">
+    <div><span class="k">Values renumbered</span><span class="v">228</span><span class="n">across 58 of 76 linked columns</span></div>
+    <div><span class="k">Routing checks failing</span><span class="v">2<small>was 18</small></span><span class="n">26 of 28 now validate</span></div>
+    <div><span class="k">Total findings</span><span class="v">34<small>was 61</small></span><span class="n">on the same 5,896 rows</span></div>
+    <div><span class="k">&ldquo;Punch not in the QRE&rdquo;</span><span class="v">5<small>was 34</small></span><span class="n">the rest were refusals</span></div>
+  </div>
+
+  <div class="callout">
+    <p><strong>Only codes we invented are ever touched.</strong> SPSS files and Excel workbooks with a data map sheet carry the script's own codes, and those are left exactly as they are. The label travels with the value throughout, so nothing is reinterpreted &mdash; only the arbitrary integer identity moves. The join refuses on an ambiguous match, refuses on fewer than two matching labels, and is a no-op the second time it runs.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="eyebrow">06 &middot; Timing</span><h2>Where the 7.6 seconds go</h2></div>
+  <p class="col">5,896 respondents, 323 columns, 104 questions — one pass, no model calls, on a laptop. Reading the 11&nbsp;MB CSV is over half the total; every check we actually care about costs milliseconds.</p>
+  <div class="pipe">
+    <div class="stage"><span class="no">01</span><span class="nm">Read &amp; segment the PDF<em>load_pdf &rarr; segment_into_questions</em></span><span class="bar"><i style="width:26%"></i></span><span class="ms">1.04 s</span></div>
+    <div class="stage"><span class="no">02</span><span class="nm">Extract 104 questions<em>prose_directives, zero model calls</em></span><span class="bar"><i style="width:2%"></i></span><span class="ms">0.07 s</span></div>
+    <div class="stage"><span class="no">03</span><span class="nm">Read the data file<em>11 MB CSV &rarr; data map + parquet</em></span><span class="bar"><i style="width:100%"></i></span><span class="ms">4.03 s</span></div>
+    <div class="stage"><span class="no">04</span><span class="nm">Link questions to columns<em>76 linked, 71 exact / 5 fuzzy</em></span><span class="bar"><i style="width:1%"></i></span><span class="ms">0.05 s</span></div>
+    <div class="stage"><span class="no">05</span><span class="nm">Cross-validate routing<em>19 questions vs. who answered</em></span><span class="bar"><i style="width:16%"></i></span><span class="ms">0.66 s</span></div>
+    <div class="stage"><span class="no">06</span><span class="nm">Questionnaire vs. data check<em>61 findings across 1.9M cells</em></span><span class="bar"><i style="width:32%"></i></span><span class="ms">1.28 s</span></div>
+    <div class="stage"><span class="no">07</span><span class="nm">Condition audit &amp; variable roles<em>33 conditions, 323 columns</em></span><span class="bar"><i style="width:11%"></i></span><span class="ms">0.44 s</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="eyebrow">07 &middot; Findings</span><h2>What the QC said — including about us</h2></div>
+  <p class="col">34 findings, down from 61. Five are errors, and all four are worth reading twice: they are the cross-check catching <em>our own</em> extraction, not the Fed's data. That is the design working. A QC engine that only ever blames the data file is a QC engine you cannot trust.</p>
+
+  <div class="legend">
+    <span><i style="background:var(--crit)"></i>Error &mdash; blocks sign-off</span>
+    <span><i style="background:var(--warn)"></i>Warning &mdash; reviewer decides</span>
+    <span><i style="background:var(--idle)"></i>Not a defect in the instrument</span>
+  </div>
+
+  <div class="findings">
+    <div class="find s-crit"><span class="stripe"></span><span class="kind">single_multi</span><span class="txt"><code>C4</code> and <code>E1</code> were read as single-answer, but respondents have more than one response recorded. Our type inference was wrong, and the data proves it.</span><span class="n">3,166</span></div>
+    <div class="find s-crit"><span class="stripe"></span><span class="kind">undeclared_code</span><span class="txt"><code>C4</code>, <code>E1</code> and <code>A1</code> carry values the scripted punch list never offers — all three are multi-punch families whose naming we do not recognise.</span><span class="n">5,896</span></div>
+    <div class="find s-warn"><span class="stripe"></span><span class="kind">punch_not_in_qre</span><span class="txt">A punch exists in the data that the questionnaire never lists. Was 34 before refusals were recognised by their label instead of their number.</span><span class="n">11</span></div>
+    <div class="find s-warn"><span class="stripe"></span><span class="kind">option_not_scripted</span><span class="txt">The questionnaire offers a code the data map has no punch for. Inherent to a label-encoded file: an option nobody chose leaves no value behind to name.</span><span class="n">18</span></div>
+    <div class="find s-warn"><span class="stripe"></span><span class="kind">unknown_variable</span><span class="txt">Four questions gate on a variable with no column at all (<code>K2B</code> tests <code>K2A</code>) — the condition can never be true, so those questions can never show.</span><span class="n">4</span></div>
+    <div class="find s-warn"><span class="stripe"></span><span class="kind">routing</span><span class="txt">Two routing checks still disagree, out of 28 run. Both gate on a question linked to a multi-punch family we do not recognise by name.</span><span class="n">2</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="eyebrow">08 &middot; Standing</span><h2>Where we actually are</h2></div>
+  <div class="notes">
+    <div class="note">
+      <span class="tag">Proven</span>
+      <h3>Format-agnostic on prose</h3>
+      <p>Two PDFs from an institution with no relationship to us parsed to 104 and 125 questions, 93% and 97% of which appear as columns in the real data files. The handful that don't are grid parents and columns the Fed suppressed for privacy.</p>
+    </div>
+    <div class="note">
+      <span class="tag">Proven</span>
+      <h3>The cheap path is the main path</h3>
+      <p>83 of 104 questions resolved with no model call at all. The 21 that didn't are numeric open-ends — "how many children aged 0&ndash;1", "what is your monthly rent" — where nothing in the text states the type.</p>
+    </div>
+    <div class="note">
+      <span class="tag">Proven</span>
+      <h3>Label-encoded files now compare</h3>
+      <p>207 values across 52 columns renumbered to the questionnaire by matching option labels, so a Qualtrics-style choice-text export is checkable on the same terms as a coded one. Routing checks failing went 18 to 4, and the four that remain are our own mis-typed questions, not the alignment.</p>
+    </div>
+    <div class="note limit">
+      <span class="tag">Limitation</span>
+      <h3>Variable roles are Decipher-shaped</h3>
+      <p>We recognise a punch column by a <code>r1</code>-style suffix. SHED writes <code>R1_a</code>, so all 323 columns were classified as questions, no hidden or system variables were identified, and the straightlining check found no grids to measure.</p>
+    </div>
+    <div class="note limit">
+      <span class="tag">Limitation</span>
+      <h3>Table-laid-out PDFs are out of reach</h3>
+      <p>BRFSS is not an outlier — CATI scripts and many agency programming documents are authored as grids. Reading them needs page-layout analysis (PyMuPDF suggests its own <code>pymupdf_layout</code>), which is a project, not a patch. Until then, a document like this should be rejected at upload with a clear reason rather than half-parsed.</p>
+    </div>
+    <div class="note open">
+      <span class="tag">Open</span>
+      <h3>Linking stops at 76 of 104</h3>
+      <p>Grid parents (<code>T0</code>, <code>T1</code>, <code>A1</code>, <code>C4</code>) own a family of columns rather than one, and the linker wants a single name. Every unlinked question is a question the QC cannot check.</p>
+    </div>
+    <div class="note">
+      <span class="tag">Proven</span>
+      <h3>The gate is a gate again</h3>
+      <p>Two orchestration tests were making live model calls, so the suite's runtime tracked a third party's uptime — 45&nbsp;seconds each on a good day, twenty minutes stuck in a socket read on a bad one. The suite now refuses the network outright and runs in 46&nbsp;seconds. Those two tests dropped to 0.2&nbsp;s without changing what they assert.</p>
+    </div>
+    <div class="note">
+      <span class="tag">Proven</span>
+      <h3>A checker that admits what it did not read</h3>
+      <p>When extraction cannot resolve a field, the cross-check now skips the checks that would assert on it rather than judging the data against a default we picked. An unknown type used to fall back to "single answer" and then report every multi-select respondent as a violation.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="eyebrow">09 &middot; Assumptions</span><h2>What this test does and does not prove</h2></div>
+  <ul class="plain col">
+    <li><strong>Two instruments from one institution is still one house style.</strong> SHED 2013 and 2014 are long, well-scripted, English-language prose questionnaires from the same authors. Together they are a fair stand-in for a client screener &mdash; not for a conjoint exercise, a MaxDiff block, or a translated tracker.</li>
+    <li><strong>"104 of ~104" is a count, not a grade.</strong> We counted labelled questions; we did not hand-verify the wording, options and base of all 104 against the PDF. The 93% column-match rate is the independent check, and it is a strong one.</li>
+    <li><strong>Zero model calls is the floor, not the norm.</strong> Backends were disabled to make the deterministic result measurable. In production the 21 unresolved questions would each cost a call — roughly 41 attempts with retries.</li>
+    <li><strong>Timings are laptop timings</strong> on a warm filesystem, single-threaded, no network, no database. The server adds upload, storage and queue time on top.</li>
+    <li><strong>Findings were reviewed, not adjudicated.</strong> "Refused is the extra punch" is a reading of the pattern across 34 findings, not a claim verified case by case.</li>
+  </ul>
+</section>
+
+<footer>
+  <p>DVV Research Cloud &middot; blind audit against Federal Reserve SHED 2014 public microdata &middot; 856 Python tests + 8 frontend tests green in 31s, ruff and tsc clean &middot; 3 September 2026</p>
+</footer>
+</div>
+
+</body></html>

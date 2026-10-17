@@ -1,0 +1,302 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
+<title>DVV Demo Surveys — Presenter's Field Key</title>
+<style>
+  :root{
+    /* neutrals — cool, faint blue bias toward the navy */
+    --paper:#F6F7F9; --card:#FFFFFF; --sunken:#EEF1F4;
+    --ink:#1B2230; --ink-soft:#5A6474; --ink-faint:#8B94A3;
+    --line:#E1E5EA; --line-strong:#CBD2DC;
+    --navy:#26364F; --gold:#B08325;
+    /* semantic states — separate from accent */
+    --term:#C0392B; --term-bg:#FBEDEC; --term-line:#E7C4C0;
+    --unlock:#B7791F; --unlock-bg:#FAF2E2; --unlock-line:#E9D3A6;
+    --safe:#2E7D5B; --safe-bg:#E7F3EC; --safe-line:#BEE0CB;
+    --seg:#26364F;
+    --shadow:0 1px 2px rgba(27,34,48,.04), 0 8px 24px -12px rgba(27,34,48,.14);
+    --serif:"Charter","Iowan Old Style",Georgia,"Times New Roman",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#14181F; --card:#1C222C; --sunken:#232A35;
+      --ink:#E7E9EE; --ink-soft:#A6AEBC; --ink-faint:#727C8C;
+      --line:#2C333F; --line-strong:#3A4250;
+      --navy:#9DB2D6; --gold:#D6A94E;
+      --term:#F0938A; --term-bg:#33211F; --term-line:#5B3A36;
+      --unlock:#E3B663; --unlock-bg:#332A17; --unlock-line:#5A4A28;
+      --safe:#79C99C; --safe-bg:#1B3227; --safe-line:#2F5341;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 28px -14px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"]{
+      --paper:#14181F; --card:#1C222C; --sunken:#232A35;
+      --ink:#E7E9EE; --ink-soft:#A6AEBC; --ink-faint:#727C8C;
+      --line:#2C333F; --line-strong:#3A4250;
+      --navy:#9DB2D6; --gold:#D6A94E;
+      --term:#F0938A; --term-bg:#33211F; --term-line:#5B3A36;
+      --unlock:#E3B663; --unlock-bg:#332A17; --unlock-line:#5A4A28;
+      --safe:#79C99C; --safe-bg:#1B3227; --safe-line:#2F5341;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 28px -14px rgba(0,0,0,.6);
+  }
+  :root[data-theme="light"]{
+      --paper:#F6F7F9; --card:#FFFFFF; --sunken:#EEF1F4;
+      --ink:#1B2230; --ink-soft:#5A6474; --ink-faint:#8B94A3;
+      --line:#E1E5EA; --line-strong:#CBD2DC; --navy:#26364F; --gold:#B08325;
+      --term:#C0392B; --term-bg:#FBEDEC; --term-line:#E7C4C0;
+      --unlock:#B7791F; --unlock-bg:#FAF2E2; --unlock-line:#E9D3A6;
+      --safe:#2E7D5B; --safe-bg:#E7F3EC; --safe-line:#BEE0CB;
+      --shadow:0 1px 2px rgba(27,34,48,.04), 0 8px 24px -12px rgba(27,34,48,.14);
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+       font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:920px;margin:0 auto;padding:34px 22px 96px;}
+  svg{display:block}
+  .glyph{width:1em;height:1em;stroke:currentColor;fill:none;
+         stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none;}
+
+  /* ---- masthead ---- */
+  .mast{position:relative;padding-bottom:20px;margin-bottom:6px;}
+  .mast::after{content:"";position:absolute;left:0;bottom:0;width:100%;height:2px;
+    background:linear-gradient(90deg,var(--gold) 0 64px,var(--line-strong) 64px);}
+  .mast-top{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+  .seal{width:38px;height:38px;color:var(--navy);flex:none;}
+  .mast-meta{font-family:var(--mono);font-size:11px;letter-spacing:.13em;
+    text-transform:uppercase;color:var(--ink-faint);}
+  .mast h1{font-family:var(--serif);font-weight:600;font-size:clamp(28px,4.4vw,42px);
+    line-height:1.06;letter-spacing:-.015em;margin:0 0 10px;text-wrap:balance;}
+  .mast .lede{color:var(--ink-soft);max-width:60ch;margin:0;font-size:15.5px;}
+
+  /* ---- index rail (segment tabs) ---- */
+  nav.rail{position:sticky;top:0;z-index:20;background:var(--paper);
+    display:flex;gap:4px;flex-wrap:wrap;padding:16px 0 14px;margin:20px 0 26px;
+    border-bottom:1px solid var(--line);}
+  .rail button{display:flex;align-items:center;gap:9px;cursor:pointer;
+    background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:8px 13px 8px 10px;color:var(--ink-soft);font-family:var(--sans);
+    font-size:12.5px;font-weight:600;letter-spacing:.005em;transition:all .18s ease;}
+  .rail button .emblem{width:26px;height:26px;color:var(--seg);flex:none;
+    background:var(--sunken);border-radius:7px;padding:4px;transition:all .18s ease;}
+  .rail button:hover{border-color:var(--line-strong);color:var(--ink);}
+  .rail button[aria-selected="true"]{background:var(--seg);border-color:var(--seg);color:#fff;box-shadow:var(--shadow);}
+  .rail button[aria-selected="true"] .emblem{background:rgba(255,255,255,.16);color:#fff;}
+  .rail button:focus-visible{outline:2px solid var(--seg);outline-offset:2px;}
+
+  /* ---- segment head ---- */
+  .seg-head{display:flex;align-items:flex-start;gap:16px;margin:2px 0 20px;}
+  .seg-emblem{width:52px;height:52px;color:var(--seg);flex:none;
+    background:var(--sunken);border:1px solid var(--line);border-radius:13px;padding:11px;}
+  .seg-titles h2{font-family:var(--serif);font-weight:600;font-size:25px;
+    line-height:1.1;margin:2px 0 5px;letter-spacing:-.01em;text-wrap:balance;}
+  .seg-titles .study{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;
+    color:var(--ink-faint);display:inline-flex;align-items:center;gap:6px;}
+  .seg-titles .study .dot{width:6px;height:6px;border-radius:50%;background:var(--seg);}
+
+  /* ---- protocol card (3-move script) ---- */
+  .protocol{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    box-shadow:var(--shadow);overflow:hidden;margin-bottom:26px;}
+  .protocol-head{display:flex;align-items:center;gap:9px;padding:14px 18px;
+    background:var(--seg);color:#fff;}
+  .protocol-head .glyph{font-size:17px;opacity:.9;}
+  .protocol-head h3{margin:0;font-size:12px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;}
+  .moves{list-style:none;margin:0;padding:6px 4px;counter-reset:mv;}
+  .moves li{display:flex;gap:14px;padding:12px 15px;counter-increment:mv;align-items:flex-start;}
+  .moves li:not(:last-child){border-bottom:1px solid var(--line);}
+  .moves li::before{content:counter(mv,decimal-leading-zero);font-family:var(--mono);
+    font-size:12px;font-weight:600;color:var(--seg);flex:none;padding-top:1px;
+    letter-spacing:.02em;min-width:24px;}
+  .moves b{color:var(--ink);font-weight:650;}
+  .moves .m-body{color:var(--ink-soft);font-size:14.5px;}
+  .moves .m-body b{color:var(--seg);}
+
+  /* ---- legend ---- */
+  .legend{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px;}
+  .legend .lg{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;
+    color:var(--ink-soft);padding:5px 11px;border:1px solid var(--line);border-radius:999px;background:var(--card);}
+  .legend .lg .glyph{font-size:15px;}
+  .lg.t .glyph{color:var(--term)} .lg.u .glyph{color:var(--unlock)} .lg.s .glyph{color:var(--safe)}
+
+  /* ---- ledger ---- */
+  .ledger-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:16px;
+    box-shadow:var(--shadow);background:var(--card);}
+  table{width:100%;border-collapse:collapse;min-width:560px;}
+  thead th{font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;
+    text-transform:uppercase;color:var(--ink-faint);text-align:left;font-weight:500;
+    padding:13px 16px;background:var(--sunken);border-bottom:1px solid var(--line);}
+  tbody td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top;}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:var(--sunken);}
+  .qid{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--ink);
+    display:inline-block;padding:3px 7px;background:var(--sunken);border:1px solid var(--line);border-radius:6px;white-space:nowrap;}
+  .qmeta{display:block;margin-top:7px;font-family:var(--mono);font-size:9.5px;
+    letter-spacing:.07em;text-transform:uppercase;color:var(--ink-faint);}
+  .qtext{max-width:44ch;color:var(--ink);}
+  .guide{font-size:13.5px;display:flex;flex-direction:column;gap:6px;}
+  .cue{display:flex;align-items:flex-start;gap:9px;line-height:1.45;}
+  .cue .glyph{font-size:16px;margin-top:1px;flex:none;}
+  .cue.t .glyph{color:var(--term)} .cue.u .glyph{color:var(--unlock)} .cue.s .glyph{color:var(--safe)}
+  .cue .tag{font-weight:650;}
+  .cue.t .tag{color:var(--term)} .cue.u .tag{color:var(--unlock)} .cue.s .tag{color:var(--safe)}
+  .cue .txt{color:var(--ink-soft)} .cue .txt em{font-style:normal;color:var(--ink);font-weight:550;}
+  .note{color:var(--ink-faint);font-size:12.5px;padding-left:25px;line-height:1.4;}
+  .none{color:var(--ink-faint);font-style:italic;font-size:13px;}
+
+  section[hidden]{display:none;}
+  @media (prefers-reduced-motion: no-preference){
+    section.seg{animation:rise .28s cubic-bezier(.2,.7,.3,1);}
+    @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  }
+  @media (max-width:560px){
+    .qtext{max-width:none} .seg-head{gap:12px} .seg-emblem{width:44px;height:44px}
+  }
+  footer{margin-top:34px;padding-top:18px;border-top:1px solid var(--line);
+    font-family:var(--mono);font-size:11px;letter-spacing:.05em;color:var(--ink-faint);
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+</style>
+
+<!-- SVG symbol library: state glyphs + segment emblems + seal -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-term" viewBox="0 0 24 24"><path d="M7.5 3h9L21 7.5v9L16.5 21h-9L3 16.5v-9z"/><path d="M8.5 8.5l7 7"/></symbol>
+  <symbol id="i-unlock" viewBox="0 0 24 24"><circle cx="8" cy="8" r="4"/><path d="M11 11l8 8m-3 0h3v-3"/></symbol>
+  <symbol id="i-safe" viewBox="0 0 24 24"><path d="M12 3l7 2.5v5c0 4.5-3 8-7 10.5-4-2.5-7-6-7-10.5v-5z"/><path d="M8.7 12l2.3 2.3 4.3-4.6"/></symbol>
+  <symbol id="i-script" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M9 9h7M9 13h7M9 17h4"/></symbol>
+  <symbol id="i-seal" viewBox="0 0 24 24"><circle cx="12" cy="10" r="6"/><path d="M9.4 9.8l1.8 1.8 3.4-3.6"/><path d="M8 15l-1 6 5-2.5L17 21l-1-6"/></symbol>
+  <!-- segment emblems -->
+  <symbol id="e-fmcg" viewBox="0 0 24 24"><path d="M12 3c3.5 4.2 5.5 7 5.5 10a5.5 5.5 0 01-11 0c0-3 2-5.8 5.5-10z"/><path d="M9.5 14a2.5 2.5 0 002.5 2.5"/></symbol>
+  <symbol id="e-healthcare" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8.5v7M8.5 12h7"/></symbol>
+  <symbol id="e-bfsi" viewBox="0 0 24 24"><path d="M4 9l8-5 8 5"/><path d="M5 9v8m4-8v8m6-8v8m4-8v8"/><path d="M3.5 20h17"/></symbol>
+  <symbol id="e-auto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.5"/><path d="M12 4v5m6.9 1.5l-4.6 2M6 16l4-2.8m3.5 1.3L15 20"/></symbol>
+  <symbol id="e-telecom" viewBox="0 0 24 24"><circle cx="12" cy="18" r="1.4"/><path d="M8.5 14.5a5 5 0 017 0M5.5 11.5a9 9 0 0113 0"/></symbol>
+  <symbol id="e-retail" viewBox="0 0 24 24"><path d="M6 8h12l-1 12H7z"/><path d="M9 8V6.5a3 3 0 016 0V8"/></symbol>
+  <symbol id="e-default" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></symbol>
+</defs></svg>
+
+<div class="wrap">
+  <header class="mast">
+    <div class="mast-top">
+      <svg class="seal" aria-hidden="true"><use href="#i-seal"/></svg>
+      <span class="mast-meta">DVV Research Cloud · Demo Kit · Confidential — presenter only</span>
+    </div>
+    <h1>Presenter's Field Key</h1>
+    <p class="lede">Six live demo surveys, twenty questions each. This key tells you exactly
+      which answer screens a respondent out, which unlocks the follow-up probe, and the
+      clean path to a completed interview — so the routing never surprises you mid-pitch.</p>
+  </header>
+
+  <nav class="rail" role="tablist" aria-label="Survey segments" id="rail"></nav>
+  <div id="segments"></div>
+
+  <footer>
+    <span>DVV Research Cloud</span>
+    <span id="foot-count"></span>
+  </footer>
+</div>
+
+<script>
+const DATA = [{"slug": "fmcg-oral-care", "title": "Toothpaste Usage & Attitudes Study", "theme": "fmcg", "questions": [{"qid": "S1", "text": "Which age group do you belong to?", "type": "single", "options": [[1, "Under 18"], [2, "18-24"], [3, "25-34"], [4, "35-44"], [5, "45-54"], [6, "55 or older"]], "terminate_if": {"op": "in", "qid": "S1", "values": [1], "verbatim_text": "Terminate if under 18"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S2", "text": "Do you or anyone in your household work in any of these industries?", "type": "multi", "options": [[1, "Market research or consulting"], [2, "Advertising, PR or media"], [3, "FMCG / personal care manufacturing"], [4, "IT / software"], [5, "Education"], [6, "None of these"]], "terminate_if": {"op": "in", "qid": "S2", "values": [1, 2, 3], "verbatim_text": "Terminate if MR, advertising or category industry"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S3", "text": "Are you involved in deciding which toothpaste brand your household buys?", "type": "single", "options": [[1, "Yes, I decide myself"], [2, "Yes, jointly with others"], [3, "No, someone else decides"]], "terminate_if": {"op": "eq", "qid": "S3", "value": 3, "verbatim_text": "Terminate non-decision-makers"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S4", "text": "Which type of area do you live in?", "type": "single", "options": [[1, "Metro (Delhi NCR, Mumbai, Bengaluru, etc.)"], [2, "Tier-1 city"], [3, "Tier-2 city"], [4, "Smaller town / rural"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q1", "text": "Which brands of toothpaste come to your mind first? Type the first ones you think of.", "type": "open_text", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q2", "text": "Which of these toothpaste brands have you heard of?", "type": "multi", "options": [[1, "Colgate"], [2, "Pepsodent"], [3, "Closeup"], [4, "Sensodyne"], [5, "Dabur Red"], [6, "Patanjali Dant Kanti"], [7, "Other (please specify)"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q3", "text": "Which brand do you use most often?", "type": "single", "options": [[1, "Colgate"], [2, "Pepsodent"], [3, "Closeup"], [4, "Sensodyne"], [5, "Dabur Red"], [6, "Patanjali Dant Kanti"], [7, "Other (please specify)"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q4", "text": "How often does your household buy toothpaste?", "type": "single", "options": [[1, "Every 2 weeks or more often"], [2, "About once a month"], [3, "Every 2-3 months"], [4, "Less often"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q5", "text": "Where do you usually buy toothpaste?", "type": "single", "options": [[1, "Local kirana / general store"], [2, "Supermarket"], [3, "Online (Amazon, Blinkit, etc.)"], [4, "Chemist / pharmacy"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q6", "text": "How satisfied are you with the brand you use most often on each of these?", "type": "grid_single", "options": [], "terminate_if": null, "show_if": null, "rows": [[1, "Taste and freshness"], [2, "Cavity protection"], [3, "Whitening"], [4, "Value for money"], [5, "Easy availability"]], "validation": null}, {"qid": "Q7", "text": "On a scale of 0-10, how likely are you to recommend the toothpaste brand you use most often to a friend or colleague?", "type": "numeric", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": {"min": 0, "max": 10}}, {"qid": "Q8", "text": "What would this brand need to improve for you to rate it higher?", "type": "multi", "options": [[1, "Price"], [2, "Taste"], [3, "Effectiveness"], [4, "Packaging"], [5, "Availability"], [6, "Other (please specify)"]], "terminate_if": null, "show_if": {"op": "lt", "qid": "Q7", "value": 7, "verbatim_text": "Ask only detractors (NPS 0-6)"}, "rows": [], "validation": null}, {"qid": "Q9", "text": "The next time you buy toothpaste, how likely are you to buy the same brand again?", "type": "single", "options": [[1, "Definitely will not"], [2, "Probably will not"], [3, "Might or might not"], [4, "Probably will"], [5, "Definitely will"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q10", "text": "How likely are you to try a new toothpaste brand in the next 3 months?", "type": "single", "options": [[1, "Not at all likely"], [2, "Not very likely"], [3, "Somewhat likely"], [4, "Very likely"], [5, "Extremely likely"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q11", "text": "Where do you usually see or hear about toothpaste brands?", "type": "multi", "options": [[1, "TV advertising"], [2, "YouTube / online video"], [3, "Social media"], [4, "Dentist recommendation"], [5, "Family and friends"], [6, "In-store displays"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q12", "text": "If you could change one thing about your toothpaste, what would it be?", "type": "open_text", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q13", "text": "How important are natural or ayurvedic ingredients when choosing a toothpaste?", "type": "single", "options": [[1, "Not at all important"], [2, "Slightly important"], [3, "Moderately important"], [4, "Very important"], [5, "Extremely important"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D1", "text": "What is your gender?", "type": "single", "options": [[1, "Male"], [2, "Female"], [3, "Other / prefer not to say"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D2", "text": "What is your monthly household income?", "type": "single", "options": [[1, "Under Rs. 25,000"], [2, "Rs. 25,000 - Rs. 50,000"], [3, "Rs. 50,000 - Rs. 1,00,000"], [4, "Over Rs. 1,00,000"], [5, "Prefer not to say"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D3", "text": "How many people live in your household, including you?", "type": "single", "options": [[1, "1"], [2, "2"], [3, "3-4"], [4, "5 or more"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}]}, {"slug": "healthcare-otc-pain", "title": "Pain Relief Products Study", "theme": "healthcare", "questions": [{"qid": "S1", "text": "Which age group do you belong to?", "type": "single", "options": [[1, "Under 18"], [2, "18-24"], [3, "25-34"], [4, "35-44"], [5, "45-54"], [6, "55 or older"]], "terminate_if": {"op": "in", "qid": "S1", "values": [1], "verbatim_text": "Terminate if under 18"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S2", "text": "Do you or anyone in your household work in any of these industries?", "type": "multi", "options": [[1, "Market research or consulting"], [2, "Advertising, PR or media"], [3, "Healthcare, pharma or hospitals"], [4, "IT / software"], [5, "Education"], [6, "None of these"]], "terminate_if": {"op": "in", "qid": "S2", "values": [1, 2, 3], "verbatim_text": "Terminate if MR, advertising or category industry"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S3", "text": "Have you used any over-the-counter pain relief product (tablet, balm, spray or gel) in the past 3 months?", "type": "single", "options": [[1, "Yes"], [2, "No"]], "terminate_if": {"op": "eq", "qid": "S3", "value": 2, "verbatim_text": "Terminate category non-users"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S4", "text": "For minor aches and pains, who do you usually turn to first?", "type": "single", "options": [[1, "A doctor"], [2, "The chemist / pharmacist"], [3, "I choose a product myself"], [4, "Family or friends"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q1", "text": "Which pain relief brands come to your mind first?", "type": "open_text", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q2", "text": "Which of these pain relief brands have you heard of?", "type": "multi", "options": [[1, "Moov"], [2, "Volini"], [3, "Iodex"], [4, "Zandu Balm"], [5, "Amrutanjan"], [6, "Crocin"], [7, "Dolo 650"], [8, "Other (please specify)"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q3", "text": "Which one do you use most often?", "type": "single", "options": [[1, "Moov"], [2, "Volini"], [3, "Iodex"], [4, "Zandu Balm"], [5, "Amrutanjan"], [6, "Crocin"], [7, "Dolo 650"], [8, "Other (please specify)"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q4", "text": "How often do you typically need a pain relief product?", "type": "single", "options": [[1, "Once a week or more"], [2, "2-3 times a month"], [3, "About once a month"], [4, "Rarely"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q5", "text": "Which of these do you use it for?", "type": "multi", "options": [[1, "Headache"], [2, "Back pain"], [3, "Joint pain"], [4, "Muscle strain / sprains"], [5, "Cold and body ache"], [6, "Other (please specify)"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q6", "text": "How satisfied are you with the product you use most often on each of these?", "type": "grid_single", "options": [], "terminate_if": null, "show_if": null, "rows": [[1, "Speed of relief"], [2, "How long the relief lasts"], [3, "Ease of use"], [4, "Price"], [5, "Availability at the chemist"]], "validation": null}, {"qid": "Q7", "text": "On a scale of 0-10, how likely are you to recommend the pain relief product you use most often to a friend or colleague?", "type": "numeric", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": {"min": 0, "max": 10}}, {"qid": "Q8", "text": "What holds you back from rating it higher?", "type": "multi", "options": [[1, "Relief is too slow"], [2, "Relief does not last"], [3, "Smell or feel on skin"], [4, "Price"], [5, "Worry about side effects"], [6, "Other (please specify)"]], "terminate_if": null, "show_if": {"op": "lt", "qid": "Q7", "value": 7, "verbatim_text": "Ask only detractors (NPS 0-6)"}, "rows": [], "validation": null}, {"qid": "Q9", "text": "The next time you need pain relief, how likely are you to buy the same product?", "type": "single", "options": [[1, "Definitely will not"], [2, "Probably will not"], [3, "Might or might not"], [4, "Probably will"], [5, "Definitely will"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q10", "text": "Where did you first hear about the product you use most often?", "type": "single", "options": [[1, "Doctor"], [2, "Chemist / pharmacist"], [3, "TV advertising"], [4, "Family or friends"], [5, "Online / social media"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q11", "text": "Where do you look for information before trying a new health product?", "type": "multi", "options": [[1, "Doctor"], [2, "Chemist"], [3, "Google search"], [4, "YouTube"], [5, "Family and friends"], [6, "I don't look anywhere"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q12", "text": "If you could improve one thing about pain relief products available today, what would it be?", "type": "open_text", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q13", "text": "For everyday aches, which do you prefer?", "type": "single", "options": [[1, "Ayurvedic / herbal products"], [2, "Allopathic / medical products"], [3, "No preference"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D1", "text": "What is your gender?", "type": "single", "options": [[1, "Male"], [2, "Female"], [3, "Other / prefer not to say"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D2", "text": "What is your monthly household income?", "type": "single", "options": [[1, "Under Rs. 25,000"], [2, "Rs. 25,000 - Rs. 50,000"], [3, "Rs. 50,000 - Rs. 1,00,000"], [4, "Over Rs. 1,00,000"], [5, "Prefer not to say"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D3", "text": "How many people live in your household, including you?", "type": "single", "options": [[1, "1"], [2, "2"], [3, "3-4"], [4, "5 or more"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}]}, {"slug": "bfsi-retail-banking", "title": "Banking Experience Study", "theme": "bfsi", "questions": [{"qid": "S1", "text": "Which age group do you belong to?", "type": "single", "options": [[1, "Under 18"], [2, "18-24"], [3, "25-34"], [4, "35-44"], [5, "45-54"], [6, "55 or older"]], "terminate_if": {"op": "in", "qid": "S1", "values": [1], "verbatim_text": "Terminate if under 18"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S2", "text": "Do you or anyone in your household work in any of these industries?", "type": "multi", "options": [[1, "Market research or consulting"], [2, "Advertising, PR or media"], [3, "Banking, insurance or financial services"], [4, "IT / software"], [5, "Education"], [6, "None of these"]], "terminate_if": {"op": "in", "qid": "S2", "values": [1, 2, 3], "verbatim_text": "Terminate if MR, advertising or category industry"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S3", "text": "Do you have a savings account that you actively use?", "type": "single", "options": [[1, "Yes"], [2, "No"]], "terminate_if": {"op": "eq", "qid": "S3", "value": 2, "verbatim_text": "Terminate non-account-holders"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S4", "text": "Which bank do you consider your primary bank?", "type": "single", "options": [[1, "State Bank of India (SBI)"], [2, "HDFC Bank"], [3, "ICICI Bank"], [4, "Axis Bank"], [5, "Kotak Mahindra Bank"], [6, "Punjab National Bank"], [7, "Other (please specify)"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q1", "text": "When you think of good digital banking, which banks come to mind first?", "type": "open_text", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q2", "text": "Which of these banks have you seen or heard advertising from recently?", "type": "multi", "options": [[1, "State Bank of India (SBI)"], [2, "HDFC Bank"], [3, "ICICI Bank"], [4, "Axis Bank"], [5, "Kotak Mahindra Bank"], [6, "Punjab National Bank"], [7, "None of these"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q3", "text": "Which of these have you used with your primary bank in the past month?", "type": "multi", "options": [[1, "Mobile banking app"], [2, "Net banking on desktop"], [3, "Branch visit"], [4, "ATM"], [5, "Phone banking"], [6, "UPI payments"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q4", "text": "How often do you use your bank's mobile app?", "type": "single", "options": [[1, "Daily"], [2, "A few times a week"], [3, "A few times a month"], [4, "Rarely or never"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q5", "text": "How satisfied are you with your primary bank on each of these?", "type": "grid_single", "options": [], "terminate_if": null, "show_if": null, "rows": [[1, "Mobile app experience"], [2, "Service at the branch"], [3, "Charges and fees"], [4, "Customer support"], [5, "Interest rates"]], "validation": null}, {"qid": "Q6", "text": "On a scale of 0-10, how likely are you to recommend your primary bank to a friend or colleague?", "type": "numeric", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": {"min": 0, "max": 10}}, {"qid": "Q7", "text": "What are the main reasons for your rating?", "type": "multi", "options": [[1, "Hidden or high charges"], [2, "Poor customer support"], [3, "App problems or downtime"], [4, "Long queues at the branch"], [5, "Low interest rates"], [6, "Other (please specify)"]], "terminate_if": null, "show_if": {"op": "lt", "qid": "Q6", "value": 7, "verbatim_text": "Ask only detractors (NPS 0-6)"}, "rows": [], "validation": null}, {"qid": "Q8", "text": "How likely are you to switch your primary bank in the next 12 months?", "type": "single", "options": [[1, "Not at all likely"], [2, "Not very likely"], [3, "Somewhat likely"], [4, "Very likely"], [5, "Extremely likely"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q9", "text": "Which of these do you currently hold with any bank?", "type": "multi", "options": [[1, "Credit card"], [2, "Personal or home loan"], [3, "Fixed deposit"], [4, "Mutual funds / investments"], [5, "Insurance"], [6, "None of these"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q10", "text": "If your bank offered a premium app-only account with zero branch visits, how likely would you be to try it?", "type": "single", "options": [[1, "Not at all likely"], [2, "Not very likely"], [3, "Somewhat likely"], [4, "Very likely"], [5, "Extremely likely"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q11", "text": "Where do you get information for financial decisions?", "type": "multi", "options": [[1, "Bank's own app or website"], [2, "YouTube / finance influencers"], [3, "News and business media"], [4, "Friends and family"], [5, "Financial advisor"], [6, "Social media"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q12", "text": "What is the one thing your bank should improve?", "type": "open_text", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q13", "text": "Overall, how much do you trust your primary bank with your money?", "type": "single", "options": [[1, "Do not trust at all"], [2, "Trust a little"], [3, "Trust somewhat"], [4, "Trust a lot"], [5, "Trust completely"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D1", "text": "What is your gender?", "type": "single", "options": [[1, "Male"], [2, "Female"], [3, "Other / prefer not to say"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D2", "text": "What is your monthly household income?", "type": "single", "options": [[1, "Under Rs. 25,000"], [2, "Rs. 25,000 - Rs. 50,000"], [3, "Rs. 50,000 - Rs. 1,00,000"], [4, "Over Rs. 1,00,000"], [5, "Prefer not to say"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D3", "text": "How many people live in your household, including you?", "type": "single", "options": [[1, "1"], [2, "2"], [3, "3-4"], [4, "5 or more"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}]}, {"slug": "auto-purchase-intent", "title": "Car Buying Study", "theme": "auto", "questions": [{"qid": "S1", "text": "Which age group do you belong to?", "type": "single", "options": [[1, "Under 18"], [2, "18-24"], [3, "25-34"], [4, "35-44"], [5, "45-54"], [6, "55 or older"]], "terminate_if": {"op": "in", "qid": "S1", "values": [1], "verbatim_text": "Terminate if under 18"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S2", "text": "Do you or anyone in your household work in any of these industries?", "type": "multi", "options": [[1, "Market research or consulting"], [2, "Advertising, PR or media"], [3, "Automobile manufacturing or dealerships"], [4, "IT / software"], [5, "Education"], [6, "None of these"]], "terminate_if": {"op": "in", "qid": "S2", "values": [1, 2, 3], "verbatim_text": "Terminate if MR, advertising or category industry"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S3", "text": "Which of these describes you?", "type": "single", "options": [[1, "I own a car"], [2, "I plan to buy a car in the next 12 months"], [3, "Both - I own one and plan to buy"], [4, "Neither"]], "terminate_if": {"op": "eq", "qid": "S3", "value": 4, "verbatim_text": "Terminate non-owners with no purchase intent"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S4", "text": "Which type of area do you live in?", "type": "single", "options": [[1, "Metro (Delhi NCR, Mumbai, Bengaluru, etc.)"], [2, "Tier-1 city"], [3, "Tier-2 city"], [4, "Smaller town / rural"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q1", "text": "Which car brands come to your mind first?", "type": "open_text", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q2", "text": "Which of these brands would you consider for your next car?", "type": "multi", "options": [[1, "Maruti Suzuki"], [2, "Hyundai"], [3, "Tata Motors"], [4, "Mahindra"], [5, "Kia"], [6, "Toyota"], [7, "Honda"], [8, "Other (please specify)"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q3", "text": "Which single brand are you most likely to buy (or do you currently drive)?", "type": "single", "options": [[1, "Maruti Suzuki"], [2, "Hyundai"], [3, "Tata Motors"], [4, "Mahindra"], [5, "Kia"], [6, "Toyota"], [7, "Honda"], [8, "Other (please specify)"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q4", "text": "What is your budget for your next car?", "type": "single", "options": [[1, "Under Rs. 8 lakh"], [2, "Rs. 8-12 lakh"], [3, "Rs. 12-20 lakh"], [4, "Over Rs. 20 lakh"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q5", "text": "Which fuel type do you prefer for your next car?", "type": "single", "options": [[1, "Petrol"], [2, "Diesel"], [3, "CNG"], [4, "Hybrid"], [5, "Electric"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q6", "text": "How important is each of these when choosing a car?", "type": "grid_single", "options": [], "terminate_if": null, "show_if": null, "rows": [[1, "Mileage / running cost"], [2, "Safety rating"], [3, "Price and value"], [4, "After-sales service"], [5, "Features and technology"]], "validation": null}, {"qid": "Q7", "text": "On a scale of 0-10, how likely are you to recommend the car brand you are most likely to buy to a friend or colleague?", "type": "numeric", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": {"min": 0, "max": 10}}, {"qid": "Q8", "text": "What concerns hold you back about this brand?", "type": "multi", "options": [[1, "Service costs"], [2, "Reliability concerns"], [3, "Resale value"], [4, "Dealer experience"], [5, "Missing features"], [6, "Other (please specify)"]], "terminate_if": null, "show_if": {"op": "lt", "qid": "Q7", "value": 7, "verbatim_text": "Ask only detractors (NPS 0-6)"}, "rows": [], "validation": null}, {"qid": "Q9", "text": "When do you expect to make your next car purchase?", "type": "single", "options": [[1, "Within 3 months"], [2, "3-6 months"], [3, "6-12 months"], [4, "More than 12 months away"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q10", "text": "How likely are you to consider an electric car for your next purchase?", "type": "single", "options": [[1, "Not at all likely"], [2, "Not very likely"], [3, "Somewhat likely"], [4, "Very likely"], [5, "Extremely likely"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q11", "text": "Where do you research before buying a car?", "type": "multi", "options": [[1, "YouTube reviews"], [2, "Dealer visits and test drives"], [3, "Friends and family"], [4, "Car websites (CarDekho, CarWale, etc.)"], [5, "TV advertising"], [6, "Social media"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q12", "text": "What is your single biggest hesitation about buying a new car right now?", "type": "open_text", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q13", "text": "Would you take a test drive if invited by a dealer this month?", "type": "single", "options": [[1, "Yes"], [2, "Maybe"], [3, "No"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D1", "text": "What is your gender?", "type": "single", "options": [[1, "Male"], [2, "Female"], [3, "Other / prefer not to say"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D2", "text": "What is your monthly household income?", "type": "single", "options": [[1, "Under Rs. 25,000"], [2, "Rs. 25,000 - Rs. 50,000"], [3, "Rs. 50,000 - Rs. 1,00,000"], [4, "Over Rs. 1,00,000"], [5, "Prefer not to say"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D3", "text": "How many people live in your household, including you?", "type": "single", "options": [[1, "1"], [2, "2"], [3, "3-4"], [4, "5 or more"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}]}, {"slug": "telecom-brand-track", "title": "Mobile Network Study", "theme": "telecom", "questions": [{"qid": "S1", "text": "Which age group do you belong to?", "type": "single", "options": [[1, "Under 18"], [2, "18-24"], [3, "25-34"], [4, "35-44"], [5, "45-54"], [6, "55 or older"]], "terminate_if": {"op": "in", "qid": "S1", "values": [1], "verbatim_text": "Terminate if under 18"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S2", "text": "Do you or anyone in your household work in any of these industries?", "type": "multi", "options": [[1, "Market research or consulting"], [2, "Advertising, PR or media"], [3, "Telecom operators or telecom equipment"], [4, "IT / software"], [5, "Education"], [6, "None of these"]], "terminate_if": {"op": "in", "qid": "S2", "values": [1, 2, 3], "verbatim_text": "Terminate if MR, advertising or category industry"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S3", "text": "Do you personally pay for a mobile connection?", "type": "single", "options": [[1, "Yes"], [2, "No"]], "terminate_if": {"op": "eq", "qid": "S3", "value": 2, "verbatim_text": "Terminate non-payers"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S4", "text": "What type of connection is your main SIM?", "type": "single", "options": [[1, "Prepaid"], [2, "Postpaid"], [3, "I use both"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q1", "text": "Which mobile network brands' advertising have you seen recently? Type whatever comes to mind.", "type": "open_text", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q2", "text": "Which of these mobile networks have you ever used?", "type": "multi", "options": [[1, "Jio"], [2, "Airtel"], [3, "Vi (Vodafone Idea)"], [4, "BSNL"], [5, "None of these"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q3", "text": "Which network is your main SIM on?", "type": "single", "options": [[1, "Jio"], [2, "Airtel"], [3, "Vi (Vodafone Idea)"], [4, "BSNL"], [5, "Other (please specify)"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q4", "text": "Roughly how much do you spend on mobile recharges or bills per month?", "type": "single", "options": [[1, "Under Rs. 200"], [2, "Rs. 200-400"], [3, "Rs. 400-700"], [4, "Over Rs. 700"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q5", "text": "How satisfied are you with your main network on each of these?", "type": "grid_single", "options": [], "terminate_if": null, "show_if": null, "rows": [[1, "Network coverage"], [2, "Data speed"], [3, "Call quality"], [4, "Value for money of plans"], [5, "Customer care"]], "validation": null}, {"qid": "Q6", "text": "On a scale of 0-10, how likely are you to recommend your main mobile network to a friend or colleague?", "type": "numeric", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": {"min": 0, "max": 10}}, {"qid": "Q7", "text": "What are the main problems you face?", "type": "multi", "options": [[1, "Call drops"], [2, "Slow data"], [3, "Price increases"], [4, "Poor customer support"], [5, "No signal in some areas"], [6, "Other (please specify)"]], "terminate_if": null, "show_if": {"op": "lt", "qid": "Q6", "value": 7, "verbatim_text": "Ask only detractors (NPS 0-6)"}, "rows": [], "validation": null}, {"qid": "Q8", "text": "How likely are you to port to a different network in the next 6 months?", "type": "single", "options": [[1, "Not at all likely"], [2, "Not very likely"], [3, "Somewhat likely"], [4, "Very likely"], [5, "Extremely likely"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q9", "text": "Which of these do you use on your main connection?", "type": "multi", "options": [[1, "Bundled OTT apps (JioCinema, Airtel Xstream, etc.)"], [2, "5G data"], [3, "International roaming"], [4, "Family / group plan"], [5, "None of these"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q10", "text": "How important is 5G coverage when choosing a network?", "type": "single", "options": [[1, "Not at all important"], [2, "Slightly important"], [3, "Moderately important"], [4, "Very important"], [5, "Extremely important"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q11", "text": "Which brand's advertising do you find most memorable?", "type": "single", "options": [[1, "Jio"], [2, "Airtel"], [3, "Vi (Vodafone Idea)"], [4, "BSNL"], [5, "None of them"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q12", "text": "What is the one thing your network should fix or improve?", "type": "open_text", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q13", "text": "Which brand do you associate most with 'best network quality'?", "type": "single", "options": [[1, "Jio"], [2, "Airtel"], [3, "Vi (Vodafone Idea)"], [4, "BSNL"], [5, "No difference between them"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D1", "text": "What is your gender?", "type": "single", "options": [[1, "Male"], [2, "Female"], [3, "Other / prefer not to say"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D2", "text": "What is your monthly household income?", "type": "single", "options": [[1, "Under Rs. 25,000"], [2, "Rs. 25,000 - Rs. 50,000"], [3, "Rs. 50,000 - Rs. 1,00,000"], [4, "Over Rs. 1,00,000"], [5, "Prefer not to say"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D3", "text": "How many people live in your household, including you?", "type": "single", "options": [[1, "1"], [2, "2"], [3, "3-4"], [4, "5 or more"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}]}, {"slug": "retail-ecommerce-csat", "title": "Online Shopping Study", "theme": "retail", "questions": [{"qid": "S1", "text": "Which age group do you belong to?", "type": "single", "options": [[1, "Under 18"], [2, "18-24"], [3, "25-34"], [4, "35-44"], [5, "45-54"], [6, "55 or older"]], "terminate_if": {"op": "in", "qid": "S1", "values": [1], "verbatim_text": "Terminate if under 18"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S2", "text": "Do you or anyone in your household work in any of these industries?", "type": "multi", "options": [[1, "Market research or consulting"], [2, "Advertising, PR or media"], [3, "E-commerce or organised retail companies"], [4, "IT / software"], [5, "Education"], [6, "None of these"]], "terminate_if": {"op": "in", "qid": "S2", "values": [1, 2, 3], "verbatim_text": "Terminate if MR, advertising or category industry"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S3", "text": "Have you ordered anything online in the past 30 days?", "type": "single", "options": [[1, "Yes"], [2, "No"]], "terminate_if": {"op": "eq", "qid": "S3", "value": 2, "verbatim_text": "Terminate lapsed / non-shoppers"}, "show_if": null, "rows": [], "validation": null}, {"qid": "S4", "text": "How often do you shop online?", "type": "single", "options": [[1, "Weekly or more often"], [2, "2-3 times a month"], [3, "About once a month"], [4, "Less often"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q1", "text": "When you think of shopping online, which apps or sites come to mind first?", "type": "open_text", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q2", "text": "Which of these have you bought from in the past 3 months?", "type": "multi", "options": [[1, "Amazon"], [2, "Flipkart"], [3, "Myntra"], [4, "Meesho"], [5, "JioMart"], [6, "Blinkit / Zepto / Instamart"], [7, "Other (please specify)"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q3", "text": "Which one do you use most often?", "type": "single", "options": [[1, "Amazon"], [2, "Flipkart"], [3, "Myntra"], [4, "Meesho"], [5, "JioMart"], [6, "Blinkit / Zepto / Instamart"], [7, "Other (please specify)"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q4", "text": "What do you usually buy online?", "type": "multi", "options": [[1, "Fashion and footwear"], [2, "Electronics and mobiles"], [3, "Groceries"], [4, "Beauty and personal care"], [5, "Home and kitchen"], [6, "Other (please specify)"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q5", "text": "How satisfied are you with the platform you use most often on each of these?", "type": "grid_single", "options": [], "terminate_if": null, "show_if": null, "rows": [[1, "Delivery speed"], [2, "Product quality"], [3, "Prices and offers"], [4, "Returns and refunds"], [5, "App experience"]], "validation": null}, {"qid": "Q6", "text": "On a scale of 0-10, how likely are you to recommend the shopping platform you use most often to a friend or colleague?", "type": "numeric", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": {"min": 0, "max": 10}}, {"qid": "Q7", "text": "What problems have you faced with it?", "type": "multi", "options": [[1, "Late deliveries"], [2, "Wrong or damaged items"], [3, "Refund hassles"], [4, "High delivery fees"], [5, "App issues"], [6, "Other (please specify)"]], "terminate_if": null, "show_if": {"op": "lt", "qid": "Q6", "value": 7, "verbatim_text": "Ask only detractors (NPS 0-6)"}, "rows": [], "validation": null}, {"qid": "Q8", "text": "For your next online purchase, how likely are you to use the same platform?", "type": "single", "options": [[1, "Definitely will not"], [2, "Probably will not"], [3, "Might or might not"], [4, "Probably will"], [5, "Definitely will"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q9", "text": "How often do you use quick-commerce apps (Blinkit, Zepto, Instamart)?", "type": "single", "options": [[1, "Daily"], [2, "Weekly"], [3, "Occasionally"], [4, "Never"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q10", "text": "Do you have a paid membership like Amazon Prime or Flipkart Plus?", "type": "single", "options": [[1, "Yes"], [2, "No, but considering it"], [3, "No, not interested"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q11", "text": "How do you usually discover new products online?", "type": "multi", "options": [[1, "App notifications and offers"], [2, "Instagram"], [3, "YouTube"], [4, "Friends and family"], [5, "TV advertising"], [6, "Google search"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q12", "text": "What is the one thing online shopping platforms should improve?", "type": "open_text", "options": [], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "Q13", "text": "For everyday purchases, which do you prefer overall?", "type": "single", "options": [[1, "Strongly prefer online"], [2, "Somewhat prefer online"], [3, "No preference"], [4, "Somewhat prefer offline stores"], [5, "Strongly prefer offline stores"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D1", "text": "What is your gender?", "type": "single", "options": [[1, "Male"], [2, "Female"], [3, "Other / prefer not to say"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D2", "text": "What is your monthly household income?", "type": "single", "options": [[1, "Under Rs. 25,000"], [2, "Rs. 25,000 - Rs. 50,000"], [3, "Rs. 50,000 - Rs. 1,00,000"], [4, "Over Rs. 1,00,000"], [5, "Prefer not to say"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}, {"qid": "D3", "text": "How many people live in your household, including you?", "type": "single", "options": [[1, "1"], [2, "2"], [3, "3-4"], [4, "5 or more"]], "terminate_if": null, "show_if": null, "rows": [], "validation": null}]}];
+const SEG = {
+  "fmcg-oral-care":        {label:"FMCG · Oral Care",    emblem:"e-fmcg"},
+  "healthcare-otc-pain":   {label:"Healthcare · OTC",    emblem:"e-healthcare"},
+  "bfsi-retail-banking":   {label:"BFSI · Banking",      emblem:"e-bfsi"},
+  "auto-purchase-intent":  {label:"Auto · Purchase",     emblem:"e-auto"},
+  "telecom-brand-track":   {label:"Telecom · Brand",     emblem:"e-telecom"},
+  "retail-ecommerce-csat": {label:"Retail · E-commerce", emblem:"e-retail"},
+};
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const gl = id => `<svg class="glyph" aria-hidden="true"><use href="#${id}"/></svg>`;
+
+function cues(seg, q){
+  const out=[]; const t=q.terminate_if;
+  if(t && t.qid===q.qid){
+    const codes = t.op==='in' ? t.values : [t.value];
+    const termLabels = q.options.filter(o=>codes.includes(o[0])).map(o=>`“${o[1]}”`);
+    const safeLabels = q.options.filter(o=>!codes.includes(o[0])).map(o=>`“${o[1]}”`);
+    out.push(`<div class="cue t">${gl('i-term')}<div><span class="tag">Terminates</span> <span class="txt">on <em>${termLabels.map(esc).join(', ')}</em></span></div></div>`);
+    if(safeLabels.length) out.push(`<div class="cue s">${gl('i-safe')}<div><span class="tag">Safe</span> <span class="txt">${safeLabels.slice(0,3).map(esc).join(', ')}${safeLabels.length>3?' …':''}</span></div></div>`);
+  }
+  const gated = seg.questions.filter(o=>o.show_if && o.show_if.qid===q.qid);
+  for(const g of gated){
+    const c=g.show_if;
+    const detail = c.op==='lt'
+      ? `score below ${c.value} — give it <em>0–${c.value-1}</em> to demo the probe, ${c.value}+ to skip it`
+      : `when this answer matches`;
+    out.push(`<div class="cue u">${gl('i-unlock')}<div><span class="tag">Unlocks ${esc(g.qid)}</span> <span class="txt">${detail}</span></div></div>`);
+  }
+  if(q.show_if){
+    out.push(`<div class="note">Shown only when ${esc(q.show_if.qid)} was answered ${q.show_if.op==='lt'?'below '+q.show_if.value:'accordingly'}.</div>`);
+  }
+  if(q.type==='grid_single' && q.rows.length){
+    out.push(`<div class="note">Rate all ${q.rows.length} rows — any pattern; straight-lining here later demos the quality flag.</div>`);
+  }
+  if(q.validation && q.validation.min!=null){
+    out.push(`<div class="note">Accepts ${q.validation.min}–${q.validation.max}.</div>`);
+  }
+  if(!out.length) out.push(`<div class="none">Any answer — no routing attached.</div>`);
+  return out.join('');
+}
+
+function protocol(seg){
+  const npsQ = seg.questions.find(q => seg.questions.some(o=>o.show_if && o.show_if.qid===q.qid));
+  const folQ = seg.questions.find(o=>o.show_if);
+  const termQ = seg.questions.filter(q=>q.terminate_if && q.terminate_if.qid===q.qid)[0];
+  const termOpt = termQ ? termQ.options.find(o=>(termQ.terminate_if.values||[termQ.terminate_if.value]).includes(o[0])) : null;
+  return `<div class="protocol">
+    <div class="protocol-head">${gl('i-script')}<h3>Three-move demo script</h3></div>
+    <ol class="moves">
+      <li><div class="m-body"><b>Show the screen-out.</b> Answer ${termQ?`<b>${esc(termQ.qid)}</b> with “${esc(termOpt[1])}”`:'a terminating option'} — the survey ends politely on the spot. Server-side screening, not a form.</div></li>
+      <li><div class="m-body"><b>Run it clean.</b> Restart, pick safe answers through the screeners, cruise the middle, give the NPS (${npsQ?esc(npsQ.qid):'NPS'}) a <b>9</b> — a quick complete; watch the counts tick on the Fielding page.</div></li>
+      <li><div class="m-body"><b>Trigger the probe.</b> One more run: score the NPS <b>0–6</b> and ${folQ?`<b>${esc(folQ.qid)}</b>`:'the follow-up'} appears — conditional routing, live for detractors only.</div></li>
+    </ol>
+  </div>`;
+}
+
+const rail=document.getElementById('rail'), wrap=document.getElementById('segments');
+DATA.forEach((seg,i)=>{
+  const m=SEG[seg.slug]||{label:seg.slug,emblem:'e-default'};
+  const btn=document.createElement('button');
+  btn.setAttribute('role','tab'); btn.id='tab-'+seg.slug;
+  btn.setAttribute('aria-selected', i===0?'true':'false');
+  btn.innerHTML=`<svg class="emblem" aria-hidden="true"><use href="#${m.emblem}"/></svg>${esc(m.label)}`;
+  btn.addEventListener('click',()=>select(seg.slug));
+  rail.appendChild(btn);
+
+  const sec=document.createElement('section');
+  sec.className='seg'; sec.id='seg-'+seg.slug; sec.hidden=i!==0;
+  sec.innerHTML=`
+    <div class="seg-head">
+      <svg class="seg-emblem" aria-hidden="true"><use href="#${m.emblem}"/></svg>
+      <div class="seg-titles">
+        <h2>${esc(seg.title)}</h2>
+        <span class="study"><span class="dot"></span>demo-${esc(seg.slug)}</span>
+      </div>
+    </div>
+    ${protocol(seg)}
+    <div class="legend">
+      <span class="lg t">${gl('i-term')} Terminates — screens the respondent out</span>
+      <span class="lg u">${gl('i-unlock')} Unlocks — conditional follow-up</span>
+      <span class="lg s">${gl('i-safe')} Safe — keeps the interview alive</span>
+    </div>
+    <div class="ledger-wrap"><table>
+      <thead><tr><th style="width:78px">Q</th><th>Question</th><th style="width:45%">Answer guidance</th></tr></thead>
+      <tbody>
+        ${seg.questions.map(q=>`<tr>
+          <td><span class="qid">${esc(q.qid)}</span><span class="qmeta">${esc(q.type.replace('_',' '))}</span></td>
+          <td class="qtext">${esc(q.text)}</td>
+          <td><div class="guide">${cues(seg,q)}</div></td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+  wrap.appendChild(sec);
+});
+document.getElementById('foot-count').textContent = `${DATA.length} segments · 20 questions each`;
+function select(slug){
+  DATA.forEach(s=>{
+    document.getElementById('seg-'+s.slug).hidden = s.slug!==slug;
+    document.getElementById('tab-'+s.slug).setAttribute('aria-selected', s.slug===slug?'true':'false');
+  });
+}
+</script>
+
+</body></html>

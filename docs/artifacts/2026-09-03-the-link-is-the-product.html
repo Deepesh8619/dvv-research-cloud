@@ -1,0 +1,229 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style></head><body>
+<title>The Link Is the Product</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=JetBrains+Mono:wght@400;500&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+:root{
+  --ground:#F3F4F7; --surface:#FCFCFE; --sunk:#E7E9EF;
+  --ink:#15171D; --ink-2:#454A57; --muted:#6E7382; --rule:#D7DAE3;
+  --accent:#9A4A24; --accent-soft:#F3E4DC;
+  --live:#2C6B4F; --broken:#A2332A; --absent:#6E7382;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#111319; --surface:#191C23; --sunk:#22262F;
+    --ink:#E7E9F0; --ink-2:#B2B7C4; --muted:#858B9B; --rule:#2C313C;
+    --accent:#D98A5E; --accent-soft:#2A211C;
+    --live:#7FBE9B; --broken:#DE8B82; --absent:#858B9B;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#111319; --surface:#191C23; --sunk:#22262F;
+  --ink:#E7E9F0; --ink-2:#B2B7C4; --muted:#858B9B; --rule:#2C313C;
+  --accent:#D98A5E; --accent-soft:#2A211C;
+  --live:#7FBE9B; --broken:#DE8B82; --absent:#858B9B;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Source Sans 3",system-ui,-apple-system,sans-serif;
+  font-size:16px; line-height:1.62; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1000px; margin:0 auto; padding:clamp(28px,5vw,72px) clamp(18px,4vw,40px) 100px}
+.col{max-width:68ch}
+h1,h2{font-family:"Bricolage Grotesque",system-ui,sans-serif; font-weight:700; text-wrap:balance; margin:0; letter-spacing:-.02em}
+h1{font-size:clamp(2.2rem,6vw,3.6rem); line-height:1.02}
+h2{font-size:clamp(1.3rem,2.6vw,1.7rem); line-height:1.15}
+h3{font-family:"Source Sans 3",sans-serif; font-size:1rem; font-weight:600; margin:0}
+p{margin:0}
+code,.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+code{font-size:.85em; background:var(--sunk); padding:.12em .36em; border-radius:3px}
+
+.eyebrow{font-family:"JetBrains Mono",monospace; font-size:.67rem; letter-spacing:.18em; text-transform:uppercase; color:var(--muted)}
+.lede{font-size:1.14rem; color:var(--ink-2); max-width:62ch}
+
+header{display:flex; flex-direction:column; gap:22px; padding-bottom:30px; border-bottom:1px solid var(--rule)}
+section{margin-top:clamp(46px,6vw,80px); display:flex; flex-direction:column; gap:22px}
+.sechead{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap}
+
+/* journey spine */
+.spine{display:flex; flex-direction:column}
+.step{
+  display:grid; grid-template-columns:1.6rem 1fr 6.6rem; gap:0 16px;
+  padding:14px 0; border-top:1px solid var(--rule); align-items:start;
+}
+.step:last-child{border-bottom:1px solid var(--rule)}
+.step .n{font-family:"JetBrains Mono",monospace; font-size:.72rem; color:var(--muted); padding-top:3px}
+.step .what{display:flex; flex-direction:column; gap:3px}
+.step .what b{font-weight:600}
+.step .what span{font-size:.88rem; color:var(--ink-2)}
+.chip{
+  justify-self:end; font-family:"JetBrains Mono",monospace; font-size:.63rem;
+  letter-spacing:.1em; text-transform:uppercase; padding:3px 8px; border-radius:3px;
+  border:1px solid currentColor; white-space:nowrap;
+}
+.c-live{color:var(--live)} .c-broken{color:var(--broken)} .c-absent{color:var(--absent)}
+
+/* evidence */
+pre{
+  margin:0; background:var(--sunk); border:1px solid var(--rule); border-radius:4px;
+  padding:14px 16px; overflow-x:auto; font-family:"JetBrains Mono",monospace;
+  font-size:.78rem; line-height:1.6; color:var(--ink-2);
+}
+pre b{color:var(--broken); font-weight:500}
+pre i{color:var(--live); font-style:normal}
+
+.defect{display:flex; flex-direction:column; gap:10px; padding:18px 20px; background:var(--surface); border:1px solid var(--rule); border-left:3px solid var(--broken); border-radius:0 4px 4px 0}
+.defect .tag{font-family:"JetBrains Mono",monospace; font-size:.63rem; letter-spacing:.12em; text-transform:uppercase; color:var(--broken)}
+.defect p{font-size:.93rem; color:var(--ink-2)}
+
+.callout{border-left:3px solid var(--accent); background:var(--accent-soft); padding:18px 22px; border-radius:0 4px 4px 0; display:flex; flex-direction:column; gap:10px}
+.callout p{font-size:.96rem; color:var(--ink-2)}
+.callout strong{color:var(--ink)}
+
+.plan{display:flex; flex-direction:column; gap:2px}
+.phase{display:grid; grid-template-columns:auto 1fr; gap:0 18px; background:var(--surface); border:1px solid var(--rule); border-radius:4px; padding:16px 18px}
+.phase .when{font-family:"JetBrains Mono",monospace; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); padding-top:3px; white-space:nowrap}
+.phase .body{display:flex; flex-direction:column; gap:6px}
+.phase ul{margin:4px 0 0; padding-left:1.1em; display:flex; flex-direction:column; gap:5px; font-size:.9rem; color:var(--ink-2)}
+
+ul.plain{margin:0; padding-left:1.15em; display:flex; flex-direction:column; gap:10px; color:var(--ink-2); font-size:.95rem}
+footer{margin-top:78px; padding-top:22px; border-top:1px solid var(--rule); color:var(--muted); font-size:.8rem}
+@media (max-width:620px){
+  .step{grid-template-columns:1.4rem 1fr}
+  .chip{grid-column:2; justify-self:start; margin-top:6px}
+  .phase{grid-template-columns:1fr}
+  .phase .when{padding-bottom:6px}
+}
+</style>
+
+<div class="wrap">
+<header>
+  <span class="eyebrow">DVV Research Cloud &middot; Fielding engine assessment</span>
+  <h1>The link is the product</h1>
+  <p class="lede">Everything built so far assumed the data arrives. It doesn't — we make it. The client sends a questionnaire; we read its conditions, publish a link, and the people who answer that link <em>are</em> the dataset. So every condition has to be enforced twice: once when a respondent meets it, and once when we check what came back.</p>
+  <p class="lede">The engine that does the first half is further along than expected. It also has three defects that reach the public, and I can prove all three.</p>
+</header>
+
+<section>
+  <div class="sechead"><span class="eyebrow">01 &middot; The journey</span><h2>What a respondent already goes through</h2></div>
+  <p class="col">One row per stage of the path from a vendor's link to a delivered dataset, with what is actually implemented today.</p>
+
+  <div class="spine">
+    <div class="step"><span class="n">01</span><span class="what"><b>The link is created and the survey is frozen</b><span>The approved questionnaire is snapshotted into the link. Re-approving it later cannot change a survey people are already taking.</span></span><span class="chip c-live">Built</span></div>
+    <div class="step"><span class="n">02</span><span class="what"><b>A respondent arrives from a panel</b><span>Token-only entry, no account. A duplicate panel id is screened out as status 30 before it can answer anything.</span></span><span class="chip c-live">Built</span></div>
+    <div class="step"><span class="n">03</span><span class="what"><b>Questions appear, or don't</b><span>Every base compiles to a real display condition — <code>[IF S2 = 2]</code> becomes <code>{S2} anyof [2]</code>.</span></span><span class="chip c-live">Built</span></div>
+    <div class="step"><span class="n">04</span><span class="what"><b>The option list is narrowed to what they said before</b><span>Masking is detected, stored, and then ignored. Every respondent is offered every option.</span></span><span class="chip c-broken">Broken</span></div>
+    <div class="step"><span class="n">05</span><span class="what"><b>Their earlier answer appears inside the next question</b><span>Piping is detected, stored, and then ignored. The scripter's instruction is shown to the public verbatim.</span></span><span class="chip c-broken">Broken</span></div>
+    <div class="step"><span class="n">06</span><span class="what"><b>They are screened out</b><span>Terminates are re-evaluated on the server against every answer so far — never trusted to the browser — and only once every question the condition names has been answered.</span></span><span class="chip c-live">Built</span></div>
+    <div class="step"><span class="n">07</span><span class="what"><b>The cell they belong to is already full</b><span>Quotas fast-fail as soon as a cell is decidable, and the slot itself is claimed atomically at completion. A cell's definition freezes the moment fielding starts.</span></span><span class="chip c-live">Built</span></div>
+    <div class="step"><span class="n">08</span><span class="what"><b>They are sent back to the panel</b><span>A separate redirect per outcome — complete, terminate, overquota, security — on the Lucid/Cint status codes vendors expect.</span></span><span class="chip c-live">Built</span></div>
+    <div class="step"><span class="n">09</span><span class="what"><b>Answers become a dataset</b><span>Completed sessions materialise into a data map and a wide table: <code>data.parquet</code>, <code>datamap.json</code>, crosstabs, an Excel deck. Re-runnable as completes arrive.</span></span><span class="chip c-live">Built</span></div>
+    <div class="step"><span class="n">10</span><span class="what"><b>The dataset is delivered as SPSS</b><span><code>write_sav</code> exists and is used by nothing but tests. Materialising produces parquet and a deck, never a <code>.sav</code>.</span></span><span class="chip c-absent">Missing</span></div>
+    <div class="step"><span class="n">11</span><span class="what"><b>The script is proven before anyone sees it</b><span>Nothing drives synthetic respondents through the real engine to show that each condition fires. The first test of the logic is a stranger from a panel.</span></span><span class="chip c-absent">Missing</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="eyebrow">02 &middot; Evidence</span><h2>What the link actually serves</h2></div>
+  <p class="col">A three-question survey with a mask on Q2 and a pipe on Q3, compiled by the real compiler. This is the JSON a respondent's browser receives.</p>
+
+<pre>{"name": "Q1", "title": "Which brands are you aware of?",
+ "type": "checkbox", "choices": [Brand 1, Brand 2, Brand 3]}
+
+{"name": "Q2", "title": "Which of those do you use? <b>[SHOW ONLY ITEMS SELECTED AT Q1]</b>",
+ "type": "checkbox", "choices": [<b>Brand 1, Brand 2, Brand 3</b>]}
+
+{"name": "Q3", "title": "What do you like about <b>[INSERT RESPONSE FROM Q2]</b>?",
+ "type": "comment", "visibleIf": <i>"{Q1} anyof [1]"</i>}</pre>
+
+  <div class="defect">
+    <span class="tag">Reaches the public</span>
+    <h3>The respondent is shown the scripter's instructions</h3>
+    <p>Q3's title goes out as <code>What do you like about [INSERT RESPONSE FROM Q2]?</code> and Q2's as <code>Which of those do you use? [SHOW ONLY ITEMS SELECTED AT Q1]</code>. A client clicking their own test link sees this on the first screen, and it is the kind of thing that ends a relationship before the data does.</p>
+  </div>
+
+  <div class="defect">
+    <span class="tag">Silently wrong data</span>
+    <h3>The mask is not enforced, so the answers are not what the script promised</h3>
+    <p>Q2 offers all three brands to a respondent who named one. They can — and will — pick brands they never said they knew. Nothing in the file looks malformed afterwards: three valid codes in a valid column.</p>
+    <p>Our own cross-check would then flag it as <code>mask_violated</code> — the QA engine correctly reporting a defect the fielding engine created. Two halves of one system disagreeing about the same sentence in the same document.</p>
+  </div>
+
+  <div class="callout">
+    <p><strong>That disagreement is the whole finding.</strong> The conditions are read once and used twice — to run the survey and to audit it — and right now only the audit half takes masking and piping seriously. Both halves should evaluate the <em>same</em> condition object through the same code. Then a mask either narrows the list in the field, or the audit catches that it didn't; it can never be enforced in one place and ignored in the other.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="eyebrow">03 &middot; Gaps</span><h2>Three things nothing covers yet</h2></div>
+  <ul class="plain col">
+    <li><strong>No dry run.</strong> You cannot prove the script works before a vendor sends real people at it. Everything needed is already there — a pinned survey, a session engine, a server-side condition evaluator — so a dry run is synthetic respondents driven through the <em>real</em> endpoints, returning a per-condition verdict: this terminate fired for 41 of 500, this base showed the question to 128, this mask never narrowed anything, this quota filled at respondent 310. That report is also the thing you hand a client before launch.</li>
+    <li><strong>Completes only.</strong> Materialising keeps status 10 and discards terminates, overquota and security screen-outs. Those rows are the evidence that the screen-outs worked — and the incidence rate the client is paying for. Right now our own screen-out check can never see them, because we throw them away before it looks.</li>
+    <li><strong>No SPSS out.</strong> The delivery format half the industry asks for is one wired function call away, and not wired.</li>
+  </ul>
+</section>
+
+<section>
+  <div class="sechead"><span class="eyebrow">04 &middot; Order</span><h2>What to build, in the order that pays</h2></div>
+  <div class="plan">
+    <div class="phase">
+      <span class="when">First &middot; days</span>
+      <div class="body">
+        <h3>Make the link honour the conditions it already read</h3>
+        <ul>
+          <li>Rewrite a pipe into the display syntax the renderer already understands, so <code>[INSERT RESPONSE FROM Q2]</code> becomes the respondent's own answer.</li>
+          <li>Emit a per-option display condition from each mask, so a masked list narrows to what they actually chose.</li>
+          <li>Strip every bracketed scripter directive from anything shown to a respondent — a whitelist of what the public may see, not a blacklist of what it may not.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">Second &middot; a week</span>
+      <div class="body">
+        <h3>Dry run before launch</h3>
+        <ul>
+          <li>Drive N synthetic respondents through the real session endpoints, with answers sampled from each question's own options.</li>
+          <li>Report per condition: how many it fired for, how many it could never fire for, and which ones nothing exercised.</li>
+          <li>Refuse to publish a link whose screen-out can never fire — a dead terminate is a survey with no screener, and it looks perfect until the data comes back.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">Third &middot; a week</span>
+      <div class="body">
+        <h3>Deliver what a client can open</h3>
+        <ul>
+          <li><code>.sav</code> alongside the Excel, both carrying the data map — variable labels, value labels, types.</li>
+          <li>Every disposition in the export, not just completes, with the status column that makes incidence and drop-off computable.</li>
+          <li>Field report: starts, completes, terminates by question, overquota by cell, median length of interview.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="when">After</span>
+      <div class="body">
+        <h3>The techniques we can read but not yet run</h3>
+        <ul>
+          <li>Least-fill assignment, MaxDiff design and balance, grid rows as first-class rows rather than a flattened matrix.</li>
+          <li>Soft launch: hold at n=50, run the checks, then release the rest — the standard way a DP shop avoids fielding 2,000 interviews against a broken screener.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="eyebrow">05 &middot; Standing</span><h2>Where this leaves us</h2></div>
+  <p class="col">The reframing is smaller than it sounds. Reading a questionnaire's conditions, compiling them into something executable, checking them against respondent-level data — that is all built, and it is the hard part. What is missing is that two of those conditions are honoured by the auditor and not by the engine, and that nothing yet proves the script works before strangers are pointed at it.</p>
+  <p class="col">The first is days of work. The second is the feature that turns this from a tool that processes data into a tool a client trusts to collect it.</p>
+</section>
+
+<footer>
+  <p>Assessment from the code as deployed at <code>210f002</code> &middot; every claim above checked against the running compiler and routes, not inferred &middot; 3 September 2026</p>
+</footer>
+</div>
+
+</body></html>

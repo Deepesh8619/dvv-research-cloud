@@ -1,0 +1,444 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>DVV Research Cloud</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap">
+<style>
+  :root {
+    --ground: #f5f6f8;
+    --surface: #ffffff;
+    --surface-2: #edf0f4;
+    --ink: #101521;
+    --ink-2: #333c4d;
+    --muted: #626d80;
+    --rule: #dbe0e8;
+    --navy: #1f3a5f;
+    --navy-soft: #e6ecf4;
+    --gold: #8a6a1f;
+    --gold-soft: #f6efdd;
+    --green: #1f6b4f;
+    --green-soft: #e2f0ea;
+    --grey-chip: #e6e9ee;
+    --plate: #fbfcfd;
+    --plate-ink: #141b26;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0c1016;
+      --surface: #141922;
+      --surface-2: #1b2230;
+      --ink: #e9edf4;
+      --ink-2: #c5cddb;
+      --muted: #94a0b3;
+      --rule: #252d3b;
+      --navy: #8fb4e3;
+      --navy-soft: #16243a;
+      --gold: #d7b063;
+      --gold-soft: #2a2314;
+      --green: #6fc3a1;
+      --green-soft: #15291f;
+      --grey-chip: #232b38;
+      --plate: #f6f8fa;
+      --plate-ink: #141b26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0c1016;
+    --surface: #141922;
+    --surface-2: #1b2230;
+    --ink: #e9edf4;
+    --ink-2: #c5cddb;
+    --muted: #94a0b3;
+    --rule: #252d3b;
+    --navy: #8fb4e3;
+    --navy-soft: #16243a;
+    --gold: #d7b063;
+    --gold-soft: #2a2314;
+    --green: #6fc3a1;
+    --green-soft: #15291f;
+    --grey-chip: #232b38;
+    --plate: #f6f8fa;
+    --plate-ink: #141b26;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-size: 16.5px; line-height: 1.62; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding-inline: 22px; padding-block: 0 80px; }
+  h1 {
+    font-family: "Newsreader", Georgia, serif; font-weight: 500;
+    font-size: clamp(38px, 6.4vw, 64px); line-height: 1.04; letter-spacing: -0.02em;
+    margin: 0 0 18px; text-wrap: balance;
+  }
+  h2 {
+    font-family: "Newsreader", Georgia, serif; font-weight: 500;
+    font-size: clamp(26px, 3.8vw, 36px); line-height: 1.14; letter-spacing: -0.012em;
+    margin: 0 0 14px; text-wrap: balance;
+  }
+  h3 { font-size: 16px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.003em; }
+  p { margin: 0 0 16px; color: var(--ink-2); max-width: 66ch; }
+  .lede { font-size: 19px; color: var(--ink); }
+  strong { color: var(--ink); font-weight: 600; }
+  ul { padding-left: 20px; margin: 0 0 16px; color: var(--ink-2); max-width: 66ch; }
+  li { margin-bottom: 8px; }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace; font-size: 11.5px; letter-spacing: 0.15em;
+    text-transform: uppercase; color: var(--navy); margin: 0 0 14px;
+  }
+  section { padding-block: 44px; border-top: 1px solid var(--rule); }
+  section:first-of-type { border-top: 0; }
+
+  /* hero */
+  header.hero { padding-block: 64px 10px; }
+  header.hero .thesis {
+    font-family: "Newsreader", Georgia, serif; font-size: clamp(19px, 2.6vw, 23px);
+    line-height: 1.45; color: var(--ink-2); max-width: 30ch; margin: 0;
+  }
+  .hero-rule { height: 3px; width: 64px; background: var(--navy); margin: 26px 0 0; border-radius: 2px; }
+
+  /* before / after */
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; margin: 24px 0 8px; }
+  @media (max-width: 620px) { .compare { grid-template-columns: 1fr; } }
+  .compare > div { background: var(--surface); padding: 20px 22px; }
+  .compare h3 { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; margin-bottom: 12px; }
+  .compare ul { margin: 0; padding-left: 18px; font-size: 14.5px; }
+  .compare li { margin-bottom: 9px; }
+  .compare .after { background: var(--navy-soft); }
+
+  /* capability list — rows, not cards */
+  .caps { display: grid; gap: 0; margin: 20px 0 6px; }
+  .cap { display: grid; grid-template-columns: 30px 1fr; gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--rule); }
+  .cap:last-child { border-bottom: 0; }
+  .cap .i { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--navy); padding-top: 3px; }
+  .cap p { margin: 0; font-size: 15px; }
+
+  /* plate for diagram */
+  .plate { background: var(--plate); color: var(--plate-ink); border: 1px solid var(--rule); border-radius: 10px; padding: 20px; overflow-x: auto; margin: 22px 0 10px; }
+  .plate pre.mermaid { margin: 0; background: none; text-align: center; }
+  .caption { font-size: 13.5px; color: var(--muted); max-width: 66ch; }
+
+  /* pillars */
+  .pillars { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 26px 32px; margin: 26px 0 6px; }
+  .pillar { border-top: 2px solid var(--navy); padding-top: 14px; }
+  .pillar p { font-size: 14.5px; margin: 0; }
+
+  /* scope table */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); margin: 22px 0 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 520px; }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; background: var(--surface-2); }
+  tr:last-child td { border-bottom: 0; }
+  .chip {
+    display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+    letter-spacing: 0.07em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+  }
+  .chip.live { background: var(--green-soft); color: var(--green); }
+  .chip.soon { background: var(--gold-soft); color: var(--gold); }
+  .chip.no { background: var(--grey-chip); color: var(--muted); }
+
+  /* numbers */
+  .proof { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; margin: 24px 0 10px; }
+  .proof > div { background: var(--surface); padding: 18px 20px; }
+  .proof .v { font-family: "IBM Plex Mono", monospace; font-size: 27px; color: var(--navy); font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .proof .l { font-size: 13px; color: var(--muted); margin-top: 7px; line-height: 1.45; }
+
+  /* pull quote */
+  .pull {
+    font-family: "Newsreader", Georgia, serif; font-size: clamp(21px, 3vw, 27px);
+    line-height: 1.38; color: var(--ink); border-left: 3px solid var(--navy);
+    padding-left: 22px; margin: 30px 0; max-width: 34ch;
+  }
+
+  /* roadmap */
+  .road { display: grid; gap: 0; margin: 22px 0 6px; }
+  .stop { display: grid; grid-template-columns: 112px 1fr; gap: 20px; padding: 16px 0; border-bottom: 1px solid var(--rule); }
+  @media (max-width: 560px) { .stop { grid-template-columns: 1fr; gap: 4px; } }
+  .stop:last-child { border-bottom: 0; }
+  .stop .when { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); padding-top: 3px; }
+  .stop p { margin: 0; font-size: 14.5px; }
+
+  .ask { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 24px 26px; margin-top: 24px; }
+  .ask h3 { margin-bottom: 10px; }
+  .ask ol { margin: 0; padding-left: 20px; color: var(--ink-2); }
+  .ask li { margin-bottom: 10px; }
+
+  footer.end { border-top: 1px solid var(--rule); padding-top: 26px; margin-top: 40px; font-size: 13.5px; color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="page">
+  <header class="hero">
+    <p class="eyebrow">DVV Research Cloud · Briefing, September 2026</p>
+    <h1>A questionnaire, fielded the same day it lands.</h1>
+    <p class="thesis">The document does the scripting. A researcher checks the result. Nothing reaches a respondent until four separate checks agree it should.</p>
+    <div class="hero-rule"></div>
+  </header>
+
+  <section>
+    <p class="eyebrow">The problem</p>
+    <h2>Scripting is the bottleneck in every project</h2>
+    <p class="lede">A client sends a Word questionnaire. Somebody reads all forty pages and rebuilds it by hand in a survey tool — every question type, every answer list, every "ask only if", every screen-out, mask and pipe.</p>
+    <p>It takes days. It is the step that decides whether the project starts this week or next. And it is where the expensive mistakes live: a base pointing at the wrong question, a screen-out that fires on everyone, a brand list that shows brands the person never heard of. Those are found in field, after real money has been spent on real respondents.</p>
+    <div class="compare">
+      <div>
+        <h3>How it works today</h3>
+        <ul>
+          <li>Days of scripter time per study</li>
+          <li>Capacity capped by how many scripters you have</li>
+          <li>Errors found by a human re-reading, or by a respondent</li>
+          <li>The same house conventions re-learned by each new scripter</li>
+          <li>Data map arrives after scripting, not before</li>
+        </ul>
+      </div>
+      <div class="after">
+        <h3>With this system</h3>
+        <ul>
+          <li>The document is read automatically; a researcher reviews it</li>
+          <li>Capacity is a review queue, not a build queue</li>
+          <li>Four checks stand between a mistake and a respondent</li>
+          <li>Conventions are taught once and applied to every future document</li>
+          <li>Data map is fixed at approval — before anyone is let in</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">What it does</p>
+    <h2>Six things, end to end</h2>
+    <div class="caps">
+      <div class="cap"><div class="i">01</div><div>
+        <h3>Reads the questionnaire</h3>
+        <p>Word or PDF in. Questions, types, answer lists with their punch codes, bases, screen-outs, grids, ranking, constant sums, loops and hidden variables out — with a note beside each one saying which line of the document it came from.</p>
+      </div></div>
+      <div class="cap"><div class="i">02</div><div>
+        <h3>Puts a researcher in charge of the result</h3>
+        <p>A review screen that groups questions the way a researcher thinks — screener, profile, core, loops, open-ends, hidden — shows which questions depend on which, and lists every unresolved issue as something clickable rather than a warning to ignore.</p>
+      </div></div>
+      <div class="cap"><div class="i">03</div><div>
+        <h3>Learns your house style</h3>
+        <p>When a reviewer corrects a misread, they can teach the convention instead of just fixing the question: "in this client's documents, this phrase means a multi-select". Re-read applies it across the whole questionnaire, and every document that client sends afterwards.</p>
+      </div></div>
+      <div class="cap"><div class="i">04</div><div>
+        <h3>Fields the survey</h3>
+        <p>A live link, one question per screen, built for a phone. Screen-outs, quotas, masks and pipes are all decided on our server — never in the respondent's browser. Soft launch holds at a set number of completes so the first data can be checked before full field.</p>
+      </div></div>
+      <div class="cap"><div class="i">05</div><div>
+        <h3>Watches the field</h3>
+        <p>Starts, incidence, where people screen out and on which rule, where they drop off, median interview length, and now what device they answered on and whether their stated location agrees with their connection — flagged, never acted on automatically.</p>
+      </div></div>
+      <div class="cap"><div class="i">06</div><div>
+        <h3>Delivers</h3>
+        <p>A clean data file and data map, cross-tabs, a deck, and a read-only link for the client. Plus an assistant that answers questions about the project — including what respondents typed in the open-ends, searched by meaning rather than keyword.</p>
+      </div></div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">How it works</p>
+    <h2>One picture</h2>
+    <div class="plate">
+<pre class="mermaid">
+flowchart LR
+  A["Questionnaire<br/>arrives"] --> B["Read<br/>automatically"]
+  B --> C["Researcher<br/>reviews & approves"]
+  C --> D["Checks:<br/>dry run + pre-link"]
+  D --> E["Live link<br/>soft launch"]
+  E --> F["QC on first<br/>completes"]
+  F --> G["Full field<br/>quotas enforced"]
+  G --> H["Data file,<br/>tables, deck"]
+  F -. problem found .-> C
+</pre>
+    </div>
+    <p class="caption">The loop back to review is the important arrow: when QC finds something in the first fifty interviews, the fix goes through the same review and the same checks as the original.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Why this, and not something off the shelf</p>
+    <h2>Four decisions that are hard to copy</h2>
+    <div class="pillars">
+      <div class="pillar">
+        <h3>It reads rules, not vibes</h3>
+        <p>Roughly two thirds of a questionnaire is understood by parsers that know market-research conventions — no AI involved, same answer every time, and a line of the document to point at. AI is used only for what is genuinely left over.</p>
+      </div>
+      <div class="pillar">
+        <h3>It gets better with each client</h3>
+        <p>Every correction can become a taught convention. The system that reads your second study for a client is measurably better than the one that read the first — and it is your team's knowledge, not a vendor's.</p>
+      </div>
+      <div class="pillar">
+        <h3>Mistakes stop before respondents</h3>
+        <p>Review flags, a dry run through every rule, a server-side pre-link check that can refuse to create the link, and a soft-launch hold. Four independent gates, each catching what the others miss.</p>
+      </div>
+      <div class="pillar">
+        <h3>The data stays where it belongs</h3>
+        <p>One private stack per client. Open-weight models only — no OpenAI or Anthropic anywhere in the code. Respondent locations are resolved from a file on the server; no address is ever sent to an outside service.</p>
+      </div>
+    </div>
+    <blockquote class="pull">The promise is not "AI reads your questionnaire". It is that a mistake does not reach a respondent.</blockquote>
+  </section>
+
+  <section>
+    <p class="eyebrow">Evidence so far</p>
+    <h2>What has actually been measured</h2>
+    <div class="proof">
+      <div><div class="v">11 → 0</div><div class="l">Questions rendering blank to a respondent on a live consumer study, across three fixes</div></div>
+      <div><div class="v">20 → 6</div><div class="l">Questions no simulated respondent could reach, before and after hidden-variable routing</div></div>
+      <div><div class="v">0</div><div class="l">Pre-link check failures on that same document once the gates were satisfied</div></div>
+      <div><div class="v">1,199</div><div class="l">Automated tests passing, each named for a behaviour a user would notice</div></div>
+    </div>
+    <p class="caption">These are from internal benchmark documents and one real study. They are not a claim about every questionnaire ever written — they are what we can show.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Scope, honestly</p>
+    <h2>What is ready, what is not</h2>
+    <p>The fastest way to lose a client is to demo something that is not finished. This is the current line.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Capability</th><th>Status</th><th>Detail</th></tr></thead>
+        <tbody>
+          <tr><td>Document → reviewed questionnaire</td><td><span class="chip live">Working</span></td><td>Used on real client documents</td></tr>
+          <tr><td>Review, teaching, re-read</td><td><span class="chip live">Working</span></td><td>Including re-approval after a change</td></tr>
+          <tr><td>Live link, screen-outs, quotas, soft launch</td><td><span class="chip live">Working</span></td><td>All decisions server-side</td></tr>
+          <tr><td>Data file, data map, tables, deck</td><td><span class="chip live">Working</span></td><td>SPSS and Excel</td></tr>
+          <tr><td>Device &amp; location paradata</td><td><span class="chip live">Working</span></td><td>Live; location check needs a lookup file installed</td></tr>
+          <tr><td>Assistant that searches the project</td><td><span class="chip live">Working</span></td><td>Acts only through a card a person confirms</td></tr>
+          <tr><td>Search open-ends by meaning</td><td><span class="chip soon">One switch away</span></td><td>Built and tested; the language model has to be enabled on the server, otherwise it matches wording only</td></tr>
+          <tr><td>One private stack per client</td><td><span class="chip soon">Prepared</span></td><td>Packaged and licensed, not yet run end to end for a paying client</td></tr>
+          <tr><td>Hosting in an Indian AWS region</td><td><span class="chip soon">Prepared</span></td><td>Configured for Mumbai; untested against a real AWS account</td></tr>
+          <tr><td>Panel integrations, automated invoicing</td><td><span class="chip no">Not built</span></td><td>Links are handed to a panel manually today</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">What a client receives</p>
+    <h2>The handover</h2>
+    <ul>
+      <li><strong>A live survey link</strong> that works on a phone, with the routing their document described.</li>
+      <li><strong>A data map</strong> — every column, every label, every missing-value code — available at approval, before field.</li>
+      <li><strong>A data file</strong> in SPSS or Excel, one column per answer, punch codes intact.</li>
+      <li><strong>Field reporting</strong>: incidence, screen-out reasons, drop-off, interview length, device split.</li>
+      <li><strong>Tables and a deck</strong>, plus a read-only share link for their own stakeholders.</li>
+    </ul>
+  </section>
+
+  <section>
+    <p class="eyebrow">What is next</p>
+    <h2>The next three moves</h2>
+    <div class="road">
+      <div class="stop"><div class="when">Immediate</div><div>
+        <h3>Turn on meaning-based search in production</h3>
+        <p>The embedding model is a one-line change to the server configuration. Until it is on, the assistant searches questions and open-ends by wording only — and says so in every answer.</p>
+      </div></div>
+      <div class="stop"><div class="when">Next</div><div>
+        <h3>Run one client bundle end to end</h3>
+        <p>A private stack, a licence key, a real questionnaire, a real field, a real delivery — start to finish, on infrastructure that is not a developer's laptop. Nothing is genuinely proven until this has happened once.</p>
+      </div></div>
+      <div class="stop"><div class="when">After that</div><div>
+        <h3>Widen the reading, on real documents</h3>
+        <p>Every questionnaire from a new client is a test of the parsers. The benchmark set has already surfaced parser defects that no amount of internal testing would have found — that loop continues, and each fix is permanent.</p>
+      </div></div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Decisions we need</p>
+    <h2>What we are asking for</h2>
+    <div class="ask">
+      <h3>Three things, in order</h3>
+      <ol>
+        <li><strong>One real questionnaire to run end to end.</strong> Not a demo document — a live project with a deadline, so the gaps show up where we can fix them.</li>
+        <li><strong>A decision on hosting.</strong> One stack per client on our infrastructure, or in the client's own cloud. Both are built; the choice changes what we quote and what we promise on data residency.</li>
+        <li><strong>Who reviews.</strong> The system replaces scripting, not judgement. Somebody has to own the approval step — the person who says "yes, this is what the client asked for" before the link goes out.</li>
+      </ol>
+    </div>
+  </section>
+
+  <footer class="end">
+    Prepared for Vishal and Vaibhav. Every figure here is measured, and every capability is marked with what has genuinely been run versus what is prepared and waiting for a first real project. If a claim in this document cannot be demonstrated on request, it should not be in it — flag anything that reads stronger than the evidence behind it.
+  </footer>
+</div>
+
+<!--claude-mermaid-runtime-begin:3477-->
+<style>.mermaid-diagram{margin-block:4px}.mermaid-diagram svg{display:block;margin:0 auto;max-width:100%;height:auto}</style>
+<script src="/_runtime/mermaid-11.16.1.min.js"></script>
+<script>(function(){
+var CFG={"palettes":{"light":{"surface":"#f4efe4","text":"#42392e","line":"#8a7f6d","border":"#7a6c52","bg":"#fffdf8"},"dark":{"surface":"#262b34","text":"#f2f3f5","line":"#a8adb8","border":"#9aa4b8","bg":"#1f232b"}}};
+if(typeof mermaid==='undefined')return;
+var pres=Array.prototype.slice.call(document.querySelectorAll('pre.mermaid')).filter(function(p){if(p.hasAttribute('data-claude-mermaid-claimed'))return false;p.setAttribute('data-claude-mermaid-claimed','1');return true;});
+if(!pres.length)return;
+var mq=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
+var root=document.documentElement;
+var items=pres.map(function(pre){
+var mount=document.createElement('div');mount.className='mermaid-diagram';
+return {pre:pre,mount:mount,src:pre.textContent||''};
+});
+var seq=0;
+var renderGen=0;
+var lastKey='';
+function pageBg(fallback){
+var els=[document.body,document.documentElement];
+for(var i=0;i<els.length;i++){
+var c=els[i]&&getComputedStyle(els[i]).backgroundColor;
+if(c&&c!=='transparent'&&c!=='rgba(0, 0, 0, 0)')return c;
+}
+return fallback;
+}
+function render(){
+var theme=root.getAttribute('data-theme');
+var dark=theme==='dark'||(!!(mq&&mq.matches)&&theme!=='light');
+var pal=dark?CFG.palettes.dark:CFG.palettes.light;
+var bg=pageBg(pal.bg);
+var key=(dark?'d':'l')+'|'+bg;
+if(key===lastKey)return;
+lastKey=key;
+var gen=++renderGen;
+var font=getComputedStyle(document.body).fontFamily||'sans-serif';
+var nat={useMaxWidth:false};
+mermaid.initialize({
+startOnLoad:false,securityLevel:'strict',theme:'base',
+flowchart:nat,sequence:nat,er:nat,state:nat,class:nat,pie:nat,
+gantt:nat,journey:nat,timeline:nat,gitGraph:nat,mindmap:nat,xyChart:nat,
+quadrantChart:nat,sankey:nat,c4:nat,requirement:nat,block:nat,
+packet:nat,kanban:nat,architecture:nat,radar:nat,
+themeVariables:{background:bg,mainBkg:pal.surface,primaryColor:pal.surface,
+primaryTextColor:pal.text,lineColor:pal.line,primaryBorderColor:pal.border,
+nodeBorder:pal.border,clusterBorder:pal.border,edgeLabelBackground:bg,
+clusterBkg:'rgba(127,127,127,0.07)',titleColor:pal.text,
+darkMode:dark,rowOdd:bg,rowEven:'rgba(127,127,127,0.07)',
+attributeBackgroundColorOdd:bg,attributeBackgroundColorEven:'rgba(127,127,127,0.07)',
+fontSize:'16px',fontFamily:font},
+themeCSS:'.node rect, .node circle, .node polygon, .node path, .cluster rect { stroke-width: 2px; }'
+});
+items.forEach(function(it){
+var id='claude-mermaid-'+seq++;
+mermaid.render(id,it.src).then(function(r){
+if(gen!==renderGen)return;
+var prev=it.pre.previousElementSibling;
+if(prev&&prev.className==='mermaid-diagram'&&prev!==it.mount)return;
+it.mount.innerHTML=r.svg;
+if(!it.mount.parentNode)it.pre.parentNode.insertBefore(it.mount,it.pre);
+it.pre.style.display='none';
+},function(){
+var scratch=document.getElementById(id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+scratch=document.getElementById('d'+id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+if(gen!==renderGen)return;
+if(it.mount.parentNode)it.mount.parentNode.removeChild(it.mount);
+it.pre.style.display='';
+});
+});
+}
+render();
+if(mq&&mq.addEventListener)mq.addEventListener('change',render);
+if(typeof MutationObserver!=='undefined')new MutationObserver(render).observe(root,{attributes:true,attributeFilter:['data-theme']});
+})();</script>
+<!--claude-mermaid-runtime-end-->
+
+</body></html>
