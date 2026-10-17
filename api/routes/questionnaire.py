@@ -76,6 +76,7 @@ from src.engines.questionnaire.logic_review import review as review_logic
 from src.engines.questionnaire.qa_loop import run_qa
 from src.engines.questionnaire.question_agent import revise as question_agent_revise
 from src.engines.questionnaire.question_agent import suggest_repairs
+from src.engines.questionnaire.second_look import second_look
 from src.engines.rag.store import ensure_index
 from src.intake.questionnaire_loader import (
     load_docx,
@@ -307,6 +308,7 @@ def _status_response(
         qa=metadata.get("qa"),
         logic_review=metadata.get("logic_review"),
         decoding=metadata.get("decoding"),
+        second_look=metadata.get("second_look"),
     )
 
 
@@ -1014,6 +1016,10 @@ def update_question(
             },
         )
 
+    # A person's save is a decision: the question is looked at again as it now
+    # stands (rules only, no model), so a solved problem stops showing and what
+    # is still wrong is said again in one sentence.
+    second_look(survey, use_model=False, locked=approved, only={new_qid})
     survey.metadata["validation_errors"] = problems_after
     _save_definition(db, questionnaire, survey)
     if new_qid != qid:
@@ -1266,7 +1272,11 @@ def run_questionnaire_qa(
     is for a study extracted before a parser fix, or after edits."""
     questionnaire = _latest_questionnaire(db, study_id)
     survey = _load_definition(db, questionnaire)
-    record = run_qa(survey, locked=set(questionnaire.approved_qids or []))
+    locked = set(questionnaire.approved_qids or [])
+    record = run_qa(survey, locked=locked)
+    # Then the second look: every flagged question re-checked, solved where the
+    # document settles it, explained in one sentence where it does not.
+    record["second_look"] = second_look(survey, locked=locked)
     survey.metadata["validation_errors"] = survey.validate()
     _save_definition(db, questionnaire, survey)
     logger.info(

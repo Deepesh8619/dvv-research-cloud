@@ -1774,6 +1774,13 @@ def extract_survey_definition(
     # respondent will meet it, a programmer agent repairs what it safely can,
     # and what is left is flagged for a person. Deterministic — no model call.
     run_qa(survey)
+    # The second look: with every question read, each flagged one is re-checked
+    # (stale flags cleared), solved from the document or by a model shown the
+    # questions around it, and explained in one plain sentence if neither can.
+    # The model is asked only for real documents, never for tests' fixtures.
+    from src.engines.questionnaire.second_look import second_look
+
+    second_look(survey, use_model=blocks is not None)
     # A second opinion over the whole survey, for problems between questions no
     # rule covers. Real documents only (one model call); never blocks anything.
     if blocks is not None:

@@ -245,6 +245,8 @@ class QuestionnaireStatusResponse(BaseModel):
     # Which reading skills decoded the document, what none could read, and the
     # recurring conventions worth teaching (decoding_report.py).
     decoding: dict | None = None
+    # The second look: flagged questions fixed, ready to apply, explained, or left to a person.
+    second_look: dict | None = None
 
 
 class QuestionnaireSettingsRequest(BaseModel):
