@@ -183,3 +183,25 @@ def test_the_base_of_every_question_is_reported(client) -> None:
 
     assert "routing" in body
     assert set(body["routing"]) == {"n_checked", "n_unchecked", "issues"}
+
+
+def test_rows_from_an_uploaded_file_are_read_from_the_run_folder(client) -> None:
+    """Processing writes the rows beside the deck, not in the upload folder; the
+    check reported "the server restarted" and skipped every row-level check."""
+    import polars as pl
+
+    test_client, session_factory, tmp_path = client
+    _seed(session_factory)
+    run_dir = Path(tmp_path) / "study_20261017_abc"
+    run_dir.mkdir()
+    pl.DataFrame({"Q1": [1, 2, 7]}).write_parquet(run_dir / "data.parquet")
+    db = session_factory()
+    db.query(StudyDB).filter(StudyDB.id == "s1").update(
+        {"excel_path": str(run_dir / "deck.xlsx")}
+    )
+    db.commit()
+    db.close()
+
+    body = test_client.post("/api/studies/s1/crosscheck").json()
+    assert body["data_file_available"] is True
+    assert body["n_rows"] == 3

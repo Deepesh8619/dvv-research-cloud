@@ -21,6 +21,14 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-17 — fielded data into an existing project (branch feat/attach-data)
+
+| Change | Evidence |
+|---|---|
+| The *Questionnaire checks* tab uploads (or replaces) the fielded data file of an existing project, runs the usual processing, and says when the check is ready. Before, a project started from its questionnaire had nowhere to put the client's export. | Real Google Ads export attached to a questionnaire project: 254 respondents, 115 questions linked, 8 findings |
+| The data check read respondent rows from the upload folder; processing writes them to the run folder. Every project whose data came from an upload skipped all row-level checks with "the server restarted". | Integration test fails before, passes after |
+| The project API never returned the data file's name, so the Data file row and its Download button were empty. | Integration test |
+
 ## 2026-10-17 — second look: every flagged question re-checked, solved or explained (branch feat/second-look)
 
 A reviewer met DA_VID_EFFIC as three flags ("Empty options", "Verification
