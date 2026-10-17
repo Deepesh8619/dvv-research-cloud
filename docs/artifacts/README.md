@@ -1,6 +1,6 @@
 # Published write-ups (archive)
 
-Snapshots of the DVV write-ups published as private claude.ai artifacts, kept here so the
+The current briefing is the first file to share. Below it are snapshots of the DVV write-ups published as private claude.ai artifacts, kept here so the
 repository holds every one of them. Each file is the page as published on the date in its name;
 the live page may have moved on. Open a file in a browser to read it.
 
@@ -13,7 +13,8 @@ the live page may have moved on. Open a file in a browser to read it.
 | [2026-09-03-blind-instrument-audit.html](2026-09-03-blind-instrument-audit.html) | Three public questionnaires (Fed SHED, CDC BRFSS) run blind; fifteen defects found and fixed | https://claude.ai/artifact/1KCJwHCCiyRVrvsGL7DcfS |
 | [2026-09-03-the-link-is-the-product.html](2026-09-03-the-link-is-the-product.html) | Fielding-engine assessment: masks, pipes, dry run, deliverables | https://claude.ai/artifact/AwD6Mx29d3q97GX8z6Qcmv |
 | [2026-09-20-inside-dvv-research-cloud.html](2026-09-20-inside-dvv-research-cloud.html) | Engineering walkthrough: every stage, the traps, the code | https://claude.ai/artifact/7APc1QwvsSk97qd7HiBc8F |
-| [2026-09-20-briefing.html](2026-09-20-briefing.html) | Briefing for Vishal and Vaibhav: what it does, scope, decisions needed | https://claude.ai/artifact/YH8FmNFzserM9dqzRUh1eQ |
+| [2026-10-17-briefing.html](2026-10-17-briefing.html) | **Current briefing — start here.** What it does, the four gates, the data check, measured results, scope, decisions needed | https://claude.ai/artifact/YH8FmNFzserM9dqzRUh1eQ |
+| [2026-09-20-briefing.html](2026-09-20-briefing.html) | The September version of the briefing (superseded) | same link, earlier version |
 | [2026-10-15-research-tasks.html](2026-10-15-research-tasks.html) | The 14 research tasks (same content as `docs/RESEARCH_TASKS.md`) | https://claude.ai/artifact/BJSUzpGf445C7yRPdEwGZR |
 
 Figures in older write-ups (test counts, scores) are as of their date; current numbers are in
