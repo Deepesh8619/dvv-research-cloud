@@ -53,6 +53,7 @@ from src.core.survey_definition import (
 from src.engines.fielding.paradata import DEVICE_CODES
 from src.engines.fielding.paradata import summarise as summarise_paradata
 from src.engines.fielding.rotation import ROTATION_VARIABLE, rotating_blocks
+from src.engines.questionnaire.bipolar import FLIP_LABELS, FLIP_VARIABLE, flipping_questions
 from src.engines.questionnaire.write_ins import write_in_name, write_ins
 
 logger = logging.getLogger(__name__)
@@ -602,6 +603,18 @@ def materialize_fielding(
             VarType.SINGLE,
             [code_of.get(getattr(s, "block_order", None)) for s in completes],
         )
+
+    # Which side each respondent saw a bipolar grid's statements on. Same
+    # reason as the block order: an order control nobody can see is no control.
+    if flipping_questions(survey):
+        datamap.add(Variable(
+            name=FLIP_VARIABLE, label="Bipolar statements: as written or flipped",
+            type=VarType.SINGLE, values=dict(FLIP_LABELS), provenance="fielding",
+        ))
+        columns[FLIP_VARIABLE] = _pandas_series(VarType.SINGLE, [
+            _to_int((getattr(s, "entry_params", None) or {}).get("bipolar_flip"))
+            for s in completes
+        ])
 
     df = pd.DataFrame(columns, columns=[v.name for v in datamap.variables])
     return datamap, df

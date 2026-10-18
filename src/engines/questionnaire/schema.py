@@ -83,6 +83,11 @@ FLAG_TRADE_OFF_UNSUPPORTED = "TRADE_OFF_UNSUPPORTED"
 # but the question was read as a choice list. The two give different data
 # columns, so a person decides which one the instrument really is.
 FLAG_ENTRY_MODE_CONFLICT = "ENTRY_MODE_CONFLICT"
+# The question is a kind the link cannot run yet (a model read a ranking grid,
+# a multi-answer grid...). Kept as the nearest kind it can run, with the real
+# kind recorded in `validation["intended_type"]`, so nobody mistakes the
+# stand-in for the instrument.
+FLAG_TYPE_NOT_SUPPORTED = "TYPE_NOT_SUPPORTED"
 
 
 # --- Extraction schema ------------------------------------------------------

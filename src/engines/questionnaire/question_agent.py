@@ -26,6 +26,7 @@ from dataclasses import fields as dataclass_fields
 from src.ai.known_failures import block_for
 from src.ai.router import BackendUnavailable, ModelOutputError, run_task
 from src.core.survey_definition import Option, Question, QuestionType
+from src.engines.questionnaire import schema
 from src.engines.questionnaire.diffing import _diff_question
 from src.engines.questionnaire.qa_loop import REPAIRS, qa_check
 
@@ -35,6 +36,17 @@ _REMOVING = re.compile(
     r"\b(remove|delete|drop|take out|get rid of|fewer|only keep|keep only)\b", re.I
 )
 _TYPES = [t.value for t in QuestionType if t is not QuestionType.MAXDIFF]
+# Kinds a model may recognise that are not types of their own here. Squeezing
+# them into the nearest type silently is how a bipolar grid became a grid of
+# "0=Agree fully with" and "Theme"; naming them keeps the real kind on record.
+#   name -> (stand-in type, or None to keep the current one; runs as is?)
+_INTENDED_TYPES: dict[str, tuple[QuestionType | None, bool]] = {
+    "bipolar_grid": (QuestionType.GRID_SINGLE, True),
+    "slider": (None, True),
+    "grid_multi": (QuestionType.GRID_SINGLE, False),
+    "rank_grid": (QuestionType.GRID_SINGLE, False),
+    "other": (None, False),
+}
 # Kept small and explicit: optional flags on every row and an open-ended
 # "validation" object are where models produce malformed structured answers
 # ('anchored false': None), which providers reject outright.
@@ -56,7 +68,10 @@ _NUMBER = {"type": "integer"}
 REVISE_SCHEMA: dict = {
     "type": "object",
     "properties": {
-        "type": {"type": "string", "enum": _TYPES},
+        "type": {"type": "string", "enum": [*_TYPES, *_INTENDED_TYPES],
+                 "description": "bipolar_grid: two opposite statements per row with a scale "
+                                "between; grid_multi: several answers per row; rank_grid: a "
+                                "rank per row; slider: a slider; other: none of these."},
         "text": {"type": "string"},
         "options": {"type": "array", "items": _ITEM},
         "rows": {"type": "array", "items": _ROW},
@@ -212,10 +227,18 @@ def revise_with_context(q: Question, instruction: str, by_qid: dict[str, Questio
             "say it in different words."
         )}
     raw = response.content if isinstance(response.content, dict) else {}
-    try:
-        new_type = QuestionType(raw.get("type"))
-    except ValueError:
-        return {"error": f"The agent answered with a type that does not exist: {raw.get('type')}"}
+    intended = raw.get("type") if raw.get("type") in _INTENDED_TYPES else None
+    if intended:
+        stand_in, runs = _INTENDED_TYPES[intended]
+        if intended == "slider":  # one slider per row is a grid; a single one a number
+            stand_in = QuestionType.GRID_SINGLE if raw.get("rows") else QuestionType.NUMERIC
+        new_type = stand_in or q.type
+    else:
+        try:
+            new_type = QuestionType(raw.get("type"))
+        except ValueError:
+            return {"error": "The agent answered with a type that does not exist: "
+                             f"{raw.get('type')}"}
 
     allowed = _norm(" ".join([
         q.source_text or "", q.text or "", instruction,
@@ -251,6 +274,12 @@ def revise_with_context(q: Question, instruction: str, by_qid: dict[str, Questio
     }
     if limits:
         after.validation = {**(q.validation or {}), **limits}
+    if intended:
+        after.validation = {**(after.validation or {}), "intended_type": intended}
+        if intended == "bipolar_grid":
+            after.validation.setdefault("bipolar", {"flip_half": False})
+        if not runs and schema.FLAG_TYPE_NOT_SUPPORTED not in after.flags:
+            after.flags = [*after.flags, schema.FLAG_TYPE_NOT_SUPPORTED]
     explanation = str(raw.get("explanation") or "Revised as asked.").strip()
     if notes:
         explanation += " (" + "; ".join(notes) + ")"

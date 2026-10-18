@@ -90,7 +90,10 @@ def test_a_tripped_grid_goes_to_the_model_and_its_fix_is_kept_when_the_tripwire_
 
     monkeypatch.setattr("src.engines.questionnaire.question_agent.run_task", fake)
     q = _q41()
+    # No `Q41_n |` table to read by rule: the statements are plain lines.
+    q.source_text = "\n".join(line.split(" | ")[1] if line.startswith("Q41_") else line
+                              for line in Q41_SOURCE.splitlines())
     sl.second_look(SurveyDefinition(study_id="s", questions=[q]), use_model=True)
-    assert "Q41_1" in seen["prompt"]  # the model was shown the document's table
+    assert "I keep it simple" in seen["prompt"]  # the model was shown the document
     assert q.validation["resolution"]["status"] == "fixed"
     assert [r.code for r in q.rows] == [1, 2, 3]
