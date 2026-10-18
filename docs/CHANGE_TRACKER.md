@@ -21,6 +21,17 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-18 — every variable and what fills it (branch feat/variables-view)
+
+Owners and analysts get a **Variables** tab: every column the data file will
+have — hidden variables, the link's assigned arms and paradata included — and
+what fills each one: *asked*, *computed* (with the rule or base in words: "1
+when D2 = 1 … 4 when D2 ≥ 4"), *assigned by the link*, *recorded*, or **not
+filled** (a hidden variable with no approved rule — a banner arriving empty),
+with every code to check punched data against. Built by the same code that
+writes the file, so it cannot drift. Client reviewers do not see it (the
+endpoint now refuses the reviewer role).
+
 ## 2026-10-18 — coded hidden variables computed for every respondent (branch feat/derived-rules)
 
 A coded hidden variable (Bubble D2a "CODE SIZE OF HOUSEHOLD" 1/2/3/4 or more,

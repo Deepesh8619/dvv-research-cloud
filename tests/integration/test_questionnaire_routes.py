@@ -1524,3 +1524,39 @@ def test_the_preview_is_the_links_own_rendering_of_unsaved_edits(client):
     assert any("nothing to answer" in p for p in body["problems"])
     stored = test_client.get("/api/studies/study_q1/questionnaire/questions/Q2").json()
     assert stored["text"] == "Which brands do you know?"  # nothing saved
+
+
+def test_every_variable_says_what_fills_it_and_only_owners_and_analysts_see_it(client):
+    """Hidden variables are where the data layout goes wrong unseen: one with no
+    rule arrives empty. The list says, column by column, what fills it."""
+    from src.core.survey_definition import Block, Expression, Option, Question, QuestionType
+
+    test_client, session_factory, state = client
+    d2 = Question(qid="D2", type=QuestionType.NUMERIC, text="People in your home?")
+    at_least_2 = Expression(op="not", children=[Expression(op="lt", qid="D2", value=2)])
+    with_rule = Question(qid="D2a", type=QuestionType.INFO, text="CODE SIZE OF HOUSEHOLD",
+                         flags=["DERIVED_VARIABLE"],
+                         options=[Option(1, "1", derive_if=Expression(op="eq", qid="D2", value=1)),
+                                  Option(2, "2+", derive_if=at_least_2)])
+    no_rule = Question(qid="C7a", type=QuestionType.INFO, text="CODE REGION",
+                       flags=["DERIVED_VARIABLE"], options=[Option(1, "West")])
+    path = Question(qid="HID_TEEN", type=QuestionType.INFO, text="Teen path",
+                    flags=["DERIVED_VARIABLE"],
+                    show_if=Expression(op="eq", qid="D2", value=3, verbatim_text="IF D2 = 3"))
+    state["survey"] = SurveyDefinition(
+        study_id="study_q1", questions=[d2, with_rule, no_rule, path],
+        blocks=[Block(block_id="B", question_ids=["D2", "D2a", "C7a", "HID_TEEN"])])
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    body = test_client.get("/api/studies/study_q1/questionnaire/datamap").json()
+    by_name = {v["name"]: v for v in body["variables"]}
+    assert by_name["D2"]["filled_by"] == "asked"
+    assert by_name["D2a"]["filled_by"] == "computed" and "D2 ≥ 2" in by_name["D2a"]["how"]
+    assert by_name["C7a"]["filled_by"] == "not_filled"
+    assert by_name["HID_TEEN"]["filled_by"] == "computed" and "D2 = 3" in by_name["HID_TEEN"]["how"]
+    assert by_name["vStatus"]["filled_by"] == "recorded"
+
+    state["role"] = "reviewer"
+    assert test_client.get("/api/studies/study_q1/questionnaire/datamap").status_code == 403
