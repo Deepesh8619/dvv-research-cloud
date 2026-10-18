@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import CleaningPanel from '../components/CleaningPanel'
 import CrosscheckPanel from '../components/CrosscheckPanel'
 import axios from 'axios'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { ProfileVariable, Study, studiesApi, shareApi, ShareLink, StudyProfile, questionnaireApi } from '../api/client'
+import { Study, studiesApi, shareApi, ShareLink, questionnaireApi } from '../api/client'
+import FieldworkCards from '../components/FieldworkCards'
 import { useAuth } from '../auth/AuthContext'
 import ChatBot from '../components/ChatBot'
 import { CheckIcon, DocChartIcon, DownloadIcon, LinkIcon } from '../components/Icons'
@@ -427,6 +428,10 @@ function OverviewTab({ study, progress }: { study: Study; progress: number }) {
           </div>
         </div>
 
+        {/* What the fieldwork produced, read from the data as fieldwork —
+            not a column-by-column profile of a spreadsheet. */}
+        <FieldworkCards studyId={study.id} ready={!!study.excel_path} />
+
         {/* QC */}
         <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
           <h2 className="font-semibold text-slate-900 mb-4">Quality control</h2>
@@ -465,10 +470,6 @@ function OverviewTab({ study, progress }: { study: Study; progress: number }) {
           )}
         </div>
 
-        {/* Data profile — replaces auto-displayed crosstabs as the default
-            view. Ask the chat navigator for a crosstab/chart on any specific
-            variable to see it rendered inline instead. */}
-        <DataProfileCard studyId={study.id} ready={!!study.excel_path} />
       </div>
 
       {/* Meta sidebar */}
@@ -501,135 +502,6 @@ function OverviewTab({ study, progress }: { study: Study; progress: number }) {
           </div>
         </dl>
       </div>
-    </div>
-  )
-}
-
-function MissingBar({ pct }: { pct: number }) {
-  const color = pct > 50 ? 'bg-red-400' : pct > 20 ? 'bg-amber-400' : 'bg-slate-300'
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-slate-600 w-12 text-right">{pct.toFixed(1)}%</span>
-      <div className="h-1.5 w-16 rounded-full bg-slate-100 overflow-hidden">
-        <div className={`h-full ${color}`} style={{ width: `${Math.min(pct, 100)}%` }} />
-      </div>
-    </div>
-  )
-}
-
-function describeValues(v: ProfileVariable): string {
-  if (v.top_values && v.top_values.length > 0) {
-    return v.top_values.map((tv) => `${tv.value}=${tv.count}`).join(', ')
-  }
-  if (v.min != null || v.max != null) {
-    return `${v.min ?? '—'} – ${v.max ?? '—'}`
-  }
-  return '—'
-}
-
-type ProfileSortKey = 'missing_desc' | 'missing_asc' | 'name' | 'distinct_desc'
-
-const PROFILE_SORTS: Record<ProfileSortKey, { label: string; cmp: (a: ProfileVariable, b: ProfileVariable) => number }> = {
-  missing_desc: { label: 'Missing % (worst first)', cmp: (a, b) => b.missing_pct - a.missing_pct },
-  missing_asc: { label: 'Missing % (best first)', cmp: (a, b) => a.missing_pct - b.missing_pct },
-  name: { label: 'Variable name', cmp: (a, b) => a.name.localeCompare(b.name) },
-  distinct_desc: { label: 'Distinct count', cmp: (a, b) => b.distinct_count - a.distinct_count },
-}
-
-function DataProfileCard({ studyId, ready }: { studyId: string; ready: boolean }) {
-  const [profile, setProfile] = useState<StudyProfile | null>(null)
-  const [search, setSearch] = useState('')
-  const [sort, setSort] = useState<ProfileSortKey>('missing_desc')
-
-  useEffect(() => {
-    if (!ready) return
-    studiesApi
-      .profile(studyId)
-      .then((r) => setProfile(r.data))
-      .catch(() => {})
-  }, [studyId, ready])
-
-  const rows = useMemo(() => {
-    if (!profile) return []
-    const q = search.trim().toLowerCase()
-    return profile.variables
-      .filter((v) => !q || v.name.toLowerCase().includes(q) || v.label.toLowerCase().includes(q))
-      .sort(PROFILE_SORTS[sort].cmp)
-  }, [profile, search, sort])
-
-  return (
-    <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
-      <div className="flex items-center justify-between mb-1">
-        <h2 className="font-semibold text-slate-900">Data profile</h2>
-      </div>
-
-      {!ready ? (
-        <p className="text-sm text-slate-500 mt-3">Profile will appear once processing completes.</p>
-      ) : !profile ? (
-        <div className="mt-3">
-          <LoadingSpinner />
-        </div>
-      ) : !profile.ready ? (
-        <p className="text-sm text-slate-500 mt-3">Profile will appear once processing completes.</p>
-      ) : (
-        <>
-          <p className="text-sm text-slate-500 mb-4">
-            {profile.summary.n_variables} variables · {profile.summary.n_respondents} respondents ·{' '}
-            {profile.summary.n_high_missing} high-missing · {profile.summary.n_constant} constant
-            {profile.summary.n_likely_duplicate_id > 0 &&
-              ` · ${profile.summary.n_likely_duplicate_id} likely-duplicate ID column${profile.summary.n_likely_duplicate_id > 1 ? 's' : ''}`}
-          </p>
-          <div className="flex items-center gap-2 mb-3">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter variables…"
-              className="flex-1 h-9 px-3 rounded-md bg-white border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-            />
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as ProfileSortKey)}
-              className="h-9 px-2 rounded-md bg-white border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-            >
-              {Object.entries(PROFILE_SORTS).map(([key, { label }]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="max-h-[420px] overflow-y-auto border border-slate-100 rounded-md">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 sticky top-0">
-                <tr className="text-left text-xs text-slate-500 uppercase tracking-wide">
-                  <th className="px-3 py-2">Variable</th>
-                  <th className="px-3 py-2">Label</th>
-                  <th className="px-3 py-2">Type</th>
-                  <th className="px-3 py-2">Missing</th>
-                  <th className="px-3 py-2">Distinct</th>
-                  <th className="px-3 py-2">Top values / range</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rows.map((v) => (
-                  <tr key={v.name} className="hover:bg-slate-50">
-                    <td className="px-3 py-2 font-mono text-xs text-slate-700">{v.name}</td>
-                    <td className="px-3 py-2 text-slate-700">{v.label || '—'}</td>
-                    <td className="px-3 py-2 text-slate-500 text-xs">{v.type}</td>
-                    <td className="px-3 py-2">
-                      <MissingBar pct={v.missing_pct} />
-                    </td>
-                    <td className="px-3 py-2 text-slate-600">{v.distinct_count}</td>
-                    <td className="px-3 py-2 text-slate-600 text-xs max-w-xs truncate" title={describeValues(v)}>
-                      {describeValues(v)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
     </div>
   )
 }

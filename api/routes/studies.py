@@ -433,6 +433,73 @@ def fielded_data_summary(
     return out
 
 
+@router.get("/studies/{study_id}/data-field-report")
+def data_field_report_route(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The field report for data fielded elsewhere, read from its export.
+
+    The same numbers the field monitor shows for our own link — dispositions,
+    incidence, which screen-out removed people, quota cells, interview length,
+    drop-off, devices, soft-launch quality — so an uploaded export is treated
+    as the fieldwork it is, not as a spreadsheet to profile.
+    """
+    import polars as pl
+
+    from api.db import list_questionnaires_for_study
+    from api.routes.chat import _study_dir
+    from src.core.models import DataMap
+    from src.core.survey_definition import SurveyDefinition
+    from src.engines.fielding.data_report import data_field_report
+    from src.engines.qc.cleaning import collect_flags
+    from src.engines.qc.discrepancy import _disposition_labels
+    from src.engines.questionnaire.label_merge import (
+        questionnaire_to_data_codes,
+        translate_to_data_codes,
+    )
+    from src.engines.questionnaire.linker import link_questions_to_datamap
+
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    parquet = _study_dir(study) / "data.parquet"
+    if not study.datamap_json or not parquet.exists():
+        return {"available": False, "processing": study.status == "classifying"}
+
+    datamap = DataMap.from_json(study.datamap_json)
+    df = pl.read_parquet(parquet)
+    survey, links = None, None
+    questionnaires = list_questionnaires_for_study(db, study_id)
+    definition = questionnaires[0].definition_json if questionnaires else None
+    if definition:
+        # Answers are counted in the script's codes, labelled by the document.
+        survey = SurveyDefinition.from_json(definition)
+        report = link_questions_to_datamap(survey, datamap)
+        survey = translate_to_data_codes(
+            survey, questionnaire_to_data_codes(survey, datamap, report)
+        )
+        links = report.links
+
+    # Soft-launch quality is judged on the completes: a screen-out's speed or
+    # blank grid says nothing about the data that will be delivered.
+    status_column, meaning = _disposition_labels(datamap)
+    completes = df
+    if status_column and status_column in df.columns:
+        codes = [code for code, outcome in meaning.items() if outcome == "complete"]
+        completes = df.filter(pl.col(status_column).is_in(codes))
+    flags, _ = collect_flags(completes, datamap)
+    # ponytail: computed per request (~0.3s on 250 rows); cache on the run dir
+    # if exports in the tens of thousands make this slow.
+    return {
+        "available": True,
+        "source_filename": study.source_filename,
+        "has_questionnaire": survey is not None,
+        **data_field_report(df, datamap, survey, links, flags),
+    }
+
+
 @router.post("/studies/{study_id}/reprocess")
 def reprocess_study(
     study_id: str,

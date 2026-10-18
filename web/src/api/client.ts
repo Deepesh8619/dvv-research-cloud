@@ -274,6 +274,10 @@ export const studiesApi = {
   /** The project's fielded data at a glance (uploaded export or collected link). */
   fieldedData: async (id: string) => api.get<FieldedData>(`/studies/${id}/fielded-data`),
 
+  /** The field report of an uploaded export: the same numbers a link gets. */
+  dataFieldReport: async (id: string) =>
+    api.get<DataFieldReport>(`/studies/${id}/data-field-report`),
+
   /** Attach (or replace) the fielded data file of an existing project. */
   attachData: async (id: string, file: File, onProgress?: (pct: number) => void) => {
     const formData = new FormData()
@@ -440,6 +444,21 @@ export interface QuestionnaireStatus {
 }
 
 /** The project's fielded data at a glance (GET /studies/{id}/fielded-data). */
+/** An uploaded export read as fieldwork. Absent fields mean the file lacks them. */
+export interface DataFieldReport extends FieldReport {
+  available: true
+  source_filename: string | null
+  has_questionnaire: boolean
+  terminates_by_question: Array<{ qid: string; n: number; rule?: string }>
+  length_of_interview: { stated_minutes: number | null; measured_minutes: number | null; over: boolean; note?: string } | null
+  sample_size_target: number | null
+  quota_targets: Array<{ group: string; definition: string; target_n: number | null; min_n: number | null; max_n: number | null }>
+  quotas: Array<{ table: string; cells: Array<{ cell: string; label: string; n: number }> }>
+  field_dates: { first: string; last: string } | null
+  completes_by_day: Array<{ day: string; n: number }>
+  quality: { n_flagged: number; by_check: Array<{ check: string; n: number }> }
+}
+
 export interface FieldedData {
   available: boolean
   processing: boolean

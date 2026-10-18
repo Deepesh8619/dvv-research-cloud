@@ -25,8 +25,10 @@ from collections.abc import Callable
 import polars as pl
 
 from src.core.models import DataMap, VarType
+from src.engines.qc.variable_roles import classify_variable
 
 MIN_COPIED_CHARS = 20
+_ANSWER_ROLES = ("question", "other_specify")
 
 
 def _norm(s: str) -> str:
@@ -59,10 +61,13 @@ def fraud_signals(
     else:
         skipped.append("shared_connection")
 
-    # paradata TEXT columns (country, city...) are not open-ends
+    # paradata TEXT columns (country, city...) are not open-ends, and neither
+    # are an export's own system columns (user agent, the script's variable
+    # lists): on a real Decipher export those flagged every complete.
     texts = [
         v.name for v in dm.variables
         if v.type == VarType.TEXT and v.provenance != "fielding_paradata" and v.name in df.columns
+        and classify_variable(v.name, v.label or "", v.question_ref) in _ANSWER_ROLES
     ]
     if texts:
         copied: set[int] = set()
@@ -72,8 +77,12 @@ def fraud_signals(
                 else None
                 for r in rows
             ]
+            # One text shared by most respondents is a constant the script wrote,
+            # not an answer anybody copied.
+            answered = sum(1 for v in vals if v)
             for ix in groups(vals):
-                copied.update(ix)
+                if answered < 10 or len(ix) * 2 <= answered:
+                    copied.update(ix)
         for i in copied:
             hits[i].append("copied_open_end")
     else:

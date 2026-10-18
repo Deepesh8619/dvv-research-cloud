@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { studiesApi, type FieldedData } from '../api/client'
+import FieldworkCards from './FieldworkCards'
 
 /**
  * Fielded data that arrived as a file. A study fielded on another platform
@@ -83,6 +84,7 @@ export default function FieldedDataPanel({ studyId, canWrite }: { studyId: strin
   )
 
   return (
+    <>
     <section className="mb-6 rounded-lg border border-slate-200 bg-white p-5 shadow-panel" data-testid="fielded-data">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
@@ -160,5 +162,11 @@ export default function FieldedDataPanel({ studyId, canWrite }: { studyId: strin
         </div>
       )}
     </section>
+    {data?.available && !busy && (
+      <div className="mb-6">
+        <FieldworkCards key={data.updated_at ?? ''} studyId={studyId} ready full />
+      </div>
+    )}
+    </>
   )
 }
