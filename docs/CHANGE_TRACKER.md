@@ -21,6 +21,15 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-18 — fielded data on the field monitor (branch feat/fielded-data-in-monitor)
+
+The field monitor only knew links run here, so a study fielded on another
+platform looked unfielded even with its export uploaded. It now has a *Fielded
+data* panel: the file, respondents, variables, and how each interview ended
+(read from the export's status column), with Upload / Replace and a button to
+check the data against the questionnaire. Real Google Ads export: 254
+respondents — 62 qualified, 140 terminated, 45 over quota, 7 partial.
+
 ## 2026-10-17 — fielded data into an existing project (branch feat/attach-data)
 
 | Change | Evidence |

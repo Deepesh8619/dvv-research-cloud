@@ -374,6 +374,65 @@ async def attach_data_file(
     return {"study_id": study_id, "status": "classifying", "source": name}
 
 
+@router.get("/studies/{study_id}/fielded-data")
+def fielded_data_summary(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The project's fielded data at a glance: file, respondents, dispositions.
+
+    Data fielded on another platform arrives as an export, and the field
+    monitor showed nothing about it — only links run here — so a project whose
+    fieldwork was finished looked as if it had none. Reads the rows the
+    processing run wrote; the status column's labels give the dispositions.
+    """
+    import polars as pl
+
+    from api.routes.chat import _study_dir
+    from src.core.models import DataMap
+    from src.engines.qc.discrepancy import _disposition_labels
+
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    parquet = _study_dir(study) / "data.parquet"
+    if not study.datamap_json or not parquet.exists():
+        return {"available": False, "source_filename": study.source_filename,
+                "processing": study.status == "classifying"}
+
+    datamap = DataMap.from_json(study.datamap_json)
+    status_column, meaning = _disposition_labels(datamap)
+    columns = pl.read_parquet_schema(parquet)
+    out = {
+        "available": True,
+        "processing": study.status == "classifying",
+        "source_filename": study.source_filename,
+        "updated_at": study.updated_at,
+        "n_variables": len(columns),
+        "status_variable": status_column,
+        "dispositions": [],
+    }
+    if status_column and status_column in columns:
+        counts = pl.read_parquet(parquet, columns=[status_column])[status_column].value_counts()
+        labels = datamap[status_column].values or {}
+        rows = []
+        for code, n in counts.iter_rows():
+            key = int(code) if code is not None and float(code).is_integer() else None
+            rows.append({
+                "code": key,
+                "label": str(labels.get(key, "No status")) if key is not None else "No status",
+                "outcome": meaning.get(key, "other") if key is not None else "other",
+                "n": int(n),
+            })
+        order = {"complete": 0, "terminated": 1, "overquota": 2, "partial": 3, "other": 4}
+        out["dispositions"] = sorted(rows, key=lambda r: (order[r["outcome"]], -r["n"]))
+        out["n_respondents"] = sum(r["n"] for r in rows)
+    else:
+        out["n_respondents"] = pl.scan_parquet(parquet).select(pl.len()).collect().item()
+    return out
+
+
 @router.post("/studies/{study_id}/reprocess")
 def reprocess_study(
     study_id: str,

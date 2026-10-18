@@ -205,3 +205,38 @@ def test_rows_from_an_uploaded_file_are_read_from_the_run_folder(client) -> None
     body = test_client.post("/api/studies/s1/crosscheck").json()
     assert body["data_file_available"] is True
     assert body["n_rows"] == 3
+
+
+def test_the_field_monitor_summarises_fielded_data_from_an_upload(client) -> None:
+    """Fieldwork done elsewhere showed nothing on the field monitor."""
+    import polars as pl
+
+    test_client, session_factory, tmp_path = client
+    _seed(session_factory)
+    dm = _datamap()
+    dm.add(Variable(name="status", label="Status", type=VarType.SINGLE,
+                    values={1: "Terminated", 2: "Overquota", 3: "Qualified"}))
+    run_dir = Path(tmp_path) / "study_run"
+    run_dir.mkdir()
+    pl.DataFrame({"Q1": [1, 2, 1, 2, None], "status": [3, 3, 3, 1, 2]}).write_parquet(
+        run_dir / "data.parquet"
+    )
+    db = session_factory()
+    db.query(StudyDB).filter(StudyDB.id == "s1").update(
+        {"excel_path": str(run_dir / "deck.xlsx"), "datamap_json": dm.to_json(),
+         "source_filename": "fielded.xlsx"}
+    )
+    db.commit()
+    db.close()
+
+    body = test_client.get("/api/studies/s1/fielded-data").json()
+    assert body["available"] and body["source_filename"] == "fielded.xlsx"
+    assert body["n_respondents"] == 5
+    assert [(d["outcome"], d["n"]) for d in body["dispositions"]] == [
+        ("complete", 3), ("terminated", 1), ("overquota", 1)]
+
+
+def test_no_data_yet_says_so(client) -> None:
+    test_client, session_factory, _ = client
+    _seed(session_factory, with_datamap=False)
+    assert test_client.get("/api/studies/s1/fielded-data").json()["available"] is False
