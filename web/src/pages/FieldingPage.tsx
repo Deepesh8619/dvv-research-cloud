@@ -21,6 +21,7 @@ import ThemeSelect from '../components/ThemeSelect'
 import { ClockIcon } from '../components/Icons'
 import PageHeader from '../components/ui/PageHeader'
 import { canWrite as hasWriteRole } from '../auth/roles'
+import FieldedDataPanel from '../components/FieldedDataPanel'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
 
@@ -876,7 +877,7 @@ export default function FieldingPage() {
       </div>
       <PageHeader
         title="Field monitor"
-        description="Create fielding links, watch responses live, manage quotas, and materialize completes into analysis."
+        description="Field the survey through a link, or bring in data fielded elsewhere — then watch responses, manage quotas, and check the data against the questionnaire."
         icon={ClockIcon}
       />
 
@@ -895,6 +896,10 @@ export default function FieldingPage() {
           </button>
         </div>
       )}
+
+      {/* Fieldwork can also arrive as a file from another platform: show it
+          here, as this survey's fielded data, before the link tools. */}
+      <FieldedDataPanel studyId={studyId!} canWrite={canWrite} />
 
       {/* Before the link, not after it: the whole point is to know what the
           script does to people while it is still cheap to change. */}

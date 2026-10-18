@@ -271,6 +271,9 @@ export const studiesApi = {
     )
   },
 
+  /** The project's fielded data at a glance (uploaded export or collected link). */
+  fieldedData: async (id: string) => api.get<FieldedData>(`/studies/${id}/fielded-data`),
+
   /** Attach (or replace) the fielded data file of an existing project. */
   attachData: async (id: string, file: File, onProgress?: (pct: number) => void) => {
     const formData = new FormData()
@@ -434,6 +437,18 @@ export interface QuestionnaireStatus {
   logic_review?: LogicReview | null
   decoding?: Decoding | null
   second_look?: SecondLookRecord | null
+}
+
+/** The project's fielded data at a glance (GET /studies/{id}/fielded-data). */
+export interface FieldedData {
+  available: boolean
+  processing: boolean
+  source_filename?: string | null
+  updated_at?: string
+  n_respondents?: number
+  n_variables?: number
+  status_variable?: string | null
+  dispositions?: { code: number | null; label: string; outcome: string; n: number }[]
 }
 
 /** What the second look did with each flagged question (second_look.py). */
