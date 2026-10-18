@@ -642,6 +642,8 @@ export function QuestionDetail({
   }
 
   const hasOptions = ['single', 'multi', 'dropdown', 'rank'].includes(state.type)
+  const keepsOptions = state.type === 'info' || state.type === 'numeric'
+
   const isConstantSum = state.type === 'constant_sum'
 
   const setOption = (i: number, patch: Partial<QuestionOption>) =>
@@ -678,7 +680,10 @@ export function QuestionDetail({
       type: isConstantSum ? 'numeric' : state.type,
       // Every field of every answer — exclusive, anchored, "other, specify".
       // Sending only code and label wiped those on any edit, even a typo fix.
-      options: hasOptions ? state.options.map((o) => ({ ...o })) : [],
+      // A hidden variable's codes (and their approved rules) and a number's
+      // opt-out codes are answers too, though the editor shows no list for
+      // them: sending [] erased D2a's codes on its first save.
+      options: hasOptions || keepsOptions ? state.options.map((o) => ({ ...o })) : [],
       show_if: (showIf as unknown as Record<string, unknown>) ?? null,
       terminate_if: (terminateIf as unknown as Record<string, unknown>) ?? null,
     }

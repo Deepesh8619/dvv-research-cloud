@@ -21,6 +21,38 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-18 — coded hidden variables computed for every respondent (branch feat/derived-rules)
+
+A coded hidden variable (Bubble D2a "CODE SIZE OF HOUSEHOLD" 1/2/3/4 or more,
+Google Ads HID_COMP_SIZE) is a banner every table is cut by, and its column
+was delivered **empty**: the document's wording was kept but never run, since a
+rule compiled wrong puts numbers nobody authored into a banner.
+
+Now the second look **proposes** a rule and a person approves it once:
+
+| Read from | Example |
+|---|---|
+| the Definition column | HID_COMP_SIZE: Micro `SS_EMP = 2`, Small `SS_EMP = 3–4` |
+| grid-row definitions | HID_AWARE: `DA_USAGE 1, 2, 3, or 4 = 3-5` — codes over different rows can all hold, so it is multi-coded |
+| a condition in the answer label | Vivo S11 "All other (S11=3)" |
+| number bands over the question it is coded from | D2a over D2 (`D2 ≥ 4`); Vivo S3a age bands over S3 |
+| a model writing each code's condition in the document's grammar (Bedrock) | the rest; parsed, and every name must exist |
+
+A value set from outside the answers (ZIP lookup, sample source, split,
+assignment) is said to be so. Once approved (`Option.derive_if`), the value is
+computed in the link (SurveyJS `calculatedValues`, for routing), on the server
+(screen-outs, quotas, dry run — never trusted from the client), and in the data
+file (one column; one 0/1 column per code when multi-coded); preflight stops
+calling it uncomputed. A rule waits until every question it tests is answered.
+
+Measured on the six documents (AI off): 28 coded hidden variables — 11 rules
+ready to approve, 8 explained as set from outside, 9 need the model or a person.
+No change to the gold scores.
+
+Also fixed: saving any hidden variable (or a number question with opt-out codes)
+in the editor **erased its codes** — the form sent an empty answer list for
+types it shows no list for.
+
 ## 2026-10-18 — tick-box grids: several answers per row (branch feat/grid-multi)
 
 Vivo Q21 ("What concerns, if any, do you have about the following types of

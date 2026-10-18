@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { Question } from '../api/client'
 import { QuestionDetail } from './QuestionnairePage'
@@ -187,5 +187,30 @@ describe('approving after a change', () => {
     renderDetail(question({ approved: true, flags: [] }))
     const button = screen.getByRole('button', { name: 'Approved' }) as HTMLButtonElement
     expect(button.disabled).toBe(true)
+  })
+})
+
+describe('saving a hidden variable', () => {
+  it('keeps its codes and their rules (they used to be sent as an empty list)', async () => {
+    const { questionnaireApi } = await import('../api/client')
+    const calls: Array<Record<string, unknown>> = []
+    const spy = vi.spyOn(questionnaireApi, 'update').mockImplementation(async (_s, _q, patch) => {
+      calls.push(patch as Record<string, unknown>)
+      return { data: question() } as never
+    })
+    const user = userEvent.setup()
+    renderDetail(question({
+      qid: 'D2a', type: 'info', text: 'CODE SIZE OF HOUSEHOLD', flags: ['DERIVED_VARIABLE'],
+      options: [
+        { code: 1, label: '1', derive_if: { op: 'eq', qid: 'D2', value: 1 } },
+        { code: 4, label: '4 or more' },
+      ] as never,
+    }))
+    await user.type(screen.getByDisplayValue('CODE SIZE OF HOUSEHOLD'), ' ')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    const options = calls[0].options as Array<Record<string, unknown>>
+    expect(options.map((o) => o.code)).toEqual([1, 4])
+    expect(options[0].derive_if).toEqual({ op: 'eq', qid: 'D2', value: 1 })
+    spy.mockRestore()
   })
 })

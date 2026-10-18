@@ -41,7 +41,14 @@ def is_decidable(expression: Expression | None, answers: dict) -> bool:
 
 
 def terminating_question(survey: SurveyDefinition, answers: dict) -> Question | None:
-    """The first question whose screen-out fires on these answers, if any."""
+    """The first question whose screen-out fires on these answers, if any.
+
+    Approved hidden-variable rules are computed first: "TERMINATE IF D2a = 4"
+    tests a value no respondent ever typed.
+    """
+    from src.engines.questionnaire.derived import with_derived
+
+    answers = with_derived(survey, answers)
     for question in survey.questions:
         if question.terminate_if is None:
             continue

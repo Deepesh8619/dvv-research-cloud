@@ -289,17 +289,24 @@ class Option:
     # reached nobody. Kept verbatim and never executed — a rule compiled wrong
     # puts numbers in a banner variable that nobody authored.
     definition: str | None = None
+    # The same rule, compiled and APPROVED by a person: a hidden variable takes
+    # this code when it holds. Set only from a reviewed proposal (see
+    # `questionnaire/derived.py`); from then on it is computed for everyone.
+    derive_if: Expression | None = None
 
     def to_dict(self) -> dict[str, Any]:
         raw = asdict(self)
         raw["show_if"] = self.show_if.to_dict() if self.show_if else None
+        raw["derive_if"] = self.derive_if.to_dict() if self.derive_if else None
         return raw
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Option:
         data = dict(raw)
         condition = data.pop("show_if", None)
-        return cls(**data, show_if=Expression.from_dict(condition) if condition else None)
+        rule = data.pop("derive_if", None)
+        return cls(**data, show_if=Expression.from_dict(condition) if condition else None,
+                   derive_if=Expression.from_dict(rule) if rule else None)
 
 
 @dataclass
