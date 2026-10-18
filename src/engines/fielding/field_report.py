@@ -226,6 +226,21 @@ def summarise(question: Question, answers: list[Mapping[str, Any]]) -> dict[str,
                 "label": row.label,
                 "counts": [picked.count(str(c.code)) for c in cols],
             })
+    elif kind is QuestionType.GRID_MULTI:
+        # Each cell counts the respondents who ticked it; a row's counts can
+        # add up to more than its base.
+        cols = question.cols or []
+        card["columns"] = [{"code": c.code, "label": c.label} for c in cols]
+        card["rows"] = []
+        for row in question.rows or []:
+            picks = [v.get(str(row.code), v.get(row.code)) for v in given if isinstance(v, dict)]
+            ticked = [{str(p) for p in (x if isinstance(x, list) else [x])}
+                      for x in picks if x is not None]
+            card["rows"].append({
+                "code": row.code,
+                "label": row.label,
+                "counts": [sum(str(c.code) in t for t in ticked) for c in cols],
+            })
     elif kind is QuestionType.NUMERIC:
         # Opt-out codes are not numbers anyone gave: "99 = prefer not to say"
         # averaged in as an age of 99 moves every statistic on the card.

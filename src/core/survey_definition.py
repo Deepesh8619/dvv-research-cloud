@@ -34,6 +34,10 @@ class QuestionType(StrEnum):
     SINGLE = "single"
     MULTI = "multi"
     GRID_SINGLE = "grid_single"
+    # Several answers per row: "for each pharmacy type, select all that apply".
+    # Answered as {row code: [column codes]}; delivered as one 0/1 column per
+    # cell, `<qid>r<row>c<col>`, the way Decipher writes it.
+    GRID_MULTI = "grid_multi"
     NUMERIC = "numeric"
     OPEN_TEXT = "open_text"
     DROPDOWN = "dropdown"
@@ -47,6 +51,9 @@ class QuestionType(StrEnum):
     INFO = "info"  # non-question display content
 
 
+#: Questions answered per row against a set of columns.
+GRID_TYPES = frozenset({QuestionType.GRID_SINGLE, QuestionType.GRID_MULTI})
+
 _CHOICE_TYPES = frozenset({
     QuestionType.SINGLE, QuestionType.MULTI, QuestionType.DROPDOWN, QuestionType.RANK,
     QuestionType.MAXDIFF,
@@ -56,7 +63,7 @@ _CHOICE_TYPES = frozenset({
 def has_nothing_to_answer(q: Question) -> bool:
     """True when a respondent shown this question could not answer it: a choice
     with no options, or a grid missing its rows or its scale."""
-    if q.type is QuestionType.GRID_SINGLE:
+    if q.type in GRID_TYPES:
         return not (q.rows and q.cols)
     return q.type in _CHOICE_TYPES and not q.options
 
@@ -237,8 +244,13 @@ def evaluate(expression: Expression, answers: dict[str, Any]) -> bool:
         return any(v in chosen for v in (expression.values or []))
 
     if op == "eq":
+        # A multi-answer grid row holds a list: "Q21.3 = 2" means 2 was ticked.
+        if isinstance(answer, list):
+            return expression.value in answer
         return answer == expression.value
     if op == "ne":
+        if isinstance(answer, list):
+            return expression.value not in answer
         return answer != expression.value
 
     # Numeric comparisons, on numbers — including numbers stored as text. A CSV
@@ -591,8 +603,8 @@ class SurveyDefinition:
 
         # Grids must have non-empty rows.
         for q in self.questions:
-            if q.type == QuestionType.GRID_SINGLE and not q.rows:
-                problems.append(f"question {q.qid}: grid_single requires non-empty rows")
+            if q.type in GRID_TYPES and not q.rows:
+                problems.append(f"question {q.qid}: {q.type.value} requires non-empty rows")
 
         # Referenced qids in routing must resolve; forward references are illegal.
         order = self.question_order()

@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from dataclasses import replace
 
-from src.core.survey_definition import Option, Question, QuestionType, SurveyDefinition
+from src.core.survey_definition import GRID_TYPES, Option, Question, QuestionType, SurveyDefinition
 from src.engines.questionnaire import schema
 from src.engines.questionnaire.carousel import coded, list_for
 from src.engines.questionnaire.prose_directives import is_terminal_option
@@ -120,7 +120,7 @@ def _items(source: Question) -> list[Option]:
 
 
 def _needs_list(q: Question) -> bool:
-    if q.type is QuestionType.GRID_SINGLE:
+    if q.type in GRID_TYPES:
         # Only a grid whose scale IS known. With neither half ("for each
         # category, which brands" — a carousel), borrowing rows put another
         # question's answers down the side of a grid that has no scale.
@@ -129,7 +129,7 @@ def _needs_list(q: Question) -> bool:
 
 
 def _fill(q: Question, items: list[Option]) -> None:
-    if q.type is QuestionType.GRID_SINGLE:
+    if q.type in GRID_TYPES:
         q.rows = items
     else:
         q.options = items

@@ -25,6 +25,10 @@ export const QUESTION_TYPE_LABELS: Record<string, TypeLabel> = {
     label: 'Rating grid',
     hint: 'Each row is rated on the same scale — one answer per row.',
   },
+  grid_multi: {
+    label: 'Tick-box grid',
+    hint: 'Each row takes as many answers as apply — e.g. concerns for each pharmacy type.',
+  },
   numeric: { label: 'Number', hint: 'Respondent types a number, e.g. an age or a count.' },
   open_text: { label: 'Written answer', hint: 'Respondent types their answer in their own words.' },
   info: {

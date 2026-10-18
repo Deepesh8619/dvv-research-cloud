@@ -22,7 +22,7 @@ them from the list the wording points at, which is where they are stated.
 
 from __future__ import annotations
 
-from src.core.survey_definition import QuestionType, SurveyDefinition
+from src.core.survey_definition import GRID_TYPES, QuestionType, SurveyDefinition
 from src.engines.questionnaire.definition_audit import _PER_ITEM
 from src.engines.questionnaire.list_sources import _looks_like_a_scale
 
@@ -39,7 +39,7 @@ def apply(survey: SurveyDefinition) -> list[str]:
     for question in survey.questions:
         # A grid holding its scale as OPTIONS, with no columns, is the same
         # shape wearing a different type.
-        grid_without_columns = question.type is QuestionType.GRID_SINGLE and not question.cols
+        grid_without_columns = question.type in GRID_TYPES and not question.cols
         if (question.type not in _CONVERTIBLE and not grid_without_columns) or question.rows:
             continue
         if not _PER_ITEM.search(question.text or ""):

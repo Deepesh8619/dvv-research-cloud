@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from src.core.survey_definition import Option, QuestionType, SurveyDefinition
+from src.core.survey_definition import GRID_TYPES, Option, QuestionType, SurveyDefinition
 
 #: The pairs worth repairing. Each side is what a document actually prints.
 _PAIRS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
@@ -54,7 +54,7 @@ def repair_swallowed_options(survey: SurveyDefinition) -> list[str]:
 
 
 def _repair(question: Any) -> bool:
-    if question.type is QuestionType.GRID_SINGLE:
+    if question.type in GRID_TYPES:
         # Typed a grid, holding one answer and neither rows nor columns: the
         # shape of a yes/no question whose "Yes" was eaten by the wording.
         # Q4a of the live pharmacy study is exactly this, and skipping it

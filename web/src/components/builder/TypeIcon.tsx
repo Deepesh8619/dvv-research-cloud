@@ -39,6 +39,7 @@ export function TypeIcon({ type, className = 'w-5 h-5' }: { type: string; classN
     case 'multi':
       return <CheckboxIcon className={className} />
     case 'grid_single':
+    case 'grid_multi':
       return <GridIcon className={className} />
     case 'rank':
       return <ListIcon className={className} />

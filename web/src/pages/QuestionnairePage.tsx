@@ -85,7 +85,7 @@ function FlagBadge({ code }: { code: string }) {
 
 // Types whose whole point is an answer list — a plain number, open text or
 // info screen has nothing to look blank about, so they are left out.
-const ANSWER_LIST_TYPES = ['single', 'multi', 'dropdown', 'rank', 'grid_single']
+const ANSWER_LIST_TYPES = ['single', 'multi', 'dropdown', 'rank', 'grid_single', 'grid_multi']
 
 /** A question whose type expects an answer list, but nothing was read into it
  * (or a blocking flag says the reading itself failed) — the "just looks
@@ -94,7 +94,7 @@ const ANSWER_LIST_TYPES = ['single', 'multi', 'dropdown', 'rank', 'grid_single']
  * excluded here rather than in every caller. */
 function looksBlank(q: Question): boolean {
   if (q.flags.includes('DERIVED_VARIABLE') || !ANSWER_LIST_TYPES.includes(q.type)) return false
-  const hasList = q.type === 'grid_single' ? (q.rows?.length ?? 0) > 0 : q.options.length > 0
+  const hasList = q.type === 'grid_single' || q.type === 'grid_multi' ? (q.rows?.length ?? 0) > 0 : q.options.length > 0
   return !hasList || q.flags.some((f) => flagInfo(f).blocking)
 }
 

@@ -35,8 +35,8 @@ from rapidfuzz import fuzz
 
 from src.core.models import DataMap
 from src.core.survey_definition import (
+    GRID_TYPES,
     Question,
-    QuestionType,
     QuestionVariableLink,
     SurveyDefinition,
     evaluate,
@@ -219,7 +219,7 @@ def _match_grid_cells(
     (Q14r2) with the column numbers read as answer codes — 13 false "value not
     scripted" findings on one study.
     """
-    if question.type is not QuestionType.GRID_SINGLE:
+    if question.type not in GRID_TYPES:
         return None
     pattern = re.compile(rf"^{re.escape(question.qid)}r(\d+)c(\d+)$", re.I)
     hits = [((int(m.group(1)), int(m.group(2))), name) for name in remaining.values()

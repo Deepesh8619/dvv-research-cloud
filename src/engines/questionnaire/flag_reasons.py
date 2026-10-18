@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from src.core.survey_definition import Question, QuestionType, SurveyDefinition
+from src.core.survey_definition import GRID_TYPES, Question, QuestionType, SurveyDefinition
 from src.engines.questionnaire import schema
 
 AUTO_ANSWER_KEY = "auto_answer"
@@ -53,6 +53,7 @@ _CHOICE_TYPES = (
     QuestionType.DROPDOWN,
     QuestionType.RANK,
     QuestionType.GRID_SINGLE,
+    QuestionType.GRID_MULTI,
 )
 
 
@@ -193,7 +194,7 @@ def flag_reason(q: Question, code: str) -> str:
     if code == schema.FLAG_DUPLICATE_OPTION_CODE:
         return f"{qid}: two answers share a code ({_duplicates(q) or 'see the list'}); each needs its own."  # noqa: E501
     if code == schema.FLAG_EMPTY_OPTIONS:
-        if q.type is QuestionType.GRID_SINGLE:
+        if q.type in GRID_TYPES:
             return (
                 f"{qid}: a grid with {len(q.rows or [])} rows and {len(q.cols or [])} "
                 "columns — it needs both to produce any data column."

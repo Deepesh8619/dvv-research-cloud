@@ -25,7 +25,13 @@ from __future__ import annotations
 import re
 
 from src.ai.router import BackendUnavailable, ModelOutputError, run_task
-from src.core.survey_definition import Expression, Question, QuestionType, SurveyDefinition
+from src.core.survey_definition import (
+    GRID_TYPES,
+    Expression,
+    Question,
+    QuestionType,
+    SurveyDefinition,
+)
 
 _TEXT_LIMIT = 160
 _OUTLINE_LIMIT = 40_000
@@ -81,7 +87,7 @@ def _kind(q: Question) -> str:
     if q.type is QuestionType.NUMERIC and q.rows:
         total = (q.validation or {}).get("sum") or (q.validation or {}).get("sum_min")
         return f"numbers x{len(q.rows)} rows" + (f", must total {total}" if total else "")
-    if q.type is QuestionType.GRID_SINGLE:
+    if q.type in GRID_TYPES:
         return f"grid {len(q.rows or [])} rows x {len(q.cols or [])} scale points"
     if q.type is QuestionType.NUMERIC:
         v = q.validation or {}

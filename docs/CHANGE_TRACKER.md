@@ -21,6 +21,26 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-18 — tick-box grids: several answers per row (branch feat/grid-multi)
+
+Vivo Q21 ("What concerns, if any, do you have about the following types of
+pharmacies? Select all that apply") was read as one answer per row: a
+respondent could tick only one pharmacy type per concern and the rest were
+never collected. A new type, `grid_multi`, runs end to end:
+
+| Where | What |
+|---|---|
+| Reading | a grid whose own wording says "select all that apply" (and not "one per row") |
+| Link | a matrix flagged `multiAnswer`; the respondent page ticks several per row |
+| Conditions | `Q21.3 = 2` on a row means 2 was ticked |
+| Data | one 0/1 column per cell, `Q21r3c2` (null where the row was not shown) — the form the data check already links |
+| Field report, uploaded exports, dry run, live answers, editor | count and show it per cell |
+| Model | `grid_multi` is now a real type, not a stand-in |
+
+Measured (AI off, 6 documents): Vivo Q21 no longer a type difference (its row
+codes differed before and still do); everything else unchanged. Bubble Q6 stays
+split per product category, each with its own brand list.
+
 ## 2026-10-18 — bipolar grids, and kinds of question we cannot run yet kept on record (branch feat/bipolar-grid)
 
 | Change | Evidence |

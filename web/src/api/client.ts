@@ -610,6 +610,7 @@ export const QUESTION_TYPES = [
   'dropdown',
   'rank',
   'grid_single',
+  'grid_multi',
   'numeric',
   'open_text',
   'info',

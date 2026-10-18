@@ -43,7 +43,6 @@ _TYPES = [t.value for t in QuestionType if t is not QuestionType.MAXDIFF]
 _INTENDED_TYPES: dict[str, tuple[QuestionType | None, bool]] = {
     "bipolar_grid": (QuestionType.GRID_SINGLE, True),
     "slider": (None, True),
-    "grid_multi": (QuestionType.GRID_SINGLE, False),
     "rank_grid": (QuestionType.GRID_SINGLE, False),
     "other": (None, False),
 }
@@ -69,9 +68,9 @@ REVISE_SCHEMA: dict = {
     "type": "object",
     "properties": {
         "type": {"type": "string", "enum": [*_TYPES, *_INTENDED_TYPES],
-                 "description": "bipolar_grid: two opposite statements per row with a scale "
-                                "between; grid_multi: several answers per row; rank_grid: a "
-                                "rank per row; slider: a slider; other: none of these."},
+                 "description": "grid_multi: several answers per row; bipolar_grid: two "
+                                "opposite statements per row with a scale between; rank_grid: "
+                                "a rank per row; slider: a slider; other: none of these."},
         "text": {"type": "string"},
         "options": {"type": "array", "items": _ITEM},
         "rows": {"type": "array", "items": _ROW},

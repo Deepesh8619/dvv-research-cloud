@@ -68,6 +68,15 @@ export function MatrixCarousel({ question }: { question: QuestionMatrixModel }) 
   // inside its button. Phones, and long answer lists, stack.
   const inline = columns.length <= 7 && columns.every((c) => (c.text || '').length <= 24)
 
+  // A multi-answer grid ("select all that apply" for each row): a row holds a
+  // list of column codes and the respondent moves on when they are ready.
+  const multi = Boolean((question as unknown as { multiAnswer?: boolean }).multiAnswer)
+  const picks: unknown[] = Array.isArray(row?.value) ? row.value : []
+  const toggle = (value: unknown) => {
+    if (question.isReadOnly) return
+    row.value = picks.includes(value) ? picks.filter((p) => p !== value) : [...picks, value]
+  }
+
   const pick = (value: unknown) => {
     if (question.isReadOnly) return
     row.value = value
@@ -117,7 +126,33 @@ export function MatrixCarousel({ question }: { question: QuestionMatrixModel }) 
         ) : (
           <p className="mb-4 text-[17px] font-semibold leading-snug text-slate-900">{row.text}</p>
         )}
-        {isNumberScale(columns) ? (
+        {multi ? (
+          <div role="group" aria-label={row.text} className="grid gap-2">
+            {columns.map((c) => {
+              const on = picks.includes(c.value)
+              return (
+                <button
+                  key={String(c.value)}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={on}
+                  onClick={() => toggle(c.value)}
+                  className="dvv-choice flex min-h-[48px] items-center gap-3 rounded-xl border-[1.5px] px-3 py-2.5 text-left text-[15px] font-medium transition-all duration-150 active:scale-[0.98]"
+                  style={{ borderColor: on ? ACCENT : '#e2e8f0', background: on ? '#eef2ff' : '#fff', color: '#1e293b' }}
+                >
+                  <span
+                    aria-hidden
+                    className="grid h-5 w-5 shrink-0 place-items-center rounded-md border-[1.5px] text-xs text-white"
+                    style={{ borderColor: on ? ACCENT : '#cbd5e1', background: on ? ACCENT : '#fff' }}
+                  >
+                    {on ? '✓' : ''}
+                  </span>
+                  {c.text}
+                </button>
+              )
+            })}
+          </div>
+        ) : isNumberScale(columns) ? (
           <NumberScale columns={columns} value={row.value} label={row.text} onPick={pick}
             oneRow={(row.text || '').includes(BIPOLAR)} />
         ) : (
@@ -580,6 +615,8 @@ export function registerRespondentControls(): void {
   // The compiler emits a number box's opt-out codes as `optOuts`; unregistered,
   // SurveyJS drops the property on load.
   if (!Serializer.findProperty('text', 'optOuts')) Serializer.addProperty('text', { name: 'optOuts:itemvalues' })
+  // A multi-answer grid is compiled as a matrix flagged `multiAnswer`.
+  if (!Serializer.findProperty('matrix', 'multiAnswer')) Serializer.addProperty('matrix', { name: 'multiAnswer:boolean' })
   const factory = ReactQuestionFactory.Instance
   factory.registerQuestion('matrix', ((props: { question: QuestionMatrixModel }) =>
     createElement(MatrixCarousel, props)) as never)

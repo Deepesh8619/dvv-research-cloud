@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from src.core.survey_definition import Question, QuestionType
+from src.core.survey_definition import GRID_TYPES, Question, QuestionType
 from src.engines.questionnaire.qa_loop import Issue
 
 # A question name as a derivation writes it: DA_USAGE, SS_EMP, Q2c, S6. Needs an
@@ -111,7 +111,7 @@ def hidden_variable(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
             if src is None or src.qid == q.qid:
                 continue
             wanted = _expand(m["codes"])
-            if src.type is QuestionType.GRID_SINGLE or src.rows:
+            if src.type in GRID_TYPES or src.rows:
                 offered, label = {c.code for c in src.cols or []}, "scale"
                 rows = {int(r) for r in re.findall(r"\d+", m["rows"])}
                 gone = rows - {r.code for r in src.rows or []}
@@ -124,7 +124,7 @@ def hidden_variable(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
                     f'"{o.label[:30]}" tests {src.qid} = {sorted(wanted - offered)}, '
                     f"which is not among its {label} {sorted(offered)}"
                 )
-            is_grid = bool(src.rows) or src.type is QuestionType.GRID_SINGLE
+            is_grid = bool(src.rows) or src.type in GRID_TYPES
             if m.group(0).strip() == text.strip() and not is_grid:
                 groups.setdefault(src.qid, []).append((o.label, wanted))
     for name, where in missing.items():
@@ -376,7 +376,7 @@ def reading_contradicts_document(q: Question, by_qid: dict[str, Question]) -> li
         ))
     listed = _row_lines(q)
     if len(listed) >= 2 and len(listed) != len(rows):
-        if q.type is QuestionType.GRID_SINGLE or rows:
+        if q.type in GRID_TYPES or rows:
             detail = (f"the document lists {len(listed)} rows for {q.qid}; "
                       f"the reading has {len(rows)}")
         else:

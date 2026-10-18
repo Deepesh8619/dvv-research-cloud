@@ -12,6 +12,7 @@ export const TYPE_CARDS: ReadonlyArray<{ key: string; hint: string }> = [
   { key: 'single', hint: 'One answer' },
   { key: 'multi', hint: 'Multiple answers' },
   { key: 'grid_single', hint: 'Rating grid' },
+  { key: 'grid_multi', hint: 'Tick-box grid' },
   { key: 'rank', hint: 'Rank order' },
   { key: 'numeric', hint: 'Number' },
   { key: 'open_text', hint: 'Open text' },
@@ -42,6 +43,14 @@ export function defaultQuestionFor(key: string): NewQuestionSpec {
           type: 'grid_single',
           rows: [{ code: 1, label: 'Statement 1' }],
           cols: [{ code: 1, label: 'Disagree' }, { code: 2, label: 'Neutral' }, { code: 3, label: 'Agree' }],
+        },
+      }
+    case 'grid_multi':
+      return {
+        create: {
+          type: 'grid_multi',
+          rows: [{ code: 1, label: 'Row 1' }],
+          cols: [{ code: 1, label: 'Option 1' }, { code: 2, label: 'Option 2' }],
         },
       }
     case 'rank':
