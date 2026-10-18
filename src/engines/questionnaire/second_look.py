@@ -520,6 +520,35 @@ def solve_duplicate_code(q: Question) -> Resolution | None:
     )
 
 
+def solve_junk_rows(q: Question, issues: list[Issue], by_qid: dict) -> Resolution | None:
+    """Scale lines or a column heading read as grid rows: drop them, keep the rest.
+
+    Vivo Q13 had its three scale lines as rows above the ten pharmacies. Only
+    when the scale is already the columns and real rows remain — otherwise the
+    rows themselves were lost (Bubble Q41) and dropping leaves nothing.
+    """
+    from src.engines.questionnaire.consistency import is_junk_row
+
+    if not q.cols or not any(i.check == "GRID_ROWS_NOT_STATEMENTS" for i in issues):
+        return None
+    keep = [r for r in q.rows or [] if not is_junk_row(r.label, q)]
+    if len(keep) < 2:
+        return None
+    after = copy.deepcopy(q)
+    after.rows = keep
+    remaining = _problems(after, {**by_qid, q.qid: after})
+    if any(i.check in ("GRID_ROWS_NOT_STATEMENTS", "ROWS_DIFFER_FROM_DOCUMENT") for i in remaining):
+        return None
+    dropped = [r.label for r in q.rows if is_junk_row(r.label, q)]
+    return Resolution(
+        status="fixed",
+        summary=f"Removed {len(dropped)} row{'s' if len(dropped) != 1 else ''} that "
+                "were the answer scale, not things to rate.",
+        detail="Removed: " + "; ".join(d[:50] for d in dropped),
+        after=after,
+    )
+
+
 def _likely_name(missing: str, qids: list[str]) -> str | None:
     """DA_USAGE → DA_PLATFORM_USAGE, C_ZIP → C_GEO_ZIP: the one real name that
     keeps every part of the missing one, in order, or ends the same way."""
@@ -725,6 +754,7 @@ def second_look(survey: SurveyDefinition, *, use_model: bool = True,
             or solve_exclusive_screen_out(q, issues)
             or solve_note_as_answer(q)
             or solve_duplicate_code(q)
+            or solve_junk_rows(q, issues, by_qid)
             or solve_rows_from_another_question(q, survey, by_qid)
         )
         if resolution is None and use_model and issues and q.qid not in locked:
