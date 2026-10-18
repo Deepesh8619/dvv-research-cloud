@@ -485,6 +485,25 @@ class StudyOrchestrator:
             "n_variables": len(datamap.variables),
         }
 
+        # A fielded export holds every interview: screen-outs, over-quota and
+        # partials too. Judging those as speeders (a terminate IS short) or
+        # their skipped columns as "empty" reported problems that were just
+        # the screener working. Quality is judged on the completes, which are
+        # the data that gets delivered.
+        from src.engines.qc.discrepancy import _disposition_labels
+
+        status_column, meaning = _disposition_labels(datamap)
+        complete_codes = [code for code, outcome in meaning.items() if outcome == "complete"]
+        fielded = bool(status_column and status_column in df.columns and complete_codes)
+        if fielded:
+            n_all = len(df)
+            df = df.filter(pl.col(status_column).is_in(complete_codes))
+            metadata["n_completes"] = len(df)
+            warnings.append(
+                f"Checked on the {len(df)} completes; {n_all - len(df)} screen-outs, "
+                "over-quota and partial interviews are not delivered data"
+            )
+
         if len(df) < 10:
             issues.append(f"Very small sample (n={len(df)})")
         if len(df) < 100:
@@ -495,10 +514,13 @@ class StudyOrchestrator:
 
         # Missingness: high-missing columns are normal in survey exports
         # (skip logic), so summarize rather than flag each of potentially
-        # hundreds of columns as an issue.
+        # hundreds of columns as an issue. A fielded export's empty columns are
+        # its routing and hidden script variables — not worth a line.
         n = max(len(df), 1)
-        high_missing = [c for c in df.columns if df[c].null_count() / n > 0.5]
-        moderate_missing = [c for c in df.columns if 0.2 < df[c].null_count() / n <= 0.5]
+        high_missing = [] if fielded else [c for c in df.columns if df[c].null_count() / n > 0.5]
+        moderate_missing = (
+            [] if fielded else [c for c in df.columns if 0.2 < df[c].null_count() / n <= 0.5]
+        )
         if high_missing:
             warnings.append(
                 f"{len(high_missing)} of {len(df.columns)} columns are >50% empty "
