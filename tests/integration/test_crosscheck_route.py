@@ -240,3 +240,45 @@ def test_no_data_yet_says_so(client) -> None:
     test_client, session_factory, _ = client
     _seed(session_factory, with_datamap=False)
     assert test_client.get("/api/studies/s1/fielded-data").json()["available"] is False
+
+
+def test_an_uploaded_export_gets_the_field_report_a_link_gets(client) -> None:
+    """Uploaded data was profiled as a spreadsheet; it is fieldwork. The
+    script's own markers say who screened out where and which cell counted."""
+    import polars as pl
+
+    test_client, session_factory, tmp_path = client
+    _seed(session_factory)
+    dm = _datamap()
+    dm.add(Variable(name="status", label="Status", type=VarType.SINGLE,
+                    values={1: "Terminated", 2: "Overquota", 3: "Qualified", 4: "Partial"}))
+    dm.add(Variable(name="markers", label="Markers", type=VarType.TEXT))
+    dm.add(Variable(name="qtime", label="Time", type=VarType.NUMERIC))
+    run_dir = Path(tmp_path) / "study_run"
+    run_dir.mkdir()
+    pl.DataFrame({
+        "Q1": [1, 2, 1, 2, None, 1],
+        "status": [3, 3, 3, 1, 2, 4],
+        "markers": ["qualified,/Region/hRegion_r1", "qualified,/Region/hRegion_r2",
+                    "qualified,/Region/hRegion_r1", "term:Q1.r2", "OQ /Overall/Total", ""],
+        "qtime": [600.0, 700.0, 800.0, 30.0, 40.0, None],
+    }).write_parquet(run_dir / "data.parquet")
+    db = session_factory()
+    db.query(StudyDB).filter(StudyDB.id == "s1").update(
+        {"excel_path": str(run_dir / "deck.xlsx"), "datamap_json": dm.to_json()}
+    )
+    db.commit()
+    db.close()
+
+    body = test_client.get("/api/studies/s1/data-field-report").json()
+    assert body["available"] and body["starts"] == 6
+    assert body["dispositions"]["complete"] == 3 and body["dispositions"]["in_progress"] == 1
+    assert body["incidence_pct"] == 75.0
+    assert body["terminates_by_question"] == [{"qid": "Q1", "n": 1, "rule": "Q1.r2"}]
+    assert body["overquota_by_cell"] == [{"cell": "/Overall/Total", "n": 1}]
+    assert body["median_loi_sec"] == 700.0  # completes only
+    assert body["quotas"][0]["table"] == "Region"
+    assert [(c["cell"], c["n"]) for c in body["quotas"][0]["cells"]] == [
+        ("hRegion_r1", 2), ("hRegion_r2", 1)]
+    q1 = next(q for q in body["questions"] if q["qid"] == "Q1")
+    assert q1["base"] == 3 and q1["answered"] == 3

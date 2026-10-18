@@ -21,6 +21,27 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-18 — an uploaded export read as fieldwork (branch feat/data-field-report)
+
+An uploaded export was shown as a spreadsheet (a column-by-column "data
+profile"). It is fieldwork, so it now gets the field report a link gets — read
+from the file: completes against the sample target, incidence, median
+interview against the length the document promised, field dates, how every
+interview ended, **which rule screened people out** and **which quota cells the
+script counted** (both from Decipher's `markers`, the script's own record),
+where partials stopped, devices, soft-launch quality on the completes, and each
+question's answers. The Overview shows these cards in place of the data
+profile; the field monitor shows them under *Fielded data*.
+
+Real Google Ads export: 62 completes of 750, incidence 30.7%, median 17m 19s
+against 12 promised; screened out at SS_RESP 90, SS_ADVERT_DECMAKER_QUAL 25,
+SS_REVENUE 18; quotas by sample source, company size and retail.
+
+Also fixed: the copied-open-end check read system text (user agent, the
+script's variable lists) as answers and flagged every complete; it now reads
+only question and "other, specify" text, and ignores a text most respondents
+share.
+
 ## 2026-10-18 — fielded data on the field monitor (branch feat/fielded-data-in-monitor)
 
 The field monitor only knew links run here, so a study fielded on another

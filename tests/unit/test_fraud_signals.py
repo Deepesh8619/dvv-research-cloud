@@ -31,3 +31,21 @@ def test_no_paradata_skips():
     assert out["flags"] == {}
     assert out["checks_skipped"] == [
         "shared_connection", "copied_open_end", "no_user_agent", "place_mismatch"]
+
+
+def test_system_text_and_constants_are_not_copied_answers():
+    """A real Decipher export flagged every complete: the user agent and a
+    script-written variable list are identical text, not pasted answers."""
+    dm = DataMap([
+        Variable("vUserAgent", type=VarType.TEXT),
+        Variable("Suspicious_OtherVariables", type=VarType.TEXT),
+        Variable("OE1", type=VarType.TEXT),
+    ])
+    n = 12
+    df = pl.DataFrame({
+        "vUserAgent": ["Mozilla/5.0 (Windows NT 10.0; Win64; x64)"] * n,
+        "Suspicious_OtherVariables": ["uuid,w,hSample,VendorID,vGetIP"] * n,
+        "OE1": [PASTE, PASTE] + [f"my own distinct answer number {i}" for i in range(n - 2)],
+    })
+    flags = fraud_signals(df, dm)["flags"]
+    assert sorted(flags) == ["row:0", "row:1"]

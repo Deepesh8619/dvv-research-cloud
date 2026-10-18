@@ -178,8 +178,9 @@ function QuestionCard({ q }: { q: QuestionSummary }) {
 
       {q.options && (
         <ul className="space-y-3">
-          {q.options.map((o) => (
-            <li key={o.code}>
+          {/* A document can give two answers one code; the key must not. */}
+          {q.options.map((o, i) => (
+            <li key={`${o.code}-${i}`}>
               <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
                 <span className="text-slate-700">{o.label}</span>
                 <span className="shrink-0 tabular-nums text-slate-500">
@@ -294,7 +295,7 @@ function Tabular({ questions }: { questions: QuestionSummary[] }) {
   )
 }
 
-function Responses({ report }: { report: FieldReport }) {
+export function Responses({ report }: { report: FieldReport }) {
   const [view, setView] = useState<'analytics' | 'tabular'>('analytics')
   const [bucket, setBucket] = useState<string>('all')
   const all = report.questions ?? []
