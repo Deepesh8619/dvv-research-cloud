@@ -21,6 +21,16 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-18 — pipeline quality control judges the completes (branch fix/qc-on-completes)
+
+The Overview's *Quality control* box ran on every row of a fielded export. On
+the real Google Ads file it reported 62 speeders (the screen-outs — a terminate
+is short because the screener ended it) and 618 "empty" columns (routing and
+hidden script variables). When the export has a status column, QC now runs on
+the completes only and drops the emptiness lines: 62 completes checked, 0
+speeders, 10 straight-liners, 40 gibberish open ends. Files without a status
+column are checked as before. Existing projects pick it up on Re-process.
+
 ## 2026-10-18 — an uploaded export read as fieldwork (branch feat/data-field-report)
 
 An uploaded export was shown as a spreadsheet (a column-by-column "data
