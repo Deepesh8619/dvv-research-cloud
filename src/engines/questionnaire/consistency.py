@@ -317,10 +317,87 @@ def terminating_answer_not_exclusive(q: Question, by_qid: dict[str, Question]) -
     )]
 
 
+# --- 10. A reading the document itself contradicts (tripwires) ----------------
+# A question can be read confidently and wrongly: Bubble Q41 came out as a grid
+# whose rows were "0=Agree fully with" and "Theme" — the scale's end label and a
+# column header — with the six statement pairs gone and the 0-10 scale cut at 7.
+# Nothing flagged it, so the second look and the model never saw it. These
+# compare the reading against what the source text plainly shows.
+# "1=Within the past 3 months", or a wrapped scale line carrying the next
+# point: "6 months (but not in the past 3 months) | 3=Within the past".
+_ANCHOR_ROW = re.compile(r"^\s*\d{1,2}\s*=|\|\s*\d{1,2}\s*=")
+_HEADER_ROW = re.compile(
+    r"^\s*(?:themes?|statements?|attributes?|items?|rows?|columns?)\s*(?:\[[^\]]*\])?\s*$", re.I
+)
+# A scale point opening a table cell (or a line inside one): "1", "5=Neutral".
+_SCALE_POINT = re.compile(r"(?:^|\n)\s*(\d{1,2})\s*(?:=|$)", re.M)
+
+
+def _row_lines(q: Question) -> list[str]:
+    """Table rows the document names after the question: "Q41_1 | …", "Q41r2 | …"."""
+    stem = re.escape(q.qid)
+    pattern = re.compile(rf"^\s*{stem}(?:_|\.|r)?\d+\s*\|", re.I | re.M)
+    return pattern.findall(q.source_text or "")
+
+
+def _document_scale_top(q: Question) -> int | None:
+    """The highest point of a scale the document writes as a run of table cells."""
+    top, run = None, []
+    for cell in (q.source_text or "").split("|"):
+        m = _SCALE_POINT.search(cell)
+        if m:
+            run.append(int(m.group(1)))
+            if len(run) >= 4:
+                top = max(top or 0, *run)
+        else:
+            run = []
+    return top
+
+
+def is_junk_row(label: str, q: Question) -> bool:
+    """A grid row that is a scale label or a column heading, not a thing to rate."""
+    label = label or ""
+    return bool(
+        _ANCHOR_ROW.search(label) or _HEADER_ROW.match(label)
+        or label.strip().lower() in {(c.label or "").strip().lower() for c in q.cols or []}
+    )
+
+
+def reading_contradicts_document(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
+    issues = []
+    rows = q.rows or []
+    junk = [r.label for r in rows if is_junk_row(r.label, q)]
+    if junk:
+        issues.append(Issue(
+            "GRID_ROWS_NOT_STATEMENTS",
+            f"{q.qid} has rows that are a scale label or a column heading, not things to "
+            f"rate: {', '.join(repr(j[:40]) for j in junk[:3])}",
+            "; ".join(j[:40] for j in junk[:3]),
+        ))
+    listed = _row_lines(q)
+    if len(listed) >= 2 and len(listed) != len(rows):
+        if q.type is QuestionType.GRID_SINGLE or rows:
+            detail = (f"the document lists {len(listed)} rows for {q.qid}; "
+                      f"the reading has {len(rows)}")
+        else:
+            detail = (f"the document writes {q.qid} as a table of {len(listed)} rows; "
+                      f"it was read as {q.type.value.replace('_', ' ')}")
+        issues.append(Issue("ROWS_DIFFER_FROM_DOCUMENT", detail, listed[0].strip()[:60]))
+    top = _document_scale_top(q)
+    codes = [c.code for c in q.cols or [] if isinstance(c.code, int)]
+    if q.cols and top is not None and codes and max(codes) < top:
+        issues.append(Issue(
+            "SCALE_CUT_SHORT",
+            f"the document's scale for {q.qid} runs to {top}; the reading stops at {max(codes)}",
+            f"0-{top}",
+        ))
+    return issues
+
+
 _WARNINGS = (
     hidden_variable, select_all_on_single, directive_names_missing_code,
     conditional_wording_dropped, note_as_answer, renamed_duplicate, odd_qid,
-    terminating_answer_not_exclusive,
+    terminating_answer_not_exclusive, reading_contradicts_document,
 )
 
 

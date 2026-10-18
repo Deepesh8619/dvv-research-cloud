@@ -21,6 +21,27 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-18 — tripwires: a confident misreading gets a second look (branch feat/tripwires)
+
+The model only saw a question the rules could not read or one that carried a
+flag. Bubble Q41 was read as a grid whose rows were "0=Agree fully with" and
+"Theme" — the six statement pairs gone — with no flag, so nothing ever looked
+again. Three checks now compare each reading with its own source text:
+
+| Tripwire | Catches |
+|---|---|
+| Rows that are a scale label or a column heading | Bubble Q41, Q44; Vivo Q13 (its wrapped scale lines read as three rows) |
+| The document lists `Q41_1 …` rows and the reading has a different number | Bubble Q41 (6 vs 2), Q44 (5 vs 4); a table read as a list |
+| The document's scale runs further than the reading's columns | — (none in the six documents) |
+
+A tripped question enters the second look. Scale lines read as rows are removed
+by rule when real rows remain (Vivo Q13 now matches the independent reading's
+rows). Otherwise it goes to the model with the document's table in view, and
+the model's fix is kept only when the tripwire clears. Measured (AI off, 6
+documents): Bubble silently-wrong 39.1% → 37.0% (Q41, Q44 now flagged); no
+other document changed; no false alarms. Q41/Q44 are resolved properly by the
+bipolar grid type (next).
+
 ## 2026-10-18 — pipeline quality control judges the completes (branch fix/qc-on-completes)
 
 The Overview's *Quality control* box ran on every row of a fielded export. On
