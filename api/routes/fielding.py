@@ -106,6 +106,7 @@ from src.engines.fielding.maxdiff_screens import questions_in as maxdiff_questio
 from src.engines.fielding.rotation import arms as rotation_arms
 from src.engines.fielding.rotation import assign as assign_arm
 from src.engines.fielding.rotation import order_pages
+from src.engines.questionnaire.bipolar import FLIP_ARMS, apply_flip, flipping_questions
 from src.renderers.surveyjs_compiler import compile_to_surveyjs, display_warnings
 
 logger = logging.getLogger(__name__)
@@ -903,6 +904,20 @@ def enter_survey(token: str, request: Request, db: Session = Depends(get_db)):
                 assign_arm(seen, [str(v) for v in range(n_versions)])
             )
             surveyjs_json = apply_maxdiff_version(surveyjs_json, survey, maxdiff_version)
+
+    # Bipolar grids whose document says half see the statements flipped: the
+    # arm that is behind, recorded in the session like the device is.
+    flipping = flipping_questions(survey)
+    if flipping:
+        dealt: dict[str, int] = {}
+        for prior in list_respondent_sessions(db, link.id):
+            arm = (getattr(prior, "entry_params", None) or {}).get("bipolar_flip")
+            if arm:
+                dealt[str(arm)] = dealt.get(str(arm), 0) + 1
+        arm = assign_arm(dealt, FLIP_ARMS)
+        entry_params = {**entry_params, "bipolar_flip": arm}
+        if arm == "2":
+            surveyjs_json = apply_flip(surveyjs_json, flipping)
 
     session = create_respondent_session(
         db, link.id, entry_params=entry_params, block_order=block_order,

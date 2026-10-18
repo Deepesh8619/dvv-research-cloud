@@ -81,9 +81,16 @@ def test_an_unreachable_agent_says_so(monkeypatch):
 
 
 def test_a_made_up_type_is_refused(monkeypatch):
+    monkeypatch.setattr(qa, "run_task", _model({"type": "hologram", "explanation": "x"}))
+    q = _stored_sum_question()
+    assert "does not exist" in qa.revise(q, "make it a hologram", {"Q2": q})["error"]
+
+
+def test_a_slider_is_kept_on_record_as_a_slider(monkeypatch):
     monkeypatch.setattr(qa, "run_task", _model({"type": "slider", "explanation": "x"}))
     q = _stored_sum_question()
-    assert "does not exist" in qa.revise(q, "make it a slider", {"Q2": q})["error"]
+    out = qa.revise(q, "make it a slider", {"Q2": q})
+    assert out["question"]["validation"]["intended_type"] == "slider"
 
 
 # --- Using a named question's answers; not losing rows; flat limits -----------

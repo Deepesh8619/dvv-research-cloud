@@ -262,6 +262,11 @@ def flag_reason(q: Question, code: str) -> str:
         return f"{qid}: not found in the document; rebuilt from the data map, so its wording and routing are the script's, not the client's."  # noqa: E501
     if code == schema.FLAG_ENTRY_MODE_CONFLICT:
         return entry_conflict_sentence(q)
+    if code == schema.FLAG_TYPE_NOT_SUPPORTED:
+        kind = str(v.get("intended_type") or "another kind").replace("_", " ")
+        return (f"{qid}: this is a {kind} question, which the link cannot run yet; it is "
+                f"set up as a {q.type.value.replace('_', ' ')} for now — script it by hand "
+                "or approve the stand-in.")
     return f"{qid}: flagged as {code.replace('_', ' ').lower()}; {GENERIC_SUFFIX}."
 
 

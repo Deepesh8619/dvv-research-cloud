@@ -52,6 +52,9 @@ function useAnswer(question: Question): unknown {
  * the screen to itself: pick, and the next slides in. The dots show what is
  * left and take you back to any statement to change it.
  */
+/** How the compiler joins a bipolar row's two statements. */
+const BIPOLAR = '  ⟷  '
+
 export function MatrixCarousel({ question }: { question: QuestionMatrixModel }) {
   useAnswer(question)
   const rows: MatrixRowModel[] = question.visibleRows
@@ -101,9 +104,22 @@ export function MatrixCarousel({ question }: { question: QuestionMatrixModel }) 
       </div>
 
       <div key={row.name} className="dvv-slide rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5">
-        <p className="mb-4 text-[17px] font-semibold leading-snug text-slate-900">{row.text}</p>
+        {/* A bipolar row: two opposite statements, the scale between them. The
+            side a statement sits on is the side its end of the scale is on. */}
+        {(row.text || '').includes(BIPOLAR) ? (
+          <div className="mb-4 grid grid-cols-2 gap-3" data-testid="bipolar-row">
+            {(row.text || '').split(BIPOLAR).slice(0, 2).map((side, i) => (
+              <p key={i} className={`rounded-xl bg-white p-3 text-[15px] font-semibold leading-snug text-slate-900 ring-1 ring-slate-200 ${i === 1 ? 'text-right' : ''}`}>
+                {side}
+              </p>
+            ))}
+          </div>
+        ) : (
+          <p className="mb-4 text-[17px] font-semibold leading-snug text-slate-900">{row.text}</p>
+        )}
         {isNumberScale(columns) ? (
-          <NumberScale columns={columns} value={row.value} label={row.text} onPick={pick} />
+          <NumberScale columns={columns} value={row.value} label={row.text} onPick={pick}
+            oneRow={(row.text || '').includes(BIPOLAR)} />
         ) : (
         <div
           role="radiogroup"
@@ -160,7 +176,10 @@ export function MatrixCarousel({ question }: { question: QuestionMatrixModel }) 
 function isNumberScale(columns: ItemValue[]): boolean {
   if (columns.length < 5) return false
   const values = columns.map((c) => Number(c.value))
-  if (values.some((v, i) => Number.isNaN(v) || (i > 0 && v !== values[i - 1] + 1))) return false
+  // Ascending, or descending: a bipolar grid's flipped half sees 10 … 0.
+  const step = values[1] - values[0]
+  if (Math.abs(step) !== 1) return false
+  if (values.some((v, i) => Number.isNaN(v) || (i > 0 && v !== values[i - 1] + step))) return false
   const bare = columns.filter((c) => (c.text || '').trim() === String(c.value)).length
   return bare * 2 >= columns.length
 }
@@ -179,6 +198,7 @@ function NumberScale({
   label,
   onPick,
   ends,
+  oneRow = false,
 }: {
   columns: ItemValue[]
   value: unknown
@@ -186,6 +206,8 @@ function NumberScale({
   onPick: (value: unknown) => void
   /** Words for the two ends when the points themselves carry none. */
   ends?: { min?: string; max?: string }
+  /** Never wrap: a bipolar scale's left end must stay under the left statement. */
+  oneRow?: boolean
 }) {
   const worded = columns.filter((c) => (c.text || '').trim() !== String(c.value))
   const firstPoint = worded.find((c) => c === columns[0])
@@ -202,7 +224,7 @@ function NumberScale({
         aria-label={label}
         className="grid gap-1.5 [grid-template-columns:repeat(var(--phone),minmax(0,1fr))] sm:[grid-template-columns:repeat(var(--wide),minmax(0,1fr))]"
         style={{
-          ['--phone' as string]: columns.length > 7 ? Math.ceil(columns.length / 2) : columns.length,
+          ['--phone' as string]: columns.length > 7 && !oneRow ? Math.ceil(columns.length / 2) : columns.length,
           ['--wide' as string]: columns.length,
         }}
       >
@@ -216,7 +238,7 @@ function NumberScale({
               aria-checked={on}
               aria-label={(c.text || '').trim() === String(c.value) ? String(c.value) : `${c.value} — ${c.text}`}
               onClick={() => onPick(c.value)}
-              className="dvv-choice h-12 rounded-xl border-[1.5px] text-base font-semibold tabular-nums transition-all duration-150 active:scale-95"
+              className={`dvv-choice h-12 rounded-xl border-[1.5px] font-semibold tabular-nums transition-all duration-150 active:scale-95 ${oneRow ? 'text-sm' : 'text-base'}`}
               style={{
                 borderColor: on ? ACCENT : '#e2e8f0',
                 background: on ? ACCENT : '#fff',

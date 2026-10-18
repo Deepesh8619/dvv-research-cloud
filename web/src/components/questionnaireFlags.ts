@@ -86,6 +86,13 @@ export const FLAG_INFO: Record<string, FlagInfo> = {
     blocking: false,
     severity: 'warn',
   },
+  TYPE_NOT_SUPPORTED: {
+    label: 'Kind of question not supported yet',
+    description:
+      'The question is a kind the survey link cannot run yet (for example a multi-answer or ranking grid). It is set up as the nearest kind it can run, and the real kind is kept on record. Script it by hand, or approve the stand-in if it is close enough.',
+    blocking: false,
+    severity: 'warn',
+  },
   ENTRY_MODE_CONFLICT: {
     label: 'Typed number vs choice list',
     description:

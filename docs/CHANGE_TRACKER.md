@@ -21,6 +21,17 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-18 — bipolar grids, and kinds of question we cannot run yet kept on record (branch feat/bipolar-grid)
+
+| Change | Evidence |
+|---|---|
+| A tripped grid whose document states its rows as a table (`Q41_1 \| left \| right \| theme [DO NOT SHOW]`) is read from that table. Two statement cells and pair wording make it **bipolar**: rows "left \| right", hidden theme column left out | Bubble Q41 (6 pairs), Q44 (5 pairs) now match the independent reading; Bubble parser 45.7% → 47.8%, link 42.4% → 44.6% |
+| "Half see left and right flipped": each respondent is dealt an arm least-fill; the flipped arm sees the statements swapped **and the scale reversed**, so a code keeps its meaning and the data needs no recoding. The arm is delivered as `HID_BIPOLAR_FLIP` | integration test: 4 respondents alternate, data carries 1,1,2,2 |
+| Respondent page: the two statements face each other above a one-line scale (the left end stays under the left statement; a reversed scale stays a number pad) | checked at phone width |
+| The model may now say a question is a `bipolar_grid`, `grid_multi`, `rank_grid`, `slider` or `other` instead of being forced into our list. Kinds the link runs are applied; the others are set up as the nearest kind with the real one in `validation.intended_type` and a *Kind of question not supported yet* flag | agent tests |
+
+No regressions on the six documents (Google Ads B link 69.0% → 70.4%).
+
 ## 2026-10-18 — tripwires: a confident misreading gets a second look (branch feat/tripwires)
 
 The model only saw a question the rules could not read or one that carried a

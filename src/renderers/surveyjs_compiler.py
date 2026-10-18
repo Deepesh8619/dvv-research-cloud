@@ -26,6 +26,7 @@ from src.core.survey_definition import (
     QuestionType,
     SurveyDefinition,
 )
+from src.engines.questionnaire.bipolar import is_bipolar, split
 from src.engines.questionnaire.grid_masks import affirmative_codes, variable_name
 from src.engines.questionnaire.grid_subquestions import without_question_label
 from src.engines.questionnaire.prose_directives import is_derived_wording, is_terminal_option
@@ -428,6 +429,14 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
         for column in element["columns"]:
             column["text"] = without_question_label(column["text"])
         element["rows"] = _choices(question.rows or [], by_qid)
+        if is_bipolar(question):
+            # Two opposite statements per row, the scale between them. Each
+            # side is carried separately so a flipped arm can swap them.
+            for row in element["rows"]:
+                left, right = split(row["text"])
+                if left and right:
+                    row.update(leftText=left, rightText=right, text=f"{left}  ⟷  {right}")
+            element["bipolar"] = True
     elif qtype == QuestionType.NUMERIC and question.rows:
         # One box per item, answered as {code: number} like a grid's row map,
         # and — when the document states one — a total they must reach.

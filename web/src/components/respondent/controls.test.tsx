@@ -109,6 +109,27 @@ describe('a 0-10 scale', () => {
     expect(model.getValue('Q')).toEqual({ 1: 7 })
   })
 
+  it('puts a bipolar pair on either side of the scale', () => {
+    const { model, question } = survey({
+      type: 'matrix', rows: [{ value: 1, text: 'I stick with brands I know  ⟷  I look for new ones' }],
+      columns: ZERO_TEN,
+    })
+    render(<MatrixCarousel question={question as QuestionMatrixModel} />)
+    expect(screen.getByTestId('bipolar-row').textContent).toBe('I stick with brands I knowI look for new ones')
+    fireEvent.click(screen.getByRole('radio', { name: '3' }))
+    expect(model.getValue('Q')).toEqual({ 1: 3 })
+  })
+
+  it('keeps the pad when the flipped half sees the scale reversed', () => {
+    const { question } = survey({
+      type: 'matrix', rows: [{ value: 1, text: 'I look for new ones  ⟷  I stick with brands I know' }],
+      columns: [...ZERO_TEN].reverse(),
+    })
+    render(<MatrixCarousel question={question as QuestionMatrixModel} />)
+    const pad = screen.getAllByRole('radio').map((b) => b.textContent)
+    expect(pad.slice(0, 3)).toEqual(['10', '9', '8'])
+  })
+
   it('is the same pad for one thing rated', () => {
     const { model, question } = survey({
       type: 'rating', rateValues: ZERO_TEN.map((c) => ({ value: c.value, text: String(c.value) })),

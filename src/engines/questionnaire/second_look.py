@@ -58,6 +58,7 @@ ATTENTION_FLAGS = frozenset({
     schema.FLAG_EMPTY_OPTIONS,
     schema.FLAG_DUPLICATE_OPTION_CODE,
     schema.FLAG_ENTRY_MODE_CONFLICT,
+    schema.FLAG_TYPE_NOT_SUPPORTED,
     # Not read at all: the model was unreachable when it was first read.
     *_UNREAD_FLAGS,
 })
@@ -520,6 +521,37 @@ def solve_duplicate_code(q: Question) -> Resolution | None:
     )
 
 
+_TABLE_TRIPS = ("GRID_ROWS_NOT_STATEMENTS", "ROWS_DIFFER_FROM_DOCUMENT")
+
+
+def solve_table_rows(q: Question, issues: list[Issue], by_qid: dict) -> Resolution | None:
+    """Rows the document states as a table (`Q41_1 | left | right`), read from it.
+
+    Bubble Q41/Q44: pairs of opposite statements read as a grid whose rows were
+    a scale label and a column heading. The table names every row, so the rows
+    come from the table and the fix is kept only when the tripwires clear.
+    """
+    from src.engines.questionnaire.bipolar import flips, is_bipolar, read_table
+
+    if not q.cols or not any(i.check in _TABLE_TRIPS for i in issues):
+        return None
+    after = read_table(q)
+    if after is None:
+        return None
+    remaining = _problems(after, {**by_qid, q.qid: after})
+    if any(i.check in _TABLE_TRIPS for i in remaining):
+        return None
+    kind = "pairs of opposite statements" if is_bipolar(after) else "rows"
+    flip = (" Half the respondents see each pair the other way round, as the document "
+            "asks; which half is recorded in the data." if flips(after) else "")
+    return Resolution(
+        status="fixed",
+        summary=f"Read the {len(after.rows)} {kind} from the document's table.{flip}",
+        detail="Rows before: " + "; ".join((r.label or "")[:40] for r in q.rows or []),
+        after=after,
+    )
+
+
 def solve_junk_rows(q: Question, issues: list[Issue], by_qid: dict) -> Resolution | None:
     """Scale lines or a column heading read as grid rows: drop them, keep the rest.
 
@@ -754,6 +786,7 @@ def second_look(survey: SurveyDefinition, *, use_model: bool = True,
             or solve_exclusive_screen_out(q, issues)
             or solve_note_as_answer(q)
             or solve_duplicate_code(q)
+            or solve_table_rows(q, issues, by_qid)
             or solve_junk_rows(q, issues, by_qid)
             or solve_rows_from_another_question(q, survey, by_qid)
         )
