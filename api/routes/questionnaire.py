@@ -1455,28 +1455,61 @@ def approve_clean(
 def questionnaire_datamap(
     study_id: str,
     db: Session = Depends(get_db),
-    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST, UserRole.REVIEWER)),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
 ):
-    """The data layout this instrument will produce — every variable, before
-    fielding. Computed from the current definition, so it never drifts."""
+    """Every variable the data file will have, hidden ones included, and what
+    fills each one. (Owner/Analyst)
+
+    The data layout is the contract with the client, and the hidden variables
+    are where it goes wrong unseen: a coded variable with no rule arrives
+    empty, one computed from a base is only as right as that base. Listing
+    what fills every column — asked, computed by an approved rule, computed
+    from a base, assigned by the link, or not filled at all — is how someone
+    checks the answers are punched right before a respondent is ever asked.
+    Built by the same code that writes the file, so it cannot drift from it.
+    """
+    from src.engines.fielding.materialize import ALL_STATUSES, materialize_fielding
+    from src.engines.questionnaire.derived import has_rule, is_coded_hidden, rule_text
+
     questionnaire = _latest_questionnaire(db, study_id)
     survey = _load_definition(db, questionnaire)
-    datamap = plan_datamap(survey)
+    datamap, _frame = materialize_fielding(survey, [], {}, ALL_STATUSES)
+    by_qid = {q.qid: q for q in survey.questions}
+
+    def filled_by(v) -> tuple[str, str]:
+        q = by_qid.get(v.question_ref or "")
+        if v.provenance == "fielding_paradata":
+            return "recorded", "recorded by the link for every interview"
+        if v.provenance == "fielding_derived" and q is not None:
+            base = (q.show_if.verbatim_text if q.show_if else "") or rule_text(q.show_if)
+            return "computed", f"1 when {base.removeprefix('IF ').strip()}, else 0"
+        if q is not None and is_coded_hidden(q):
+            if has_rule(q):
+                return "computed", "; ".join(
+                    f"{o.code} when {rule_text(o.derive_if)}" for o in q.options if o.derive_if)
+            return "not_filled", "no approved rule — the column will be empty"
+        if v.question_ref is None and v.name != "respondent_id":
+            return "assigned", "assigned by the link, balanced across respondents"
+        return "asked", ""
+
+    variables = []
+    for v in datamap.variables:
+        kind, how = filled_by(v)
+        variables.append({
+            "name": v.name,
+            "label": v.label,
+            "type": v.type.value if hasattr(v.type, "value") else str(v.type),
+            "values": {str(k): lbl for k, lbl in (v.values or {}).items()} or None,
+            "question_ref": v.question_ref,
+            "derived": v.provenance == "fielding_derived",
+            "filled_by": kind,
+            "how": how,
+        })
     return {
         "questionnaire_id": questionnaire.id,
         "status": questionnaire.status,
-        "n_variables": len(datamap.variables),
-        "variables": [
-            {
-                "name": v.name,
-                "label": v.label,
-                "type": v.type.value if hasattr(v.type, "value") else str(v.type),
-                "values": v.values or None,
-                "question_ref": v.question_ref,
-                "derived": v.provenance == "fielding_derived",
-            }
-            for v in datamap.variables
-        ],
+        "n_variables": len(variables),
+        "variables": variables,
     }
 
 

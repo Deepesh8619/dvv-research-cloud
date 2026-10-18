@@ -674,7 +674,26 @@ export interface RenderedSource {
   n_blocks: number
 }
 
+/** One column of the data file, and what fills it. */
+export interface PlannedVariable {
+  name: string
+  label: string
+  type: string
+  values: Record<string, string> | null
+  question_ref: string | null
+  derived: boolean
+  filled_by: 'asked' | 'computed' | 'not_filled' | 'recorded' | 'assigned'
+  /** The rule or base that computes it, in words; empty for an asked question. */
+  how: string
+}
+
 export const questionnaireApi = {
+  /** Every variable the data file will have, hidden ones included. Owner/Analyst. */
+  datamap: async (studyId: string) =>
+    api.get<{ n_variables: number; status: string; variables: PlannedVariable[] }>(
+      `/studies/${studyId}/questionnaire/datamap`,
+    ),
+
   status: async (studyId: string) =>
     api.get<QuestionnaireStatus>(`/studies/${studyId}/questionnaire`),
 

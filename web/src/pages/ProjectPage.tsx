@@ -6,6 +6,7 @@ import axios from 'axios'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Study, studiesApi, shareApi, ShareLink, questionnaireApi } from '../api/client'
 import FieldworkCards from '../components/FieldworkCards'
+import VariablesPanel from '../components/VariablesPanel'
 import { useAuth } from '../auth/AuthContext'
 import ChatBot from '../components/ChatBot'
 import { CheckIcon, DocChartIcon, DownloadIcon, LinkIcon } from '../components/Icons'
@@ -47,7 +48,10 @@ const STAGE_PROGRESS: Record<string, number> = {
 // instrument the client signed off. That second comparison is the one a DP shop
 // is paid for, and burying it under generic data QC misrepresented which of the
 // two matters.
-const TABS = ['Overview', 'Questionnaire checks', 'Reports', 'Cleaning', 'Activity'] as const
+const TABS = ['Overview', 'Questionnaire checks', 'Variables', 'Reports', 'Cleaning', 'Activity'] as const
+// The full variable list, hidden ones included, is for the people who build and
+// check the data — not for client reviewers.
+const STAFF_ONLY_TABS: ReadonlyArray<string> = ['Variables']
 type Tab = (typeof TABS)[number]
 
 export default function ProjectPage() {
@@ -55,6 +59,7 @@ export default function ProjectPage() {
   const [params, setParams] = useSearchParams()
   const tab = (params.get('tab') as Tab) || 'Overview'
   const { user } = useAuth()
+  const isStaff = user?.role === 'owner' || user?.role === 'analyst'
 
   const [study, setStudy] = useState<Study | null>(null)
   const [loading, setLoading] = useState(true)
@@ -261,7 +266,7 @@ export default function ProjectPage() {
       {/* Tab nav */}
       <div className="border-b border-slate-200 mb-6">
         <nav className="flex gap-1 overflow-x-auto">
-          {TABS.map((t) => (
+          {TABS.filter((t) => !STAFF_ONLY_TABS.includes(t) || isStaff).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -284,6 +289,7 @@ export default function ProjectPage() {
       {tab === 'Reports' && (noData ? <NoDataState /> : <ReportsTab study={study} />)}
       {tab === 'Cleaning' && (noData ? <NoDataState /> : <CleaningPanel studyId={study.id} role={user?.role} />)}
       {tab === 'Activity' && <ActivityTab study={study} />}
+      {tab === 'Variables' && isStaff && <VariablesPanel studyId={study.id} />}
 
       {/* Share modal */}
       {showShareModal && (
