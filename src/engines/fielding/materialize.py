@@ -161,10 +161,24 @@ def _grid_cell(value: Any, row_code: int) -> int | None:
     return _to_int(raw)
 
 
+def _grid_picks(value: Any, row_code: int) -> set[int] | None:
+    """The column codes ticked in one row of a multi-answer grid; None if unanswered."""
+    if not isinstance(value, Mapping):
+        return None
+    raw = value.get(row_code)
+    if raw is None:
+        raw = value.get(str(row_code))
+    if raw is None:
+        return None
+    return _selected_codes(raw if isinstance(raw, (list, tuple, set)) else [raw])
+
+
 def picked_option(question: Question, code: int, value: Any) -> bool:
     """Whether this answer chose option (or grid row) `code`."""
     if question.type is QuestionType.GRID_SINGLE:
         return _grid_cell(value, code) is not None
+    if question.type is QuestionType.GRID_MULTI:
+        return bool(_grid_picks(value, code))
     if question.type is QuestionType.NUMERIC:
         return (_to_float(_grid_cell(value, code)) or 0) > 0
     if isinstance(value, (list, tuple, set)):
@@ -297,6 +311,31 @@ def _question_specs(question: Question) -> list[_ColumnSpec]:
             return str(raw) if raw is not None else None
 
         return [_ColumnSpec(var, read_text)]
+
+    if qtype == QuestionType.GRID_MULTI:
+        # One 0/1 column per cell, `Q21r3c2`, as Decipher writes a checkbox grid
+        # — and as the data check already links one. Null where the row was not
+        # answered (not shown), 0 where it was and this column was not ticked.
+        specs = []
+        for row in question.rows or []:
+            for col in question.cols or []:
+                var = Variable(
+                    name=f"{qid}r{row.code}c{col.code}",
+                    label=f"{text} — {row.label} — {col.label}",
+                    type=VarType.MULTI,
+                    values={0: "Not selected", 1: "Selected"},
+                    question_ref=qid,
+                    question_text=text,
+                    row=str(row.code),
+                    provenance="fielding",
+                )
+
+                def read(a, q=qid, rc=row.code, cc=col.code):
+                    picks = _grid_picks(a.get(q), rc)
+                    return None if picks is None else int(cc in picks)
+
+                specs.append(_ColumnSpec(var, read))
+        return specs
 
     if qtype == QuestionType.GRID_SINGLE:
         col_labels = {c.code: c.label for c in (question.cols or [])}

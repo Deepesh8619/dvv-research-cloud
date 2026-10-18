@@ -20,6 +20,7 @@ import re
 from typing import Any
 
 from src.core.survey_definition import (
+    GRID_TYPES,
     Block,
     Expression,
     Question,
@@ -421,8 +422,12 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
         if isinstance(top_n, int) and 0 < top_n < len(question.options or []):
             element["selectToRankEnabled"] = True
             element["maxSelectedChoices"] = top_n
-    elif qtype == QuestionType.GRID_SINGLE:
+    elif qtype in GRID_TYPES:
         element["type"] = "matrix"
+        if qtype is QuestionType.GRID_MULTI:
+            # Several answers per row; the respondent page reads the flag and
+            # stores each row as a list of column codes.
+            element["multiAnswer"] = True
         element["columns"] = _choices(question.cols or [], by_qid)
         # A definition stored before grids like Q2a/Q2b were split still heads
         # its columns "Q2a. ever heard of?" — a label the respondent cannot read.

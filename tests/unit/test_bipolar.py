@@ -94,7 +94,7 @@ def test_a_kind_the_link_cannot_run_is_kept_on_record_not_squeezed(monkeypatch):
                  " Acme Fizz Cleansers Toners")
 
     def fake(task, prompt, schema_, **_):
-        return AIResponse({"type": "grid_multi", "rows": [{"code": 1, "label": "Cleansers"},
+        return AIResponse({"type": "rank_grid", "rows": [{"code": 1, "label": "Cleansers"},
                                                           {"code": 2, "label": "Toners"}],
                            "cols": [{"code": 1, "label": "Acme"}, {"code": 2, "label": "Fizz"}],
                            "explanation": "Brands per product."}, "bedrock", "qwen3")
@@ -102,5 +102,5 @@ def test_a_kind_the_link_cannot_run_is_kept_on_record_not_squeezed(monkeypatch):
     monkeypatch.setattr("src.engines.questionnaire.question_agent.run_task", fake)
     out = revise_with_context(q, "fix it", {"Q6": q}, [])
     after = Question.from_dict(out["question"])
-    assert after.validation["intended_type"] == "grid_multi"
+    assert after.validation["intended_type"] == "rank_grid"
     assert schema.FLAG_TYPE_NOT_SUPPORTED in after.flags

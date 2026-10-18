@@ -163,6 +163,12 @@ def _answer(
         if not rows or not cols:
             return None
         return {str(r.code): rng.choice([c.code for c in cols]) for r in rows}
+    if question.type == QuestionType.GRID_MULTI:
+        rows, cols = question.rows or [], question.cols or []
+        if not rows or not cols:
+            return None
+        codes = [c.code for c in cols]
+        return {str(r.code): rng.sample(codes, rng.randint(1, len(codes))) for r in rows}
     if question.type == QuestionType.NUMERIC and question.rows:
         # Shares that must reach the stated total: split it at random.
         total = int((question.validation or {}).get("sum") or 100)

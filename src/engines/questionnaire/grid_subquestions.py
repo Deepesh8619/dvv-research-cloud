@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from dataclasses import replace
 
-from src.core.survey_definition import Question, QuestionType, SurveyDefinition
+from src.core.survey_definition import GRID_TYPES, Question, QuestionType, SurveyDefinition
 from src.engines.questionnaire.loops import _replace
 
 # "Q2a. ever heard of?", "Q2b) Ever purchased from?", "S10A: Used in P3M"
@@ -52,7 +52,7 @@ def split_subquestion_grids(survey: SurveyDefinition) -> list[dict]:
     """Replace every grid whose columns are questions with one question per column."""
     applied: list[dict] = []
     for grid in list(survey.questions):
-        if grid.type is not QuestionType.GRID_SINGLE or not grid.rows:
+        if grid.type not in GRID_TYPES or not grid.rows:
             continue
         parsed = [column_question(c.label) for c in grid.cols or []]
         if len(parsed) < 2 or None in parsed:

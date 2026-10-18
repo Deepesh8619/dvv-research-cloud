@@ -52,6 +52,7 @@ _DATE_FORMATS = ("%m/%d/%Y %H:%M", "%m/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y
 # The first variable a terminate rule names is the question that screened them
 # out: "term:(SS_REVENUE.r13 or SS_REVENUE.r14)" -> SS_REVENUE.
 _RULE_QUESTION = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_CELL = re.compile(r"r(\d+)c(\d+)$")
 _CELL_CODE = re.compile(r"^(?P<var>.+?)_r(?P<code>\d+)$")
 
 
@@ -79,6 +80,14 @@ def _markers(value: Any) -> list[str]:
 def _answer(question, row: dict, variables: list[str]) -> Any:
     """One respondent's answer to one question, in the shape the link stores it."""
     kind = question.type
+    if kind is QuestionType.GRID_MULTI:
+        out: dict[int, list[int]] = {}
+        for name in variables:
+            m = _CELL.search(name)
+            value = row.get(name)
+            if m and value not in (None, 0, "0", 0.0):
+                out.setdefault(int(m.group(1)), []).append(int(m.group(2)))
+        return out or None
     if kind is QuestionType.GRID_SINGLE:
         return _grid_answer(row, variables)
     if kind in (QuestionType.SINGLE, QuestionType.DROPDOWN, QuestionType.MULTI, QuestionType.RANK):

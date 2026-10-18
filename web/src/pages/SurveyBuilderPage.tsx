@@ -246,7 +246,7 @@ function buildDetailState(q: Question): DetailState {
     whatever is in the editor right now, not from the last save. */
 function draftQuestionFrom(state: DetailState, base: Question): Question {
   const isConstantSum = state.type === 'constant_sum'
-  const isGrid = state.type === 'grid_single'
+  const isGrid = state.type === 'grid_single' || state.type === 'grid_multi'
   const hasOptions = OPTION_TYPES.has(state.type)
   return {
     ...base,
@@ -324,7 +324,7 @@ function QuestionDetail({
   }
 
   const hasOptions = OPTION_TYPES.has(state.type)
-  const isGrid = state.type === 'grid_single'
+  const isGrid = state.type === 'grid_single' || state.type === 'grid_multi'
   const isConstantSum = state.type === 'constant_sum'
 
   // Insert a piping marker {QID} at the cursor (SurveyJS interpolates it live).

@@ -55,9 +55,11 @@ export function compileQuestionForPreview(q: Question): Record<string, unknown> 
       el.choices = choices(q.options)
       break
     case 'grid_single':
+    case 'grid_multi':
       el.type = 'matrix'
       el.rows = choices(q.rows ?? [])
       el.columns = choices(q.cols ?? [])
+      if (q.type === 'grid_multi') el.multiAnswer = true
       break
     case 'numeric':
       if (q.rows && q.rows.length > 0) {

@@ -34,6 +34,7 @@ import re
 from dataclasses import dataclass, field
 
 from src.core.survey_definition import (
+    GRID_TYPES,
     Expression,
     Option,
     Question,
@@ -283,7 +284,7 @@ def solve_rows_from_another_question(q: Question, survey: SurveyDefinition,
     """A rating grid whose rows are another question's answers ("INSERT SELECTIONS FROM X")."""
     if q.rows:
         return None
-    is_grid = q.type is QuestionType.GRID_SINGLE
+    is_grid = q.type in GRID_TYPES
     scale = q.cols or _scale_from_source(q) or (_scale_from_options(q) if not is_grid else None)
     if not scale:
         return None

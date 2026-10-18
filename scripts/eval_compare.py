@@ -69,7 +69,7 @@ GOLD_TYPES: dict[str, set | None] = {
     "single": {QT.SINGLE}, "multi": {QT.MULTI}, "numeric": {QT.NUMERIC},
     "text": {QT.OPEN_TEXT}, "dropdown": {QT.DROPDOWN, QT.SINGLE}, "ranking": {QT.RANK},
     "constant_sum": {QT.NUMERIC}, "grid_single": {QT.GRID_SINGLE},
-    "grid_multi": set(),  # the model has no multi-answer grid: always a TYPE_DIFF
+    "grid_multi": {QT.GRID_MULTI},
     "maxdiff": {QT.MAXDIFF}, "date": {QT.OPEN_TEXT, QT.NUMERIC},
     "slider": {QT.NUMERIC, QT.SINGLE}, "other": None,
 }
@@ -78,7 +78,7 @@ LINK_KIND = {"radiogroup": "single", "rating": "single", "checkbox": "multi",
              "multipletext": "numeric", "html": "html"}
 LINK_OK = {"single": {"single"}, "multi": {"multi"}, "dropdown": {"dropdown", "single"},
            "ranking": {"ranking"}, "numeric": {"numeric"}, "constant_sum": {"numeric"},
-           "text": {"text"}, "grid_single": {"grid"}, "grid_multi": set(),
+           "text": {"text"}, "grid_single": {"grid"}, "grid_multi": {"grid_multi"},
            "date": {"text", "numeric"}, "slider": {"numeric", "single"}}
 DEFECT_WORDS = {
     "unknown_reference": ["unknown", "reference", "refers", "undefined", "not found", "unresolved"],
@@ -599,6 +599,8 @@ def cmp_link(g: dict, el: dict | None, page: dict | None, q: Question | None,
         return [Diff("MISSING", "link_missing", f"no element in the compiled survey ({why})")]
     out: list[Diff] = []
     kind = LINK_KIND.get(el["type"], el["type"])
+    if kind == "grid" and el.get("multiAnswer"):
+        kind = "grid_multi"
     if el["type"] == "text" and el.get("inputType") == "number":
         kind = "numeric"
     elif el["type"] in ("text", "comment"):

@@ -54,7 +54,7 @@ def write_in_name(qid: str, code: int) -> str:
 def _candidates(question: Question) -> list[Option]:
     if question.type in _PICK_TYPES:
         return list(question.options or [])
-    if question.type in (QuestionType.GRID_SINGLE, QuestionType.NUMERIC):
+    if question.type in (QuestionType.GRID_SINGLE, QuestionType.GRID_MULTI, QuestionType.NUMERIC):
         return list(question.rows or [])
     return []
 

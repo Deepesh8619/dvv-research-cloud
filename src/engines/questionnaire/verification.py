@@ -30,7 +30,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from src.core.survey_definition import Question, QuestionType
+from src.core.survey_definition import GRID_TYPES, Question, QuestionType
 
 # A line that offers an answer: "1. Yes", "98: Other (specify)", "- Retailer A".
 _OPTION_LINE = re.compile(r"^\s*(?:(?P<code>\d{1,3})\s*[.):]|[-•*])\s+(?P<label>\S.*)$")
@@ -140,7 +140,7 @@ def _answer_list_checks(
     captured = {_normalise(o.label) for o in question.options or []}
     captured |= {_normalise(o.label) for o in (question.rows or [])}
     dropped = [label for _, label in source_options if label not in captured]
-    if question.type is not QuestionType.GRID_SINGLE:
+    if question.type not in GRID_TYPES:
         checks.append(
             Check(
                 "source_options_all_captured",
@@ -179,6 +179,7 @@ def _always_decidable(question: Question, chunk_text: str) -> list[Check]:
     if _MULTI_WORDING.search(wording) and question.type not in (
         QuestionType.MULTI,
         QuestionType.GRID_SINGLE,
+        QuestionType.GRID_MULTI,
     ):
         checks.append(
             Check("type_matches_the_wording", False,
@@ -195,7 +196,7 @@ def _always_decidable(question: Question, chunk_text: str) -> list[Check]:
         checks.append(Check("type_matches_the_wording", True))
 
     # 5. A grid answers per row, with the columns as its scale.
-    if question.type is QuestionType.GRID_SINGLE:
+    if question.type in GRID_TYPES:
         checks.append(
             Check(
                 "grid_has_rows_and_columns",
@@ -263,7 +264,7 @@ def covers_the_question(question: Question, checks: list[Check]) -> bool:
     to the model, which is the point: the checklist takes the work it can settle
     and leaves the rest, rather than claiming everything.
     """
-    if question.type is QuestionType.GRID_SINGLE:
+    if question.type in GRID_TYPES:
         return bool(question.rows and question.cols)
     if question.type in (QuestionType.OPEN_TEXT, QuestionType.NUMERIC, QuestionType.INFO):
         return bool(question.text)

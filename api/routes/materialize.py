@@ -610,13 +610,17 @@ def _display(question, value) -> str:
     from src.core.survey_definition import QuestionType
 
     labels = {o.code: o.label for o in (question.options if question else [])}
-    is_grid = question is not None and question.type is QuestionType.GRID_SINGLE
+    is_grid = question is not None and question.type in (
+        QuestionType.GRID_SINGLE, QuestionType.GRID_MULTI)
     if is_grid and isinstance(value, dict):
         rows = {str(r.code): r.label for r in question.rows or []}
         cols = {c.code: c.label for c in question.cols or []}
-        return "; ".join(
-            f"{rows.get(str(r), r)}: {cols.get(_as_int(c), c)}" for r, c in value.items()
-        )
+
+        def picked(c):
+            picks = c if isinstance(c, list) else [c]
+            return ", ".join(str(cols.get(_as_int(p), p)) for p in picks)
+
+        return "; ".join(f"{rows.get(str(r), r)}: {picked(c)}" for r, c in value.items())
     if isinstance(value, list):
         return ", ".join(str(labels.get(_as_int(v), v)) for v in value)
     return str(labels.get(_as_int(value), value))

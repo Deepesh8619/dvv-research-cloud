@@ -194,7 +194,7 @@ def _respondent_view(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
     for name in _PIPE.findall(element.get("title") or ""):
         source = by_qid.get(name)
         if source is not None and source.rows and source.type in (
-            QuestionType.NUMERIC, QuestionType.GRID_SINGLE
+            QuestionType.NUMERIC, QuestionType.GRID_SINGLE, QuestionType.GRID_MULTI
         ):
             return [Issue(
                 "pipe_cannot_fill",

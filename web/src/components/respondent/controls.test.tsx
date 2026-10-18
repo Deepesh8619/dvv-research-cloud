@@ -168,3 +168,21 @@ describe('ConstantSum', () => {
     expect(model.getValue('Q')).toEqual({ 1: 70, 2: 30 })
   })
 })
+
+describe('a tick-box grid', () => {
+  it('takes several answers in a row and stores them as a list', () => {
+    const { model, question } = survey({
+      type: 'matrix', multiAnswer: true,
+      rows: [{ value: 1, text: 'Delivery pharmacy' }, { value: 2, text: 'In-person pharmacy' }],
+      columns: [{ value: 1, text: 'Timing' }, { value: 2, text: 'Security' }, { value: 3, text: 'Privacy' }],
+    })
+    render(<MatrixCarousel question={question as QuestionMatrixModel} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Timing' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Privacy' }))
+    expect(model.getValue('Q')).toEqual({ 1: [1, 3] })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Timing' }))
+    expect(model.getValue('Q')).toEqual({ 1: [3] })
+    fireEvent.click(screen.getByText('Next statement ›'))
+    expect(screen.getByText('In-person pharmacy')).toBeTruthy()
+  })
+})

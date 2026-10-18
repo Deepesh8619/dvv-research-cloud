@@ -39,6 +39,7 @@ from src.ai.router import (
 )
 from src.core.models import DataMap
 from src.core.survey_definition import (
+    GRID_TYPES,
     Block,
     Expression,
     Option,
@@ -130,6 +131,7 @@ _OPTION_BEARING_TYPES = frozenset(
         QuestionType.MULTI,
         QuestionType.DROPDOWN,
         QuestionType.GRID_SINGLE,
+        QuestionType.GRID_MULTI,
     }
 )
 
@@ -397,7 +399,7 @@ def _validate_question(result: ExtractionResult, routing: dict) -> None:
             codes.add(opt.code)
 
     # Empty options on a type that requires an answer list.
-    if q.type is QuestionType.GRID_SINGLE:
+    if q.type in GRID_TYPES:
         # A grid is judged on rows AND columns, never on `options`. It emits one
         # data column per ROW with the COLUMNS as that column's value labels, so
         # a grid holding a dozen options but no rows delivers nothing at all —
@@ -770,7 +772,7 @@ def _apply_table_shape(question: Question, chunk: QuestionChunk) -> None:
     if not tables:
         return
     entry = next((found for t in tables if (found := entry_table(t))), None)
-    if entry is not None and question.type is not QuestionType.GRID_SINGLE:
+    if entry is not None and question.type not in GRID_TYPES:
         rows, percent = entry
         question.type = QuestionType.NUMERIC
         question.rows, question.options, question.cols = rows, [], None
@@ -895,7 +897,7 @@ def _question_from_prose(fields: ProseFields, chunk: QuestionChunk) -> Question:
     # says the whole grid takes that many answers in total — which is not what
     # the question asks. Seen on a real client grid ("Select one answer per
     # row", which arrived here as a cap of 1).
-    if question.type is QuestionType.GRID_SINGLE and question.validation:
+    if question.type in GRID_TYPES and question.validation:
         for key in ("min_select", "max_select"):
             question.validation.pop(key, None)
     _codes_from_list_numbers(question, chunk)
@@ -1472,6 +1474,24 @@ def _derived_result(chunk: QuestionChunk, role: str) -> ExtractionResult:
     return result
 
 
+_SELECT_ALL_GRID = re.compile(
+    r"select\s+all\s+that\s+apply|check\s+all\s+that\s+apply|choose\s+all|"
+    r"select\s+(?:as\s+many|all)\s+(?:as|that)", re.I)
+_ONE_PER_ROW = re.compile(r"\bone\b[^.\n]{0,20}\b(?:per|for\s+each|in\s+each)\b", re.I)
+
+
+def promote_multi_answer_grids(survey: SurveyDefinition) -> None:
+    """A grid whose own wording says "select all that apply" takes several answers per row."""
+    for q in survey.questions:
+        if q.type is not QuestionType.GRID_SINGLE or not (q.rows and q.cols):
+            continue
+        wording = q.text or ""
+        if _SELECT_ALL_GRID.search(wording) and not _ONE_PER_ROW.search(wording):
+            q.type = QuestionType.GRID_MULTI
+            q.extraction_evidence = {**(q.extraction_evidence or {}),
+                                     "type": "grid worded 'select all that apply'"}
+
+
 def extract_survey_definition(
     chunks: list[QuestionChunk],
     study_id: str,
@@ -1769,6 +1789,10 @@ def extract_survey_definition(
     # Automatic answers and typed-vs-choice contradictions, before QA so the
     # base flag an automatic answer does not deserve is gone when QA looks.
     mark_derived_facts(survey)
+    # "For each type of pharmacy… select all that apply": a grid with several
+    # answers per row. Read as one answer per row, a respondent could tick only
+    # one concern per pharmacy type and the rest were never collected.
+    promote_multi_answer_grids(survey)
 
     # The QA loop, as the last pass: a QA agent tests every question as the
     # respondent will meet it, a programmer agent repairs what it safely can,
