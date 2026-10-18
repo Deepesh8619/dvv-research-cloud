@@ -702,6 +702,13 @@ def compile_to_surveyjs(survey: SurveyDefinition) -> dict[str, Any]:
     if len(rotating) >= 2:
         compiled["rotatingPages"] = rotating
 
+    # Hidden variables an approved rule computes, so a later question whose
+    # base names one ("ASK IF D2a = 4") can be shown in the browser. The server
+    # computes the same values itself and never takes these from the client.
+    calculated = _calculated_values(survey)
+    if calculated:
+        compiled["calculatedValues"] = calculated
+
     grid_masks = _grid_mask_sources(survey)
     if grid_masks:
         # Read by the respondent page, not by SurveyJS itself.
@@ -711,6 +718,21 @@ def compile_to_surveyjs(survey: SurveyDefinition) -> dict[str, Any]:
         # Read by the respondent page, not by SurveyJS itself.
         compiled["pipeVariables"] = variables
     return compiled
+
+
+def _calculated_values(survey: SurveyDefinition) -> list[dict[str, Any]]:
+    from src.engines.questionnaire.derived import has_rule, is_coded_hidden, is_multi_coded
+
+    out = []
+    for q in survey.questions:
+        if not is_coded_hidden(q) or not has_rule(q) or is_multi_coded(q):
+            continue
+        expression = "''"
+        for option in reversed([o for o in q.options if o.derive_if is not None]):
+            condition = _expression_to_visibleif_string(option.derive_if)
+            expression = f"iif({condition}, {_format_value(option.code)}, {expression})"
+        out.append({"name": q.qid, "expression": expression, "includeIntoResult": False})
+    return out
 
 
 def _shuffled_choices(question: Question, choices: list[dict]) -> list[dict]:

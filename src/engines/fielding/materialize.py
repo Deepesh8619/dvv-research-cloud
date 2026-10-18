@@ -54,6 +54,7 @@ from src.engines.fielding.paradata import DEVICE_CODES
 from src.engines.fielding.paradata import summarise as summarise_paradata
 from src.engines.fielding.rotation import ROTATION_VARIABLE, rotating_blocks
 from src.engines.questionnaire.bipolar import FLIP_LABELS, FLIP_VARIABLE, flipping_questions
+from src.engines.questionnaire.derived import derived_values, has_rule, is_multi_coded
 from src.engines.questionnaire.write_ins import write_in_name, write_ins
 
 logger = logging.getLogger(__name__)
@@ -218,12 +219,12 @@ def _write_in_specs(question: Question) -> list[_ColumnSpec]:
     return specs
 
 
-def _specs_for_question(question: Question) -> list[_ColumnSpec]:
+def _specs_for_question(question: Question, survey=None) -> list[_ColumnSpec]:
     """Emit the DataMap column spec(s) for one question (empty for info)."""
-    return [*_question_specs(question), *_write_in_specs(question)]
+    return [*_question_specs(question, survey), *_write_in_specs(question)]
 
 
-def _question_specs(question: Question) -> list[_ColumnSpec]:
+def _question_specs(question: Question, survey=None) -> list[_ColumnSpec]:
     """The columns of the question's own answer."""
     qid = question.qid
     text = question.text or qid
@@ -362,6 +363,23 @@ def _question_specs(question: Question) -> list[_ColumnSpec]:
         # COLUMN, and every banner cut by age band reads it. Typed info it
         # emitted nothing at all, so the variable the tables are built on was
         # simply absent from the file.
+        # With an approved rule the value is computed from the answers; without
+        # one the column is still delivered (preflight says it will be empty).
+        def value_of(a, q=qid):
+            return derived_values(survey, a).get(q) if survey is not None else a.get(q)
+
+        if is_multi_coded(question):
+            # Several codes can hold at once (aware of Google AND Meta): one
+            # 0/1 column per code, like a multi-select.
+            return [
+                _ColumnSpec(
+                    Variable(name=f"{qid}r{o.code}", label=f"{text} — {o.label}",
+                             type=VarType.MULTI, values={0: "No", 1: "Yes"},
+                             question_ref=qid, question_text=text, provenance="derived"),
+                    lambda a, c=o.code, f=value_of: _code_held(f(a), c),
+                )
+                for o in question.options
+            ]
         var = Variable(
             name=qid,
             label=text,
@@ -371,7 +389,7 @@ def _question_specs(question: Question) -> list[_ColumnSpec]:
             question_text=text,
             provenance="derived",
         )
-        return [_ColumnSpec(var, lambda a, q=qid: _to_int(a.get(q)))]
+        return [_ColumnSpec(var, lambda a, f=value_of: _to_int(f(a)))]
 
     if qtype == QuestionType.INFO and qid.upper().startswith("HID_") and question.show_if:
         # A hidden variable IS a column — it is what banners are cut by. It has
@@ -424,8 +442,16 @@ def uncomputed_derived(survey) -> list[str]:
         if q.type is QuestionType.INFO
         and _is_derived(q)
         and q.options
+        and not has_rule(q)
         and not (q.qid.upper().startswith("HID_") and q.show_if is not None)
     )
+
+
+def _code_held(value: Any, code: int) -> int | None:
+    """1/0 for one code of a multi-coded hidden variable; None when it has no value."""
+    if value is None:
+        return None
+    return int(code in (value if isinstance(value, list) else [value]))
 
 
 def _is_derived(question: Question) -> bool:
@@ -518,7 +544,7 @@ def plan_datamap(survey: SurveyDefinition) -> DataMap:
     )
     for qid in survey.question_order():
         if qid in survey:
-            for spec in _specs_for_question(survey[qid]):
+            for spec in _specs_for_question(survey[qid], survey):
                 datamap.add(spec.variable)
     for var in _paradata_variables():
         datamap.add(var)
@@ -563,7 +589,7 @@ def materialize_fielding(
     question_specs: list[_ColumnSpec] = []
     for qid in survey.question_order():
         if qid in survey:
-            question_specs.extend(_specs_for_question(survey[qid]))
+            question_specs.extend(_specs_for_question(survey[qid], survey))
 
     datamap = DataMap()
     rid_var = Variable(

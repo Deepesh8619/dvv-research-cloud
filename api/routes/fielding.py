@@ -107,6 +107,7 @@ from src.engines.fielding.rotation import arms as rotation_arms
 from src.engines.fielding.rotation import assign as assign_arm
 from src.engines.fielding.rotation import order_pages
 from src.engines.questionnaire.bipolar import FLIP_ARMS, apply_flip, flipping_questions
+from src.engines.questionnaire.derived import with_derived
 from src.renderers.surveyjs_compiler import compile_to_surveyjs, display_warnings
 
 logger = logging.getLogger(__name__)
@@ -1076,7 +1077,9 @@ def submit_answers(
         upsert_respondent_answer(db, session_id, qid, _exclusive_only(survey, qid, value))
     touch_respondent_session(db, session_id, current_page=body.current_page)
 
-    answers = get_session_answers_map(db, session_id)
+    # Hidden variables an approved rule computes join the answers, so a
+    # screen-out or quota written on one ("D2a = 4") is judged like any other.
+    answers = with_derived(survey, get_session_answers_map(db, session_id))
     _check_stated_place(db, session, survey, answers)
     for question in survey.questions:
         if question.terminate_if is None:
@@ -1166,7 +1169,8 @@ def complete_survey(
             session,
         )
 
-    answers = get_session_answers_map(db, session_id)
+    answers = with_derived(SurveyDefinition.from_json(link.survey_json),
+                           get_session_answers_map(db, session_id))
     matching = _matching_cells(list_quota_cells(db, link.id), answers)
 
     claimed: list[str] = []

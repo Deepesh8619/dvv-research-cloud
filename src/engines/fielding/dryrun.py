@@ -39,6 +39,7 @@ from src.engines.fielding.decisions import (
     unsatisfiable_conditions,
 )
 from src.engines.fielding.materialize import picked_option
+from src.engines.questionnaire.derived import with_derived
 from src.engines.questionnaire.grid_masks import mask_codes
 from src.engines.questionnaire.write_ins import write_in_name, write_ins
 
@@ -358,7 +359,8 @@ def simulate(
 
             full = [
                 cell
-                for cell in matching_cells(cells, answers, decidable_only=True)
+                for cell in matching_cells(
+                    cells, with_derived(survey, answers), decidable_only=True)
                 if counts[cell.id] >= cell.limit
             ]
             if full:
@@ -373,11 +375,11 @@ def simulate(
             if is_decidable(by_qid[qid].terminate_if, answers):
                 result.eligible += 1
 
-        for cell in matching_cells(cells, answers):
+        for cell in matching_cells(cells, with_derived(survey, answers)):
             quotas[cell.id].eligible += 1
 
         if status == STATUS_COMPLETE:
-            for cell in matching_cells(cells, answers):
+            for cell in matching_cells(cells, with_derived(survey, answers)):
                 if counts[cell.id] >= cell.limit:
                     status = STATUS_OVERQUOTA
                     quotas[cell.id].fired += 1

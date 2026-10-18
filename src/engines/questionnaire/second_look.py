@@ -168,7 +168,9 @@ def refresh_flags(q: Question, by_qid: dict[str, Question]) -> list[Issue]:
 
 
 def _needs_look(q: Question) -> bool:
-    return bool(set(q.flags or ()) & ATTENTION_FLAGS)
+    from src.engines.questionnaire.derived import needs_rule
+
+    return bool(set(q.flags or ()) & ATTENTION_FLAGS) or needs_rule(q)
 
 
 # --- rows inserted from another question -----------------------------------------
@@ -582,6 +584,58 @@ def solve_junk_rows(q: Question, issues: list[Issue], by_qid: dict) -> Resolutio
     )
 
 
+def solve_derived_rule(q: Question, survey: SurveyDefinition, use_model: bool,
+                       locked: set[str]) -> Resolution | None:
+    """A coded hidden variable with no rule: propose one, never apply it unasked.
+
+    D2a "CODE SIZE OF HOUSEHOLD" (1 / 2 / 3 / 4 or more) was a data column
+    delivered empty. The rule is read from the document — a Definition column,
+    a condition in the answer label, number bands over the question it is coded
+    from — or written by a model in the document's grammar, and offered for a
+    person to approve. A value from outside the answers is said to be so.
+    """
+    from src.engines.questionnaire.derived import (
+        comes_from_outside,
+        needs_rule,
+        rule_from_document,
+        rule_from_model,
+        rule_text,
+    )
+
+    if not needs_rule(q):
+        return None
+    if comes_from_outside(q):
+        return Resolution(
+            status="explained",
+            summary=f"{q.qid} is set from outside the answers (a lookup, the sample or an "
+                    "assignment), so no rule over the answers can compute it.",
+            detail="Supply it with the sample, or script the lookup; until then its column "
+                   "is empty.",
+        )
+    found = rule_from_document(q, survey)
+    if found is None and use_model and q.qid not in locked:
+        found = rule_from_model(q, survey)
+    if found is None:
+        return Resolution(
+            status="needs_you",
+            summary=f"{q.qid} is computed by the scripter, and the document does not say how "
+                    "in a form that can be run.",
+            detail="Write each code's condition in the answer's Definition, e.g. "
+                   "`D2 = 1` or `D2 >= 4`, and it will be computed for every respondent.",
+        )
+    after, how = found
+    lines = "; ".join(f"{o.code} {o.label[:30]}: {rule_text(o.derive_if)}"
+                      for o in after.options[:8])
+    return Resolution(
+        status="ready",
+        summary=f"A rule for {q.qid}, read from {how}. Apply it and {q.qid} is computed for "
+                "every respondent — in the link, for routing and quotas, and in the data.",
+        detail=lines,
+        source="rule" if how.startswith(("the ", "matching")) else f"ai:{how}",
+        after=after,
+    )
+
+
 def _likely_name(missing: str, qids: list[str]) -> str | None:
     """DA_USAGE → DA_PLATFORM_USAGE, C_ZIP → C_GEO_ZIP: the one real name that
     keeps every part of the missing one, in order, or ends the same way."""
@@ -777,9 +831,10 @@ def second_look(survey: SurveyDefinition, *, use_model: bool = True,
             continue
         before = copy.deepcopy(q)
         resolution = (
+            solve_derived_rule(q, survey, use_model, locked)
             # Only right after a person saved it: an unread question whose
             # leftover text trips no check must not be called "fine".
-            (_filled_in_since(q, issues) if only is not None else None)
+            or (_filled_in_since(q, issues) if only is not None else None)
             or solve_renamed_duplicate(q, issues)
             or solve_group_base(q, survey)
             or solve_typed_number(q)
