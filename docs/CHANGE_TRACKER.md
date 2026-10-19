@@ -21,6 +21,26 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-19 — a named brand list coded the way the script codes it (branch fix/study-list-codes)
+
+"FOR Q6-Q10 REFER TO CORE COMPETITOR SET OF 10 BRANDS BELOW" names an unnumbered
+list once. Its questions borrowed the awareness list's codes (Q2a: CeraVe 5,
+Neutrogena 14); the client's own script — and its export — coded the list by
+its order, 1..10 (CeraVe 2, Neutrogena 3). A tracker's next wave fielded here
+would have coded every brand differently from the last.
+
+| Change | Evidence |
+|---|---|
+| Questions a named list covers are coded by its order | Bubble Q6_1..Q6_6 and Q8-Q10 now carry exactly the script's codes, per-category subsets included (lip products 1,3,7,9,10,98; sunscreens without Rhode 7) |
+| Masks match by brand name where the two lists code a brand differently: each choice tests the source's code (CeraVe 2 shows when `{Q2a} contains 5`); the dry run does the same | compiler + dry-run tests |
+| "98Another brand not listed (Specify)" — no space after 98 — kept code 98; it had collided with Medicube 12 and vanished from four categories | Bubble Q6_1..Q6_4 |
+
+The Q6 question itself stays one multi-select per category: the export shows
+the script fielded it as a loop (`Q6_Lr<category>r<brand>`), not as a grid.
+
+Measured (AI off): Bubble parser 47.8% → 51.1%, link 44.6% → 47.8% (Q8, Q9,
+Q10 now match — the known gap below is closed); nothing else changed.
+
 ## 2026-10-18 — every variable and what fills it (branch feat/variables-view)
 
 Owners and analysts get a **Variables** tab: every column the data file will
@@ -196,9 +216,8 @@ scale and masks on save (the form never sent them).
 
 Measured (AI off, 6 documents): flagged 106 → 80, every remaining one with a
 next step. Against the independent readings, no question got worse; four Google
-Ads bases and DA_VID_EFFIC improved. **Known gap:** Bubble Q8–Q10 rows carry
-Q2a's codes where the document numbers its core brands 1–10 — wrong before and
-after, but their stale flag (wrong reason) is now gone, so they are unflagged.
+Ads bases and DA_VID_EFFIC improved. **Known gap (closed 2026-10-19):** Bubble Q8–Q10 rows carried
+Q2a's codes where the script numbers its core brands 1–10.
 
 ## 2026-10-16 — fielded data checked against the questionnaire (branch feat/data-audit)
 

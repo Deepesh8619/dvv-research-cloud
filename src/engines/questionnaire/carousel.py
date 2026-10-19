@@ -174,12 +174,27 @@ def list_for(survey: SurveyDefinition, qid: str, lists: list[dict] | None = None
     return None
 
 
-def coded(survey: SurveyDefinition, names: list[str], near: Question | None = None) -> list[Option]:
-    """Options for these names, carrying the codes an earlier brand list gave them.
+def coded(survey: SurveyDefinition, names: list[str], near: Question | None = None,
+          order: list[str] | None = None) -> list[Option]:
+    """Options for these names, coded the way the script will code them.
 
-    The awareness question's codes, where it has the name: a mask compares
-    codes, and the data file should code a brand the same way everywhere.
+    A list the document names once ("FOR Q6-Q10 REFER TO CORE COMPETITOR SET OF
+    10 BRANDS BELOW") is coded by its own order, 1..N — that is what the
+    client's script did (Bubble: CeraVe 2, Neutrogena 3), and what earlier
+    waves of a tracker were coded as. Masks against an awareness list coded
+    differently are matched by brand name (`mask_code_map`). Without such a
+    list, the awareness question's codes are used.
     """
+    if order:
+        position = {name.strip().casefold(): i for i, name in enumerate(order, start=1)}
+        spare = len(order) + 1
+        out = []
+        for name in names:
+            code = position.get(name.strip().casefold())
+            if code is None:
+                code, spare = spare, spare + 1
+            out.append(Option(code=code, label=name.strip()))
+        return out
     source = _brand_source(survey, near)
     by_label = {o.label.strip().casefold(): o for o in (source.options if source else [])}
     used = {o.code for o in by_label.values()}
@@ -252,7 +267,7 @@ def _expand(
                 f"'{category['condition']}' names no question for its first rows — "
                 "confirm which respondents see this category"
             )
-        options = coded(survey, names, template)
+        options = coded(survey, names, template, order=core_names or None)
         taken = {o.code for o in options}
         options += [o for o in extras if o.code not in taken]
         parts.append(Question(
@@ -275,7 +290,8 @@ def _expand(
 
 
 _AWARE_FROM = re.compile(r"\bAWARE\s+(?:FROM|AT|IN)\s+([A-Z][A-Za-z]*\d+[A-Za-z]?)", re.I)
-_LEADING_CODE = re.compile(r"^\s*(\d{1,3})\s+(?=\S)")
+# "98 Another brand…" — and "98Another brand…", as the Bubble document wrote it.
+_LEADING_CODE = re.compile(r"^\s*(\d{1,3})\s*(?=[A-Za-z])")
 
 
 def _written_code(option: Option) -> Option:

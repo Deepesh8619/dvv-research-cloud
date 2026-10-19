@@ -73,9 +73,12 @@ def test_each_category_is_its_own_question_with_its_own_brands():
     assert survey["Q6_1"].options[-1].label == "Another brand not listed (Specify)"
 
 
-def test_brand_codes_are_the_awareness_question_codes():
-    """A mask compares codes: Neutrogena is 14 in Q2a, so it is 14 here."""
-    assert {o.label: o.code for o in _survey()["Q6_1"].options}["Neutrogena"] == 14
+def test_brand_codes_follow_the_list_the_document_names():
+    """The client's script coded "the core set of brands below" 1..N in order
+    (Bubble: CeraVe 2, Neutrogena 3), not with the awareness list's codes."""
+    assert {o.label: o.code for o in _survey()["Q6_1"].options} == {
+        "Bubble": 1, "CeraVe": 2, "Neutrogena": 3, "Rhode": 4,
+        "Another brand not listed (Specify)": 98}
 
 
 def test_a_category_shows_only_to_users_of_it_and_only_brands_they_know():
@@ -85,8 +88,11 @@ def test_a_category_shows_only_to_users_of_it_and_only_brands_they_know():
     assert evaluate(q.show_if, {"Q3": {"1": 5}}) is False
     element = {e["name"]: e for p in compile_to_surveyjs(survey)["pages"]
                for e in p["elements"] if "name" in e}["Q6_1"]
+    # Matched by brand name: Neutrogena is 3 here and 14 in Q2a.
+    shown_if = {c["value"]: c.get("visibleIf") for c in element["choices"]}
+    assert shown_if[3] == "{Q2a} contains 14"
     # The write-in is never hidden by awareness of Q2a's own "Other".
-    assert element["choicesVisibleIf"] == "({Q2a} contains {item}) or {item} anyof [98]"
+    assert shown_if[98] is None
 
 
 def test_a_condition_written_without_its_question_is_flagged_not_guessed():
@@ -135,3 +141,12 @@ def test_the_dry_run_answers_a_constant_sum_with_shares_that_reach_the_total():
     for seed in range(20):
         answer = _answer(q, random.Random(seed), None)
         assert sum(answer.values()) == 100 and all(v >= 0 for v in answer.values())
+
+
+def test_the_dry_run_masks_by_brand_name_too():
+    from src.engines.fielding.dryrun import _mask_allowed_codes
+
+    survey = _survey()
+    by_qid = {q.qid: q for q in survey.questions}
+    # Aware of Neutrogena (14 in Q2a) only: Q6_1 may offer Neutrogena (3 here).
+    assert _mask_allowed_codes(survey["Q6_1"], {"Q2a": [14]}, by_qid) == {3}

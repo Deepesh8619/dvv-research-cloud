@@ -91,3 +91,20 @@ def _as_code(value: Any) -> int | None:
 def variable_name(qid: str) -> str:
     """The survey variable the browser sets for a grid-sourced mask."""
     return f"{qid}_picked"
+
+
+def mask_code_map(question: Any, source: Any) -> dict[int, int]:
+    """{source code: this question's code} for answers the two lists share by label.
+
+    A list coded by its own order (Bubble Q6: CeraVe 2) masked by an awareness
+    list coded alphabetically (Q2a: CeraVe 5) shares no codes worth comparing;
+    the brand NAME is what the mask means. Identity where the codes agree.
+    """
+    own = {(o.label or "").strip().casefold(): o.code
+           for o in [*(question.options or []), *(question.rows or [])]}
+    out: dict[int, int] = {}
+    for o in [*(source.options or []), *(source.rows or [])]:
+        code = own.get((o.label or "").strip().casefold())
+        if code is not None:
+            out[o.code] = code
+    return out
