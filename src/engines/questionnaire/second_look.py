@@ -629,7 +629,9 @@ def solve_derived_rule(q: Question, survey: SurveyDefinition, use_model: bool,
     return Resolution(
         status="ready",
         summary=f"A rule for {q.qid}, read from {how}. Apply it and {q.qid} is computed for "
-                "every respondent — in the link, for routing and quotas, and in the data.",
+                "every respondent — in the link, for routing and quotas, and in the data."
+                + ("" if how.startswith(("the ", "matching")) else
+                   " Written by a model: check every code against the document first."),
         detail=lines,
         source="rule" if how.startswith(("the ", "matching")) else f"ai:{how}",
         after=after,
