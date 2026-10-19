@@ -28,7 +28,7 @@ from src.core.survey_definition import (
     SurveyDefinition,
 )
 from src.engines.questionnaire.bipolar import is_bipolar, split
-from src.engines.questionnaire.grid_masks import affirmative_codes, variable_name
+from src.engines.questionnaire.grid_masks import affirmative_codes, mask_code_map, variable_name
 from src.engines.questionnaire.grid_subquestions import without_question_label
 from src.engines.questionnaire.prose_directives import is_derived_wording, is_terminal_option
 from src.engines.questionnaire.symbols import symbols_for_survey
@@ -541,10 +541,26 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
                     if o.code not in offered or o.open_other or is_terminal_option(o.label)
                     or _WRITE_IN.search(o.label or "")
                 ]
-                if exempt and mask.get("mode") in ("selected", None):
-                    condition = f"({condition}) or {{item}} anyof [{', '.join(map(str, exempt))}]"
-                element[masked] = condition
-                carried = [o.code for o in own if o.code in offered and o.code not in exempt]
+                # Lists that code a brand differently (Bubble Q6 by its own
+                # 1..10 list, Q2a alphabetically) are matched by name: each
+                # choice tests the source's code for the same brand.
+                to_own = mask_code_map(question, source) if source is not None else {}
+                to_source = {v: k for k, v in to_own.items()}
+                if any(k != v for k, v in to_own.items()):
+                    exempt = [o.code for o in own if o.code not in to_source
+                              or o.open_other or is_terminal_option(o.label)
+                              or _WRITE_IN.search(o.label or "")]
+                    for item in element["choices" if masked == "choicesVisibleIf" else "rows"]:
+                        if item.get("value") in to_source and item.get("value") not in exempt:
+                            item["visibleIf"] = condition.replace(
+                                "{item}", _format_value(to_source[item["value"]]))
+                else:
+                    if exempt and mask.get("mode") in ("selected", None):
+                        condition = (f"({condition}) or {{item}} anyof "
+                                     f"[{', '.join(map(str, exempt))}]")
+                    element[masked] = condition
+                carried = [to_source.get(o.code, o.code) for o in own
+                           if o.code not in exempt and to_source.get(o.code, o.code) in offered]
                 if (
                     source is not None and carried and mask.get("mode") in ("selected", None)
                     and source.type in (QuestionType.MULTI, QuestionType.SINGLE)

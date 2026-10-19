@@ -172,7 +172,7 @@ def fill_lists(survey: SurveyDefinition) -> list[dict]:
         if study and not ((q.validation or {}).get("techniques") or {}).get("masks"):
             # "FOR Q6-Q10 REFER TO CORE COMPETITOR SET OF 10 BRANDS": named for
             # exactly these questions, so nothing to confirm.
-            _fill(q, coded(survey, study["items"], q))
+            _fill(q, coded(survey, study["items"], q, order=study["items"]))
             q.extraction_evidence["options"] = study["verbatim"]
             filled.append({"qid": q.qid, "from": study["verbatim"], "named": True})
             seen.append(q)

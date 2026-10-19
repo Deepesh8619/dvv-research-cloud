@@ -40,7 +40,7 @@ from src.engines.fielding.decisions import (
 )
 from src.engines.fielding.materialize import picked_option
 from src.engines.questionnaire.derived import with_derived
-from src.engines.questionnaire.grid_masks import mask_codes
+from src.engines.questionnaire.grid_masks import mask_code_map, mask_codes
 from src.engines.questionnaire.write_ins import write_in_name, write_ins
 
 DEFAULT_RESPONDENTS = 500
@@ -137,6 +137,9 @@ def _mask_allowed_codes(
         picked = mask_codes(source, chosen)
         if picked is None:
             continue
+        # Matched by name where the two lists code a brand differently.
+        to_own = mask_code_map(question, source)
+        picked = {to_own.get(c, c) for c in picked}
         offered = {o.code for o in question.options}
         return picked & offered if mode == "selected" else offered - picked
     return None
