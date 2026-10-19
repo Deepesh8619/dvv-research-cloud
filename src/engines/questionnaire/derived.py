@@ -114,12 +114,69 @@ def _rows_rule(text: str) -> Expression | None:
     return parts[0] if len(parts) == 1 else Expression(op="and" if every else "or", children=parts)
 
 
-def _parse(text: str) -> Expression | None:
+# A top-level AND/OR between two conditions: only where a NEW condition starts
+# (NOT, or a question name followed by its test), so "Q2c.1 = 1 OR 2" and
+# "DA_USAGE 1, 2, 3, or 4 = 5" stay whole.
+_JOIN = re.compile(r"\s+(AND|OR)\s+(?=NOT\b|[A-Za-z][A-Za-z0-9_]*(?:\.\d+)?\s*(?:[=<>!]|\d))",
+                   re.I)
+_NOT = re.compile(r"^\s*NOT\s+", re.I)
+# "SS_CHANNELS = 2 and/or 4 ONLY (no others)"
+_ONLY = re.compile(r"^\s*(?P<qid>[A-Za-z][A-Za-z0-9_]*)\s*=\s*(?P<codes>[\d,\s/andor]+?)\s+ONLY\b",
+                   re.I)
+# "Any options outside 2 and 4 selected at SS_CHANNELS"
+_OUTSIDE_CODES = re.compile(
+    r"^\s*any\s+(?:options?|answers?|codes?)\s+outside\s+(?P<codes>[\d,\s/andor]+?)\s+"
+    r"(?:selected\s+)?(?:at|in)\s+(?P<qid>[A-Za-z][A-Za-z0-9_]*)", re.I)
+
+
+def _codes_of(qid: str, survey: SurveyDefinition | None) -> list[int]:
+    q = next((x for x in (survey.questions if survey else []) if x.qid.upper() == qid.upper()),
+             None)
+    return [o.code for o in (q.options if q else [])]
+
+
+def _only_or_outside(text: str, survey: SurveyDefinition | None) -> Expression | None:
+    """"= 2 and/or 4 ONLY" and "any options outside 2 and 4": over the question's own codes."""
+    for pattern, only in ((_ONLY, True), (_OUTSIDE_CODES, False)):
+        m = pattern.match(text)
+        if not m:
+            continue
+        named = [int(c) for c in re.findall(r"\d+", m["codes"])]
+        others = [c for c in _codes_of(m["qid"], survey) if c not in named]
+        if not others:
+            return None
+        qid = next((x.qid for x in survey.questions if x.qid.upper() == m["qid"].upper()),
+                   m["qid"])
+        if only:
+            return Expression(op="and", children=[
+                Expression(op="in", qid=qid, values=named),
+                Expression(op="not", children=[Expression(op="in", qid=qid, values=others)]),
+            ])
+        return Expression(op="in", qid=qid, values=others)
+    return None
+
+
+def _parse(text: str, survey: SurveyDefinition | None = None) -> Expression | None:
     """A condition in the document's grammar, or None if it is not exact."""
-    text = (text or "").strip()
+    text = (text or "").strip().strip("()").strip()
     if not text:
         return None
-    return _rows_rule(text) or parse_routing(f"IF {text}")
+    whole = _only_or_outside(text, survey) or _rows_rule(text) or parse_routing(f"IF {text}")
+    if whole is not None and not _JOIN.search(text):
+        return whole
+    if _NOT.match(text) and not _JOIN.search(text):
+        inner = _parse(_NOT.sub("", text), survey)
+        return Expression(op="not", children=[inner]) if inner else None
+    # "NOT A AND B": OR binds loosest, then AND.
+    for joiner in ("OR", "AND"):
+        parts = [p for p in re.split(rf"\s+{joiner}\s+(?=NOT\b|[A-Za-z][A-Za-z0-9_]*"
+                                     rf"(?:\.\d+)?\s*(?:[=<>!]|\d))", text, flags=re.I) if p]
+        if len(parts) > 1:
+            kids = [_parse(p, survey) for p in parts]
+            if not all(kids):
+                return whole
+            return Expression(op=joiner.lower(), children=kids)
+    return whole
 
 
 def _source_of(q: Question, survey: SurveyDefinition) -> Question | None:
@@ -151,11 +208,11 @@ def rule_from_document(q: Question, survey: SurveyDefinition) -> tuple[Question,
     """The question with a rule on every code, and how it was read — or None."""
     after = copy.deepcopy(q)
     how = ""
-    rules = [_parse(o.definition or "") for o in after.options]
+    rules = [_parse(o.definition or "", survey) for o in after.options]
     if all(rules):
         how = "the document's Definition column"
     else:
-        rules = [(_parse(m.group(1)) if (m := _IN_LABEL.search(o.label or "")) else None)
+        rules = [(_parse(m.group(1), survey) if (m := _IN_LABEL.search(o.label or "")) else None)
                  for o in after.options]
         if all(rules):
             how = "the conditions written in the answer labels"
@@ -188,15 +245,20 @@ def _tested(expr: Expression) -> frozenset[tuple[str, str | None]]:
 
 
 def _mark_multi_coded(q: Question) -> None:
-    """Codes that test DIFFERENT things can all hold at once.
+    """Codes that each test a DIFFERENT thing can all hold at once.
 
     HID_AWARE codes "Google Ads aware" and "Meta Ads aware" from different grid
     rows: one respondent is often both. Codes that split ONE answer into bands
     (D2a over D2) cannot overlap. Recorded so the value is a list, and the data
     file one 0/1 column per code, where several can hold.
     """
-    seen = {_tested(o.derive_if) for o in q.options if o.derive_if is not None}
-    q.validation = {**(q.validation or {}), "multi_coded": len(seen) > 1}
+    # Only when EVERY code tests something of its own. Bubble C10's audience
+    # codes 1-4 split Q2c and code 5 tests Q2a: that is a priority list (first
+    # match wins), not memberships — a recent buyer is not also "aware, never
+    # purchased".
+    tested = [_tested(o.derive_if) for o in q.options if o.derive_if is not None]
+    q.validation = {**(q.validation or {}),
+                    "multi_coded": len(tested) > 1 and len(set(tested)) == len(tested)}
 
 
 def comes_from_outside(q: Question) -> bool:
@@ -221,8 +283,11 @@ def rule_from_model(q: Question, survey: SurveyDefinition) -> tuple[Question, st
         "A market-research questionnaire defines a hidden variable the scripter computes "
         "from earlier answers. For each of its codes, write the condition under which a "
         "respondent gets that code, using ONLY question names below, in this grammar: "
-        "`S3 = 2`, `S3 = 1,2`, `S3 = 25-34`, `D2 >= 4`, `Q2c.1 = 1 OR 2`, joined with AND/OR. "
-        "Leave a condition empty if the document does not say how to compute it.\n\n"
+        "`S3 = 2`, `S3 = 1,2`, `S3 = 25-34`, `D2 >= 4`, `Q2c.1 = 1 OR 2`, a grid's rows as "
+        "`Q5 1, 2, or 3 = 4-5`, `X = 2 and/or 4 ONLY` for those codes and no others, "
+        "joined with AND/OR and NOT. Use only codes and numbers the document states. "
+        "Leave exactly one condition empty if that code means everyone else; leave all "
+        "empty if the document does not say how to compute it.\n\n"
         f"HIDDEN VARIABLE {q.qid}: {q.text}\n"
         + "\n".join(f"code {o.code}: {o.label}" for o in q.options)
         + f"\n\nSOURCE TEXT:\n{(q.source_text or '')[:1200]}\n\nEARLIER QUESTIONS:\n{context}"
@@ -244,14 +309,44 @@ def rule_from_model(q: Question, survey: SurveyDefinition) -> tuple[Question, st
                for c in raw.get("codes") or [] if str(c.get("code", "")).lstrip("-").isdigit()}
     known = {x.qid for x in survey.questions}
     after = copy.deepcopy(q)
+    rules = {o.code: _parse(written.get(o.code, ""), survey) for o in after.options}
+    blank = [c for c, r in rules.items() if r is None and not written.get(c, "").strip()]
+    if len(blank) == 1 and len(rules) > 1 and all(r for c, r in rules.items() if c != blank[0]):
+        # "Unaware (Not selected at Q2a)": the one code left is everyone else.
+        rules[blank[0]] = Expression(op="not", children=[
+            Expression(op="or", children=[r for c, r in rules.items() if c != blank[0]])])
     for option in after.options:
-        rule = _parse(written.get(option.code, ""))
-        # Every code needs an exact condition over questions that exist.
-        if rule is None or not rule.referenced_qids() <= known:
+        rule = rules[option.code]
+        # Every code needs an exact condition over questions that exist, using
+        # values the document states: a model asked for state regions wrote
+        # ZIP codes it made up, over a question that holds a typed ZIP.
+        if rule is None or not rule.referenced_qids() <= known or not _grounded(rule, q, survey):
             return None
         option.derive_if = rule
     _mark_multi_coded(after)
     return after, f"a model ({response.backend}/{response.model}) reading the questions before it"
+
+
+def _values(expr: Expression) -> list[tuple[str, Any]]:
+    if expr.children:
+        return [v for c in expr.children for v in _values(c)]
+    vals = list(expr.values or []) + ([expr.value] if expr.value is not None else [])
+    return [(expr.qid or "", v) for v in vals]
+
+
+def _grounded(rule: Expression, q: Question, survey: SurveyDefinition) -> bool:
+    """Every value a rule tests is a code of that question, or written in the document."""
+    by_upper = {x.qid.upper(): x for x in survey.questions}
+    written = set(re.findall(r"\d+", " ".join(
+        [q.text or "", q.source_text or "",
+         *((o.label or "") + " " + (o.definition or "") for o in q.options)])))
+    for qid, value in _values(rule):
+        source = by_upper.get(qid.upper())
+        codes = {o.code for o in [*(source.options or []), *(source.rows or []),
+                                  *(source.cols or [])]} if source else set()
+        if value not in codes and str(value) not in written:
+            return False
+    return True
 
 
 def derived_values(survey: SurveyDefinition, answers: dict[str, Any]) -> dict[str, Any]:

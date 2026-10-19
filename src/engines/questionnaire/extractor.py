@@ -325,7 +325,11 @@ def _question_from_raw(content: dict, chunk: QuestionChunk) -> tuple[Question, d
         options=_options_from(content.get("options")),
         rows=rows or None,
         cols=cols or None,
-        required=bool(content.get("required", True)),
+        # A model answers "must the respondent answer?" with no far too readily
+        # (Vivo: nine questions it read came back optional, the document saying
+        # nothing of the kind). Optional only where the document says so.
+        required=bool(content.get("required", True))
+        or not _OPTIONAL_WORDING.search(chunk.chunk_text or ""),
         show_if=_parse_expression(routing.get("show_if"), verbatim),
         terminate_if=_parse_expression(routing.get("terminate_if"), verbatim),
         validation=validation or None,
@@ -1478,6 +1482,11 @@ _SELECT_ALL_GRID = re.compile(
     r"select\s+all\s+that\s+apply|check\s+all\s+that\s+apply|choose\s+all|"
     r"select\s+(?:as\s+many|all)\s+(?:as|that)", re.I)
 _ONE_PER_ROW = re.compile(r"\bone\b[^.\n]{0,20}\b(?:per|for\s+each|in\s+each)\b", re.I)
+
+
+_OPTIONAL_WORDING = re.compile(
+    r"\boptional\b|\bnot\s+required\b|\bif\s+applicable\b|\b(?:may|can)\s+(?:leave|skip)\b|"
+    r"\bleave\s+(?:it\s+)?blank\b", re.I)
 
 
 def promote_multi_answer_grids(survey: SurveyDefinition) -> None:

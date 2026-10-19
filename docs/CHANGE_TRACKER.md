@@ -21,6 +21,32 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-19 — the model path measured on Bedrock, and what that run found (branch fix/derived-model-rules)
+
+First real run of the model fallbacks (Qwen3-32B on Bedrock, Mumbai) on the six
+documents. `scripts/eval_compare.py --with-bedrock` lets the extraction call
+Bedrock only — every free tier stays off, as before.
+
+| Found | Fixed |
+|---|---|
+| Asked for hidden-variable rules, the model **invented values**: ZIP codes for Bubble C7a "CODE STATE & REGION", and they passed (only question names were checked) | a rule's values must be codes of the question it tests, or numbers the document writes |
+| Correct model answers refused by our reader: "NOT A AND B" over grid rows, a blank code meaning "everyone else" | compound conditions split only where a new condition starts; exactly one blank code = none of the others |
+| "SS_CHANNELS = 2 and/or 4 ONLY (no others)" read as "2 or 4" | `ONLY` and "any options outside 2 and 4 selected at X" read exactly, over X's own codes — now by rule, no model needed |
+| Audience codes over Q2c and Q2a counted as overlapping memberships (a recent buyer also "aware, never purchased") | multi-coded only when every code tests something of its own; otherwise a priority list |
+| Questions the model read came back **not required** with nothing in the document saying so (9 on Vivo) | optional only where the document says optional / not required / if applicable / may skip |
+
+Hidden variables over the six documents: 13 rules from the document, 4 from the
+model (ready for a person to approve, marked "written by a model"), 8 set from
+outside the answers, 3 with no rule (two name a question that does not exist).
+
+Gold scores, AI off → Bedrock on: Vivo parser 29.9% → 34.6%, link 27.3% →
+32.1%; TRD2 42.9% → 44.8%; TRD1 70.0% → 71.0%; Google Ads B link 69.0% → 70.4%;
+Bubble and Google Ads A unchanged. **Open:** where the model reads a question
+the rules had flagged, the flag goes and a partly-wrong reading can be left
+unflagged — silently wrong rises (Vivo 33.8% → 44.9%, Bubble 33.7% → 38.0%).
+Model runs also vary run to run (TRD1 silent 22.6% one run, 0.0% the next).
+Vivo Q17b got worse with the model (single read as numeric).
+
 ## 2026-10-19 — a named brand list coded the way the script codes it (branch fix/study-list-codes)
 
 "FOR Q6-Q10 REFER TO CORE COMPETITOR SET OF 10 BRANDS BELOW" names an unnumbered

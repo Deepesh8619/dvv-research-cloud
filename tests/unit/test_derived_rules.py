@@ -18,7 +18,7 @@ from src.core.survey_definition import (
 from src.engines.fielding.decisions import terminating_question
 from src.engines.fielding.materialize import ALL_STATUSES, materialize_fielding, uncomputed_derived
 from src.engines.questionnaire import second_look as sl
-from src.engines.questionnaire.derived import derived_values, rule_from_document
+from src.engines.questionnaire.derived import derived_values, rule_from_document, rule_from_model
 from src.renderers.surveyjs_compiler import compile_to_surveyjs
 
 
@@ -135,3 +135,79 @@ def test_once_approved_it_screens_out_routes_and_reaches_the_data():
                                 entry_params={}, block_order=None) for i in ("a", "b")]
     _dm, frame = materialize_fielding(s, sessions, {"a": {"D2": 1}, "b": {"D2": 5}}, ALL_STATUSES)
     assert list(frame["D2a"]) == [1, 4]
+
+
+def _channels() -> Question:
+    return Question(qid="SS_CHANNELS", type=QuestionType.MULTI, text="Where do you sell?",
+                    options=[Option(c, f"ch{c}") for c in (1, 2, 3, 4, 98)])
+
+
+def test_only_and_outside_are_read_over_the_questions_own_codes():
+    brick = Question(qid="HID_BRICK", type=QuestionType.INFO, text="Physical only",
+                     options=[Option(1, "Physical only",
+                                     definition="SS_CHANNELS = 2 and/or 4 ONLY (no others)"),
+                              Option(2, "Not physical only",
+                                     definition="Any options outside 2 and 4 selected at "
+                                                "SS_CHANNELS")])
+    s = _survey(_channels(), brick)
+    _approved(s, "HID_BRICK")
+    assert derived_values(s, {"SS_CHANNELS": [2, 4]}) == {"HID_BRICK": 1}
+    assert derived_values(s, {"SS_CHANNELS": [2, 3]}) == {"HID_BRICK": 2}  # not "only"
+
+
+def test_a_model_rule_is_combined_grounded_and_the_blank_code_is_everyone_else(monkeypatch):
+    q2c = Question(qid="Q2c", type=QuestionType.SINGLE, text="Last bought?",
+                   options=[Option(c, str(c)) for c in range(1, 6)])
+    audience = Question(qid="C10", type=QuestionType.INFO, text="AUDIENCE CODE",
+                        flags=["DERIVED_VARIABLE"],
+                        options=[Option(1, "Recent"), Option(2, "Lapsed"), Option(3, "Unaware")])
+
+    def fake(task, prompt, schema, **_):
+        return AIResponse({"codes": [{"code": 1, "condition": "Q2c = 1,2"},
+                                     {"code": 2, "condition": "NOT Q2c = 1,2 AND Q2c = 3-5"},
+                                     {"code": 3, "condition": ""}]}, "bedrock", "qwen3")
+
+    monkeypatch.setattr("src.ai.router.run_task", fake)
+    s = _survey(q2c, audience)
+    after, _how = rule_from_model(audience, s)
+    audience.options, audience.validation = after.options, after.validation
+    assert derived_values(s, {"Q2c": 4}) == {"C10": 2}
+    assert derived_values(s, {"Q2c": 9}) == {"C10": 3}  # everyone else
+
+
+def test_values_the_document_never_states_are_refused(monkeypatch):
+    zip_q = Question(qid="C7", type=QuestionType.OPEN_TEXT, text="Your ZIP code?")
+    region = Question(qid="C7a", type=QuestionType.INFO, text="CODE STATE & REGION",
+                      flags=["DERIVED_VARIABLE"], options=[Option(1, "Pacific")])
+
+    def fake(task, prompt, schema, **_):  # a model making up ZIP codes
+        return AIResponse({"codes": [{"code": 1, "condition": "C7 = 98101, 90210"}]},
+                          "bedrock", "qwen3")
+
+    monkeypatch.setattr("src.ai.router.run_task", fake)
+    assert rule_from_model(region, _survey(zip_q, region)) is None
+
+
+def test_codes_over_one_question_and_another_are_a_priority_list_not_memberships():
+    q2c = Question(qid="Q2c", type=QuestionType.SINGLE, text="Last bought?",
+                   options=[Option(c, str(c)) for c in range(1, 4)])
+    q2a = Question(qid="Q2a", type=QuestionType.MULTI, text="Aware?", options=[Option(1, "B")])
+    audience = Question(qid="C10", type=QuestionType.INFO, text="AUDIENCE",
+                        flags=["DERIVED_VARIABLE"],
+                        options=[Option(1, "Recent (Q2c=1)"), Option(2, "Lapsed (Q2c=2,3)"),
+                                 Option(3, "Aware (Q2a=1)")])
+    s = _survey(q2c, q2a, audience)
+    _approved(s, "C10")
+    assert derived_values(s, {"Q2c": 1, "Q2a": [1]}) == {"C10": 1}  # not [1, 3]
+
+
+def test_a_model_reading_is_optional_only_where_the_document_says_so():
+    from src.engines.questionnaire.extractor import _question_from_raw
+    from src.intake.questionnaire_loader import QuestionChunk
+
+    said_no = {"qid": "Q4", "text": "Which pharmacy?", "type": "single", "required": False,
+               "options": [{"code": 1, "label": "CVS"}], "routing": {}}
+    plain = QuestionChunk("Q4. Which pharmacy do you use most?\n1 CVS", "Q4", [], "p1")
+    marked = QuestionChunk("Q4. Which pharmacy? (optional)\n1 CVS", "Q4", [], "p1")
+    assert _question_from_raw(dict(said_no), plain)[0].required is True
+    assert _question_from_raw(dict(said_no), marked)[0].required is False

@@ -41,8 +41,13 @@ _AI_OFF = {
     "GROQ_API_KEY": "", "CEREBRAS_API_KEY": "", "BEDROCK_API_KEY": "",
     "HF_TOKEN": "", "OLLAMA_HOST": "http://127.0.0.1:1",
 }
+# `--with-bedrock` keeps the Bedrock key (the in-region model production uses,
+# allowed for client documents); every free tier stays off regardless.
+_BEDROCK_KEY = os.environ.get("BEDROCK_API_KEY", "") if "--with-bedrock" in sys.argv else ""
 os.environ.update(_AI_OFF)
 os.environ.pop("DVV_EXTRACT_LOCAL", None)
+if _BEDROCK_KEY:
+    os.environ["BEDROCK_API_KEY"] = _BEDROCK_KEY
 sys.path.insert(0, str(REPO))
 
 from src.ai.router import BackendUnavailable, llm_key_presence  # noqa: E402
@@ -101,10 +106,13 @@ class Refuse(SystemExit):
 
 
 def assert_ai_off() -> None:
+    """Free AI tiers may train on what they are sent: never a client document."""
     os.environ.update(_AI_OFF)
-    present = llm_key_presence()
+    if _BEDROCK_KEY:
+        os.environ["BEDROCK_API_KEY"] = _BEDROCK_KEY
+    present = {k: v for k, v in llm_key_presence().items() if k != "BEDROCK_API_KEY" or not _BEDROCK_KEY}
     if any(present.values()) or os.environ.get("OLLAMA_HOST") != _AI_OFF["OLLAMA_HOST"]:
-        raise Refuse(f"REFUSING to read a document: AI is not off ({present})")
+        raise Refuse(f"REFUSING to read a document: a free AI tier is on ({present})")
 
 
 # ---------------------------------------------------------------- text helpers
@@ -1047,6 +1055,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--gold", type=Path)
     ap.add_argument("--batch", type=Path, nargs="+", help="dirs holding gold .json (+ sibling .docx or source_file)")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    ap.add_argument("--with-bedrock", action="store_true",
+                    help="let the extraction call Bedrock (BEDROCK_API_KEY); free tiers stay off")
     ap.add_argument("--baseline", type=Path, help="previous results.json, or a previous --out dir in batch mode")
     a = ap.parse_args(argv)
     assert_ai_off()
