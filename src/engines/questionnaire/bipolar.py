@@ -58,8 +58,9 @@ def _hidden_columns(q: Question) -> int:
     """How many trailing columns the header marks [DO NOT SHOW] (a theme label)."""
     for raw in (q.source_text or "").splitlines():
         cells = [c.strip() for c in raw.split("|")]
-        if len(cells) >= 3 and any(_HIDDEN_CELL.search(c) for c in cells):
-            return sum(1 for c in cells if _HIDDEN_CELL.search(c))
+        hidden = sum(1 for c in cells if _HIDDEN_CELL.search(c))
+        if len(cells) >= 3 and hidden:
+            return hidden
     return 0
 
 
@@ -73,25 +74,21 @@ def read_table(q: Question) -> Question | None:
     if len(rows) < 2:
         return None
     hidden = _hidden_columns(q)
-    shown = [cells[: len(cells) - hidden] if hidden and len(cells) > hidden else cells
+    shown = [cells[: len(cells) - hidden] if len(cells) > hidden else cells
              for _code, cells in rows]
     widths = {len(c) for c in shown}
-    if len(widths) != 1:
+    bipolar = widths == {2} and _PAIR_WORDS.search(q.text or q.source_text or "")
+    if not (bipolar or widths == {1}):
         return None
-    width = widths.pop()
     after = copy.deepcopy(q)
-    if width == 2 and _PAIR_WORDS.search(q.text or q.source_text or ""):
-        after.rows = [Option(code, SEPARATOR.join(cells)) for (code, _), cells in zip(
-            rows, shown, strict=True)]
+    # One cell is the label; two are "left | right".
+    after.rows = [Option(code, SEPARATOR.join(cells)) for (code, _), cells in zip(
+        rows, shown, strict=True)]
+    if bipolar:
         after.validation = {
             **(q.validation or {}),
             BIPOLAR_KEY: {"flip_half": bool(_FLIP_WORDS.search(q.source_text or ""))},
         }
-    elif width == 1:
-        after.rows = [Option(code, cells[0]) for (code, _), cells in zip(
-            rows, shown, strict=True)]
-    else:
-        return None
     if after.type is not QuestionType.GRID_SINGLE and after.cols:
         after.type = QuestionType.GRID_SINGLE
     return after

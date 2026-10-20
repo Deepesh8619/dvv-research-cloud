@@ -10,8 +10,8 @@ import { BUCKETS } from '../lib/buckets'
  * Incidence is the one that costs money: a study bid at 40% that fields at 12%
  * is a budget problem the day it starts.
  */
-function minutes(seconds: number | null): string {
-  if (seconds === null) return '—'
+export function minutes(seconds: number | null): string {
+  if (seconds == null) return '—'
   const m = Math.floor(seconds / 60)
   const s = Math.round(seconds % 60)
   return m > 0 ? `${m}m ${s}s` : `${s}s`
@@ -72,12 +72,12 @@ function pct(n: number, of: number): string {
 }
 
 // A share of the base, drawn. Width animates in so a card reads as it lands.
-function Bar({ n, of }: { n: number; of: number }) {
-  const width = of > 0 ? Math.max(2, (100 * n) / of) : 0
+export function Bar({ n, of, color = 'bg-indigo-500' }: { n: number; of: number; color?: string }) {
+  const width = of > 0 ? Math.min(100, Math.max(2, (100 * n) / of)) : 0
   return (
     <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
       <div
-        className="h-full rounded-full bg-indigo-500 motion-safe:transition-[width] motion-safe:duration-500"
+        className={`h-full rounded-full ${color} motion-safe:transition-[width] motion-safe:duration-500`}
         style={{ width: `${n > 0 ? width : 0}%` }}
       />
     </div>

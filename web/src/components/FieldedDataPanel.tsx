@@ -11,14 +11,6 @@ import FieldworkCards from './FieldworkCards'
  * This shows the export as the survey's fieldwork: who is in it, how each
  * interview ended, and the way on to checking it against the questionnaire.
  */
-const OUTCOME_STYLE: Record<string, string> = {
-  complete: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
-  terminated: 'bg-red-50 text-red-700 ring-red-600/20',
-  overquota: 'bg-amber-50 text-amber-700 ring-amber-600/20',
-  partial: 'bg-slate-100 text-slate-700 ring-slate-500/20',
-  other: 'bg-slate-100 text-slate-600 ring-slate-500/20',
-}
-
 export default function FieldedDataPanel({ studyId, canWrite }: { studyId: string; canWrite: boolean }) {
   const [data, setData] = useState<FieldedData | null>(null)
   const [state, setState] = useState<'idle' | 'uploading' | 'processing' | 'failed'>('idle')
@@ -128,19 +120,7 @@ export default function FieldedDataPanel({ studyId, canWrite }: { studyId: strin
               <dd className="font-medium tabular-nums text-slate-800">{(data.n_variables ?? 0).toLocaleString()}</dd>
             </div>
           </dl>
-          {data.dispositions && data.dispositions.length > 0 ? (
-            <div className="flex flex-wrap gap-2" aria-label="How each interview ended">
-              {data.dispositions.map((d) => (
-                <span
-                  key={`${d.code}`}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${OUTCOME_STYLE[d.outcome] ?? OUTCOME_STYLE.other}`}
-                >
-                  {d.label}
-                  <span className="tabular-nums">{d.n.toLocaleString()}</span>
-                </span>
-              ))}
-            </div>
-          ) : (
+          {!data.status_variable && (
             <p className="text-xs text-slate-500">
               The file has no status column, so every row is treated as an interview; completes and screen-outs can't be told apart.
             </p>
