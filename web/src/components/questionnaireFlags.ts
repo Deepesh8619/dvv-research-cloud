@@ -86,6 +86,13 @@ export const FLAG_INFO: Record<string, FlagInfo> = {
     blocking: false,
     severity: 'warn',
   },
+  MODEL_READ: {
+    label: 'Read by a model — check it',
+    description:
+      'The rules could not read this question, so a model did. Its reading passed the same checks and can still be wrong in ways no check sees (a missing answer code, a wrong type). Compare it with the document line by line, then approve it. Bulk approval skips it.',
+    blocking: false,
+    severity: 'warn',
+  },
   TYPE_NOT_SUPPORTED: {
     label: 'Kind of question not supported yet',
     description:

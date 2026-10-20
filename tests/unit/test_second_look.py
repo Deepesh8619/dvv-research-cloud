@@ -190,7 +190,7 @@ def _unread_brand_question():
     return prior, q
 
 
-def test_the_model_sees_the_questions_named_and_its_fix_is_kept_when_qa_passes(monkeypatch):
+def test_the_model_sees_the_questions_named_and_its_fix_is_offered_when_qa_passes(monkeypatch):
     prior, q = _unread_brand_question()
     seen = {}
 
@@ -205,8 +205,10 @@ def test_the_model_sees_the_questions_named_and_its_fix_is_kept_when_qa_passes(m
     assert seen["task"] == "questionnaire.resolve"
     assert "Acme Cola" in seen["prompt"]  # the named question was in view
     r = q.validation["resolution"]
-    assert r["status"] == "fixed" and r["source"].startswith("ai:")
-    assert [o.label for o in q.options] == ["Acme Cola", "Fizz Pop"]
+    # Offered, never applied: a model's fix can pass the checks and be wrong.
+    assert r["status"] == "ready" and r["source"].startswith("ai:")
+    assert [o["label"] for o in r["proposed"]["options"]] == ["Acme Cola", "Fizz Pop"]
+    assert q.options == []
 
 
 def test_a_model_answer_with_invented_wording_is_not_used(monkeypatch):
@@ -257,3 +259,16 @@ def test_an_information_screen_renamed_for_a_duplicate_name_is_not_reported():
     asked = Question(qid="S6_2", type=QuestionType.SINGLE, text="Again?",
                      options=[Option(1, "Yes")], validation={"original_qid": "S6"})
     assert renamed_duplicate(asked, {"S6_2": asked})
+
+
+def test_a_question_the_model_read_stays_marked_until_a_person_approves_it():
+    from src.engines.questionnaire.extractor import _question_from_raw
+    from src.intake.questionnaire_loader import QuestionChunk
+
+    raw = {"qid": "Q4", "text": "Which pharmacy?", "type": "single",
+           "options": [{"code": 1, "label": "CVS"}], "routing": {}}
+    chunk = QuestionChunk("Q4. Which pharmacy?\n1 CVS", "Q4", [], "p1")
+    q, _routing = _question_from_raw(raw, chunk)
+    assert schema.FLAG_MODEL_READ in q.flags
+    sl.second_look(_survey(q), use_model=False)
+    assert schema.FLAG_MODEL_READ in q.flags  # checks passing do not clear it

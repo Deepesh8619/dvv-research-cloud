@@ -770,9 +770,12 @@ def solve_with_model(q: Question, survey: SurveyDefinition, by_qid: dict,
     remaining = _problems(after, {**by_qid, q.qid: after})
     if len(remaining) >= len(issues) or suggestion.get("dropped"):
         return None  # not better, or it reached for words the document does not have
+    # Offered, never applied unasked: a model's fix passes the checks that
+    # raised the flag and can still be wrong in a way no check sees.
     return Resolution(
-        status="fixed" if not remaining else "ready",
-        summary=suggestion["explanation"],
+        status="ready",
+        summary=suggestion["explanation"] + " Written by a model: check it against the document "
+                "before applying.",
         detail=("Worked out from the question's source and the questions it names."
                 + (f" Still open: {'; '.join(_plain(i) for i in remaining)}" if remaining else "")),
         source=f"ai:{suggestion['source'].removeprefix('agent (').rstrip(')')}",

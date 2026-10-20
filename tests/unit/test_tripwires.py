@@ -73,7 +73,7 @@ def test_wrapped_scale_lines_read_as_rows_are_removed_by_rule():
     assert [r.label for r in q.rows] == ["CVS", "Walgreens"]
 
 
-def test_a_tripped_grid_goes_to_the_model_and_its_fix_is_kept_when_the_tripwire_clears(
+def test_a_tripped_grid_goes_to_the_model_and_its_fix_is_offered_when_the_tripwire_clears(
         monkeypatch):
     seen = {}
 
@@ -95,5 +95,6 @@ def test_a_tripped_grid_goes_to_the_model_and_its_fix_is_kept_when_the_tripwire_
                               for line in Q41_SOURCE.splitlines())
     sl.second_look(SurveyDefinition(study_id="s", questions=[q]), use_model=True)
     assert "I keep it simple" in seen["prompt"]  # the model was shown the document
-    assert q.validation["resolution"]["status"] == "fixed"
-    assert [r.code for r in q.rows] == [1, 2, 3]
+    r = q.validation["resolution"]
+    assert r["status"] == "ready"
+    assert [row["code"] for row in r["proposed"]["rows"]] == [1, 2, 3]

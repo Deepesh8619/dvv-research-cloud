@@ -1220,10 +1220,12 @@ def approve_question(
     # A question with nothing to pick cannot be that, whoever clicks.
     if any(has_nothing_to_answer(q) for q in matching):
         raise HTTPException(status_code=422, detail=_NOTHING_TO_ANSWER.format(qid=qid))
-    cleared = sorted({f for q in matching for f in q.flags if f in _BLOCKING_FLAGS})
+    # A model's reading is confirmed by exactly this: a person approving it.
+    confirmed = _BLOCKING_FLAGS | {"MODEL_READ"}
+    cleared = sorted({f for q in matching for f in q.flags if f in confirmed})
     if cleared:
         for q in matching:
-            q.flags = [f for f in q.flags if f not in _BLOCKING_FLAGS]
+            q.flags = [f for f in q.flags if f not in confirmed]
         _save_definition(db, questionnaire, survey)
 
     approved = set(questionnaire.approved_qids or [])

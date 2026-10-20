@@ -21,6 +21,24 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-20 — model readings stay marked until a person approves them (branch fix/model-readings-flagged)
+
+The Bedrock run (2026-10-19) showed the cost of trusting the model: where it
+read a question the rules could not, the question's flags went away, and a
+partly-wrong reading became a silent one (Vivo silently wrong 33.8% → 44.9%).
+A model's reading passes the same checks as a rule's, so the checks cannot be
+what releases it.
+
+| Change | Evidence |
+|---|---|
+| Every question the model reads carries **"Read by a model — check it"** (`MODEL_READ`), with a plain reason and a next step | unit test |
+| It clears only when a person approves that question; "approve clean questions" skips it, so it always gets an individual look | integration test |
+| A second-look fix written by the model is **offered** ("fix ready — written by a model, check it against the document"), never applied on its own | second-look and tripwire tests |
+
+Not yet measured on Bedrock: the AWS sign-in expired before the re-run. Expected
+effect: Vivo's silently-wrong share back towards the AI-off 33.8% while keeping
+the model's accuracy gain (parser 34.6%).
+
 ## 2026-10-19 — the model path measured on Bedrock, and what that run found (branch fix/derived-model-rules)
 
 First real run of the model fallbacks (Qwen3-32B on Bedrock, Mumbai) on the six
