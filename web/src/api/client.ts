@@ -467,7 +467,6 @@ export interface FieldedData {
   n_respondents?: number
   n_variables?: number
   status_variable?: string | null
-  dispositions?: { code: number | null; label: string; outcome: string; n: number }[]
 }
 
 /** What the second look did with each flagged question (second_look.py). */

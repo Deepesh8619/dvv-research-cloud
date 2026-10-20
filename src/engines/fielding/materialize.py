@@ -151,24 +151,22 @@ def _selected_codes(value: Any) -> set[int]:
     return out
 
 
-def _grid_cell(value: Any, row_code: int) -> int | None:
-    """The column code a grid row was answered with (value is a {row: col} dict)."""
+def _row_answer(value: Any, row_code: int) -> Any:
+    """One grid row's answer from a {row: answer} dict; keys may be ints or strings."""
     if not isinstance(value, Mapping):
         return None
-    # Answer keys may be ints or their string forms depending on the client.
     raw = value.get(row_code)
-    if raw is None:
-        raw = value.get(str(row_code))
-    return _to_int(raw)
+    return value.get(str(row_code)) if raw is None else raw
+
+
+def _grid_cell(value: Any, row_code: int) -> int | None:
+    """The column code a grid row was answered with."""
+    return _to_int(_row_answer(value, row_code))
 
 
 def _grid_picks(value: Any, row_code: int) -> set[int] | None:
     """The column codes ticked in one row of a multi-answer grid; None if unanswered."""
-    if not isinstance(value, Mapping):
-        return None
-    raw = value.get(row_code)
-    if raw is None:
-        raw = value.get(str(row_code))
+    raw = _row_answer(value, row_code)
     if raw is None:
         return None
     return _selected_codes(raw if isinstance(raw, (list, tuple, set)) else [raw])

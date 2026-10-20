@@ -232,8 +232,7 @@ def test_the_field_monitor_summarises_fielded_data_from_an_upload(client) -> Non
     body = test_client.get("/api/studies/s1/fielded-data").json()
     assert body["available"] and body["source_filename"] == "fielded.xlsx"
     assert body["n_respondents"] == 5
-    assert [(d["outcome"], d["n"]) for d in body["dispositions"]] == [
-        ("complete", 3), ("terminated", 1), ("overquota", 1)]
+    assert body["status_variable"] == "status"  # how each ended: /data-field-report
 
 
 def test_no_data_yet_says_so(client) -> None:

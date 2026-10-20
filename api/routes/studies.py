@@ -380,12 +380,12 @@ def fielded_data_summary(
     db: Session = Depends(get_db),
     user: UserDB = Depends(get_current_user),
 ):
-    """The project's fielded data at a glance: file, respondents, dispositions.
+    """The project's fielded data at a glance: file, respondents, variables.
 
     Data fielded on another platform arrives as an export, and the field
     monitor showed nothing about it — only links run here — so a project whose
-    fieldwork was finished looked as if it had none. Reads the rows the
-    processing run wrote; the status column's labels give the dispositions.
+    fieldwork was finished looked as if it had none. How each interview ended
+    is in `/data-field-report`, shown right below this on the field monitor.
     """
     import polars as pl
 
@@ -401,36 +401,17 @@ def fielded_data_summary(
         return {"available": False, "source_filename": study.source_filename,
                 "processing": study.status == "classifying"}
 
-    datamap = DataMap.from_json(study.datamap_json)
-    status_column, meaning = _disposition_labels(datamap)
+    status_column, _meaning = _disposition_labels(DataMap.from_json(study.datamap_json))
     columns = pl.read_parquet_schema(parquet)
-    out = {
+    return {
         "available": True,
         "processing": study.status == "classifying",
         "source_filename": study.source_filename,
         "updated_at": study.updated_at,
         "n_variables": len(columns),
-        "status_variable": status_column,
-        "dispositions": [],
+        "n_respondents": pl.scan_parquet(parquet).select(pl.len()).collect().item(),
+        "status_variable": status_column if status_column in columns else None,
     }
-    if status_column and status_column in columns:
-        counts = pl.read_parquet(parquet, columns=[status_column])[status_column].value_counts()
-        labels = datamap[status_column].values or {}
-        rows = []
-        for code, n in counts.iter_rows():
-            key = int(code) if code is not None and float(code).is_integer() else None
-            rows.append({
-                "code": key,
-                "label": str(labels.get(key, "No status")) if key is not None else "No status",
-                "outcome": meaning.get(key, "other") if key is not None else "other",
-                "n": int(n),
-            })
-        order = {"complete": 0, "terminated": 1, "overquota": 2, "partial": 3, "other": 4}
-        out["dispositions"] = sorted(rows, key=lambda r: (order[r["outcome"]], -r["n"]))
-        out["n_respondents"] = sum(r["n"] for r in rows)
-    else:
-        out["n_respondents"] = pl.scan_parquet(parquet).select(pl.len()).collect().item()
-    return out
 
 
 @router.get("/studies/{study_id}/data-field-report")
@@ -454,7 +435,7 @@ def data_field_report_route(
     from src.core.survey_definition import SurveyDefinition
     from src.engines.fielding.data_report import data_field_report
     from src.engines.qc.cleaning import collect_flags
-    from src.engines.qc.discrepancy import _disposition_labels
+    from src.engines.qc.discrepancy import completes_only
     from src.engines.questionnaire.label_merge import (
         questionnaire_to_data_codes,
         translate_to_data_codes,
@@ -484,11 +465,7 @@ def data_field_report_route(
 
     # Soft-launch quality is judged on the completes: a screen-out's speed or
     # blank grid says nothing about the data that will be delivered.
-    status_column, meaning = _disposition_labels(datamap)
-    completes = df
-    if status_column and status_column in df.columns:
-        codes = [code for code, outcome in meaning.items() if outcome == "complete"]
-        completes = df.filter(pl.col(status_column).is_in(codes))
+    completes, _fielded = completes_only(df, datamap)
     flags, _ = collect_flags(completes, datamap)
     # ponytail: computed per request (~0.3s on 250 rows); cache on the run dir
     # if exports in the tens of thousands make this slow.

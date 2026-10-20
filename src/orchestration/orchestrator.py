@@ -490,14 +490,11 @@ class StudyOrchestrator:
         # their skipped columns as "empty" reported problems that were just
         # the screener working. Quality is judged on the completes, which are
         # the data that gets delivered.
-        from src.engines.qc.discrepancy import _disposition_labels
+        from src.engines.qc.discrepancy import completes_only
 
-        status_column, meaning = _disposition_labels(datamap)
-        complete_codes = [code for code, outcome in meaning.items() if outcome == "complete"]
-        fielded = bool(status_column and status_column in df.columns and complete_codes)
+        n_all = len(df)
+        df, fielded = completes_only(df, datamap)
         if fielded:
-            n_all = len(df)
-            df = df.filter(pl.col(status_column).is_in(complete_codes))
             metadata["n_completes"] = len(df)
             warnings.append(
                 f"Checked on the {len(df)} completes; {n_all - len(df)} screen-outs, "

@@ -255,6 +255,21 @@ def _disposition_labels(datamap: DataMap | None) -> tuple[str | None, dict[int, 
     return None, {}
 
 
+def completes_only(df, datamap: DataMap | None):
+    """(the completes, True) when the file has a status column, else (df, False).
+
+    A fielded export holds every interview; quality is judged on the completes,
+    the data that gets delivered.
+    """
+    import polars as pl
+
+    status_column, meaning = _disposition_labels(datamap)
+    codes = [code for code, outcome in meaning.items() if outcome == "complete"]
+    if not (status_column and status_column in df.columns and codes):
+        return df, False
+    return df.filter(pl.col(status_column).is_in(codes)), True
+
+
 def _as_code(value: object) -> int | None:
     number = _as_number(value)
     return int(number) if number is not None and float(number).is_integer() else None

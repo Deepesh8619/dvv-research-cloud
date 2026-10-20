@@ -8,10 +8,6 @@ vi.mock('../api/client', () => ({
       data: {
         available: true, processing: false, source_filename: '260578.xlsx', n_respondents: 750,
         n_variables: 696, status_variable: 'status',
-        dispositions: [
-          { code: 3, label: 'Qualified', outcome: 'complete', n: 254 },
-          { code: 1, label: 'Terminated', outcome: 'terminated', n: 420 },
-        ],
       },
     }),
     dataFieldReport: vi.fn().mockResolvedValue({
@@ -43,7 +39,7 @@ describe('FieldedDataPanel', () => {
     render(<MemoryRouter><FieldedDataPanel studyId="s1" canWrite /></MemoryRouter>)
     expect(await screen.findByText('260578.xlsx')).toBeTruthy()
     expect(screen.getByText('750')).toBeTruthy()
-    expect(screen.getAllByText('Qualified').length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('Qualified')).length).toBeGreaterThan(0)
     expect(screen.getByText('Check it against the questionnaire')).toBeTruthy()
     expect(screen.getByText('Replace data file')).toBeTruthy()
   })

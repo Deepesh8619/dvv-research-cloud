@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import { studiesApi, type DataFieldReport } from '../api/client'
-import { Responses } from './FieldReportPanel'
+import { Bar, Responses, minutes } from './FieldReportPanel'
 
 /**
  * An uploaded export, read as the fieldwork it is.
@@ -31,13 +31,6 @@ const CHECK_LABELS: Record<string, string> = {
 // A quota table with this many cells is a design balancer (MaxDiff versions),
 // not something anyone reads cell by cell.
 const MAX_CELLS_SHOWN = 12
-
-function minutes(seconds: number | null): string {
-  if (seconds == null) return '—'
-  const m = Math.floor(seconds / 60)
-  const s = Math.round(seconds % 60)
-  return m > 0 ? `${m}m ${s}s` : `${s}s`
-}
 
 function pct(n: number, of: number): string {
   return of > 0 ? `${((100 * n) / of).toFixed(of >= 100 ? 0 : 1).replace(/\.0$/, '')}%` : '—'
@@ -83,16 +76,6 @@ function Stat({ label, value, hint, tone = 'text-slate-900', children }: {
   )
 }
 
-function Meter({ n, of, color = 'bg-indigo-500' }: { n: number; of: number; color?: string }) {
-  const width = of > 0 ? Math.min(100, Math.max(n > 0 ? 2 : 0, (100 * n) / of)) : 0
-  return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-      <div className={`h-full rounded-full ${color} motion-safe:transition-[width] motion-safe:duration-500`}
-        style={{ width: `${width}%` }} />
-    </div>
-  )
-}
-
 function BarList({ rows, of, color, empty }: {
   rows: Array<{ key: string; label: ReactNode; n: number; sub?: string }>
   of: number; color?: string; empty: string
@@ -109,7 +92,7 @@ function BarList({ rows, of, color, empty }: {
             </span>
           </div>
           {r.sub && <p className="truncate font-mono text-[11px] text-slate-400" title={r.sub}>{r.sub}</p>}
-          <div className="mt-1"><Meter n={r.n} of={of} color={color} /></div>
+          <div className="mt-1"><Bar n={r.n} of={of} color={color} /></div>
         </li>
       ))}
     </ul>
@@ -183,7 +166,7 @@ export default function FieldworkCards({ studyId, ready, full = false }: {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Completes" value={String(d.complete)}
           hint={target ? `of ${target} needed · ${pct(d.complete, target)}` : `of ${report.starts} who started`}>
-          {target ? <div className="mt-2"><Meter n={d.complete} of={target} color="bg-emerald-500" /></div> : null}
+          {target ? <div className="mt-2"><Bar n={d.complete} of={target} color="bg-emerald-500" /></div> : null}
         </Stat>
         <Stat label="Incidence" value={report.incidence_pct == null ? '—' : `${report.incidence_pct}%`}
           hint={`${d.complete} of ${judged} the screener judged`} />

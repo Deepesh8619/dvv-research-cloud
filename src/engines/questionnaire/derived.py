@@ -96,9 +96,11 @@ def needs_rule(q: Question) -> bool:
 
 
 def _between(qid: str, lo: int, hi: int | None, row: str | None = None) -> Expression:
+    if hi == lo:
+        return Expression(op="eq", qid=qid, value=lo, row=row)
     low = Expression(op="not", children=[Expression(op="lt", qid=qid, value=lo, row=row)])
-    if hi is None or hi == lo:
-        return Expression(op="eq", qid=qid, value=lo, row=row) if hi == lo else low
+    if hi is None:
+        return low
     high = Expression(op="not", children=[Expression(op="gt", qid=qid, value=hi, row=row)])
     return Expression(op="and", children=[low, high])
 
@@ -117,8 +119,8 @@ def _rows_rule(text: str) -> Expression | None:
 # A top-level AND/OR between two conditions: only where a NEW condition starts
 # (NOT, or a question name followed by its test), so "Q2c.1 = 1 OR 2" and
 # "DA_USAGE 1, 2, 3, or 4 = 5" stay whole.
-_JOIN = re.compile(r"\s+(AND|OR)\s+(?=NOT\b|[A-Za-z][A-Za-z0-9_]*(?:\.\d+)?\s*(?:[=<>!]|\d))",
-                   re.I)
+_NEW_CONDITION = r"(?=NOT\b|[A-Za-z][A-Za-z0-9_]*(?:\.\d+)?\s*(?:[=<>!]|\d))"
+_JOIN = re.compile(rf"\s+(AND|OR)\s+{_NEW_CONDITION}", re.I)
 _NOT = re.compile(r"^\s*NOT\s+", re.I)
 # "SS_CHANNELS = 2 and/or 4 ONLY (no others)"
 _ONLY = re.compile(r"^\s*(?P<qid>[A-Za-z][A-Za-z0-9_]*)\s*=\s*(?P<codes>[\d,\s/andor]+?)\s+ONLY\b",
@@ -129,10 +131,9 @@ _OUTSIDE_CODES = re.compile(
     r"(?:selected\s+)?(?:at|in)\s+(?P<qid>[A-Za-z][A-Za-z0-9_]*)", re.I)
 
 
-def _codes_of(qid: str, survey: SurveyDefinition | None) -> list[int]:
-    q = next((x for x in (survey.questions if survey else []) if x.qid.upper() == qid.upper()),
-             None)
-    return [o.code for o in (q.options if q else [])]
+def _question(qid: str, survey: SurveyDefinition | None) -> Question | None:
+    return next((x for x in (survey.questions if survey else []) if x.qid.upper() == qid.upper()),
+                None)
 
 
 def _only_or_outside(text: str, survey: SurveyDefinition | None) -> Expression | None:
@@ -142,11 +143,11 @@ def _only_or_outside(text: str, survey: SurveyDefinition | None) -> Expression |
         if not m:
             continue
         named = [int(c) for c in re.findall(r"\d+", m["codes"])]
-        others = [c for c in _codes_of(m["qid"], survey) if c not in named]
+        source = _question(m["qid"], survey)
+        others = [o.code for o in (source.options if source else []) if o.code not in named]
         if not others:
             return None
-        qid = next((x.qid for x in survey.questions if x.qid.upper() == m["qid"].upper()),
-                   m["qid"])
+        qid = source.qid
         if only:
             return Expression(op="and", children=[
                 Expression(op="in", qid=qid, values=named),
@@ -169,8 +170,7 @@ def _parse(text: str, survey: SurveyDefinition | None = None) -> Expression | No
         return Expression(op="not", children=[inner]) if inner else None
     # "NOT A AND B": OR binds loosest, then AND.
     for joiner in ("OR", "AND"):
-        parts = [p for p in re.split(rf"\s+{joiner}\s+(?=NOT\b|[A-Za-z][A-Za-z0-9_]*"
-                                     rf"(?:\.\d+)?\s*(?:[=<>!]|\d))", text, flags=re.I) if p]
+        parts = [p for p in re.split(rf"\s+{joiner}\s+{_NEW_CONDITION}", text, flags=re.I) if p]
         if len(parts) > 1:
             kids = [_parse(p, survey) for p in parts]
             if not all(kids):
@@ -237,11 +237,17 @@ def rule_from_document(q: Question, survey: SurveyDefinition) -> tuple[Question,
     return after, how
 
 
+def _leaves(expr: Expression):
+    if expr.children:
+        for child in expr.children:
+            yield from _leaves(child)
+    else:
+        yield expr
+
+
 def _tested(expr: Expression) -> frozenset[tuple[str, str | None]]:
     """The (question, row) pairs a rule looks at."""
-    if expr.children:
-        return frozenset().union(*(_tested(c) for c in expr.children))
-    return frozenset({(expr.qid or "", None if expr.row is None else str(expr.row))})
+    return frozenset((e.qid or "", None if e.row is None else str(e.row)) for e in _leaves(expr))
 
 
 def _mark_multi_coded(q: Question) -> None:
@@ -327,20 +333,14 @@ def rule_from_model(q: Question, survey: SurveyDefinition) -> tuple[Question, st
     return after, f"a model ({response.backend}/{response.model}) reading the questions before it"
 
 
-def _values(expr: Expression) -> list[tuple[str, Any]]:
-    if expr.children:
-        return [v for c in expr.children for v in _values(c)]
-    vals = list(expr.values or []) + ([expr.value] if expr.value is not None else [])
-    return [(expr.qid or "", v) for v in vals]
-
-
 def _grounded(rule: Expression, q: Question, survey: SurveyDefinition) -> bool:
     """Every value a rule tests is a code of that question, or written in the document."""
     by_upper = {x.qid.upper(): x for x in survey.questions}
     written = set(re.findall(r"\d+", " ".join(
         [q.text or "", q.source_text or "",
          *((o.label or "") + " " + (o.definition or "") for o in q.options)])))
-    for qid, value in _values(rule):
+    for qid, value in ((e.qid or "", v) for e in _leaves(rule)
+                       for v in [*(e.values or []), *([e.value] if e.value is not None else [])]):
         source = by_upper.get(qid.upper())
         codes = {o.code for o in [*(source.options or []), *(source.rows or []),
                                   *(source.cols or [])]} if source else set()
@@ -353,8 +353,9 @@ def derived_values(survey: SurveyDefinition, answers: dict[str, Any]) -> dict[st
     """Every approved coded hidden variable's value for this respondent.
 
     In document order, so one hidden variable may be coded from another
-    (HID_GEO_REGION from HID_GEO_DIVISION). The first code whose rule holds
-    wins; none holding leaves the variable unset rather than guessed.
+    (HID_GEO_REGION from HID_GEO_DIVISION). A single-coded variable takes the
+    first code whose rule holds, a multi-coded one every code that holds; none
+    holding leaves the variable unset rather than guessed.
     """
     known = dict(answers)
     out: dict[str, Any] = {}
