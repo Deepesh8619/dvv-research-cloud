@@ -1560,3 +1560,23 @@ def test_every_variable_says_what_fills_it_and_only_owners_and_analysts_see_it(c
 
     state["role"] = "reviewer"
     assert test_client.get("/api/studies/study_q1/questionnaire/datamap").status_code == 403
+
+
+def test_approving_a_model_read_question_clears_its_mark_and_bulk_approval_skips_it(client):
+    from src.core.survey_definition import Block, Option, Question, QuestionType
+
+    test_client, session_factory, state = client
+    read_by_model = Question(qid="Q1", type=QuestionType.SINGLE, text="Which pharmacy?",
+                             options=[Option(1, "CVS")], flags=["MODEL_READ"])
+    clean = Question(qid="Q2", type=QuestionType.SINGLE, text="Age band?",
+                     options=[Option(1, "18-34")])
+    state["survey"] = SurveyDefinition(study_id="study_q1", questions=[read_by_model, clean],
+                                       blocks=[Block(block_id="B", question_ids=["Q1", "Q2"])])
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+
+    bulk = test_client.post("/api/studies/study_q1/questionnaire/questions/approve-clean").json()
+    assert "Q1" not in bulk["newly_approved"]  # a person has to look at it
+    r = test_client.post("/api/studies/study_q1/questionnaire/questions/Q1/approve").json()
+    assert "MODEL_READ" in r["cleared_flags"]

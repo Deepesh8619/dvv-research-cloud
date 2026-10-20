@@ -88,6 +88,11 @@ FLAG_ENTRY_MODE_CONFLICT = "ENTRY_MODE_CONFLICT"
 # kind recorded in `validation["intended_type"]`, so nobody mistakes the
 # stand-in for the instrument.
 FLAG_TYPE_NOT_SUPPORTED = "TYPE_NOT_SUPPORTED"
+# Read by a model rather than the rules. A model's reading passes the same
+# checks as a rule's and can still be wrong (measured on Bedrock: Vivo went to
+# 44.9% wrong-and-unflagged once model readings cleared their flags), so it
+# stays marked until a person approves that question. Bulk approval skips it.
+FLAG_MODEL_READ = "MODEL_READ"
 
 
 # --- Extraction schema ------------------------------------------------------
