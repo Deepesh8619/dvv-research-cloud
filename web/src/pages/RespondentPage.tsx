@@ -17,6 +17,7 @@ import {
 } from '../components/Icons'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { registerRespondentControls } from '../components/respondent/controls'
+import { PROBE, askFollowUp } from '../components/respondent/probes'
 import { applySurveyTheme, gradientBar } from '../components/respondent/surveyLook'
 
 // Grid, rank and number questions are drawn by us — see controls.tsx.
@@ -283,6 +284,8 @@ export default function RespondentPage() {
         survey.onCurrentPageChanged.add(async (sender) => {
           setPosition(positionOf(sender))
           trackSection(sender)
+          void askFollowUp(sender, async (qid, answer) =>
+            (await fieldingApi.probe(token, sessionIdRef.current, qid, answer)).data.probe)
           await submitPage(sender, sender.currentPageNo)
         })
 
@@ -441,7 +444,8 @@ export default function RespondentPage() {
   }
 
   if (phase === 'welcome') {
-    const questionCount = model?.getAllQuestions().length ?? 0
+    // A follow-up box is asked only after a thin answer: not one of the questions.
+    const questionCount = model?.getAllQuestions().filter((q) => !q.name.endsWith(PROBE)).length ?? 0
     const minutes = Math.max(1, Math.ceil(questionCount / 4))
     return (
       <Centered theme={theme}>

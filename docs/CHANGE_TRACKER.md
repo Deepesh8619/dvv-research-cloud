@@ -21,6 +21,27 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-21 — one follow-up when an open answer is thin (branch feat/followup-probes)
+
+Expansion item 7 of 8. Questionnaire checks → Follow-up probes: tick the "why"
+questions. A respondent whose answer is a stock reply ("ok", "nothing comes
+to mind") or under six words gets one follow-up page right after it, worded
+for that answer by an open model — neutral, never suggesting an answer
+(leading wording is refused) — or a fixed probe when no model answers. Optional
+to answer. Asked once per respondent and question and recorded, so the public
+link cannot run the model at will. Data gains `<qid>_PROBEQ` (what was asked)
+and `<qid>_PROBE` (the reply). The thin rule is one rule in Python and
+TypeScript, tested on the same answers.
+
+Measured: on Google Ads 23% of open answers are thin ("Lower the rates",
+"Nothing comes to mind"). Job-title questions are short by design — hence
+switched on per question, never by default. Checked as a respondent in the
+browser: "Lower the rates" → follow-up page, probe recorded on the session;
+the welcome screen no longer counts the follow-up as a question.
+
+Not measured: the model-written wording (no model may read client answers
+here; Bedrock login expired). The fixed probe is what ran.
+
 ## 2026-10-21 — waves and countries: drift, moves, one stacked file (branch feat/tracker-stacking)
 
 Expansion item 6 of 8, second half. Reports → Waves and countries: pick the

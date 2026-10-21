@@ -258,6 +258,7 @@ DEFAULT_ROUTES: dict[str, dict[str, str]] = {
     # (src/engines/questionnaire/logic_review.py).
     "questionnaire.logic_review": {"backend": "auto", "model": ""},
     "report.narrative": {"backend": "auto", "model": ""},
+    "fielding.probe": {"backend": "auto", "model": ""},
     # study.chat routes through src/ai/navigator.py (multi-tool agent loop on
     # Groq, then Cerebras) rather than run_task — kept here so the task
     # inventory in one place stays truthful. study.chat.basic is its local

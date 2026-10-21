@@ -644,6 +644,22 @@ def _write_in_elements(question: Question) -> list[dict[str, Any]]:
     return out
 
 
+def _probe_elements(question: Question) -> list[dict[str, Any]]:
+    """The follow-up box after an open question marked for probing.
+
+    Shown only when the answer is thin (`isThin`, registered by the respondent
+    page with the same rule as `probes.is_thin`). The title is a fixed probe
+    until the page fetches the one written for this answer. Optional: a
+    follow-up is an invitation, and a forced one gets "no" typed into it.
+    """
+    from src.engines.fielding.probes import FALLBACK, PROBE, probed
+
+    if not probed(question):
+        return []
+    return [{"type": "comment", "name": f"{question.qid}{PROBE}", "title": FALLBACK,
+             "isRequired": False, "visibleIf": f"isThin({{{question.qid}}})"}]
+
+
 def _compile_block(block: Block, survey: SurveyDefinition) -> dict[str, Any]:
     """Compile one `Block` into a SurveyJS page dict."""
     elements: list[dict[str, Any]] = []
@@ -652,6 +668,7 @@ def _compile_block(block: Block, survey: SurveyDefinition) -> dict[str, Any]:
         if qid in survey and _is_respondent_facing(survey[qid]):
             elements.append(_compile_question(survey[qid], by_qid))
             elements.extend(_write_in_elements(survey[qid]))
+            elements.extend(_probe_elements(survey[qid]))
 
     page: dict[str, Any] = {"name": block.block_id, "elements": elements}
     if block.label:

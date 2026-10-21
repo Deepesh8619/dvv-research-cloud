@@ -34,6 +34,7 @@ import re
 from concurrent.futures.process import BrokenProcessPool
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -1135,6 +1136,39 @@ def submit_answers(
             )
 
     return {"ok": True, "terminated": False}
+
+
+class ProbeRequest(BaseModel):
+    qid: str = Field(max_length=200)
+    answer: str = Field(max_length=2000)
+
+
+@router.post("/r/{token}/sessions/{session_id}/probe")
+def follow_up(token: str, session_id: str, body: ProbeRequest, db: Session = Depends(get_db)):
+    """The follow-up for a thin answer to a question marked for probing, or null.
+
+    Written once per respondent and question, then recorded (`<qid>_PROBEQ`);
+    asking again returns the record, so the public link cannot run the model at will.
+    """
+    from src.engines.fielding.probes import ASKED, is_thin, probed, write_probe
+
+    link = _resolve_link(db, token)
+    session = _resolve_session(db, link, session_id)
+    if session.status_code is not None:
+        raise HTTPException(status_code=409, detail="This interview has finished")
+    survey = SurveyDefinition.from_json(link.survey_json)
+    question = survey[body.qid] if body.qid in survey else None
+    if question is None or not probed(question):
+        raise HTTPException(status_code=404, detail="No follow-up for this question")
+    if not is_thin(body.answer):
+        return {"probe": None}
+    asked = get_session_answers_map(db, session_id).get(f"{body.qid}{ASKED}")
+    if asked:
+        return {"probe": asked}
+    text, source = write_probe(question.text or "", body.answer)
+    upsert_respondent_answer(db, session_id, f"{body.qid}{ASKED}", text)
+    logger.info(f"[{link.study_id}] follow-up for {body.qid} ({source})")
+    return {"probe": text}
 
 
 @router.post("/r/{token}/sessions/{session_id}/complete")
