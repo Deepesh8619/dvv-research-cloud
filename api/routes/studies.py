@@ -746,6 +746,80 @@ def get_tracking(
     return report.to_dict()
 
 
+def _stack_sources(db: Session, study_id: str, others: list[str]):
+    """(name, parquet, datamap path) for this study then each other one, or 404/422."""
+    ids = [study_id, *dict.fromkeys(o for o in others if o != study_id)]
+    if len(ids) < 2:
+        raise HTTPException(status_code=422, detail="Name at least one other study to stack with")
+    out = []
+    for sid in ids:
+        study = get_study(db, sid)
+        if not study:
+            raise HTTPException(status_code=404, detail=f"Study {sid} not found")
+        parquet, dm = _run_artifacts(study, f"Study {sid}")
+        out.append((study.client_name or sid, sid, parquet, dm))
+    return out
+
+
+@router.get("/studies/{study_id}/stack")
+def stack_check(
+    study_id: str,
+    with_: list[str] = Query(default=[], alias="with"),
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """What differs between this study and other waves or countries of it: variables
+    not in every file, codes added or missing, codes that changed meaning. Data maps
+    only, no answers. (Authenticated)"""
+    from src.core.models import DataMap
+    from src.engines.tabs.stacking import drift
+
+    sources = _stack_sources(db, study_id, with_)
+    return drift([(name, DataMap.from_json(dm.read_text())) for name, _sid, _p, dm in sources])
+
+
+@router.get("/studies/{study_id}/stack.sav")
+def stack_download(
+    study_id: str,
+    with_: list[str] = Query(default=[], alias="with"),
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """One SPSS file of every respondent from these studies, SOURCE first. Refused while
+    a question's codes mean different things in different files. (Gated like a download
+    for every study in it.)"""
+    import shutil
+    import tempfile
+
+    import polars as pl
+    from starlette.background import BackgroundTask
+
+    from api.routes.materialize import data_access
+    from src.adapters.spss import write_sav
+    from src.core.models import DataMap
+    from src.engines.tabs.stacking import drift, stack
+
+    sources = _stack_sources(db, study_id, with_)
+    for _name, sid, _p, _dm in sources:
+        decision = data_access(db, sid, user)
+        if not decision.allowed:
+            raise HTTPException(status_code=403, detail=f"{sid}: {decision.reason}")
+    maps = [(name, DataMap.from_json(dm.read_text())) for name, _sid, _p, dm in sources]
+    report = drift(maps)
+    if report["n_breaking"]:
+        raise HTTPException(status_code=409, detail=(
+            f"{report['n_breaking']} questions mean different things in different files; "
+            "fix their codes before stacking"))
+    data, datamap = stack([(name, pl.read_parquet(p), dm)
+                           for (name, _sid, p, _d), (_n, dm) in zip(sources, maps, strict=True)])
+    folder = Path(tempfile.mkdtemp())
+    path = folder / f"{study_id}_stacked.sav"
+    write_sav(data.to_pandas(), datamap, path)
+    # Respondent data: gone from disk once sent.
+    return FileResponse(path, filename=path.name, media_type="application/octet-stream",
+                        background=BackgroundTask(shutil.rmtree, folder, ignore_errors=True))
+
+
 def _coding_file(study) -> Path:
     """coding.json lives in the orchestrator run dir (beside the decks) — the
     same location convention as crosstabs.json/datamap.json, NOT STUDIES_DIR."""
