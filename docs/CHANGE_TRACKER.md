@@ -21,6 +21,25 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-21 — a quote read from the questionnaire (branch feat/quote-from-document)
+
+Expansion item 2 of 8. The Questionnaire checks tab opens with a quote: the
+interview length as a range (±30%, its measured error), the five longest
+questions, the screeners that decide who qualifies, and — from the user's own
+completes, incidence, rate per minute, minimum cost per complete and project
+fee — starts needed, cost per complete, sample cost and total. When the
+document's own length is below the low end, it says the study is likely
+under-priced. Nothing guesses a panel's prices.
+
+| Study | Estimate | Document says | Actual median |
+|---|---|---|---|
+| Google Ads | 22.0 min | 12 | 17.3 |
+| TRD1 | 13.0 min | 15 | 19.9 |
+| TRD2 | 12.4 min | 15 | 12.4 |
+
+Mean error 21% against the documents' 26%. The timing constants are plain
+reading and answering times, not fitted to these three studies.
+
 ## 2026-10-21 — one authenticity score per respondent (branch feat/authenticity-score)
 
 Expansion item 1 of 8. Decipher writes, per open end, keystrokes, characters,

@@ -1515,6 +1515,35 @@ def questionnaire_datamap(
     }
 
 
+@router.get("/studies/{study_id}/questionnaire/quote")
+def questionnaire_quote(
+    study_id: str,
+    completes: int | None = None,
+    incidence_pct: float | None = None,
+    rate_per_minute: float | None = None,
+    min_cpi: float | None = None,
+    project_fee: float | None = None,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """A quote from the questionnaire: length range, screeners, starts and cost.
+
+    Before anyone scripts the study. Prices come only from the rates passed in;
+    nothing here guesses what a panel charges. (Owner/Analyst)
+    """
+    from src.engines.fielding.quote import quote
+
+    for name, value in (("completes", completes), ("incidence_pct", incidence_pct),
+                        ("rate_per_minute", rate_per_minute), ("min_cpi", min_cpi),
+                        ("project_fee", project_fee)):
+        if value is not None and value < 0:
+            raise HTTPException(status_code=422, detail=f"{name} cannot be negative")
+    if incidence_pct is not None and incidence_pct > 100:
+        raise HTTPException(status_code=422, detail="incidence_pct is a percentage, 0-100")
+    survey = _load_definition(db, _latest_questionnaire(db, study_id))
+    return quote(survey, completes, incidence_pct, rate_per_minute, min_cpi, project_fee)
+
+
 @router.post("/studies/{study_id}/questionnaire/approve-all")
 def approve_all(
     study_id: str,

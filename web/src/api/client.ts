@@ -686,7 +686,22 @@ export interface PlannedVariable {
   how: string
 }
 
+/** A quote read from the questionnaire. `cost` is null until incidence (and rates) are given. */
+export interface StudyQuote {
+  length: { minutes: number; low: number; high: number; stated_minutes: number | null;
+            longest: Array<{ qid: string; seconds: number }> }
+  screeners: Array<{ qid: string; text: string; screens_out: string }>
+  cost: { completes: number; incidence_pct: number; starts_needed: number;
+          cost_per_complete?: number; sample_cost?: number; total?: number } | null
+  completes: number | null
+  n_questions: number
+}
+
 export const questionnaireApi = {
+  quote: async (studyId: string, params: Record<string, number | undefined>) =>
+    api.get<StudyQuote>(`/studies/${studyId}/questionnaire/quote`, {
+      params: Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && !Number.isNaN(v))),
+    }),
   /** Every variable the data file will have, hidden ones included. Owner/Analyst. */
   datamap: async (studyId: string) =>
     api.get<{ n_variables: number; status: string; variables: PlannedVariable[] }>(
