@@ -674,6 +674,29 @@ def get_crosstabs(
     raise HTTPException(status_code=404, detail="No table data for this study")
 
 
+@router.get("/studies/{study_id}/findings")
+def get_findings(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """Findings read off the computed tables, strongest first, each number cited
+    to its table, column and base. (Authenticated, like the tables themselves.)"""
+    from api.db import list_questionnaires_for_study
+    from src.core.survey_definition import SurveyDefinition
+    from src.engines.analysis.findings import findings
+
+    tables = get_crosstabs(study_id, db, user)["tables"]
+    questions: dict[str, str] = {}
+    screeners: set[str] = set()
+    q = next(iter(list_questionnaires_for_study(db, study_id)), None)
+    if q is not None and q.definition_json:
+        survey = SurveyDefinition.from_json(q.definition_json)
+        questions = {x.qid: x.text for x in survey.questions}
+        screeners = {x.qid for x in survey.questions if x.terminate_if}
+    return {"n_tables": len(tables), "findings": findings(tables, questions, screeners)}
+
+
 def _run_artifacts(study, what: str) -> tuple[Path, Path]:
     """(data.parquet, datamap.json) for a processed study, or 404 with a reason."""
     if not study.excel_path:

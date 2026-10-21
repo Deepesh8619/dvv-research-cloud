@@ -21,6 +21,29 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-21 — findings with cited numbers, in the Reports tab and the deck (branch feat/cited-findings)
+
+Expansion item 4 of 8. The deck asked a model for every headline and printed
+it unchecked ("No headline / Analysis pending" when no model answered).
+Findings are now computed from the tables (`analysis/findings.py`): the
+largest significant banner difference, the most chosen options of a
+multi-select (its option tables regrouped under the question's wording), the
+leading answer; screener questions are the sample's profile, ranked last;
+constant tables (100% one answer) say nothing. Every number carries its table,
+column and unweighted base; bases under 30 are marked indicative. A model's
+sentence is kept only if every number in it is a cell, base, mean or gap of
+its table (numbers inside labels like "Under 35" are not claims).
+
+The PowerPoint opens with a Key findings slide, each line cited
+(`[T11: Checked n=52, Unchecked n=39]`), and every table slide names its source
+and base. Fielded studies now get the PowerPoint too (they had only Excel),
+named in the questionnaire's words, with no model call.
+
+Measured: Google Ads (30 auto tables, Total only) → 5 findings + 4 sample
+lines, the "USA 100%" country constant dropped; TRD2 with a banner → the one
+significant difference (REMS 36% vs 15%) ranked first. Every computed
+finding verifies against its own tables.
+
 ## 2026-10-21 — pharma compliance: adverse events and the consent notice (branch feat/pharma-compliance)
 
 Expansion item 3 of 8.
