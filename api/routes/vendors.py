@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 
 from api.auth import UserRole, require_role
 from api.db import (
-    AuditLogDB,
     UserDB,
     answers_by_session,
     get_db,
@@ -26,9 +25,11 @@ from src.engines.fielding.decisions import STATUS_COMPLETE, QuotaCell
 from src.engines.fielding.vendors import (
     CONTACT_COLUMNS,
     MAX_INVITE_ROWS,
+    RECONCILIATION_COLUMNS,
     flag_rates,
     pct_removed,
     quota_balance,
+    reconciliation,
     row_pid,
     scorecard_row,
     unfinished,
@@ -66,7 +67,7 @@ def vendor_scorecard(
     # call. Must not be polled; cache or precompute if a dashboard ever needs it.
     """
     from api.heavy import plain_sessions, run_heavy_detached
-    from src.engines.qc.cleaning import current_decisions
+    from api.routes.cleaning import _decisions
 
     if not get_study(db, study_id):
         raise HTTPException(status_code=404, detail="Study not found")
@@ -86,22 +87,14 @@ def vendor_scorecard(
             plain_sessions(list_respondent_sessions(db, link.id)),
             answers_by_session(db, link.id), cells,
         ))
-    audit = (
-        db.query(AuditLogDB)
-        .filter(AuditLogDB.entity == "cleaning.respondent", AuditLogDB.study_id == study_id)
-        .order_by(AuditLogDB.at.asc()).all()
-    )
-    decisions = current_decisions([
-        {"entity_id": r.entity_id, "action": r.action,
-         "after": json.loads(r.after_json) if r.after_json else None}
-        for r in audit
-    ])
+    decisions = _decisions(db, study_id)
 
     rows = []
     for job in jobs:
         # The first call closes the session; everything is already loaded.
         report, quality, ids = run_heavy_detached(db, _report_and_quality, *job[1:])
-        rows.append(scorecard_row(job[0], report, quality, pct_removed(ids, decisions)))
+        n_removed = sum(decisions.get(i, {}).get("decision") == "remove" for i in ids)
+        rows.append(scorecard_row(job[0], report, quality, pct_removed(ids, decisions), n_removed))
     return {"study_id": study_id, "vendors": rows, "run_by": user.name}
 
 
@@ -120,6 +113,31 @@ def quota_balance_route(
              if not k.is_test}
     cells = [c for lid in links for c in list_quota_cells(db, lid)]
     return {"study_id": study_id, **quota_balance(links, cells, target), "run_by": user.name}
+
+
+@router.get("/studies/{study_id}/fielding/links/{link_id}/reconciliation.csv")
+def reconciliation_csv(
+    study_id: str,
+    link_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.FOUNDER, UserRole.ANALYST)),
+):
+    """The panel's end-of-field file: every respondent id, its outcome, and whether
+    the complete is accepted or rejected (with the cleaning reason). (Owner/Founder/Analyst)
+    """
+    from api.routes.cleaning import _decisions
+
+    link = get_fielding_link(db, link_id)
+    if not link or link.study_id != study_id:
+        raise HTTPException(status_code=404, detail="Link not found")
+    rows = reconciliation(list_respondent_sessions(db, link_id), _decisions(db, study_id))
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=RECONCILIATION_COLUMNS)
+    w.writeheader()
+    w.writerows(rows)
+    name = "".join(c if c.isalnum() else "_" for c in (link.vendor_name or "vendor"))
+    return Response(buf.getvalue(), media_type="text/csv", headers={
+        "Content-Disposition": f'attachment; filename="reconciliation_{name}.csv"'})
 
 
 MAX_INVITE_BYTES = 5 * 1024 * 1024

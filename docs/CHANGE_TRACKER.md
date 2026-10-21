@@ -21,6 +21,27 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-21 — sample suppliers and the panel reconciliation file (branch feat/supplier-reconciliation)
+
+Expansion item 5 of 8. Panel redirects, vendor name, CPI, target, the vendor
+scorecard and quota balancing already existed, but only as API: nothing in the
+app showed them or let anyone set a supplier's price. The Field monitor now has
+a Sample suppliers panel — per live link: completes against target, incidence,
+share removed in cleaning, **accepted** completes (the ones nobody removed:
+what the panel is paid for) and the billable amount — with Edit (name, cost
+per complete, target) and a **Reconciliation** download: every respondent's
+panel id (pid, else rid/psid), outcome (complete / terminate / overquota /
+security / incomplete), accepted or rejected, and the reason a person gave.
+Nothing is rejected automatically.
+
+Not built: creating projects and buying sample through a marketplace's own API
+(Cint, PureSpectrum, Dynata) — that needs partner accounts and credentials;
+every one of them already integrates through the redirect links DVV writes.
+
+Checked in the browser on a scratch database: Cint 12 completes × 3.5 = 42;
+PureSpectrum 8 completes, 2 removed as speeders → 6 accepted × 2.8 = 16.8; the
+downloaded file lists the two rejections with "speeder: under 4 minutes".
+
 ## 2026-10-21 — findings with cited numbers, in the Reports tab and the deck (branch feat/cited-findings)
 
 Expansion item 4 of 8. The deck asked a model for every headline and printed

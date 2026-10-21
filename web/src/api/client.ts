@@ -1121,6 +1121,25 @@ export interface MaterializeResult {
   destination: string
 }
 
+export interface SupplierRow {
+  link_id: string
+  vendor_name: string | null
+  cpi: number | null
+  target_completes: number | null
+  starts: number
+  completes: number
+  /** Completes nobody removed in cleaning: what the panel is paid for. */
+  accepted: number
+  billable: number | null
+  incidence_pct: number | null
+  median_loi: number | null
+  pct_of_target: number | null
+  pct_removed: number | null
+  speeder_rate: number | null
+  straightliner_rate: number | null
+  duplicate_rate: number | null
+}
+
 export const fieldingApi = {
   // `search` is window.location.search (e.g. "?pid=P1&rid=R2") so the backend
   // captures panel params into the session's entry_params at entry time.
@@ -1196,6 +1215,13 @@ export const fieldingApi = {
 
   closeLink: async (studyId: string, linkId: string) =>
     api.post<FieldingLink>(`/studies/${studyId}/fielding/links/${linkId}/close`, {}),
+
+  /** One row per real link: progress, cost and quality by sample supplier. */
+  suppliers: async (studyId: string) =>
+    api.get<{ vendors: SupplierRow[] }>(`/studies/${studyId}/fielding/vendors`),
+  setVendor: async (studyId: string, linkId: string,
+                    body: { vendor_name: string | null; cpi: number | null; target_completes: number | null }) =>
+    api.patch<FieldingLink>(`/studies/${studyId}/fielding/links/${linkId}/vendor`, body),
 
   /** Hold at `limit` completes, or release to full sample with `null`. */
   setSoftLaunch: async (studyId: string, linkId: string, limit: number | null) =>
