@@ -1322,3 +1322,44 @@ def test_vendor_fields_round_trip_patch_and_viewer_refused(client):
 
     state["role"] = "reviewer"
     assert test_client.patch(url, json={"cpi": 1}).status_code == 403
+
+
+def test_a_translated_sheet_comes_back_checked_and_a_link_serves_it(client):
+    """Sheet out, filled sheet in (blanks and broken tokens listed), ?lang=hi served."""
+    import csv
+    import io
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    survey = _sample_survey("study_f1")
+    survey.questions[2].text = "Which coffee brand, [pipe: Q2]?"
+    _make_questionnaire(sf, survey=survey)
+
+    r = test_client.get("/api/studies/study_f1/questionnaire/translations/hi.csv")
+    assert r.status_code == 200 and r.text.startswith("﻿key,part,source,translation")
+    rows = list(csv.DictReader(io.StringIO(r.text.lstrip("﻿"))))
+    hindi = {"title": "कॉफ़ी अध्ययन", "Q1": "आपकी उम्र क्या है?", "Q2": "क्या आप कॉफ़ी पीते हैं?",
+             "Q2/o/1": "हाँ", "Q2/o/2": "नहीं", "Q3": "कौन सा कॉफ़ी ब्रांड?"}  # pipe dropped
+    for row in rows:
+        row["translation"] = hindi.get(row["key"], "")
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=rows[0].keys())
+    w.writeheader()
+    w.writerows(rows)
+    up = test_client.post("/api/studies/study_f1/questionnaire/translations/hi",
+                          files={"file": ("hi.csv", buf.getvalue().encode("utf-8"), "text/csv")})
+    assert up.status_code == 200, up.text
+    assert up.json()["n_translated"] == up.json()["n_total"] == 6
+    assert up.json()["problems"] == [
+        {"key": "Q3", "problem": "keep [pipe: Q2] exactly as in the source"}]
+    assert test_client.get("/api/studies/study_f1/questionnaire/translations").json()[
+        "languages"][0]["lang"] == "hi"
+    assert test_client.get(
+        "/api/studies/study_f1/questionnaire/translations/not a code.csv").status_code == 422
+
+    token = _create_link(test_client).json()["token"]
+    hi = test_client.get(f"/api/r/{token}?lang=hi").json()["surveyjs_json"]
+    en = test_client.get(f"/api/r/{token}").json()["surveyjs_json"]
+    titles = lambda sj: [e["title"] for p in sj["pages"] for e in p["elements"]]  # noqa: E731
+    assert titles(hi)[:2] == ["आपकी उम्र क्या है?", "क्या आप कॉफ़ी पीते हैं?"]
+    assert titles(en)[0] == "What is your age?"

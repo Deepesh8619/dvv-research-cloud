@@ -106,6 +106,7 @@ from src.engines.fielding.maxdiff_screens import questions_in as maxdiff_questio
 from src.engines.fielding.rotation import arms as rotation_arms
 from src.engines.fielding.rotation import assign as assign_arm
 from src.engines.fielding.rotation import order_pages
+from src.engines.fielding.translation import translated
 from src.engines.questionnaire.bipolar import FLIP_ARMS, apply_flip, flipping_questions
 from src.engines.questionnaire.derived import with_derived
 from src.renderers.surveyjs_compiler import compile_to_surveyjs, display_warnings
@@ -869,7 +870,9 @@ def enter_survey(token: str, request: Request, db: Session = Depends(get_db)):
         )
 
     survey = SurveyDefinition.from_json(link.survey_json)
-    surveyjs_json = compile_to_surveyjs(survey)
+    # ?lang=hi serves the Hindi translation when the link carries one; `lang`
+    # is already in entry_params, so the data records which language was read.
+    surveyjs_json = compile_to_surveyjs(translated(survey, entry_params.get("lang", "")))
 
     # Which block this respondent meets first, when the script asked for the
     # blocks to be rotated. Assigned to the arm that is BEHIND rather than by a

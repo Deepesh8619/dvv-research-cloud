@@ -11,6 +11,7 @@ import FindingsPanel from '../components/FindingsPanel'
 import VariablesPanel from '../components/VariablesPanel'
 import NoticePanel from '../components/NoticePanel'
 import QuotePanel from '../components/QuotePanel'
+import TranslationsPanel from '../components/TranslationsPanel'
 import { useAuth } from '../auth/AuthContext'
 import ChatBot from '../components/ChatBot'
 import { CheckIcon, DocChartIcon, DownloadIcon, LinkIcon } from '../components/Icons'
@@ -407,6 +408,7 @@ function QuestionnaireChecksTab({
     <div className="space-y-4">
       <NoticePanel studyId={study.id} />
       <QuotePanel studyId={study.id} />
+      <TranslationsPanel studyId={study.id} />
       <CrosscheckPanel studyId={study.id} dataFilename={study.source_filename} />
     </div>
   )

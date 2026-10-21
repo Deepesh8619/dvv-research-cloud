@@ -1544,6 +1544,87 @@ def questionnaire_quote(
     return quote(survey, completes, incidence_pct, rate_per_minute, min_cpi, project_fee)
 
 
+def _language(lang: str) -> str:
+    from src.engines.fielding.translation import valid_language
+
+    if not valid_language(lang):
+        raise HTTPException(status_code=422, detail="Language must be a code like hi, ta or pt-BR")
+    return lang
+
+
+@router.get("/studies/{study_id}/questionnaire/translations")
+def translations(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Each language's progress, and how many strings a respondent reads. (Owner/Analyst)"""
+    from src.engines.fielding.translation import source_strings, status
+
+    survey = _load_definition(db, _latest_questionnaire(db, study_id))
+    return {"n_strings": len(source_strings(survey)), "languages": status(survey)}
+
+
+@router.get("/studies/{study_id}/questionnaire/translations/{lang}.csv")
+def translation_sheet(
+    study_id: str,
+    lang: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """The translator's sheet for one language, already-translated rows filled.
+    (Owner/Analyst)"""
+    import csv
+    import io
+
+    from src.engines.fielding.translation import SHEET_COLUMNS, sheet
+
+    survey = _load_definition(db, _latest_questionnaire(db, study_id))
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=SHEET_COLUMNS)
+    writer.writeheader()
+    writer.writerows(sheet(survey, _language(lang)))
+    # BOM so Excel opens Hindi, Tamil or Chinese as text, not mojibake.
+    return Response("\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="translation_{lang}.csv"'})
+
+
+MAX_SHEET_BYTES = 5 * 1024 * 1024
+
+
+@router.post("/studies/{study_id}/questionnaire/translations/{lang}")
+async def upload_translation(
+    study_id: str,
+    lang: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Take back a filled sheet: stored, and every blank or broken token listed. (Owner/Analyst)"""
+    import csv
+    import io
+
+    from src.engines.fielding.translation import status, store
+
+    _language(lang)
+    raw = await file.read(MAX_SHEET_BYTES + 1)
+    if len(raw) > MAX_SHEET_BYTES:
+        raise HTTPException(status_code=413, detail="Sheet larger than 5 MB")
+    try:
+        rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))))
+    except (UnicodeDecodeError, csv.Error):
+        raise HTTPException(status_code=422, detail="Save the sheet as CSV (UTF-8)") from None
+    if not rows or "key" not in rows[0] or "translation" not in rows[0]:
+        raise HTTPException(status_code=422,
+                            detail="The sheet needs its key and translation columns")
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    problems = store(survey, lang, rows)
+    _save_definition(db, questionnaire, survey)
+    done = next(s for s in status(survey) if s["lang"] == lang)
+    return {**done, "problems": problems[:200]}
+
+
 @router.post("/studies/{study_id}/questionnaire/approve-all")
 def approve_all(
     study_id: str,

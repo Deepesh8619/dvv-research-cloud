@@ -21,6 +21,26 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-21 — translations through the translator's sheet (branch feat/translation-sheets)
+
+Expansion item 6 of 8, first half. A survey can now be fielded in other
+languages from one master. Questionnaire checks → Translations: download a
+sheet per language (one row per thing a respondent reads — question, answer,
+grid row, grid column; UTF-8 with BOM so Excel opens Hindi or Tamil as text),
+the translator fills the translation column, upload it back. The upload is
+checked: blanks listed, and every piping or scripting token (`[INSERT
+PROVIDER]`, `{Q1}`, `[textbox]`) must be kept exactly. Stored on the
+questionnaire, so a link opened afterwards carries it; `?lang=hi` on the link
+serves the Hindi questionnaire (untranslated strings fall back to the source)
+and `lang` lands in the respondent's entry parameters, i.e. in the data.
+
+Measured on Google Ads: 570 strings over 68 questions; 22 carry a token, and a
+translator who drops them gets all 22 named on upload.
+
+Not built: a model's first draft of the translation — no model can be run on a
+client questionnaire here (free tiers excluded, Bedrock login expired); the
+sheet is the industry's own workflow either way.
+
 ## 2026-10-21 — sample suppliers and the panel reconciliation file (branch feat/supplier-reconciliation)
 
 Expansion item 5 of 8. Panel redirects, vendor name, CPI, target, the vendor
