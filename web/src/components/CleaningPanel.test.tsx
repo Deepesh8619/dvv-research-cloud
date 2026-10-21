@@ -39,6 +39,22 @@ describe('CleaningPanel', () => {
     expect(ids).toEqual(['b2', 'a1'])
   })
 
+  it('orders by authenticity score and shows each band', async () => {
+    const { cleaningApi } = await import('../api/client')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const api = cleaningApi as any
+    const st = state(2)
+    api.get.mockResolvedValue({ data: { ...st.data, authenticity: {
+      a1: { score: 65, band: 'review first', reasons: ['pasted answer: Q26: pasted 1168 characters'] },
+      b2: { score: 25, band: 'fine', reasons: [] },
+    } } })
+    api.rules.mockResolvedValue({ data: { rules: [], proposed: [] } })
+    render(<CleaningPanel studyId="s" role="analyst" />)
+    expect(await screen.findByText('65 · review first')).toBeTruthy()
+    const ids = screen.getAllByText(/^(a1|b2)$/).map((e) => e.textContent)
+    expect(ids).toEqual(['a1', 'b2'])  // one strong reason outranks two weak ones
+  })
+
   it('has no bulk-keep control', async () => {
     await setup(2)
     render(<CleaningPanel studyId="s" role="owner" />)

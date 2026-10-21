@@ -262,6 +262,9 @@ def _is_gibberish(text: str) -> bool:
     return False
 
 
+_ANSWER_ROLES = ("question", "other_specify")
+
+
 def detect_gibberish_open_ends(df: pl.DataFrame, datamap: DataMap) -> dict[str, list[int]]:
     """Per TEXT variable, row indices whose answer looks like junk."""
     out: dict[str, list[int]] = {}
@@ -270,6 +273,10 @@ def detect_gibberish_open_ends(df: pl.DataFrame, datamap: DataMap) -> dict[str, 
         if v.type != VarType.TEXT or v.name not in df.columns:
             continue
         if v.provenance == "fielding_paradata":
+            continue
+        # An answer, not a script column: uuid, session and fp_html5 hold
+        # hashes, and on a real export they were every "gibberish" flag raised.
+        if classify_variable(v.name, v.label or "", v.question_ref) not in _ANSWER_ROLES:
             continue
         series = df[v.name]
         flagged = [

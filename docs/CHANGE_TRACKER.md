@@ -21,6 +21,32 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-21 — one authenticity score per respondent (branch feat/authenticity-score)
+
+Expansion item 1 of 8. Decipher writes, per open end, keystrokes, characters,
+the pasted text, keyboard suggestions, dictation and a paste flag; it was all
+discarded as "system columns". The Cleaning tab now ranks respondents by one
+score (0-100, *review first* ≥ 60, *worth a look* ≥ 30), every reason shown,
+removal still a person's decision.
+
+| Evidence | Rule (set on real exports) |
+|---|---|
+| Pasted answer | a paste (copied text or the export's flag) only where keystrokes are under half the characters — "1,168 characters with 1 keystroke" (TRD2) counts; "65 characters with 111 keystrokes" does not |
+| Few keystrokes | long answer, keystrokes under 30% of characters, and no autocomplete, suggestion or dictation to explain it (a phone's "In clu de data…" is not a fault) |
+| AI-written text | phrases a language model leaves ("as an AI language model") |
+| Too fast to read | finished faster than the words they were shown could be skimmed at 600 a minute (questions and answers seen, not hidden or script columns) |
+| Existing checks | speeder, straight-liner, duplicate, gibberish, copied open end, failed trap |
+
+Fixed on the way: cleaning flagged every row of a fielded export, screen-outs
+included (now completes only); "gibberish" fired on `uuid`, `session`,
+`fp_html5`, `VendorID` (now answer columns only); typing-trace, `session`,
+`qtime` and `uniqueid` columns are script columns, not questions.
+
+Measured on completes: Google Ads 62 → 11 flagged (was 37), 1 worth a look;
+TRD2 91 → 28 flagged, 7 worth a look, including the 1,168-character paste;
+TRD1 17 → 2. Weights are a first setting, to retune on a fielded study's
+reviewer decisions.
+
 ## 2026-10-20 — model readings stay marked until a person approves them (branch fix/model-readings-flagged)
 
 The Bedrock run (2026-10-19) showed the cost of trusting the model: where it

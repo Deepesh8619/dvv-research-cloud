@@ -58,11 +58,15 @@ _SYSTEM_NAMES = frozenset(
      # screened out at the first question looked as if they had carried on.
      "daytime", "realstart", "laststart", "starttime", "endtime", "ipaddress",
      "useragent", "rid", "vendorid", "otherVariables", "othervariables", "zeroratio",
-     "dcua", "md", "q_ans", "geoinfo", "respinfo"}
+     "dcua", "md", "q_ans", "geoinfo", "respinfo", "session", "qtime", "list", "url",
+     "source", "decLang", "declang", "pid", "psid", "tid", "uniqueid"}
 )
 # Timers and device/tracking fields, by the shape of the name.
 _SYSTEM_NAME_RE = re.compile(
-    r"^(question_?time|geoinfor?|respinfor?|fp_|vget|vuser|qinmax\d*_)|_?timer$", re.I
+    r"^(question_?time|geoinfor?|respinfor?|fp_|vget|vuser|qinmax\d*_)|_?timer$|"
+    # Decipher's typing traces per open end: hQ15OE_KeyStrokeCount, hQ15CopyResponse.
+    r"(keystrokecount|charactercount|copyresponse|copy_paste_flagged|speechtotexttext|"
+    r"keyboardsuggesttext|manualtyping)$", re.I
 )
 # dSample, vUserAgent, hCFDeviceWidth: a one-letter lower-case platform prefix
 # on a camel-case name. Case-sensitive on purpose: DA_SHARE and dQ5 are questions.

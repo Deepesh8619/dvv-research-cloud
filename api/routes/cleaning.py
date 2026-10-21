@@ -39,11 +39,16 @@ def _flags_job(parquet: Path, datamap: Path, rules: list[dict]):
     import polars as pl
 
     from src.core.models import DataMap
+    from src.engines.qc.authenticity import scores
     from src.engines.qc.cleaning import collect_flags, respondent_key_column, respondent_keys
+    from src.engines.qc.discrepancy import completes_only
 
-    df = pl.read_parquet(parquet)
-    flags, skipped = collect_flags(df, DataMap.from_json(datamap.read_text()), rules)
-    return respondent_key_column(df), respondent_keys(df), flags, skipped
+    dm = DataMap.from_json(datamap.read_text())
+    # A fielded export holds screen-outs too; their short interviews and blank
+    # grids are the screener working, not bad respondents, and are not delivered.
+    df, _fielded = completes_only(pl.read_parquet(parquet), dm)
+    flags, skipped = collect_flags(df, dm, rules)
+    return respondent_key_column(df), respondent_keys(df), flags, skipped, scores(flags)
 
 
 def _cleaning(study) -> dict:
@@ -82,12 +87,15 @@ def get_cleaning(
     parquet, datamap = _run_artifacts(study, f"Study {study_id}")
     state = _cleaning(study)
     decisions = _decisions(db, study_id)
-    key_column, _keys, flags, skipped = run_heavy_detached(
+    key_column, _keys, flags, skipped, authenticity = run_heavy_detached(
         db, _flags_job, parquet, datamap, state["rules"]
     )
     return {
         "key_column": key_column,
         "flags": flags,
+        # One score per flagged respondent, every reason shown; highest first
+        # is the order a reviewer should work in. Removal stays their call.
+        "authenticity": authenticity,
         "skipped": skipped,
         "decisions": decisions,
         "n_unreviewed_flagged": sum(1 for k in flags if k not in decisions),
@@ -231,7 +239,7 @@ def lock_cleaning(
     parquet, datamap_path = _run_artifacts(study, f"Study {study_id}")
     run_dir = parquet.parent
     decisions = _decisions(db, study_id)
-    _, _, flags, _ = run_heavy_detached(db, _flags_job, parquet, datamap_path, state["rules"])
+    _, _, flags, _, _ = run_heavy_detached(db, _flags_job, parquet, datamap_path, state["rules"])
     unreviewed = sum(1 for k in flags if k not in decisions)
     if unreviewed:
         raise HTTPException(
