@@ -17,6 +17,7 @@ import {
 } from '../components/Icons'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { registerRespondentControls } from '../components/respondent/controls'
+import { askFollowUp } from '../components/respondent/probes'
 import { applySurveyTheme, gradientBar } from '../components/respondent/surveyLook'
 
 // Grid, rank and number questions are drawn by us — see controls.tsx.
@@ -283,6 +284,8 @@ export default function RespondentPage() {
         survey.onCurrentPageChanged.add(async (sender) => {
           setPosition(positionOf(sender))
           trackSection(sender)
+          void askFollowUp(sender, async (qid, answer) =>
+            (await fieldingApi.probe(token, sessionIdRef.current, qid, answer)).data.probe)
           await submitPage(sender, sender.currentPageNo)
         })
 

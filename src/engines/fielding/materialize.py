@@ -52,6 +52,7 @@ from src.core.survey_definition import (
 )
 from src.engines.fielding.paradata import DEVICE_CODES
 from src.engines.fielding.paradata import summarise as summarise_paradata
+from src.engines.fielding.probes import ASKED, PROBE, probed
 from src.engines.fielding.rotation import ROTATION_VARIABLE, rotating_blocks
 from src.engines.questionnaire.bipolar import FLIP_LABELS, FLIP_VARIABLE, flipping_questions
 from src.engines.questionnaire.derived import derived_values, has_rule, is_multi_coded
@@ -309,7 +310,15 @@ def _question_specs(question: Question, survey=None) -> list[_ColumnSpec]:
             raw = a.get(q)
             return str(raw) if raw is not None else None
 
-        return [_ColumnSpec(var, read_text)]
+        specs = [_ColumnSpec(var, read_text)]
+        if probed(question):
+            # The follow-up asked of a thin answer, and what came back.
+            for suffix, what in ((ASKED, "follow-up asked"), (PROBE, "follow-up answer")):
+                specs.append(_ColumnSpec(
+                    Variable(name=f"{qid}{suffix}", label=f"{text} — {what}", type=VarType.TEXT,
+                             question_ref=qid, question_text=text, provenance="fielding"),
+                    lambda a, key=f"{qid}{suffix}": read_text(a, key)))
+        return specs
 
     if qtype == QuestionType.GRID_MULTI:
         # One 0/1 column per cell, `Q21r3c2`, as Decipher writes a checkbox grid

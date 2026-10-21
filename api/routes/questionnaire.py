@@ -1544,6 +1544,50 @@ def questionnaire_quote(
     return quote(survey, completes, incidence_pct, rate_per_minute, min_cpi, project_fee)
 
 
+@router.get("/studies/{study_id}/questionnaire/probes")
+def probe_settings(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Open questions, and which get a follow-up when the answer is thin. (Owner/Analyst)"""
+    from src.engines.fielding.probes import probed
+
+    survey = _load_definition(db, _latest_questionnaire(db, study_id))
+    return {"questions": [{"qid": q.qid, "text": (q.text or "")[:200], "probed": probed(q)}
+                          for q in survey.questions if q.type is QuestionType.OPEN_TEXT]}
+
+
+class ProbeSettings(BaseModel):
+    qids: list[str]
+
+
+@router.put("/studies/{study_id}/questionnaire/probes")
+def set_probes(
+    study_id: str,
+    body: ProbeSettings,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Probe exactly these open questions; a link opened afterwards asks the follow-ups.
+    (Owner/Analyst)"""
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    opens = {q.qid: q for q in survey.questions if q.type is QuestionType.OPEN_TEXT}
+    unknown = sorted(set(body.qids) - set(opens))
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Not open questions: {', '.join(unknown)}")
+    for qid, q in opens.items():
+        rules = dict(q.validation or {})
+        if qid in body.qids:
+            rules["probe"] = True
+        else:
+            rules.pop("probe", None)
+        q.validation = rules
+    _save_definition(db, questionnaire, survey)
+    return probe_settings(study_id, db, user)
+
+
 def _language(lang: str) -> str:
     from src.engines.fielding.translation import valid_language
 

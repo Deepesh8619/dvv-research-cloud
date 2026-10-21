@@ -1363,3 +1363,37 @@ def test_a_translated_sheet_comes_back_checked_and_a_link_serves_it(client):
     titles = lambda sj: [e["title"] for p in sj["pages"] for e in p["elements"]]  # noqa: E731
     assert titles(hi)[:2] == ["आपकी उम्र क्या है?", "क्या आप कॉफ़ी पीते हैं?"]
     assert titles(en)[0] == "What is your age?"
+
+
+def test_a_thin_answer_gets_one_recorded_follow_up(client, monkeypatch):
+    """Switched on per question; asked once; recorded; never for a full answer."""
+    from types import SimpleNamespace
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    assert test_client.put("/api/studies/study_f1/questionnaire/probes",
+                           json={"qids": ["Q2"]}).status_code == 422  # Q2 is not open
+    on = test_client.put("/api/studies/study_f1/questionnaire/probes", json={"qids": ["Q3"]})
+    assert [q["probed"] for q in on.json()["questions"]] == [True]
+
+    calls = []
+    monkeypatch.setattr("src.ai.router.run_task", lambda *a, **k: calls.append(1) or SimpleNamespace(
+        content={"probe": "What do you like about that brand?"}))
+    token = _create_link(test_client).json()["token"]
+    sid = test_client.get(f"/api/r/{token}").json()["session_id"]
+    url = f"/api/r/{token}/sessions/{sid}/probe"
+    assert test_client.post(url, json={"qid": "Q3", "answer": "Nescafe"}).json() == {
+        "probe": "What do you like about that brand?"}
+    assert test_client.post(url, json={"qid": "Q3", "answer": "Nescafe!"}).json()["probe"] == (
+        "What do you like about that brand?")
+    assert len(calls) == 1  # the second ask is answered from the record
+    full = "I buy Nescafe because it is cheap, quick and my whole office drinks it"
+    assert test_client.post(url, json={"qid": "Q3", "answer": full}).json() == {"probe": None}
+    assert test_client.post(url, json={"qid": "Q2", "answer": "x"}).status_code == 404
+
+    db = sf()
+    db.query(RespondentSessionDB).filter_by(id=sid).one().status_code = 10
+    db.commit()
+    db.close()
+    assert test_client.post(url, json={"qid": "Q3", "answer": "ok"}).status_code == 409

@@ -764,6 +764,11 @@ export const complianceApi = {
 export interface TranslationStatus { lang: string; n_total: number; n_translated: number; n_problems: number }
 
 export const questionnaireApi = {
+  probes: async (studyId: string) =>
+    api.get<{ questions: Array<{ qid: string; text: string; probed: boolean }> }>(`/studies/${studyId}/questionnaire/probes`),
+  setProbes: async (studyId: string, qids: string[]) =>
+    api.put<{ questions: Array<{ qid: string; text: string; probed: boolean }> }>(
+      `/studies/${studyId}/questionnaire/probes`, { qids }),
   translations: async (studyId: string) =>
     api.get<{ n_strings: number; languages: TranslationStatus[] }>(`/studies/${studyId}/questionnaire/translations`),
   /** Take back a filled sheet; blanks and broken piping tokens come back as problems. */
@@ -1178,6 +1183,9 @@ export const fieldingApi = {
   enter: async (token: string, search = '') =>
     api.get<RespondentEntry>(`/r/${token}${search}`),
 
+  /** The follow-up written for a thin open answer, or null when it is not thin. */
+  probe: async (token: string, sessionId: string, qid: string, answer: string) =>
+    api.post<{ probe: string | null }>(`/r/${token}/sessions/${sessionId}/probe`, { qid, answer }),
   answers: async (
     token: string,
     sessionId: string,

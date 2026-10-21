@@ -11,6 +11,7 @@ import FindingsPanel from '../components/FindingsPanel'
 import TrackerPanel from '../components/TrackerPanel'
 import VariablesPanel from '../components/VariablesPanel'
 import NoticePanel from '../components/NoticePanel'
+import ProbesPanel from '../components/ProbesPanel'
 import QuotePanel from '../components/QuotePanel'
 import TranslationsPanel from '../components/TranslationsPanel'
 import { useAuth } from '../auth/AuthContext'
@@ -410,6 +411,7 @@ function QuestionnaireChecksTab({
       <NoticePanel studyId={study.id} />
       <QuotePanel studyId={study.id} />
       <TranslationsPanel studyId={study.id} />
+      <ProbesPanel studyId={study.id} />
       <CrosscheckPanel studyId={study.id} dataFilename={study.source_filename} />
     </div>
   )
