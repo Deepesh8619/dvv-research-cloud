@@ -697,6 +697,39 @@ export interface StudyQuote {
   n_questions: number
 }
 
+/** What respondents are told before agreeing, item by item (DPDP s.5; AE statement for health studies). */
+export interface NoticeCheck {
+  health_study: boolean
+  complete: boolean
+  consent_questions: string[]
+  items: Array<{ item: string; label: string; present: boolean }>
+}
+
+export interface AdverseEventHit {
+  respondent: string
+  column: string
+  question: string
+  terms: string[]
+  sentence: string
+  answer: string
+}
+
+/** Open answers naming a side effect: someone had it ("possible"), or it is only mentioned. */
+export interface AdverseEventScan {
+  n_respondents: number
+  n_open_ends: number
+  possible: AdverseEventHit[]
+  mentions: AdverseEventHit[]
+}
+
+export const complianceApi = {
+  notice: async (studyId: string) => api.get<NoticeCheck>(`/studies/${studyId}/compliance/notice`),
+  addNotice: async (studyId: string, body: { organisation: string; purpose: string; contact: string }) =>
+    api.post<NoticeCheck>(`/studies/${studyId}/compliance/notice`, body),
+  adverseEvents: async (studyId: string) =>
+    api.get<AdverseEventScan>(`/studies/${studyId}/compliance/adverse-events`),
+}
+
 export const questionnaireApi = {
   quote: async (studyId: string, params: Record<string, number | undefined>) =>
     api.get<StudyQuote>(`/studies/${studyId}/questionnaire/quote`, {

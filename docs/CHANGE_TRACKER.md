@@ -21,6 +21,35 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-21 — pharma compliance: adverse events and the consent notice (branch feat/pharma-compliance)
+
+Expansion item 3 of 8.
+
+**Adverse events.** The Cleaning tab reads every open answer of every
+interview (screen-outs and partials included) for a side effect, a medicine
+not working, overdose, pregnancy or misuse. *Possible* means someone had it
+("my patient developed a rash", "it did not work for him"), to report within a
+working day; a *mention* is an event nobody said they had, or denied ("no side
+effects"). Nothing is reported or dismissed automatically.
+
+| Study | Interviews | Raw keyword hits | Possible | Mentions |
+|---|---|---|---|---|
+| TRD1 (physicians) | 131 | 5 | 1 ("if Spravato did not work for them" — hypothetical, a person rules) | 1 |
+| TRD2 (physicians) | 91 | 5 | 0 | 4 |
+| Google Ads | 254 | 1 | 0 | 0 |
+
+Every raw hit was an opinion ("efficacy and safety", "expand on
+hallucinations"), which is why a word list alone is not the rule.
+
+**The notice.** Questionnaire checks lists what respondents are told before
+agreeing against DPDP s.5 / Rules r.3 (consent question, purpose, data,
+withdrawal, grievance contact, Data Protection Board) and, for a health
+study, the adverse-event statement. Neither physician questionnaire had any of
+them. One click puts a notice and a consent question first; a "no" ends the
+interview. The consent ledger now also finds consent questions by their own
+wording (nothing ever set `validation.consent`, so it was always empty for a
+questionnaire read from a document).
+
 ## 2026-10-21 — a quote read from the questionnaire (branch feat/quote-from-document)
 
 Expansion item 2 of 8. The Questionnaire checks tab opens with a quote: the
