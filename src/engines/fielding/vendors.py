@@ -31,13 +31,19 @@ def pct_removed(session_ids: Iterable[str], decisions: dict[str, dict]) -> float
     return pct(removed, len(ids))
 
 
-def scorecard_row(link, report: dict, quality: dict, removed_pct: float | None) -> dict:
+def scorecard_row(link, report: dict, quality: dict, removed_pct: float | None,
+                  n_removed: int = 0) -> dict:
     """One vendor row. `report` is FieldReport.to_dict(); `quality` the flag rates."""
     completes = report["dispositions"].get("complete", 0)
     dropoff = report["dropoff_by_question"]
     return {
         "link_id": link.id,
         "vendor_name": link.vendor_name,
+        "cpi": link.cpi,
+        "target_completes": link.target_completes,
+        # What the panel is paid for: completes a person did not remove.
+        "accepted": completes - n_removed,
+        "billable": cost(completes - n_removed, link.cpi),
         "starts": report["starts"],
         "completes": completes,
         "incidence_pct": report["incidence_pct"],
@@ -49,6 +55,43 @@ def scorecard_row(link, report: dict, quality: dict, removed_pct: float | None) 
         **quality,
         "pct_removed": removed_pct,
     }
+
+
+# Panel status codes (Cint / Lucid convention) in the words a panel's
+# reconciliation sheet uses.
+_OUTCOME = {10: "complete", 20: "terminate", 30: "security", 40: "overquota"}
+RECONCILIATION_COLUMNS = (
+    "panel_id", "session_id", "outcome", "decision", "reason", "completed_at")
+
+
+def panel_id(session) -> str:
+    """The id the panel knows this person by: the pid at entry, else rid/psid."""
+    params = session.entry_params or {}
+    keys = ("pid", "rid", "psid", "id")
+    return getattr(session, "pid", None) or next(
+        (str(params[k]) for k in keys if params.get(k)), "")
+
+
+def reconciliation(sessions: Iterable, decisions: dict[str, dict]) -> list[dict]:
+    """One row per session for the panel's end-of-field reconciliation.
+
+    A complete is *accepted* unless a person removed it in cleaning; then it is
+    *rejected* with that reason, and the panel neither pays the incentive nor
+    bills the CPI. Never decided automatically: no removal, no rejection.
+    """
+    rows = []
+    for s in sessions:
+        outcome = _OUTCOME.get(s.status_code, "incomplete")
+        d = decisions.get(s.id) or {}
+        removed = outcome == "complete" and d.get("decision") == "remove"
+        rows.append({
+            "panel_id": panel_id(s), "session_id": s.id, "outcome": outcome,
+            "decision": "rejected" if removed else "accepted" if outcome == "complete" else "",
+            "reason": (d.get("reason_code") or "") + (f": {d['note']}" if d.get("note") else "")
+            if removed else "",
+            "completed_at": s.completed_at or "",
+        })
+    return rows
 
 
 def _split(remaining: int, weights: list[int]) -> list[int]:

@@ -22,6 +22,7 @@ import { ClockIcon } from '../components/Icons'
 import PageHeader from '../components/ui/PageHeader'
 import { canWrite as hasWriteRole } from '../auth/roles'
 import FieldedDataPanel from '../components/FieldedDataPanel'
+import SuppliersPanel from '../components/SuppliersPanel'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
 
@@ -910,6 +911,8 @@ export default function FieldingPage() {
       {links && links.length === 0 && !loadError && (
         <p className="text-sm text-slate-400">No fielding links yet.</p>
       )}
+
+      {links && links.some((l) => !l.is_test) && <SuppliersPanel studyId={studyId!} canWrite={canWrite} />}
 
       <div className="space-y-4">
         {(links ?? []).map((link) => (

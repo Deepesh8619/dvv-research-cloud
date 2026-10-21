@@ -179,3 +179,34 @@ def test_invitations_and_reminders(client):
     assert _counts(Session) == before
     state["role"] = "reviewer"
     assert _post(c, "reminders", body).status_code == 403
+
+
+def test_reconciliation_accepts_completes_and_rejects_only_what_a_person_removed(client):
+    import csv
+    import io
+
+    from api.db import record_audit
+
+    c, Session, _ = client
+    _seed(Session)
+    db = Session()
+    db.get(RespondentSessionDB, "lA_0").pid = "P100"
+    db.get(RespondentSessionDB, "lA_1").entry_params = {"rid": "R7"}
+    record_audit(db, entity="cleaning.respondent", entity_id="lA_1", action="remove",
+                 actor_id="u1", study_id="s1", summary="x",
+                 after={"reason_code": "speeder", "note": "4 minutes"})
+    db.commit()
+    db.close()
+
+    r = c.get("/api/studies/s1/fielding/links/lA/reconciliation.csv")
+    assert r.status_code == 200
+    assert 'filename="reconciliation_Alpha.csv"' in r.headers["content-disposition"]
+    rows = {x["session_id"]: x for x in csv.DictReader(io.StringIO(r.text))}
+    assert (rows["lA_0"]["panel_id"], rows["lA_0"]["decision"]) == ("P100", "accepted")
+    assert (rows["lA_1"]["panel_id"], rows["lA_1"]["decision"], rows["lA_1"]["reason"]) == (
+        "R7", "rejected", "speeder: 4 minutes")
+    assert (rows["lA_3"]["outcome"], rows["lA_3"]["decision"]) == ("terminate", "")
+
+    a = {v["link_id"]: v for v in c.get("/api/studies/s1/fielding/vendors").json()["vendors"]}["lA"]
+    assert (a["accepted"], a["billable"], a["cpi"], a["target_completes"]) == (2, 4.0, 2.0, 10)
+    assert c.get("/api/studies/s1/fielding/links/nope/reconciliation.csv").status_code == 404
