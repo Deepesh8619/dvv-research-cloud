@@ -1,4 +1,4 @@
-"""Compliance exports. The consent ledger: who agreed to what text, and when."""
+"""Compliance: the consent ledger, the notice respondents agree to, and adverse events."""
 
 import csv
 import hashlib
@@ -7,7 +7,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.auth import UserRole, require_role
@@ -24,6 +24,7 @@ from api.db import (
 )
 from api.routes.materialize import _display, data_access
 from src.core.survey_definition import SurveyDefinition
+from src.engines.qc.compliance import is_consent
 
 router = APIRouter()
 
@@ -41,7 +42,8 @@ def consent_ledger(
 ):
     """One row per (session, consent question), read from each link's PINNED survey.
 
-    A consent question has `validation.consent: true`. Sessions that never
+    A consent question has `validation.consent: true`, or asks for consent in
+    its own words (a questionnaire read from a document is never marked). Sessions that never
     answered still get a row (empty answer) so gaps are visible. Test links are
     skipped: their data is never real. (Owner/Analyst, gated like a data download.)
     """
@@ -56,7 +58,7 @@ def consent_ledger(
         if link.is_test:
             continue
         survey = SurveyDefinition.from_json(link.survey_json)
-        consent_qs = [q for q in survey.questions if (q.validation or {}).get("consent") is True]
+        consent_qs = [q for q in survey.questions if is_consent(q)]
         qids.update(q.qid for q in consent_qs)
         for q in consent_qs:
             sha = hashlib.sha256(q.text.encode("utf-8")).hexdigest()
@@ -164,3 +166,97 @@ def set_retention(
     )
     db.commit()
     return {"retain_until": value}
+
+
+@router.get("/studies/{study_id}/compliance/adverse-events")
+def adverse_events(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Open answers describing a side effect, for a person to report within a day.
+
+    Every interview, screen-outs and partials included. (Owner/Analyst, gated
+    like a data download: the answers are shown.)
+    """
+    import polars as pl
+
+    from api.routes.studies import _run_artifacts
+    from src.core.models import DataMap
+    from src.engines.qc.cleaning import respondent_keys
+    from src.engines.qc.compliance import scan_adverse_events
+
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    decision = data_access(db, study_id, user)
+    if not decision.allowed:
+        raise HTTPException(status_code=403, detail=decision.reason)
+    parquet, datamap = _run_artifacts(study, f"Study {study_id}")
+    df = pl.read_parquet(parquet)
+    return scan_adverse_events(df, DataMap.from_json(datamap.read_text()), respondent_keys(df))
+
+
+@router.get("/studies/{study_id}/compliance/notice")
+def notice_check(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """What respondents are told before agreeing, item by item. (Owner/Analyst)"""
+    from api.routes.questionnaire import _latest_questionnaire, _load_definition
+    from src.engines.qc.compliance import check_notice
+
+    return check_notice(_load_definition(db, _latest_questionnaire(db, study_id)))
+
+
+class NoticeBody(BaseModel):
+    organisation: str = Field(min_length=2, max_length=200)
+    purpose: str = Field(min_length=3, max_length=300)
+    contact: str = Field(min_length=3, max_length=200)
+
+
+@router.post("/studies/{study_id}/compliance/notice")
+def add_notice(
+    study_id: str,
+    body: NoticeBody,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Put the notice and the consent question first in the questionnaire. (Owner/Analyst)
+
+    A no ends the interview. Health studies also get the adverse-event statement.
+    """
+    from api.db import update_questionnaire_status
+    from api.routes.questionnaire import (
+        _latest_questionnaire,
+        _load_definition,
+        _save_definition,
+    )
+    from src.core.survey_definition import Block
+    from src.engines.qc.compliance import CONSENT_QID, NOTICE_QID, check_notice, notice_questions
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    taken = [q for q in (NOTICE_QID, CONSENT_QID) if q in survey]
+    if taken:
+        raise HTTPException(
+            status_code=409, detail=f"The questionnaire already has {', '.join(taken)}")
+    added = notice_questions(body.organisation.strip(), body.purpose.strip(),
+                             body.contact.strip(), check_notice(survey)["health_study"])
+    survey.questions[0:0] = added
+    if not survey.blocks:
+        survey.blocks.append(Block(block_id="B1", question_ids=[q.qid for q in survey.questions]))
+    else:
+        survey.blocks[0].question_ids[0:0] = [q.qid for q in added]
+    survey._rebuild_index()
+    survey.metadata["validation_errors"] = survey.validate()
+    _save_definition(db, questionnaire, survey)
+    update_questionnaire_status(db, questionnaire.id, "in_review")
+    record_audit(
+        db, entity="compliance.notice", entity_id=questionnaire.id, action="add",
+        actor_id=user.id, study_id=study_id,
+        summary=f"Added the notice and consent question for {body.organisation.strip()}",
+    )
+    db.commit()
+    return check_notice(survey)

@@ -255,3 +255,45 @@ def test_retention_patch(client):
     assert c.patch(url, json={"retain_until": None}).status_code == 200
     state["role"] = "analyst"
     assert c.patch(url, json={"retain_until": "2999-01-01"}).status_code == 403
+
+
+def test_the_notice_is_checked_added_first_and_then_fills_the_ledger(client):
+    c, sf, _state = client
+    _seed(sf, with_consent=False)
+    before = c.get("/api/studies/s1/compliance/notice").json()
+    assert not before["complete"] and before["consent_questions"] == []
+    body = {"organisation": "DVV Research", "purpose": "understanding coffee habits",
+            "contact": "privacy@dvv.example"}
+    after = c.post("/api/studies/s1/compliance/notice", json=body)
+    assert after.status_code == 200 and after.json()["complete"], after.json()
+    survey = SurveyDefinition.from_json(sf().get(QuestionnaireDB, "q1").definition_json)
+    assert [q.qid for q in survey.questions][:2] == ["DPDP_NOTICE", "CONSENT"]
+    assert survey.blocks[0].question_ids[:2] == ["DPDP_NOTICE", "CONSENT"]
+    assert c.post("/api/studies/s1/compliance/notice", json=body).status_code == 409
+    assert c.post("/api/studies/s1/compliance/notice",
+                  json={**body, "contact": ""}).status_code == 422
+
+
+def test_adverse_events_are_read_from_every_interview(client, tmp_path):
+    import polars as pl
+
+    from src.core.models import DataMap, Variable, VarType
+
+    c, sf, _state = client
+    _seed(sf)
+    run = tmp_path / "run"
+    run.mkdir()
+    pl.DataFrame({"uuid": ["a", "b", "c"], "Q9": [
+        "My patient developed a rash after the first dose.",
+        "Efficacy and a clean side effect profile.", None]}).write_parquet(run / "data.parquet")
+    (run / "datamap.json").write_text(DataMap([Variable(
+        name="Q9", label="Anything else?", type=VarType.TEXT, question_ref="Q9")]).to_json())
+    db = sf()
+    db.get(StudyDB, "s1").excel_path = str(run / "out.xlsx")
+    db.commit()
+    db.close()
+    r = c.get("/api/studies/s1/compliance/adverse-events")
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert [(h["respondent"], h["terms"]) for h in out["possible"]] == [("a", ["rash"])]
+    assert [h["respondent"] for h in out["mentions"]] == ["b"]

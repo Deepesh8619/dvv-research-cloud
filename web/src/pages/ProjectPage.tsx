@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import AdverseEventsPanel from '../components/AdverseEventsPanel'
 import CleaningPanel from '../components/CleaningPanel'
 import CrosscheckPanel from '../components/CrosscheckPanel'
 import axios from 'axios'
@@ -7,6 +8,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Study, studiesApi, shareApi, ShareLink, questionnaireApi } from '../api/client'
 import FieldworkCards from '../components/FieldworkCards'
 import VariablesPanel from '../components/VariablesPanel'
+import NoticePanel from '../components/NoticePanel'
 import QuotePanel from '../components/QuotePanel'
 import { useAuth } from '../auth/AuthContext'
 import ChatBot from '../components/ChatBot'
@@ -288,7 +290,12 @@ export default function ProjectPage() {
         <QuestionnaireChecksTab study={study} canWrite={hasWriteRole(user?.role)} />
       )}
       {tab === 'Reports' && (noData ? <NoDataState /> : <ReportsTab study={study} />)}
-      {tab === 'Cleaning' && (noData ? <NoDataState /> : <CleaningPanel studyId={study.id} role={user?.role} />)}
+      {tab === 'Cleaning' && (noData ? <NoDataState /> : (
+        <div className="space-y-4">
+          {hasWriteRole(user?.role) && <AdverseEventsPanel studyId={study.id} />}
+          <CleaningPanel studyId={study.id} role={user?.role} />
+        </div>
+      ))}
       {tab === 'Activity' && <ActivityTab study={study} />}
       {tab === 'Variables' && isStaff && <VariablesPanel studyId={study.id} />}
 
@@ -397,6 +404,7 @@ function QuestionnaireChecksTab({
   }
   return (
     <div className="space-y-4">
+      <NoticePanel studyId={study.id} />
       <QuotePanel studyId={study.id} />
       <CrosscheckPanel studyId={study.id} dataFilename={study.source_filename} />
     </div>
