@@ -8,6 +8,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Study, studiesApi, shareApi, ShareLink, questionnaireApi } from '../api/client'
 import FieldworkCards from '../components/FieldworkCards'
 import FindingsPanel from '../components/FindingsPanel'
+import TrackerPanel from '../components/TrackerPanel'
 import VariablesPanel from '../components/VariablesPanel'
 import NoticePanel from '../components/NoticePanel'
 import QuotePanel from '../components/QuotePanel'
@@ -543,6 +544,7 @@ function ReportsTab({ study }: { study: Study }) {
   return (
     <div className="space-y-6">
       <FindingsPanel studyId={study.id} />
+      <TrackerPanel study={study} />
       <div className="grid grid-cols-2 gap-6">
         {items.map((item) => (
           <div key={item.fmt} className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">

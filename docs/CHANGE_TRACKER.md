@@ -21,6 +21,28 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-21 — waves and countries: drift, moves, one stacked file (branch feat/tracker-stacking)
+
+Expansion item 6 of 8, second half. Reports → Waves and countries: pick the
+other files of a tracker; their data maps are checked against this one —
+variables not in every file, codes added or missing (fine to stack), and the
+ones that break: a code whose label changed, a list **renumbered** ("Sago" was
+3, now 4), a **different question under the same name**, a changed type. With
+one other wave picked, the significant moves against it are listed (the
+existing wave comparison, which had no screen). **Download stacked SPSS file**
+writes every respondent with a SOURCE variable and the codebook, and is
+refused while any question breaks. The temporary file is deleted once sent.
+
+Fixed on the way: wave tracking compared codes by number only, so a code
+relabelled between waves was reported as a movement; it is now skipped with
+the reason.
+
+Measured on the two physician studies (different questionnaires reusing
+question ids): 161 of 383 variables shared; 14 questions break — Q6 and Q13
+are different questions under the same names, Q15 changed type, and the
+sample-source list `vlist` is renumbered (Sago 3 → 4), which would have put
+every panel's respondents under the wrong panel in a pooled table.
+
 ## 2026-10-21 — translations through the translator's sheet (branch feat/translation-sheets)
 
 Expansion item 6 of 8, first half. A survey can now be fielded in other

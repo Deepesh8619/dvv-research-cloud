@@ -226,6 +226,23 @@ export interface Finding {
   cites: Array<{ table: string; row: string; column: string; value: number; base: number }>
 }
 
+/** What differs between waves or countries of one tracker (data maps only). */
+export interface StackCheck {
+  sources: string[]
+  n_variables: number
+  n_in_every_source: number
+  n_breaking: number
+  not_in_every_source: Array<{ variable: string; in: string[] }>
+  changed: Array<{ variable: string; label: string; source: string; script: boolean; breaking: boolean; problems: string[] }>
+}
+
+export interface WaveTrend {
+  name: string
+  label: string
+  n_significant: number
+  deltas: Array<{ code: number; label: string; pct_baseline: number; pct_current: number; delta: number; significant: boolean }>
+}
+
 export const studiesApi = {
   upload: async (file: File, clientName?: string, onProgress?: (pct: number) => void) => {
     const formData = new FormData()
@@ -263,6 +280,10 @@ export const studiesApi = {
   crosstabs: async (id: string) => {
     return api.get<CrosstabsPayload>(`/studies/${id}/crosstabs`)
   },
+  stackCheck: async (id: string, others: string[]) =>
+    api.get<StackCheck>(`/studies/${id}/stack`, { params: { with: others }, paramsSerializer: { indexes: null } }),
+  tracking: async (id: string, baselineId: string) =>
+    api.get<{ variables: WaveTrend[]; skipped: Record<string, string> }>(`/studies/${id}/tracking/${baselineId}`),
   /** Findings computed from the tables, each number cited to its table and base. */
   findings: async (id: string) => api.get<{ n_tables: number; findings: Finding[] }>(`/studies/${id}/findings`),
 

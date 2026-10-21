@@ -20,6 +20,7 @@ V1 scope (documented, honest):
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -113,6 +114,18 @@ def _code_distribution(df: pl.DataFrame, name: str) -> tuple[dict[int, int], int
     }, base
 
 
+def _norm(label: str) -> str:
+    """A label as compared across waves: case, spacing and punctuation ignored."""
+    return re.sub(r"\W+", " ", label or "").strip().casefold()
+
+
+def relabelled(before: dict[int, str], after: dict[int, str]) -> list[int]:
+    """Codes present in both whose meaning changed: code 3 was "Brand C", now
+    "Brand D". Comparing such a code across waves reports a relabelling as a
+    movement. Case, spacing and punctuation are not a change."""
+    return [c for c in sorted(set(before) & set(after)) if _norm(before[c]) != _norm(after[c])]
+
+
 def _shared_trackable_variables(
     dm_base: DataMap, dm_cur: DataMap
 ) -> tuple[list[str], dict[str, str]]:
@@ -137,6 +150,11 @@ def _shared_trackable_variables(
             continue
         if set(v.values) != set(cur.values or {}):
             skipped[v.name] = "answer codes differ between waves"
+            continue
+        if moved := relabelled(v.values, cur.values):
+            c = moved[0]
+            skipped[v.name] = (f"answer labels changed (code {c}: "
+                               f"{v.values[c]!r} -> {cur.values[c]!r})")
             continue
         shared.append(v.name)
     return shared, skipped
