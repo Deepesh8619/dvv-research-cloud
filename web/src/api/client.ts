@@ -740,7 +740,18 @@ export const complianceApi = {
     api.get<AdverseEventScan>(`/studies/${studyId}/compliance/adverse-events`),
 }
 
+export interface TranslationStatus { lang: string; n_total: number; n_translated: number; n_problems: number }
+
 export const questionnaireApi = {
+  translations: async (studyId: string) =>
+    api.get<{ n_strings: number; languages: TranslationStatus[] }>(`/studies/${studyId}/questionnaire/translations`),
+  /** Take back a filled sheet; blanks and broken piping tokens come back as problems. */
+  uploadTranslation: async (studyId: string, lang: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<TranslationStatus & { problems: Array<{ key: string; problem: string }> }>(
+      `/studies/${studyId}/questionnaire/translations/${encodeURIComponent(lang)}`, form)
+  },
   quote: async (studyId: string, params: Record<string, number | undefined>) =>
     api.get<StudyQuote>(`/studies/${studyId}/questionnaire/quote`, {
       params: Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && !Number.isNaN(v))),
