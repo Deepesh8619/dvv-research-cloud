@@ -71,6 +71,13 @@ def collect_flags(
         for i in idx:
             add(i, "gibberish", var)
     skipped = dict(qc.checks_skipped)
+    # Typing traces, AI-written text and reading time: the authenticity evidence.
+    from src.engines.qc.authenticity import ai_text_flags, reading_speed_flags, typing_flags
+
+    for found in (typing_flags(df), ai_text_flags(df, datamap), reading_speed_flags(df, datamap)):
+        for i, items in found.items():
+            for check, detail in items:
+                add(i, check, detail)
 
     for f in run_rules(df, rules or [], lambda i: keys[i]):
         flags[f["key"]].append({"check": f["check"], "detail": f["detail"]})

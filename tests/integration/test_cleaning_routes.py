@@ -328,3 +328,28 @@ def test_lock_applies_policy_and_writes_cleaning_log(client, tmp_path, monkeypat
     assert out.filter(pl.col("vSessionId") == "s4")["Q1"].to_list() == [float(imp[0]["new"])]
     assert pl.read_parquet(run / "data_raw.parquet").filter(
         pl.col("vSessionId") == "s4")["Q1"].to_list() == [None]
+
+
+def test_each_flagged_respondent_carries_an_authenticity_score(client):
+    c, _sf, _state = client
+    got = c.get("/api/studies/st1/cleaning").json()
+    flagged = set(got["flags"])
+    assert flagged and set(got["authenticity"]) == flagged
+    one = got["authenticity"][sorted(flagged)[0]]
+    assert 0 < one["score"] <= 100 and one["band"] in ("review first", "worth a look", "fine")
+    assert one["reasons"]
+
+
+def test_screen_outs_in_a_fielded_export_are_not_cleaning_candidates(tmp_path):
+    from api.routes.cleaning import _flags_job
+
+    rows = [{"uuid": f"u{i}", "status": 3 if i < 4 else 1, **{c: 1 for c in COLS}}
+            for i in range(8)]
+    pl.DataFrame(rows).write_parquet(tmp_path / "d.parquet")
+    dm = DataMap([Variable(name="status", label="Status",
+                           values={1: "Terminated", 3: "Qualified"}),
+                  *[Variable(name=c, label=f"Question {c}", question_ref=c) for c in COLS]])
+    (tmp_path / "dm.json").write_text(dm.to_json())
+    result = _flags_job(tmp_path / "d.parquet", tmp_path / "dm.json", [])
+    keys = result[1]
+    assert keys == ["u0", "u1", "u2", "u3"]  # the four screen-outs are left out

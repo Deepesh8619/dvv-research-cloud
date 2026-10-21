@@ -36,8 +36,9 @@ function ReasonSelect({ value, onChange, label }: { value: string; onChange: (v:
   )
 }
 
-function Row({ k, flags, decision, act, busy, onKeep, onRemove, checked, onCheck }: {
+function Row({ k, flags, decision, act, busy, onKeep, onRemove, checked, onCheck, authenticity }: {
   k: string
+  authenticity?: { score: number; band: string }
   flags: Array<{ check: string; detail: string }>
   decision?: CleaningState['decisions'][string]
   act: boolean
@@ -56,6 +57,11 @@ function Row({ k, flags, decision, act, busy, onKeep, onRemove, checked, onCheck
           <input type="checkbox" aria-label={`select ${k}`} checked={checked} onChange={(e) => onCheck(e.target.checked)} />
         )}
         <span className="font-mono text-sm break-all">{k}</span>
+        {authenticity && (
+          <Badge tone={authenticity.band === 'review first' ? 'danger' : authenticity.band === 'worth a look' ? 'warning' : 'neutral'}>
+            {authenticity.score} · {authenticity.band}
+          </Badge>
+        )}
         <Badge tone="warning">{flags.length} flag{flags.length === 1 ? '' : 's'}</Badge>
         {decision ? (
           <Badge tone={decision.decision === 'remove' ? 'danger' : 'success'}>
@@ -134,7 +140,9 @@ export default function CleaningPanel({ studyId, role }: { studyId: string; role
   if (loadErr) return <Err text={loadErr} />
   if (!s) return <p className="text-sm text-slate-500">Loading cleaning review…</p>
 
-  const keys = Object.keys(s.flags).sort((a, b) => s.flags[b].length - s.flags[a].length)
+  // Highest authenticity concern first: the order a reviewer should work in.
+  const scoreOf = (k: string) => s.authenticity?.[k]?.score ?? s.flags[k].length
+  const keys = Object.keys(s.flags).sort((a, b) => scoreOf(b) - scoreOf(a))
   const decide = (ks: string[], decision: 'remove' | 'keep', reason_code: string, note: string) =>
     run(() => cleaningApi.decide(studyId, { keys: ks, decision, reason_code, note: note || undefined }))
   const unreviewed = s.n_unreviewed_flagged
@@ -179,6 +187,7 @@ export default function CleaningPanel({ studyId, role }: { studyId: string; role
               {keys.map((k) => (
                 <Row
                   key={k} k={k} flags={s.flags[k]} decision={s.decisions[k]} act={open} busy={busy}
+                  authenticity={s.authenticity?.[k]}
                   checked={sel.has(k)}
                   onCheck={(v) => setSel((p) => { const n = new Set(p); if (v) n.add(k); else n.delete(k); return n })}
                   onKeep={(r, n) => decide([k], 'keep', r, n)}
