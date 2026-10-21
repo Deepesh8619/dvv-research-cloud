@@ -22,7 +22,7 @@ describe('follow-up probes', () => {
     expect(survey.getQuestionByName('Q5_PROBE').isVisible).toBe(false)
     survey.setValue('Q5', 'Lower the rates')
     expect(survey.getQuestionByName('Q5_PROBE').isVisible).toBe(true)
-    survey.currentPageNo = 1
+    survey.currentSingleQuestion = survey.getQuestionByName('Q5_PROBE')
     const fetchProbe = vi.fn().mockResolvedValue('What would make the rates feel fair?')
     await askFollowUp(survey, fetchProbe)
     expect(fetchProbe).toHaveBeenCalledWith('Q5', 'Lower the rates')

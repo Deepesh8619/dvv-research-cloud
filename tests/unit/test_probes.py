@@ -54,5 +54,6 @@ def test_a_probed_question_gets_a_follow_up_page_and_two_columns():
                            completed_at="2026-10-21T10:05:00", entry_params={})
     dm, df = materialize_fielding(s, [sess], {"a": {
         "Q5": "Lower the rates", "Q5_PROBEQ": "What would make them fair?", "Q5_PROBE": "Half"}})
-    assert df.loc[0, "Q5_PROBEQ"] == "What would make them fair?" and df.loc[0, "Q5_PROBE"] == "Half"
+    assert df.loc[0, "Q5_PROBEQ"] == "What would make them fair?"
+    assert df.loc[0, "Q5_PROBE"] == "Half"
     assert dm["Q5_PROBE"].label == "Why did you cut spend? — follow-up answer"

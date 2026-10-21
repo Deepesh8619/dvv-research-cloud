@@ -1378,8 +1378,10 @@ def test_a_thin_answer_gets_one_recorded_follow_up(client, monkeypatch):
     assert [q["probed"] for q in on.json()["questions"]] == [True]
 
     calls = []
-    monkeypatch.setattr("src.ai.router.run_task", lambda *a, **k: calls.append(1) or SimpleNamespace(
-        content={"probe": "What do you like about that brand?"}))
+    def model(*a, **k):
+        calls.append(1)
+        return SimpleNamespace(content={"probe": "What do you like about that brand?"})
+    monkeypatch.setattr("src.ai.router.run_task", model)
     token = _create_link(test_client).json()["token"]
     sid = test_client.get(f"/api/r/{token}").json()["session_id"]
     url = f"/api/r/{token}/sessions/{sid}/probe"

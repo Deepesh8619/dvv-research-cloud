@@ -22,7 +22,9 @@ export async function askFollowUp(
   survey: Model,
   fetchProbe: (qid: string, answer: string) => Promise<string | null>,
 ): Promise<void> {
-  const question = survey.currentPage?.questions[0]
+  // One question per page swaps questions inside a single page: the one on
+  // screen is currentSingleQuestion (onCurrentPageChanged still fires per move).
+  const question = survey.currentSingleQuestion ?? survey.currentPage?.questions[0]
   if (!question?.name.endsWith(PROBE)) return
   const qid = question.name.slice(0, -PROBE.length)
   const answer = survey.getValue(qid)
