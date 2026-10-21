@@ -7,6 +7,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Study, studiesApi, shareApi, ShareLink, questionnaireApi } from '../api/client'
 import FieldworkCards from '../components/FieldworkCards'
 import VariablesPanel from '../components/VariablesPanel'
+import QuotePanel from '../components/QuotePanel'
 import { useAuth } from '../auth/AuthContext'
 import ChatBot from '../components/ChatBot'
 import { CheckIcon, DocChartIcon, DownloadIcon, LinkIcon } from '../components/Icons'
@@ -396,6 +397,7 @@ function QuestionnaireChecksTab({
   }
   return (
     <div className="space-y-4">
+      <QuotePanel studyId={study.id} />
       <CrosscheckPanel studyId={study.id} dataFilename={study.source_filename} />
     </div>
   )

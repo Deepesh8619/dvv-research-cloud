@@ -1580,3 +1580,16 @@ def test_approving_a_model_read_question_clears_its_mark_and_bulk_approval_skips
     assert "Q1" not in bulk["newly_approved"]  # a person has to look at it
     r = test_client.post("/api/studies/study_q1/questionnaire/questions/Q1/approve").json()
     assert "MODEL_READ" in r["cleared_flags"]
+
+
+def test_a_quote_comes_from_the_questionnaire_and_refuses_nonsense_inputs(client):
+    test_client, session_factory, _state = client
+    _make_study(session_factory)
+    _upload(test_client)
+    _wait_draft(test_client)
+    url = "/api/studies/study_q1/questionnaire/quote"
+    q = test_client.get(url, params={"completes": 400, "incidence_pct": 50,
+                                     "rate_per_minute": 0.1}).json()
+    assert q["length"]["minutes"] > 0 and q["cost"]["starts_needed"] == 800
+    bad = test_client.get(url, params={"incidence_pct": 150})
+    assert bad.status_code == 422
