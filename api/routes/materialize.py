@@ -46,6 +46,7 @@ from src.engines.fielding.materialize import (
 from src.engines.tabs.runner import deck_to_json, run_tab_plan
 from src.orchestration.orchestrator import auto_tab_plan
 from src.renderers.excel import render_deck as render_excel
+from src.renderers.pptx import render_deck as render_pptx
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -83,6 +84,7 @@ def _publish_tables(db: Session, study, run_dir, datamap) -> None:
     # resolve it; the deck download then 404s, which download_deck already
     # handles gracefully (it 404s on any missing file, never 500s).
     excel_path = str(run_dir / "fielded.marker")
+    pptx_path = None
     tab_plan = auto_tab_plan(datamap, title=f"{study.client_name} — Fielded Topline")
     if tab_plan:
         deck_run = run_tab_plan(str(parquet_path), tab_plan, datamap)
@@ -94,7 +96,17 @@ def _publish_tables(db: Session, study, run_dir, datamap) -> None:
         xlsx_path = run_dir / f"{study_id}_fielded_deck.xlsx"
         render_excel(deck_run, str(xlsx_path))
         excel_path = str(xlsx_path)
-    update_study_paths(db, study_id, excel_path=excel_path, datamap_json=datamap.to_json())
+        # The PowerPoint: computed, cited findings named in the questionnaire's
+        # own words (no model call, so publishing stays quick).
+        try:
+            qs = _approved_survey(db, study_id).questions
+        except (HTTPException, KeyError, ValueError):
+            qs = []  # no approved, readable questionnaire: findings go unnamed, not unpublished
+        pptx_path = str(run_dir / f"{study_id}_fielded_deck.pptx")
+        render_pptx(deck_run, pptx_path, questions={q.qid: q.text for q in qs},
+                    screeners={q.qid for q in qs if q.terminate_if}, narrate=False)
+    update_study_paths(db, study_id, excel_path=excel_path, pptx_path=pptx_path,
+                       datamap_json=datamap.to_json())
     if crosstabs_json is not None:
         set_study_artifacts(db, study_id, crosstabs_json=crosstabs_json)
 

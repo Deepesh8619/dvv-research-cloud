@@ -218,6 +218,14 @@ export const shareApi = {
   publicDownloadUrl: (token: string, fmt: 'excel' | 'pptx') => `/api/public/studies/${token}/download/${fmt}`,
 }
 
+export interface Finding {
+  kind: 'difference' | 'lead' | 'most_chosen' | 'sample'
+  text: string
+  tables: string[]
+  caution: string | null
+  cites: Array<{ table: string; row: string; column: string; value: number; base: number }>
+}
+
 export const studiesApi = {
   upload: async (file: File, clientName?: string, onProgress?: (pct: number) => void) => {
     const formData = new FormData()
@@ -255,6 +263,8 @@ export const studiesApi = {
   crosstabs: async (id: string) => {
     return api.get<CrosstabsPayload>(`/studies/${id}/crosstabs`)
   },
+  /** Findings computed from the tables, each number cited to its table and base. */
+  findings: async (id: string) => api.get<{ n_tables: number; findings: Finding[] }>(`/studies/${id}/findings`),
 
   profile: async (id: string) => {
     return api.get<StudyProfile>(`/studies/${id}/profile`)

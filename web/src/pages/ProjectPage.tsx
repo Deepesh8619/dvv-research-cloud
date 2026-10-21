@@ -7,6 +7,7 @@ import axios from 'axios'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Study, studiesApi, shareApi, ShareLink, questionnaireApi } from '../api/client'
 import FieldworkCards from '../components/FieldworkCards'
+import FindingsPanel from '../components/FindingsPanel'
 import VariablesPanel from '../components/VariablesPanel'
 import NoticePanel from '../components/NoticePanel'
 import QuotePanel from '../components/QuotePanel'
@@ -532,36 +533,39 @@ function ReportsTab({ study }: { study: Study }) {
     },
     {
       title: 'PowerPoint report',
-      desc: 'Client-ready deck: one slide per table with AI-drafted headline and insight.',
+      desc: 'Client-ready deck: key findings first, then one slide per table; every number cited to its table and base.',
       fmt: 'pptx' as const,
       available: !!study.pptx_path,
     },
   ]
   return (
-    <div className="grid grid-cols-2 gap-6">
-      {items.map((item) => (
-        <div key={item.fmt} className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
-          <h2 className="font-semibold text-slate-900 mb-1">{item.title}</h2>
-          <p className="text-sm text-slate-500 mb-5">{item.desc}</p>
-          {item.available ? (
-            <button
-              type="button"
-              onClick={() =>
-                studiesApi.download(
-                  study.id,
-                  item.fmt,
-                  `${study.client_name}.${item.fmt === 'excel' ? 'xlsx' : 'pptx'}`,
-                )
-              }
-              className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600"
-            >
-              <DownloadIcon className="w-4 h-4" /> Download
-            </button>
-          ) : (
-            <span className="text-sm text-slate-400">Not yet generated</span>
-          )}
-        </div>
-      ))}
+    <div className="space-y-6">
+      <FindingsPanel studyId={study.id} />
+      <div className="grid grid-cols-2 gap-6">
+        {items.map((item) => (
+          <div key={item.fmt} className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
+            <h2 className="font-semibold text-slate-900 mb-1">{item.title}</h2>
+            <p className="text-sm text-slate-500 mb-5">{item.desc}</p>
+            {item.available ? (
+              <button
+                type="button"
+                onClick={() =>
+                  studiesApi.download(
+                    study.id,
+                    item.fmt,
+                    `${study.client_name}.${item.fmt === 'excel' ? 'xlsx' : 'pptx'}`,
+                  )
+                }
+                className="inline-flex items-center gap-2 bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600"
+              >
+                <DownloadIcon className="w-4 h-4" /> Download
+              </button>
+            ) : (
+              <span className="text-sm text-slate-400">Not yet generated</span>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
