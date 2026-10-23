@@ -21,6 +21,33 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-23 — cleaning review as triage, with the answers behind each flag (branch feat/cleaning-triage)
+
+User feedback: the cleaning screen was hard to use — the reason defaulted to
+"other" (which forces a note), flags repeated line by line ("gibberish: Q5",
+"gibberish: Q7a" …), three badges per respondent, and the reviewer never saw
+what the respondent actually wrote. Now:
+
+- A summary strip (to review / removed / kept, progress, Lock beside it).
+- Filters by band and by check, with counts; reviewed respondents hidden
+  unless asked.
+- A ranked list on the left, flags grouped ("Gibberish ×2, Straight-lined").
+- An evidence panel: each flag with its question and the respondent's answer
+  in words (new `POST /cleaning/respondents/{key}/evidence`, gated like a
+  download), the straight-lined grid ("all 6 rows answered “Extremely
+  trustworthy”"), and interview time against the median. Decipher's scripted
+  labels (`${"Agree3" if …}`) are shown as their text.
+- The reason pre-filled from the strongest flag; a note required only for
+  "other". Keys: ↑ ↓ move, K keep, R remove; after a decision the next
+  unreviewed respondent opens.
+- "Remove all N" for the ones still marked review first (recorded as "other"
+  with that note). Still no bulk keep.
+- Rules, imputation and versions folded into one closed section.
+
+Checked in the browser on the local Google Ads study: R removed the first
+respondent and opened the next; its evidence ("Google Ads" for all 9 goals)
+is the kind a reviewer should see before deciding.
+
 ## 2026-10-23 — advanced methods: MaxDiff, TURF, Van Westendorp, key drivers (branch feat/advanced-methods)
 
 Expansion item 8 of 8. Reports → Advanced methods, on the completes, computed

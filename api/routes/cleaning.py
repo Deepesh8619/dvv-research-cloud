@@ -106,6 +106,51 @@ def get_cleaning(
     }
 
 
+class EvidenceRequest(BaseModel):
+    flags: list[dict]
+
+
+def _evidence_job(parquet: Path, datamap: Path, key: str, flags: list[dict]):
+    import polars as pl
+
+    from src.core.models import DataMap
+    from src.engines.qc.cleaning import respondent_keys
+    from src.engines.qc.discrepancy import completes_only
+    from src.engines.qc.evidence import evidence
+
+    dm = DataMap.from_json(datamap.read_text())
+    df, _fielded = completes_only(pl.read_parquet(parquet), dm)
+    keys = respondent_keys(df)
+    if key not in keys:
+        return None
+    return evidence(df, dm, keys.index(key), flags)
+
+
+@router.post("/studies/{study_id}/cleaning/respondents/{key}/evidence")
+def respondent_evidence(
+    study_id: str,
+    key: str,
+    body: EvidenceRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The answers behind one respondent's flags. Gated like a download: it shows
+    what they wrote. The flags only choose which of their answers to show."""
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    access = data_access(db, study_id, user)
+    if not access.allowed:
+        raise HTTPException(status_code=403, detail=access.reason)
+    parquet, datamap = _run_artifacts(study, f"Study {study_id}")
+    flags = [{"check": str(f.get("check", "")), "detail": str(f.get("detail", ""))[:500]}
+             for f in body.flags[:50]]
+    found = run_heavy_detached(db, _evidence_job, parquet, datamap, key, flags)
+    if found is None:
+        raise HTTPException(status_code=404, detail="No such respondent in this study")
+    return found
+
+
 @router.post("/studies/{study_id}/cleaning/decisions")
 def post_decisions(
     study_id: str,

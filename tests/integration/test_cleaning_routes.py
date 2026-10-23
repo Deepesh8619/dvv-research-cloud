@@ -353,3 +353,14 @@ def test_screen_outs_in_a_fielded_export_are_not_cleaning_candidates(tmp_path):
     result = _flags_job(tmp_path / "d.parquet", tmp_path / "dm.json", [])
     keys = result[1]
     assert keys == ["u0", "u1", "u2", "u3"]  # the four screen-outs are left out
+
+
+def test_evidence_shows_the_flagged_answers(client):
+    c, _sf, _state = client
+    r = c.post("/api/studies/st1/cleaning/respondents/s1/evidence",
+               json={"flags": [{"check": "duplicate", "detail": "identical answers"},
+                               {"check": "gibberish", "detail": COLS[0]}]})
+    assert r.status_code == 200, r.text
+    assert r.json()["items"][1]["answers"][0]["column"] == COLS[0]
+    assert c.post("/api/studies/st1/cleaning/respondents/nobody/evidence",
+                  json={"flags": []}).status_code == 404

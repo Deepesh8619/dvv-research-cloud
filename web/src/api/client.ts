@@ -1710,6 +1710,12 @@ export interface CleaningState {
   imputations: Array<Record<string, unknown>>
 }
 
+export interface CleaningEvidence {
+  items: Array<{ check: string; detail: string; answers: Array<{ column: string; question: string; answer: string }> }>
+  seconds: number | null
+  median_seconds: number | null
+}
+
 export interface ImputationBody {
   variable: string
   method: string
@@ -1723,6 +1729,9 @@ export interface ImputationBody {
 // Mirrors api/routes/cleaning.py. Keep is one respondent per call (server-enforced).
 export const cleaningApi = {
   get: async (id: string) => api.get<CleaningState>(`/studies/${id}/cleaning`),
+  /** The answers behind one respondent's flags. */
+  evidence: async (id: string, key: string, flags: Array<{ check: string; detail: string }>) =>
+    api.post<CleaningEvidence>(`/studies/${id}/cleaning/respondents/${encodeURIComponent(key)}/evidence`, { flags }),
   decide: async (
     id: string,
     body: { keys: string[]; decision: 'remove' | 'keep'; reason_code: string; note?: string },
