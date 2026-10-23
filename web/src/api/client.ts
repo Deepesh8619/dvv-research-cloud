@@ -243,6 +243,20 @@ export interface WaveTrend {
   deltas: Array<{ code: number; label: string; pct_baseline: number; pct_current: number; delta: number; significant: boolean }>
 }
 
+export interface MethodInputs {
+  n_respondents: number
+  maxdiff: Array<{ exercise: string; screens: number }>
+  multi_select: Array<{ question: string; text: string }>
+  numeric: Array<{ variable: string; label: string }>
+  ratings: Array<{ variable: string; label: string }>
+}
+
+export type MethodRequest =
+  | { method: 'maxdiff'; exercise: string }
+  | { method: 'turf'; question: string; max_size: number }
+  | { method: 'van_westendorp'; prices: string[] }
+  | { method: 'drivers'; outcome: string; predictors: string[] }
+
 export const studiesApi = {
   upload: async (file: File, clientName?: string, onProgress?: (pct: number) => void) => {
     const formData = new FormData()
@@ -280,6 +294,9 @@ export const studiesApi = {
   crosstabs: async (id: string) => {
     return api.get<CrosstabsPayload>(`/studies/${id}/crosstabs`)
   },
+  methodInputs: async (id: string) => api.get<MethodInputs>(`/studies/${id}/methods`),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  runMethod: async (id: string, body: MethodRequest) => api.post<any>(`/studies/${id}/methods`, body),
   stackCheck: async (id: string, others: string[]) =>
     api.get<StackCheck>(`/studies/${id}/stack`, { params: { with: others }, paramsSerializer: { indexes: null } }),
   tracking: async (id: string, baselineId: string) =>

@@ -171,6 +171,7 @@ try:
         corrections,
         fielding,
         materialize,
+        methods,
         public,
         questionnaire,
         studies,
@@ -209,6 +210,7 @@ try:
 
     app.include_router(cleaning.router, prefix="/api")
     app.include_router(codeframes.router, prefix="/api")
+    app.include_router(methods.router, prefix="/api")
     logger.info("✅ Codeframe-library routes loaded")
     from api.routes import copilot
 

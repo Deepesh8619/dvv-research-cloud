@@ -21,6 +21,28 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-23 — advanced methods: MaxDiff, TURF, Van Westendorp, key drivers (branch feat/advanced-methods)
+
+Expansion item 8 of 8. Reports → Advanced methods, on the completes, computed
+from the data file with numpy (no model). Only the methods the file supports
+are offered.
+
+- **MaxDiff** counting scores, (best − worst) / times shown, reading Decipher's
+  layout (`<q>_<n>best`, items shown in `MD_Items_<n>`) and DVV's own
+  (`<q>_s<n>_best`). Hierarchical-Bayes utilities are not attempted.
+- **TURF**: best set of each size by reach (every combination up to 50,000,
+  greedy beyond), with frequency.
+- **Van Westendorp**: acceptable range (PMC–PME), optimal and indifference
+  points; out-of-order answers left out and counted; 30 respondents minimum.
+- **Key drivers**: Johnson's relative weights (share of R²), honest under
+  correlated ratings; needs max(30, 5 × attributes) complete answers.
+
+Measured on Google Ads: MaxDiff 65 respondents × 12 screens, each item shown
+~218 times (a balanced design: 65 × 12 × 4 / 14 ≈ 223); ai_audience_grow
++0.28 first, cash_back −0.19 last. TURF on sales channels: own website 88%,
++ marketplaces 94%, + own stores 97%. Synthetic checks: drivers recover an
+80/20 split; Van Westendorp crossings land at the true price.
+
 ## 2026-10-21 — one follow-up when an open answer is thin (branch feat/followup-probes)
 
 Expansion item 7 of 8. Questionnaire checks → Follow-up probes: tick the "why"
