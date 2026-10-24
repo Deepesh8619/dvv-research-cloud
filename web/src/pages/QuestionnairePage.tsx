@@ -569,6 +569,7 @@ export function QuestionDetail({
   studyId,
   q,
   priorQids,
+  allQuestions,
   canWrite,
   canCorrect,
   profile,
@@ -583,6 +584,8 @@ export function QuestionDetail({
   studyId: string
   q: Question
   priorQids: string[]
+  /** Every question, so a condition can be picked by wording and answer labels. */
+  allQuestions?: Question[]
   canWrite: boolean
   /** Founders' lane — the correction surface renders only for them. */
   canCorrect: boolean
@@ -1105,6 +1108,7 @@ export function QuestionDetail({
         flat={state.showIf}
         verbatim={state.showIfVerbatim ?? routingVerbatim}
         priorQids={priorQids.filter((qid) => qid !== q.qid)}
+        questions={allQuestions}
         canWrite={canWrite}
         onChangeFlat={(f) => set('showIf', f)}
       />
@@ -1114,6 +1118,7 @@ export function QuestionDetail({
         flat={state.terminateIf}
         verbatim={state.terminateIfVerbatim ?? routingVerbatim}
         priorQids={priorQids}
+        questions={allQuestions}
         canWrite={canWrite}
         onChangeFlat={(f) => set('terminateIf', f)}
       />
@@ -1169,6 +1174,7 @@ function RoutingBlock({
   flat,
   verbatim,
   priorQids,
+  questions,
   canWrite,
   onChangeFlat,
 }: {
@@ -1177,6 +1183,7 @@ function RoutingBlock({
   flat: FlatRouting
   verbatim: string | null
   priorQids: string[]
+  questions?: Question[]
   canWrite: boolean
   onChangeFlat: (f: FlatRouting) => void
 }) {
@@ -1191,6 +1198,7 @@ function RoutingBlock({
         flat={flat}
         onChange={onChangeFlat}
         qidOptions={priorQids}
+        questions={questions}
         disabled={!canWrite}
       />
       <div>
@@ -1864,6 +1872,7 @@ export default function QuestionnairePage() {
                   studyId={studyId!}
                   q={selected}
                   priorQids={questions.map((qq) => qq.qid)}
+                  allQuestions={questions}
                   canWrite={canWrite}
                   canCorrect={canCorrect}
                   profile={status?.profile}

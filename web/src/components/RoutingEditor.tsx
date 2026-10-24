@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { Expression, ExprOp } from '../api/client'
+import { Expression, ExprOp, Question } from '../api/client'
 
 // --- Routing editor -----------------------------------------------------------
 //
@@ -86,7 +86,33 @@ function emptyLeaf(): Expression {
   return { op: 'eq', qid: '', value: '' }
 }
 
+/** What a condition may refer to, in the researcher's words. */
+export type RoutingQuestion = Pick<Question, 'qid' | 'text' | 'type' | 'options'>
+
+const CHOICE = new Set(['single', 'dropdown'])
+// Verbs that fit the question: a single choice "is", a multi-select "includes",
+// a number "is more than". Anything else keeps the generic list.
+function verbsFor(type: string | undefined): Array<{ value: ExprOp; label: string }> {
+  if (type && CHOICE.has(type)) return [{ value: 'eq', label: 'is' }, { value: 'ne', label: 'is not' }, { value: 'in', label: 'is any of' }]
+  if (type === 'multi') return [{ value: 'selected', label: 'includes' }]
+  if (type === 'numeric') return [{ value: 'eq', label: 'is' }, { value: 'gt', label: 'is more than' }, { value: 'lt', label: 'is less than' }]
+  return LEAF_OPS
+}
+
+/** "Do you drink coffee? is Yes" — a condition read back in words. */
+export function describeCondition(c: Expression, questions: RoutingQuestion[]): string {
+  const q = questions.find((x) => x.qid === c.qid)
+  if (!q) return ''
+  const label = (v: unknown) => q.options.find((o) => o.code === v)?.label ?? String(v ?? '')
+  const verb = verbsFor(q.type).find((o) => o.value === c.op)?.label ?? c.op
+  const what = c.op === 'in' ? (c.values ?? []).map(label).join(' or ') : label(c.value)
+  return `${q.text.length > 70 ? q.text.slice(0, 69) + '…' : q.text} ${verb} ${what || '…'}`
+}
+
 interface Props {
+  /** The questions a condition may name, with their answers: turns each condition
+      into a sentence picked from labels instead of codes typed by hand. */
+  questions?: RoutingQuestion[]
   label: string
   flat: FlatRouting
   onChange: (flat: FlatRouting) => void
@@ -97,7 +123,7 @@ interface Props {
   emptyText?: string
 }
 
-export default function RoutingEditor({ label, flat, onChange, qidOptions, disabled, emptyText }: Props) {
+export default function RoutingEditor({ label, flat, onChange, qidOptions, disabled, emptyText, questions }: Props) {
   if (!flat.editable) {
     return (
       <div>
@@ -157,18 +183,88 @@ export default function RoutingEditor({ label, flat, onChange, qidOptions, disab
             className="h-7 px-2 rounded-md border border-slate-300 text-xs disabled:bg-slate-50"
             aria-label={`${label} connective`}
           >
-            <option value="and">match ALL (and)</option>
-            <option value="or">match ANY (or)</option>
+            <option value="and">all of these</option>
+            <option value="or">any of these</option>
           </select>
         )}
       </div>
 
+      {questions && flat.conditions.some((c) => describeCondition(c, questions)) && (
+        <p className="mb-2 text-sm text-slate-700">
+          {flat.conditions.map((c) => describeCondition(c, questions)).filter(Boolean)
+            .join(flat.connective === 'and' ? ', and ' : ', or ')}
+        </p>
+      )}
       {flat.conditions.length === 0 ? (
         <p className="text-sm text-slate-400 mb-2">{emptyText ?? 'No condition — always shown.'}</p>
       ) : (
         <div className="space-y-2">
           {flat.conditions.map((cond, i) => {
             const usesValues = cond.op === 'in'
+            const known = questions?.filter((q) => qidOptions.includes(q.qid))
+            const q = known?.find((x) => x.qid === cond.qid)
+            if (known && (!cond.qid || q)) {
+              const verbs = verbsFor(q?.type)
+              const choices = q && q.options.length > 0 && q.type !== 'numeric'
+              return (
+                <div key={i} className="flex flex-wrap items-center gap-2 rounded-md bg-slate-50 p-2">
+                  <select value={cond.qid ?? ''} disabled={disabled} aria-label="condition question"
+                    className="h-8 max-w-full rounded-md border border-slate-300 px-2 text-sm"
+                    onChange={(e) => {
+                      const next = known.find((x) => x.qid === e.target.value)
+                      setCondition(i, { qid: e.target.value, op: verbsFor(next?.type)[0].value, value: '', values: undefined })
+                    }}>
+                    <option value="">pick a question…</option>
+                    {known.map((x) => (
+                      <option key={x.qid} value={x.qid}>{x.qid} — {x.text.length > 60 ? x.text.slice(0, 59) + '…' : x.text}</option>
+                    ))}
+                  </select>
+                  {q && (
+                    <select value={cond.op} disabled={disabled} aria-label="condition operator"
+                      className="h-8 rounded-md border border-slate-300 px-2 text-sm"
+                      onChange={(e) => {
+                        const op = e.target.value as ExprOp
+                        if (op === 'in') setCondition(i, { op, values: cond.value !== '' && cond.value != null ? [cond.value] : [], value: undefined })
+                        else setCondition(i, { op, value: cond.values?.[0] ?? '', values: undefined })
+                      }}>
+                      {verbs.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  )}
+                  {q && choices && usesValues && (
+                    <span className="flex flex-wrap gap-1" role="group" aria-label="condition answers">
+                      {q.options.map((o) => {
+                        const on = (cond.values ?? []).includes(o.code)
+                        return (
+                          <button key={o.code} type="button" disabled={disabled} aria-pressed={on}
+                            onClick={() => setCondition(i, { values: on ? (cond.values ?? []).filter((v) => v !== o.code) : [...(cond.values ?? []), o.code] })}
+                            className={`rounded-full border px-2.5 py-0.5 text-xs ${on ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700'}`}>
+                            {o.label}
+                          </button>
+                        )
+                      })}
+                    </span>
+                  )}
+                  {q && choices && !usesValues && (
+                    <select value={cond.value == null ? '' : String(cond.value)} disabled={disabled} aria-label="condition answer"
+                      className="h-8 max-w-xs rounded-md border border-slate-300 px-2 text-sm"
+                      onChange={(e) => setCondition(i, { value: coerce(e.target.value) })}>
+                      <option value="">pick an answer…</option>
+                      {q.options.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+                    </select>
+                  )}
+                  {q && !choices && (
+                    <input value={cond.value == null ? '' : String(cond.value)} disabled={disabled} inputMode="decimal"
+                      aria-label="condition value" placeholder={q.type === 'numeric' ? 'a number' : 'value'}
+                      className="h-8 w-28 rounded-md border border-slate-300 px-2 text-sm"
+                      onChange={(e) => setCondition(i, { value: coerce(e.target.value) })} />
+                  )}
+                  {!disabled && (
+                    <button type="button" onClick={() => removeCondition(i)} aria-label="remove condition"
+                      className="ml-auto px-1 text-sm text-slate-400 hover:text-red-600">✕</button>
+                  )}
+                </div>
+              )
+            }
             return (
               <div key={i} className="flex items-center gap-2 flex-wrap">
                 <select
