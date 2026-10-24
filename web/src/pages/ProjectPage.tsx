@@ -12,6 +12,7 @@ import TrackerPanel from '../components/TrackerPanel'
 import MethodsPanel from '../components/MethodsPanel'
 import VariablesPanel from '../components/VariablesPanel'
 import NoticePanel from '../components/NoticePanel'
+import OpenEndsPanel from '../components/OpenEndsPanel'
 import ProbesPanel from '../components/ProbesPanel'
 import QuotePanel from '../components/QuotePanel'
 import TranslationsPanel from '../components/TranslationsPanel'
@@ -56,7 +57,7 @@ const STAGE_PROGRESS: Record<string, number> = {
 // instrument the client signed off. That second comparison is the one a DP shop
 // is paid for, and burying it under generic data QC misrepresented which of the
 // two matters.
-const TABS = ['Overview', 'Questionnaire checks', 'Variables', 'Reports', 'Cleaning', 'Activity'] as const
+const TABS = ['Overview', 'Questionnaire checks', 'Variables', 'Reports', 'Cleaning', 'Open ends', 'Activity'] as const
 // The full variable list, hidden ones included, is for the people who build and
 // check the data — not for client reviewers.
 const STAFF_ONLY_TABS: ReadonlyArray<string> = ['Variables']
@@ -301,6 +302,7 @@ export default function ProjectPage() {
           <CleaningPanel studyId={study.id} role={user?.role} />
         </div>
       ))}
+      {tab === 'Open ends' && (noData ? <NoDataState /> : <OpenEndsPanel studyId={study.id} />)}
       {tab === 'Activity' && <ActivityTab study={study} />}
       {tab === 'Variables' && isStaff && <VariablesPanel studyId={study.id} />}
 

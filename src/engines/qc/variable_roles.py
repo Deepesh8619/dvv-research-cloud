@@ -237,3 +237,35 @@ def find_companions(datamap) -> dict[str, list[Companion]]:
             )
             break
     return out
+
+
+_WORDS = re.compile(r"[^\W\d_]{2,}")
+_NOT_AN_ANSWER = re.compile(r"^(hidden\b|captured variable$)", re.I)
+
+
+def open_end_columns(df, datamap) -> list[str]:
+    """The text columns respondents wrote answers in: what coding and the open-end
+    checks read. Not uuid, dates, user agents, ZIP codes or script stores — on a
+    real export those were most of the "open questions" sent to be coded.
+
+    A column counts when it is a respondent's question (by role and label) AND
+    reads like words: at least five answers, most with two or more words.
+    """
+    from src.core.models import VarType
+
+    out = []
+    for v in datamap.variables:
+        if v.type != VarType.TEXT or v.name not in df.columns:
+            continue
+        if v.provenance == "fielding_paradata":
+            continue
+        role = classify_variable(v.name, v.label or "", v.question_ref)
+        if role in ("system", "hidden") or _NOT_AN_ANSWER.match((v.label or "").strip()):
+            continue
+        if role == "maxdiff" and "OE" not in v.name.upper():
+            continue  # the design's item lists; MAXDIFF_OE is a real "why"
+        answers = [a for a in df[v.name].to_list() if isinstance(a, str) and a.strip()]
+        worded = sum(len(_WORDS.findall(a)) >= 2 for a in answers)
+        if len(answers) >= 5 and worded * 2 >= len(answers):
+            out.append(v.name)
+    return out

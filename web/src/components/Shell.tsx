@@ -3,7 +3,7 @@ import { Link, NavLink, useNavigate, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import CopilotDrawer from './CopilotDrawer'
 import { FOUNDER_ROLES, WRITE_ROLES } from '../auth/roles'
-import { ChatIcon, DocChartIcon, FolderIcon, GridIcon, LogOutIcon, MenuIcon, PlusIcon, SearchIcon, ShieldIcon } from './Icons'
+import { DocChartIcon, FolderIcon, GridIcon, LogOutIcon, MenuIcon, PlusIcon, SearchIcon, ShieldIcon } from './Icons'
 
 // `roles` restricts an entry to those roles; omitted means everyone signed in.
 // Mirrors the SERVER-side gate — hiding a link is presentation, not access
@@ -29,26 +29,11 @@ const NAV = [
     roles: WRITE_ROLES,
     restrictedTo: 'Owner, analyst, founder',
   },
-  { to: '/coding', label: 'Coding', icon: ChatIcon },
+  // Team, wording and the activity log live under Admin; coding is a project tab.
   {
     to: '/admin',
     label: 'Admin',
     icon: ShieldIcon,
-    roles: ['owner'],
-    restrictedTo: 'Owner only',
-  },
-  // Founders' wording console — same roles as the correction loop.
-  {
-    to: '/wording',
-    label: 'Wording',
-    icon: ChatIcon,
-    roles: FOUNDER_ROLES,
-    restrictedTo: 'Owner, founder',
-  },
-  {
-    to: '/activity',
-    label: 'Activity',
-    icon: DocChartIcon,
     roles: FOUNDER_ROLES,
     restrictedTo: 'Owner, founder',
   },

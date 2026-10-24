@@ -1,19 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import axios from 'axios'
 import {
   CodingPayload,
+  CodingStatus,
   CodingVariable,
   ReviewItem,
-  Study,
   codingApi,
-  studiesApi,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import LoadingSpinner from '../components/LoadingSpinner'
+import LoadingSpinner from './LoadingSpinner'
 import { canWrite as hasWriteRole } from '../auth/roles'
-import { ChatIcon } from '../components/Icons'
-import PageHeader from '../components/ui/PageHeader'
 
 // Roles allowed to resolve items (matches api require_role(OWNER, ANALYST)).
 
@@ -227,134 +223,99 @@ function VariableQueue({
   )
 }
 
-export default function CodingPage() {
+/**
+ * A project's open questions: which are coded, a button to code them (codeframe
+ * from a sample, every answer coded by an open model, in the background), and
+ * the low-confidence answers a person should check.
+ */
+export default function OpenEndsPanel({ studyId }: { studyId: string }) {
   const { user } = useAuth()
   const canWrite = hasWriteRole(user?.role)
-
-  const [studies, setStudies] = useState<Study[]>([])
-  const [selectedStudy, setSelectedStudy] = useState<string>('')
+  const [status, setStatus] = useState<CodingStatus | null>(null)
   const [coding, setCoding] = useState<CodingPayload | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [loadingCoding, setLoadingCoding] = useState(false)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    studiesApi
-      .list()
-      .then((res) => setStudies(res.data.studies ?? []))
-      .catch(() => setStudies([]))
-      .finally(() => setLoading(false))
-  }, [])
-
-  const loadCoding = useCallback(async (studyId: string) => {
-    setSelectedStudy(studyId)
-    setCoding(null)
-    setNotice(null)
-    if (!studyId) return
-    setLoadingCoding(true)
+  const load = useCallback(async () => {
     try {
-      const res = await codingApi.get(studyId)
-      setCoding(res.data)
+      const [st, cd] = await Promise.all([codingApi.status(studyId), codingApi.get(studyId).catch(() => null)])
+      setStatus(st.data)
+      setCoding(cd?.data ?? null)
+      setError(null)
     } catch (err) {
-      // 404 = no open-ends / pre-persistence run: an expected state, not a failure.
-      setNotice(errorMessage(err) || 'No coding data for this study')
-    } finally {
-      setLoadingCoding(false)
+      setError(errorMessage(err) || 'Could not read this study’s open questions.')
     }
-  }, [])
+  }, [studyId])
+  useEffect(() => { void load() }, [load])
+
+  const running = status?.job?.state === 'running'
+  // Coding runs in the background: check back every few seconds until it ends.
+  useEffect(() => {
+    if (!running) return
+    const t = window.setInterval(() => void load(), 4000)
+    return () => window.clearInterval(t)
+  }, [running, load])
 
   const onResolved = useCallback(
-    (
-      variable: string,
-      respondentId: number,
-      status: 'accepted' | 'corrected',
-      codes: string[],
-    ) => {
+    (variable: string, respondentId: number, st: 'accepted' | 'corrected', codes: string[]) => {
       setCoding((prev) => {
-        if (!prev) return prev
-        const block = prev[variable]
-        if (!block) return prev
-        return {
-          ...prev,
-          [variable]: {
-            ...block,
-            review_queue: block.review_queue.map((i) =>
-              i.respondent_id === respondentId
-                ? { ...i, status, final_codes: codes, resolved_by: user?.name }
-                : i,
-            ),
-          },
-        }
+        const block = prev?.[variable]
+        if (!prev || !block) return prev
+        return { ...prev, [variable]: { ...block, review_queue: block.review_queue.map((i) =>
+          i.respondent_id === respondentId ? { ...i, status: st, final_codes: codes, resolved_by: user?.name } : i) } }
       })
     },
     [user?.name],
   )
+  const coded = useMemo(() => (coding ? Object.values(coding).filter((v) => v.codeframe.codes.length > 0) : []), [coding])
 
-  const variables = useMemo(() => (coding ? Object.values(coding) : []), [coding])
-
-  if (loading) return <LoadingSpinner />
+  if (error) return <p className="text-sm text-red-700">{error}</p>
+  if (!status) return <LoadingSpinner />
+  const uncoded = status.open_ends.filter((o) => !o.coded)
 
   return (
-    <div className="max-w-4xl">
-      <PageHeader
-        title="Verbatim Coding"
-        description="Review low-confidence AI codings — accept the suggestion or correct the codes."
-        icon={ChatIcon}
-      />
-
-      <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-4 mb-6 flex items-center gap-3">
-        <label className="text-sm text-slate-600 shrink-0">Project:</label>
-        <select
-          value={selectedStudy}
-          onChange={(e) => loadCoding(e.target.value)}
-          className="flex-1 h-9 px-3 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-        >
-          <option value="">Select a project…</option>
-          {studies.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.client_name} ({s.id})
-            </option>
-          ))}
-        </select>
-        {selectedStudy && (
-          <Link
-            to={`/projects/${selectedStudy}`}
-            className="text-sm text-sky-600 hover:text-sky-700 shrink-0"
-          >
-            Open project →
-          </Link>
+    <div className="space-y-4">
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-semibold text-slate-900">Open questions</h2>
+            <p className="mt-1 max-w-2xl text-sm text-slate-500">
+              Coding builds a codeframe from a sample of answers, codes every answer, and sends the ones it is unsure
+              of to the list below for a person to check.
+            </p>
+          </div>
+          {canWrite && status.open_ends.length > 0 && (
+            <button type="button" disabled={running} onClick={async () => {
+              try { await codingApi.run(studyId, uncoded.length ? uncoded.map((o) => o.variable) : undefined); await load() }
+              catch (err) { setError(errorMessage(err)) }
+            }} className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+              {running ? 'Coding…' : uncoded.length ? `Code ${uncoded.length} open question${uncoded.length === 1 ? '' : 's'}` : 'Code again'}
+            </button>
+          )}
+        </div>
+        {status.open_ends.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-600">This study has no open questions.</p>
+        ) : (
+          <ul className="mt-3 divide-y divide-slate-100 text-sm">
+            {status.open_ends.map((o) => (
+              <li key={o.variable} className="flex items-baseline gap-3 py-2">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${o.coded ? 'bg-emerald-500' : 'bg-slate-300'}`} aria-hidden />
+                <span className="font-mono text-slate-900">{o.variable}</span>
+                <span className="min-w-0 flex-1 truncate text-slate-600">{o.question}</span>
+                <span className="text-xs text-slate-500">{o.n_answers} answers · {o.coded ? 'coded' : 'not coded'}</span>
+              </li>
+            ))}
+          </ul>
         )}
-      </div>
-
-      {loadingCoding && <LoadingSpinner />}
-
-      {notice && !loadingCoding && (
-        <div className="bg-slate-50 border border-slate-200 rounded-md p-4 text-sm text-slate-500">
-          {notice}
-        </div>
-      )}
-
-      {!selectedStudy && !notice && (
-        <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-10 text-center">
-          <p className="text-sm text-slate-500 max-w-md mx-auto">
-            When a project's data contains open-ended questions, the pipeline generates a
-            codeframe, codes every response with a confidence score, and queues low-confidence
-            items here. Pick a project above to review its queue.
+        {status.job?.state === 'failed' && <p className="mt-3 text-sm text-red-700">{status.job.error}</p>}
+        {status.job?.state === 'done' && Object.keys(status.job.failed ?? {}).length > 0 && (
+          <p className="mt-3 text-sm text-amber-800">
+            Not coded: {Object.entries(status.job.failed ?? {}).map(([k, v]) => `${k} (${v})`).join('; ')}
           </p>
-        </div>
-      )}
-
-      <div className="space-y-6">
-        {variables.map((v) => (
-          <VariableQueue
-            key={v.question_var}
-            variable={v}
-            studyId={selectedStudy}
-            canWrite={canWrite}
-            onResolved={onResolved}
-          />
-        ))}
-      </div>
+        )}
+      </section>
+      {coded.map((v) => (
+        <VariableQueue key={v.question_var} variable={v} studyId={studyId} canWrite={canWrite} onResolved={onResolved} />
+      ))}
     </div>
   )
 }
