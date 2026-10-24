@@ -554,19 +554,21 @@ function QuestionDetail({
           by SurveyDefinition.validate(). */}
       <div className="border border-slate-200 rounded-md p-3">
         <RoutingEditor
-          label="Show this question if"
+          label="Ask this question only if"
           flat={state.showIf}
           onChange={(f) => set('showIf', f)}
           qidOptions={priorQids}
+          questions={earlier}
           disabled={!canWrite}
         />
       </div>
       <div className="border border-slate-200 rounded-md p-3">
         <RoutingEditor
-          label="Terminate / screen out if"
+          label="End the interview (screen out) if"
           flat={state.terminateIf}
           onChange={(f) => set('terminateIf', f)}
           qidOptions={[...priorQids, q.qid]}
+          questions={[...earlier, q]}
           disabled={!canWrite}
         />
       </div>

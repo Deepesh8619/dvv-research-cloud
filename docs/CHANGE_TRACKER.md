@@ -21,6 +21,19 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-24 — conditions in plain words (branch feat/plain-language-conditions)
+
+The routing editor asked for a question id, an operator ("equals", "has
+selected") and codes typed by hand ("1, 2"). Given the questions (builder and
+questionnaire review), each condition now reads as a sentence: the question
+picked by its wording, a verb that fits its type (a single choice "is / is not
+/ is any of", a multi-select "includes", a number "is / is more than / is less
+than"), and the answer picked from its labels — "is any of" as chips. The
+condition is read back above ("What is your age? is less than 18"); "all of
+these / any of these" replaces "match ALL (and)". Labels: "Ask this question
+only if", "End the interview (screen out) if". The stored routing is unchanged,
+and any screen not passing the questions keeps the previous editor.
+
 ## 2026-10-24 — build from scratch: study templates and ready-made blocks (branch feat/builder-library)
 
 User asked for a card-based way to build a good questionnaire with ease. The
