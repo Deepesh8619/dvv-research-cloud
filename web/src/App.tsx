@@ -3,22 +3,28 @@ import './styles/globals.css'
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { LabelProvider } from './labels/LabelContext'
-import Shell from './components/Shell'
 import RequireAuth from './components/RequireAuth'
 import RequireRole from './components/RequireRole'
 import { FOUNDER_ROLES, WRITE_ROLES } from './auth/roles'
-import AdminPage from './pages/AdminPage'
-import DashboardPage from './pages/DashboardPage'
-import FieldingPage from './pages/FieldingPage'
-import LoginPage from './pages/LoginPage'
-import NewProjectPage from './pages/NewProjectPage'
-import ProjectPage from './pages/ProjectPage'
-import ProjectsPage from './pages/ProjectsPage'
-import QuestionnairePage from './pages/QuestionnairePage'
-import RespondentPage from './pages/RespondentPage'
-import ResetPasswordPage from './pages/ResetPasswordPage'
-import SurveyBuilderPage from './pages/SurveyBuilderPage'
-import SharePage from './pages/SharePage'
+import { Suspense, lazy } from 'react'
+import LoadingSpinner from './components/LoadingSpinner'
+
+// Each page loads when it is opened. A respondent opening a survey link on a
+// phone downloads the survey and nothing else — not the analyst app (2.5 MB
+// in one file before this).
+const Shell = lazy(() => import('./components/Shell'))
+const AdminPage = lazy(() => import('./pages/AdminPage'))
+const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const FieldingPage = lazy(() => import('./pages/FieldingPage'))
+const LoginPage = lazy(() => import('./pages/LoginPage'))
+const NewProjectPage = lazy(() => import('./pages/NewProjectPage'))
+const ProjectPage = lazy(() => import('./pages/ProjectPage'))
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
+const QuestionnairePage = lazy(() => import('./pages/QuestionnairePage'))
+const RespondentPage = lazy(() => import('./pages/RespondentPage'))
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'))
+const SurveyBuilderPage = lazy(() => import('./pages/SurveyBuilderPage'))
+const SharePage = lazy(() => import('./pages/SharePage'))
 
 function LegacyStudyRedirect() {
   const { id } = useParams()
@@ -30,6 +36,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <LabelProvider>
+        <Suspense fallback={<LoadingSpinner />}>
         <Routes>
           {/* Public routes (no auth required) */}
           <Route path="/login" element={<LoginPage />} />
@@ -73,6 +80,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Routes>
+        </Suspense>
         </LabelProvider>
       </AuthProvider>
     </BrowserRouter>

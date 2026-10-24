@@ -445,7 +445,7 @@ export default function RespondentPage() {
 
   if (phase === 'welcome') {
     // A follow-up box is asked only after a thin answer: not one of the questions.
-    const questionCount = model?.getAllQuestions().filter((q) => !q.name.endsWith(PROBE)).length ?? 0
+    const questionCount = model?.getAllQuestions().filter((q) => !q.name.endsWith(PROBE) && q.getType() !== 'html').length ?? 0  // as the progress bar counts
     const minutes = Math.max(1, Math.ceil(questionCount / 4))
     return (
       <Centered theme={theme}>

@@ -1,5 +1,5 @@
 import { Model } from 'survey-core'
-import { BorderlessLight } from 'survey-core/themes'
+import { BorderlessLight } from 'survey-core/themes/borderless-light'
 import type { Theme } from '../../api/themes'
 
 // The 4px card top strip — the one deliberate flourish per the design spec.
