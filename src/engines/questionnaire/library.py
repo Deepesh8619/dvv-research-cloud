@@ -115,6 +115,11 @@ def _hcp_screener(i: Inputs) -> list[Question]:
     ]
 
 
+def _aware_only(source: str) -> dict:
+    """Show only the brands this person said they know ("None" stays offered)."""
+    return {"techniques": {"masks": [{"source_qid": source, "mode": "selected"}]}}
+
+
 def _awareness(i: Inputs) -> list[Question]:
     cat = i["category"]
     aware = Expression(op="not", children=[Expression(op="selected", qid="AWR_AIDED",
@@ -126,13 +131,13 @@ def _awareness(i: Inputs) -> list[Question]:
                  type=QuestionType.MULTI, options=_brand_list(i), randomize_options=True),
         Question(qid="AWR_CONSIDER", text=f"Which of these would you consider buying next time "
                  f"you buy {cat}?", type=QuestionType.MULTI, options=_brand_list(i),
-                 randomize_options=True, show_if=aware),
+                 randomize_options=True, show_if=aware, validation=_aware_only("AWR_AIDED")),
         Question(qid="AWR_USED", text="Which of these have you bought in the past 3 months?",
                  type=QuestionType.MULTI, options=_brand_list(i), randomize_options=True,
-                 show_if=aware),
+                 show_if=aware, validation=_aware_only("AWR_AIDED")),
         Question(qid="AWR_PREFER", text=f"And which one is your most preferred brand of {cat}?",
                  type=QuestionType.SINGLE, options=_brand_list(i), randomize_options=True,
-                 show_if=aware),
+                 show_if=aware, validation=_aware_only("AWR_AIDED")),
     ]
 
 
@@ -311,6 +316,8 @@ def _rename(questions: list[Question], taken: set[str]) -> list[Question]:
     for q in questions:
         q.qid = mapping[q.qid]
         q.show_if, q.terminate_if = fix(q.show_if), fix(q.terminate_if)
+        for mask in ((q.validation or {}).get("techniques") or {}).get("masks") or []:
+            mask["source_qid"] = mapping.get(mask["source_qid"], mask["source_qid"])
     return questions
 
 
