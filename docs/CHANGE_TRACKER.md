@@ -21,6 +21,21 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-24 — quotas written with the questionnaire (branch feat/quota-plan)
+
+Quotas were set per link, by hand, after the link existed. Now the builder
+has a Quotas card: completes needed, and rows like "Women · S_GENDER · Woman ·
+50%" (answers picked by label, the limit shown as you type). Saved with the
+questionnaire (`metadata.quota_plan`, `GET|PUT /questionnaire/quotas`); every
+real link opened afterwards gets one cell per row, limited to share ×
+completes rounded up (test links get none). Refused with the reason: no
+completes, a question that is not single-choice, answers it does not have, or
+shares for one question over 100%. Single-choice questions only for now
+(numeric bands such as age come next if needed).
+
+Checked: unit tests; the journey test now writes a plan and finds the cell on
+the link it opens; in the browser, Women 50% of 400 saved as a limit of 200.
+
 ## 2026-10-24 — awareness block asks only about brands the person knows (branch feat/awareness-masks)
 
 Consideration, purchase and preference in the Awareness block now list only

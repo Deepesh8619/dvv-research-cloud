@@ -1544,6 +1544,46 @@ def questionnaire_quote(
     return quote(survey, completes, incidence_pct, rate_per_minute, min_cpi, project_fee)
 
 
+class QuotaPlan(BaseModel):
+    completes: int
+    cells: list[dict] = []
+
+
+@router.get("/studies/{study_id}/questionnaire/quotas")
+def get_quota_plan(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """The quota plan every new link starts from. (Owner/Analyst)"""
+    survey = _load_definition(db, _latest_questionnaire(db, study_id))
+    plan = (survey.metadata or {}).get("quota_plan") or {"completes": None, "cells": []}
+    from src.engines.fielding.quota_plan import cells
+
+    return {**plan, "limits": cells(plan) if plan.get("completes") else []}
+
+
+@router.put("/studies/{study_id}/questionnaire/quotas")
+def set_quota_plan(
+    study_id: str,
+    body: QuotaPlan,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Save the quota plan; links opened from now on get these cells. (Owner/Analyst)"""
+    from src.engines.fielding.quota_plan import cells, problems
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    plan = body.model_dump()
+    found = problems(plan, survey)
+    if found:
+        raise HTTPException(status_code=422, detail=found)
+    survey.metadata["quota_plan"] = plan
+    _save_definition(db, questionnaire, survey)
+    return {**plan, "limits": cells(plan)}
+
+
 @router.get("/studies/{study_id}/questionnaire/expert-checks")
 def expert_checks(
     study_id: str,

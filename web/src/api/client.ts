@@ -800,7 +800,13 @@ export interface ExpertNotes {
   n_consider: number
 }
 
+export interface QuotaPlanCell { name: string; qid: string; codes: number[]; share_pct: number }
+export interface QuotaPlan { completes: number | null; cells: QuotaPlanCell[]; limits: Array<{ name: string; limit: number }> }
+
 export const questionnaireApi = {
+  quotaPlan: async (studyId: string) => api.get<QuotaPlan>(`/studies/${studyId}/questionnaire/quotas`),
+  saveQuotaPlan: async (studyId: string, plan: { completes: number; cells: QuotaPlanCell[] }) =>
+    api.put<QuotaPlan>(`/studies/${studyId}/questionnaire/quotas`, plan),
   expertChecks: async (studyId: string) => api.get<ExpertNotes>(`/studies/${studyId}/questionnaire/expert-checks`),
   library: async () => api.get<{ modules: LibraryEntry[]; templates: LibraryEntry[] }>('/questionnaire/library'),
   /** Add a ready-made block after `afterQid` (or at the end). */
