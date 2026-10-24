@@ -393,6 +393,17 @@ def create_link(
         is_test=is_test,
         vendor=redirects,
     )
+    # The quota plan written with the questionnaire becomes this link's cells.
+    # A test link carries none: its respondents are not sample.
+    plan = (survey.metadata or {}).get("quota_plan")
+    if plan and not is_test:
+        from src.engines.fielding.quota_plan import cells as plan_cells
+        from src.engines.fielding.quota_plan import problems as plan_problems
+
+        if not plan_problems(plan, survey):
+            for cell in plan_cells(plan):
+                create_quota_cell(db, link.id, cell["name"], json.dumps(cell["condition"]),
+                                  cell["limit"])
     if not check["ok"]:
         # Opened over a failing check on purpose: say so where it can be found.
         logger.warning(

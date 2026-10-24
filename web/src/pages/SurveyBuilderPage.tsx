@@ -14,6 +14,7 @@ import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { InputsForm, ModulePicker, TemplatePicker, useLibrary } from '../components/BuilderLibrary'
 import ExpertChecks from '../components/ExpertChecks'
+import QuotaPlanPanel from '../components/QuotaPlanPanel'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import ThemeSelect from '../components/ThemeSelect'
 import { DEFAULT_THEME_SLUG } from '../api/themes'
@@ -979,6 +980,9 @@ export default function SurveyBuilderPage() {
             )}
           </div>
           <div className="flex items-center gap-3">
+            {status && status.source !== 'extracted' && questions.length > 0 && canWrite && (
+              <QuotaPlanPanel studyId={studyId!} questions={questions} />
+            )}
             {status && status.source !== 'extracted' && questions.length > 0 && (
               <button
                 type="button"

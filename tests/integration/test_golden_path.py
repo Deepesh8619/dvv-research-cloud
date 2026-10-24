@@ -88,6 +88,10 @@ def test_a_study_runs_from_template_to_deck(client):
     # Built well: the expert checks have nothing to fix.
     assert c.get(f"/api/studies/{sid}/questionnaire/expert-checks").json()["n_fix"] == 0
 
+    plan = c.put(f"/api/studies/{sid}/questionnaire/quotas", json={
+        "completes": 40, "cells": [{"name": "Women", "qid": "S_GENDER", "codes": [2],
+                                    "share_pct": 75}]})
+    assert plan.status_code == 200 and plan.json()["limits"][0]["limit"] == 30, plan.text
     c.post(f"/api/studies/{sid}/questionnaire/questions/approve-clean")
     approved = c.post(f"/api/studies/{sid}/questionnaire/approve-all")
     assert approved.status_code == 200, approved.text
@@ -95,6 +99,8 @@ def test_a_study_runs_from_template_to_deck(client):
     link = c.post(f"/api/studies/{sid}/fielding/links", json={})
     assert link.status_code in (200, 201), link.text
     token, link_id = link.json()["token"], link.json()["id"]
+    cells = c.get(f"/api/studies/{sid}/fielding/links/{link_id}/quotas").json()["cells"]
+    assert [(q["name"], q["limit"]) for q in cells] == [("Women", 30)]  # the plan, applied
     c.patch(f"/api/studies/{sid}/fielding/links/{link_id}/vendor",
             json={"vendor_name": "Cint", "cpi": 3.5, "target_completes": 40})
 
