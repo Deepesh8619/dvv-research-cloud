@@ -21,6 +21,29 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-24 — CI, an end-to-end journey test, and multi-selects in the tables (branch chore/ci)
+
+Nothing ran the tests except a person, and nothing exercised the features
+together. Now:
+
+- **CI** (`.github/workflows/ci.yml`) on every PR and push to main: the
+  backend suite with every AI key empty, ruff, vitest and the production web
+  build. Green on a clean runner.
+- **The journey test** (`tests/integration/test_golden_path.py`): a brand
+  tracker from the template → expert checks → approve → link with a supplier
+  → 40 respondents through the respondent API (5 under 18 and 1 refusing
+  consent are screened out; 34 complete) → data → tables, findings, cleaning,
+  Open ends, methods (TURF), the PowerPoint, the reconciliation file and the
+  billable amount.
+
+Its first run found a real defect: in DVV's own fielded data the multi-select
+option columns are typed MULTI, and the automatic table plan took SINGLE only
+— so a fielded brand tracker had **no tables for aided awareness,
+consideration or purchase**, the core of the study (Decipher exports were
+unaffected: they type the same columns SINGLE 0/1). The plan now includes
+them, and findings name an option by its own label ("Nescafé"), not the
+question-and-option title.
+
 ## 2026-10-24 — live expert checks while building (branch feat/expert-checks)
 
 The builder now reads the questionnaire the way a senior researcher would, as

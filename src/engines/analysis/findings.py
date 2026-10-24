@@ -64,18 +64,23 @@ def _lead(t: dict) -> dict | None:
     }
 
 
+def _option(title: str) -> str:
+    """An option table's own label: "Which have you heard of? — Nescafé" is Nescafé."""
+    return title.rsplit(" — ", 1)[-1]
+
+
 def _multi(question: str, tables: list[dict]) -> dict | None:
     picks = sorted(((t, r) for t in tables if (r := checked_row(t))),
                    key=lambda p: -p[1]["pct"][0])
     if len(picks) < 2:
         return None
     top = picks[:3]
-    said = ", then ".join(f"{t['title']} {_pct(r['pct'][0])}" for t, r in top)
+    said = ", then ".join(f"{_option(t['title'])} {_pct(r['pct'][0])}" for t, r in top)
     return {
         "kind": "most_chosen", "tables": [t["id"] for t, _r in picks],
         "text": f"{_short(question)}: most chosen {said}.",
         "strength": top[0][1]["pct"][0],
-        "cites": [_cite(t, t["title"], 0, r["pct"][0]) for t, r in top],
+        "cites": [_cite(t, _option(t["title"]), 0, r["pct"][0]) for t, r in top],
     }
 
 
@@ -138,7 +143,7 @@ def findings(tables: list[dict], questions: dict[str, str] | None = None,
             f["caution"], f["qid"] = _caution(ts[0]), q
             out.append(f)
         for t in ts:  # an option chosen more by one banner column than another
-            if f := _difference(t, f"{_short(name, 60)} {t['title']}"):
+            if f := _difference(t, f"{_short(name, 60)} {_option(t['title'])}"):
                 f["caution"], f["qid"] = _caution(t), q
                 out.append(f)
     for f in out:
