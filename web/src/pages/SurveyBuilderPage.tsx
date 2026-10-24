@@ -13,6 +13,7 @@ import { isConstantSumQuestion, TYPE_CHOICES, typeLabel } from '../labels/questi
 import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { InputsForm, ModulePicker, TemplatePicker, useLibrary } from '../components/BuilderLibrary'
+import ExpertChecks from '../components/ExpertChecks'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import ThemeSelect from '../components/ThemeSelect'
 import { DEFAULT_THEME_SLUG } from '../api/themes'
@@ -966,6 +967,10 @@ export default function SurveyBuilderPage() {
             <h1 className="text-2xl font-semibold text-slate-900">Survey builder</h1>
             {status && status.source !== 'extracted' && (
               <span className="text-sm text-slate-400 tabular-nums">{questions.length} questions</span>
+            )}
+            {status && status.source !== 'extracted' && questions.length > 0 && (
+              <ExpertChecks studyId={studyId!} onGoTo={setSelectedQid}
+                version={questions.map((q) => `${q.qid}:${q.text}:${q.options.length}:${q.randomize_options}`).join('|')} />
             )}
             {dirty && (
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" role="status">

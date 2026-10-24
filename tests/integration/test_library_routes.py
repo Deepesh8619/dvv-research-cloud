@@ -68,3 +68,11 @@ def test_a_template_then_a_module_build_a_valid_questionnaire(client):
     assert order[order.index("S_GENDER") + 1] == "NPS_2"
     assert survey.validate() == []
     assert survey["AWR_CONSIDER"].show_if.to_dict()["children"][0]["qid"] == "AWR_AIDED"
+
+
+def test_expert_checks_read_the_questionnaire(client):
+    c, _db = client
+    c.post("/api/studies/s1/questionnaire/template",
+           json={"template": "brand_tracker", "inputs": INPUTS})
+    r = c.get("/api/studies/s1/questionnaire/expert-checks").json()
+    assert r["n_fix"] == 0 and r["length"]["minutes"] > 0

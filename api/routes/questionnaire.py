@@ -1544,6 +1544,18 @@ def questionnaire_quote(
     return quote(survey, completes, incidence_pct, rate_per_minute, min_cpi, project_fee)
 
 
+@router.get("/studies/{study_id}/questionnaire/expert-checks")
+def expert_checks(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """A senior researcher's notes on the questionnaire as it stands, and its length."""
+    from src.engines.questionnaire.expert_checks import check
+
+    return check(_load_definition(db, _latest_questionnaire(db, study_id)))
+
+
 @router.get("/questionnaire/library")
 def questionnaire_library(user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST))):
     """Ready-made modules and study templates, with the inputs each asks for."""

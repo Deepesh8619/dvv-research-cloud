@@ -21,6 +21,24 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-24 — live expert checks while building (branch feat/expert-checks)
+
+The builder now reads the questionnaire the way a senior researcher would, as
+it is built (`questionnaire/expert_checks.py`, `GET /questionnaire/expert-checks`):
+leading wording, two questions in one ("the price and quality"), a
+multi-select with no "None of these"/"Don't know", a scale that leans one way,
+9+ unordered answers in a fixed order, grids over 12 rows, more than 4
+required open questions, and the interview length past 20 minutes. Two weights
+— fix and consider — and never blocking. A chip in the builder header ("≈ 3–6
+min · 1 note") opens the notes; each note jumps to its question; it refreshes
+as questions change.
+
+Calibrated: all five templates come out with no notes; the real Google Ads
+questionnaire gets 10 — about 22 minutes, a 15-row grid, a 12-answer list in
+a fixed order, and multi-selects without "None" (weighed "consider": some,
+like customer ages, always have an answer). MaxDiff design tables are not
+called long grids.
+
 ## 2026-10-24 — conditions in plain words (branch feat/plain-language-conditions)
 
 The routing editor asked for a question id, an operator ("equals", "has

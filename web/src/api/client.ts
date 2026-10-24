@@ -793,7 +793,15 @@ export interface TranslationStatus { lang: string; n_total: number; n_translated
 export interface LibraryField { key: string; label: string; kind: 'text' | 'number' | 'lines' | 'long'; placeholder: string }
 export interface LibraryEntry { id: string; title: string; description: string; inputs: LibraryField[]; modules?: string[] }
 
+export interface ExpertNotes {
+  length: { minutes: number; low: number; high: number }
+  notes: Array<{ qid: string | null; weight: 'fix' | 'consider'; note: string }>
+  n_fix: number
+  n_consider: number
+}
+
 export const questionnaireApi = {
+  expertChecks: async (studyId: string) => api.get<ExpertNotes>(`/studies/${studyId}/questionnaire/expert-checks`),
   library: async () => api.get<{ modules: LibraryEntry[]; templates: LibraryEntry[] }>('/questionnaire/library'),
   /** Add a ready-made block after `afterQid` (or at the end). */
   addModule: async (studyId: string, module: string, inputs: Record<string, string>, afterQid?: string | null) =>
