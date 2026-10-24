@@ -36,16 +36,16 @@ import FieldedDataPanel from './FieldedDataPanel'
 
 describe('FieldedDataPanel', () => {
   it('shows an export from another platform as this survey’s fieldwork', async () => {
-    render(<MemoryRouter><FieldedDataPanel studyId="s1" canWrite /></MemoryRouter>)
+    render(<MemoryRouter><FieldedDataPanel studyId="s1" /></MemoryRouter>)
     expect(await screen.findByText('260578.xlsx')).toBeTruthy()
     expect(screen.getByText('750')).toBeTruthy()
     expect((await screen.findAllByText('Qualified')).length).toBeGreaterThan(0)
     expect(screen.getByText('Check it against the questionnaire')).toBeTruthy()
-    expect(screen.getByText('Replace data file')).toBeTruthy()
+    expect(screen.getByText('Replace data on the project page')).toBeTruthy()  // one upload, on the project
   })
 
   it('reads the export as fieldwork: incidence, screen-outs, quotas, quality', async () => {
-    render(<MemoryRouter><FieldedDataPanel studyId="s1" canWrite /></MemoryRouter>)
+    render(<MemoryRouter><FieldedDataPanel studyId="s1" /></MemoryRouter>)
     expect(await screen.findByText('30.7%')).toBeTruthy()
     expect(screen.getByText('of 750 needed · 8%')).toBeTruthy()
     expect(screen.getByText('17m 19s')).toBeTruthy()

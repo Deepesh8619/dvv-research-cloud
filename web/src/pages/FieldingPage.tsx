@@ -900,7 +900,7 @@ export default function FieldingPage() {
 
       {/* Fieldwork can also arrive as a file from another platform: show it
           here, as this survey's fielded data, before the link tools. */}
-      <FieldedDataPanel studyId={studyId!} canWrite={canWrite} />
+      <FieldedDataPanel studyId={studyId!} />
 
       {/* Before the link, not after it: the whole point is to know what the
           script does to people while it is still cheap to change. */}
