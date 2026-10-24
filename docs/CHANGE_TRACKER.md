@@ -21,6 +21,19 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-24 — one data upload per project (branch feat/one-data-upload)
+
+User: "no need for 3 sections while uploading". The same data file could be
+uploaded in three places — New Project, Questionnaire checks (data vs
+questionnaire) and Field monitor (fielded data) — although the last two
+already wrote to the same slot. Now a Data bar under the project header, on
+every tab, is the one place: file name, respondents, variables, Download,
+Upload/Replace. When it changes, the project reloads (`dvv:data-changed`).
+The data check shows the file it reads ("None yet — upload it in the Data
+bar"), and the Field monitor keeps its fieldwork cards with a link to the
+project page. New Project's "Start with data" stays: that creates a project
+from data rather than adding data to one.
+
 ## 2026-10-24 — Open ends in each project; Wording and Activity under Admin (branch feat/open-ends-and-nav)
 
 User asked what Coding, Activity and Wording do and whether they belong. Found:

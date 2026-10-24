@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import axios from 'axios'
 import { studiesApi, type FieldedData } from '../api/client'
 import FieldworkCards from './FieldworkCards'
 
@@ -11,11 +10,8 @@ import FieldworkCards from './FieldworkCards'
  * This shows the export as the survey's fieldwork: who is in it, how each
  * interview ended, and the way on to checking it against the questionnaire.
  */
-export default function FieldedDataPanel({ studyId, canWrite }: { studyId: string; canWrite: boolean }) {
+export default function FieldedDataPanel({ studyId }: { studyId: string }) {
   const [data, setData] = useState<FieldedData | null>(null)
-  const [state, setState] = useState<'idle' | 'uploading' | 'processing' | 'failed'>('idle')
-  const [pct, setPct] = useState(0)
-  const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -29,50 +25,10 @@ export default function FieldedDataPanel({ studyId, canWrite }: { studyId: strin
     void load()
   }, [load])
 
-  const upload = async (file: File) => {
-    setError(null)
-    setState('uploading')
-    setPct(0)
-    try {
-      await studiesApi.attachData(studyId, file, setPct)
-      setState('processing')
-      for (let i = 0; i < 100; i++) {
-        await new Promise((r) => setTimeout(r, 3000))
-        const status = (await studiesApi.get(studyId)).data.status
-        if (status === 'error') {
-          setState('failed')
-          return
-        }
-        if (status !== 'classifying') {
-          setState('idle')
-          await load()
-          return
-        }
-      }
-      setState('failed')
-    } catch (err) {
-      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null
-      setError(typeof detail === 'string' ? detail : 'The data file could not be uploaded.')
-      setState('idle')
-    }
-  }
-
-  const busy = state === 'uploading' || state === 'processing'
-  const picker = canWrite && !busy && (
-    <label className="inline-flex cursor-pointer items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
-      {data?.available ? 'Replace data file' : 'Upload fielded data (.xlsx, .sav, .csv)'}
-      <input
-        id="fielded-data-file"
-        type="file"
-        accept=".xlsx,.sav,.csv"
-        className="sr-only"
-        onChange={(e) => {
-          const f = e.target.files?.[0]
-          e.target.value = ''
-          if (f) void upload(f)
-        }}
-      />
-    </label>
+  const picker = (
+    <Link to={`/projects/${studyId}`} className="text-sm font-medium text-primary-600 hover:underline">
+      {data?.available ? 'Replace data on the project page' : 'Upload data on the project page'}
+    </Link>
   )
 
   return (
@@ -84,27 +40,14 @@ export default function FieldedDataPanel({ studyId, canWrite }: { studyId: strin
           <p className="mt-1 max-w-xl text-sm text-slate-500">
             {data?.available
               ? 'The respondent data in this project. Fielded on another platform? It is your fieldwork all the same.'
-              : 'Fielded this survey on another platform? Upload its export here and it becomes this survey’s fieldwork.'}
+              : 'Fielded this survey on another platform? Upload its export as the project’s data and it becomes this survey’s fieldwork.'}
           </p>
         </div>
         {picker}
       </div>
 
-      {error && (
-        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p>
-      )}
-      {busy && (
-        <p role="status" className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-          {state === 'uploading' ? `Uploading… ${pct}%` : 'Reading the file and its variables… usually under a minute.'}
-        </p>
-      )}
-      {state === 'failed' && (
-        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          The file could not be read. Use the respondent-level export (one row per respondent) and try again.
-        </p>
-      )}
 
-      {data?.available && !busy && (
+      {data?.available && (
         <div className="mt-4 space-y-3">
           <dl className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
             <div className="flex gap-2">
@@ -142,7 +85,7 @@ export default function FieldedDataPanel({ studyId, canWrite }: { studyId: strin
         </div>
       )}
     </section>
-    {data?.available && !busy && (
+    {data?.available && (
       <div className="mb-6">
         <FieldworkCards key={data.updated_at ?? ''} studyId={studyId} ready full />
       </div>

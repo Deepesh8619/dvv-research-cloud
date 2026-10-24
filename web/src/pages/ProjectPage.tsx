@@ -12,6 +12,7 @@ import TrackerPanel from '../components/TrackerPanel'
 import MethodsPanel from '../components/MethodsPanel'
 import VariablesPanel from '../components/VariablesPanel'
 import NoticePanel from '../components/NoticePanel'
+import ProjectDataBar, { DATA_CHANGED } from '../components/ProjectDataBar'
 import OpenEndsPanel from '../components/OpenEndsPanel'
 import ProbesPanel from '../components/ProbesPanel'
 import QuotePanel from '../components/QuotePanel'
@@ -92,6 +93,12 @@ export default function ProjectPage() {
 
   useEffect(() => {
     load()
+  }, [load])
+
+  // New data uploaded in the data bar: every tab reads it, so reload the project.
+  useEffect(() => {
+    window.addEventListener(DATA_CHANGED, load)
+    return () => window.removeEventListener(DATA_CHANGED, load)
   }, [load])
 
   // Is there a questionnaire yet? A 404 means none — offer the "Build survey"
@@ -271,6 +278,8 @@ export default function ProjectPage() {
           {reprocessError}
         </p>
       )}
+
+      <ProjectDataBar studyId={study.id} canWrite={hasWriteRole(user?.role)} />
 
       {/* Tab nav */}
       <div className="border-b border-slate-200 mb-6">
