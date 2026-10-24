@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { studiesApi, type Finding } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * What the tables say, computed from them: significant differences first, then
@@ -32,7 +33,7 @@ export default function FindingsPanel({ studyId }: { studyId: string }) {
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-panel" data-testid="findings">
-      <h2 className="font-semibold text-slate-900">Key findings</h2>
+      <h2 className="font-semibold text-slate-900">Key findings<InfoTip id="findings" /></h2>
       <p className="mt-1 max-w-2xl text-sm text-slate-500">
         Read off the tables, not written by a model; the same findings open the PowerPoint.
       </p>

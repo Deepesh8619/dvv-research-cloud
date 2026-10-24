@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { questionnaireApi, type StudyQuote } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * A quote read from the questionnaire, before anyone scripts it: how long the
@@ -40,7 +41,7 @@ export default function QuotePanel({ studyId }: { studyId: string }) {
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel" data-testid="quote-panel">
-      <h2 className="font-semibold text-slate-900">Quote from the questionnaire</h2>
+      <h2 className="font-semibold text-slate-900">Quote from the questionnaire<InfoTip id="quote" /></h2>
       <p className="mt-1 max-w-2xl text-sm text-slate-500">
         Read from the document before anyone scripts it. Length is a range (±30%: its measured error on real studies);
         cost uses only the rates you enter.
@@ -85,21 +86,26 @@ export default function QuotePanel({ studyId }: { studyId: string }) {
           </div>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <label className="text-xs text-slate-600">Completes
-                <input className={field} inputMode="numeric" value={form.completes} onChange={set('completes')} placeholder={quote.completes ? String(quote.completes) : 'e.g. 500'} />
-              </label>
-              <label className="text-xs text-slate-600">Incidence %
-                <input className={field} inputMode="decimal" value={form.incidence} onChange={set('incidence')} placeholder="e.g. 30" />
-              </label>
-              <label className="text-xs text-slate-600">Your rate per minute
-                <input className={field} inputMode="decimal" value={form.rate} onChange={set('rate')} placeholder="per complete-minute" />
-              </label>
-              <label className="text-xs text-slate-600">Minimum cost per complete
-                <input className={field} inputMode="decimal" value={form.minCpi} onChange={set('minCpi')} placeholder="optional" />
-              </label>
-              <label className="col-span-2 text-xs text-slate-600">Project fee
-                <input className={field} inputMode="decimal" value={form.fee} onChange={set('fee')} placeholder="programming, DP, reporting — optional" />
-              </label>
+              <div className="text-xs text-slate-600">
+                <span className="inline-flex items-center"><label htmlFor="quote-completes">Completes</label></span>
+                <input id="quote-completes" className={field} inputMode="numeric" value={form.completes} onChange={set('completes')} placeholder={quote.completes ? String(quote.completes) : 'e.g. 500'} />
+              </div>
+              <div className="text-xs text-slate-600">
+                <span className="inline-flex items-center"><label htmlFor="quote-incidence">Incidence %</label><InfoTip id="incidence" /></span>
+                <input id="quote-incidence" className={field} inputMode="decimal" value={form.incidence} onChange={set('incidence')} placeholder="e.g. 30" />
+              </div>
+              <div className="text-xs text-slate-600">
+                <span className="inline-flex items-center"><label htmlFor="quote-rate">Your rate per minute</label><InfoTip id="rate_per_minute" /></span>
+                <input id="quote-rate" className={field} inputMode="decimal" value={form.rate} onChange={set('rate')} placeholder="per complete-minute" />
+              </div>
+              <div className="text-xs text-slate-600">
+                <span className="inline-flex items-center"><label htmlFor="quote-min-cpi">Minimum cost per complete</label><InfoTip id="min_cpi" /></span>
+                <input id="quote-min-cpi" className={field} inputMode="decimal" value={form.minCpi} onChange={set('minCpi')} placeholder="optional" />
+              </div>
+              <div className="col-span-2 text-xs text-slate-600">
+                <span className="inline-flex items-center"><label htmlFor="quote-fee">Project fee</label><InfoTip id="project_fee" /></span>
+                <input id="quote-fee" className={field} inputMode="decimal" value={form.fee} onChange={set('fee')} placeholder="programming, DP, reporting — optional" />
+              </div>
             </div>
             {quote.cost ? (
               <dl className="grid grid-cols-2 gap-3 rounded-lg bg-slate-50 p-3 text-sm">

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { complianceApi, type NoticeCheck } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * What a respondent is told before agreeing, against what India's DPDP Act
@@ -35,7 +36,7 @@ export default function NoticePanel({ studyId }: { studyId: string }) {
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel" data-testid="notice-panel">
-      <h2 className="font-semibold text-slate-900">Consent and notice</h2>
+      <h2 className="font-semibold text-slate-900">Consent and notice<InfoTip id="notice" /></h2>
       <p className="mt-1 max-w-2xl text-sm text-slate-500">
         What respondents are told before they agree (DPDP Act, s.5)
         {check.health_study ? ', and — this is a health study — that side effects they describe will be reported.' : '.'}

@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 
 import { studiesApi, type DataFieldReport } from '../api/client'
 import { Bar, Responses, minutes } from './FieldReportPanel'
+import InfoTip from './ui/InfoTip'
+import type { HelpId } from '../help/help'
 
 /**
  * An uploaded export, read as the fieldwork it is.
@@ -63,12 +65,12 @@ function Card({ title, aside, children, className = '' }: {
   )
 }
 
-function Stat({ label, value, hint, tone = 'text-slate-900', children }: {
-  label: string; value: string; hint?: ReactNode; tone?: string; children?: ReactNode
+function Stat({ label, value, hint, tone = 'text-slate-900', children, tip }: {
+  label: string; value: string; hint?: ReactNode; tone?: string; children?: ReactNode; tip?: HelpId
 }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-panel min-w-0">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-slate-500">{label}</p>
+      <p className="flex items-center text-[11px] font-medium uppercase tracking-wider text-slate-500">{label}{tip && <InfoTip id={tip} />}</p>
       <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone}`}>{value}</p>
       {hint && <p className="mt-0.5 text-xs text-slate-500">{hint}</p>}
       {children}
@@ -168,7 +170,7 @@ export default function FieldworkCards({ studyId, ready, full = false }: {
           hint={target ? `of ${target} needed · ${pct(d.complete, target)}` : `of ${report.starts} who started`}>
           {target ? <div className="mt-2"><Bar n={d.complete} of={target} color="bg-emerald-500" /></div> : null}
         </Stat>
-        <Stat label="Incidence" value={report.incidence_pct == null ? '—' : `${report.incidence_pct}%`}
+        <Stat label="Incidence" tip="incidence" value={report.incidence_pct == null ? '—' : `${report.incidence_pct}%`}
           hint={`${d.complete} of ${judged} the screener judged`} />
         <Stat label="Median interview" value={minutes(report.median_loi_sec)}
           tone={loi?.over ? 'text-amber-600' : 'text-slate-900'}

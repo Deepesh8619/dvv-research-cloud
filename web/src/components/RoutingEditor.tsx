@@ -1,6 +1,8 @@
 import { useState } from 'react'
 
 import { Expression, ExprOp, Question } from '../api/client'
+import InfoTip from './ui/InfoTip'
+import type { HelpId } from '../help/help'
 
 // --- Routing editor -----------------------------------------------------------
 //
@@ -110,6 +112,8 @@ export function describeCondition(c: Expression, questions: RoutingQuestion[]): 
 }
 
 interface Props {
+  /** An (i) beside the label explaining what this condition does. */
+  help?: HelpId
   /** The questions a condition may name, with their answers: turns each condition
       into a sentence picked from labels instead of codes typed by hand. */
   questions?: RoutingQuestion[]
@@ -123,7 +127,7 @@ interface Props {
   emptyText?: string
 }
 
-export default function RoutingEditor({ label, flat, onChange, qidOptions, disabled, emptyText, questions }: Props) {
+export default function RoutingEditor({ label, flat, onChange, qidOptions, disabled, emptyText, questions, help }: Props) {
   if (!flat.editable) {
     return (
       <div>
@@ -174,7 +178,9 @@ export default function RoutingEditor({ label, flat, onChange, qidOptions, disab
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
+        <span className="inline-flex items-center text-xs font-medium uppercase tracking-wide text-slate-500">
+          {label}{help && <InfoTip id={help} />}
+        </span>
         {flat.conditions.length > 1 && (
           <select
             value={flat.connective}

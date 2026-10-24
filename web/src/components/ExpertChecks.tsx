@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { questionnaireApi, type ExpertNotes } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * A senior researcher reading over the shoulder while the survey is built:
@@ -28,12 +29,13 @@ export default function ExpertChecks({ studyId, version, onGoTo }: {
   const total = notes.n_fix + notes.n_consider
   const minutes = `≈ ${Math.round(notes.length.low)}–${Math.round(notes.length.high)} min`
   return (
-    <div className="relative">
+    <div className="relative flex items-center">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
         className={`rounded-full border px-3 py-1 text-xs font-medium tabular-nums ${
           notes.n_fix ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-300 text-slate-600'}`}>
         {minutes} · {total === 0 ? 'no notes' : `${total} note${total === 1 ? '' : 's'}`}
       </button>
+      <InfoTip id="expert_notes" />
       {open && (
         <div className="absolute left-0 top-9 z-20 w-[28rem] max-w-[90vw] rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
           <p className="text-sm text-slate-700">

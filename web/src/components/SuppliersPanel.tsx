@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { downloadFile, fieldingApi, type SupplierRow } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * Sample suppliers: one row per live link — who sends it, what they cost,
@@ -58,12 +59,12 @@ export default function SuppliersPanel({ studyId, canWrite }: { studyId: string;
   return (
     <section className="mb-6 rounded-lg border border-slate-200 bg-white p-5 shadow-panel" data-testid="suppliers">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="font-semibold text-slate-900">Sample suppliers</h2>
+        <h2 className="font-semibold text-slate-900">Sample suppliers<InfoTip id="suppliers" /></h2>
         <button type="button" onClick={load} className="text-sm text-primary-500 hover:text-primary-600">Refresh</button>
       </div>
       <p className="mt-1 max-w-2xl text-sm text-slate-500">
-        Accepted completes are the ones nobody removed in cleaning — what each panel is paid for. The reconciliation
-        file lists every respondent id with that decision.
+        Accepted<InfoTip id="accepted" /> completes are the ones nobody removed in cleaning — what each panel is paid
+        for. The reconciliation<InfoTip id="reconciliation" /> file lists every respondent id with that decision.
       </p>
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[600px] text-sm">

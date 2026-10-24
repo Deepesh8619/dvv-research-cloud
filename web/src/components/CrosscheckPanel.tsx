@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import axios from 'axios'
 
 import { CrosscheckReport, QuestionnaireStatus, questionnaireApi, studiesApi } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * Check the collected data against the questionnaire it was collected under.
@@ -109,7 +110,7 @@ export default function CrosscheckPanel({
     <section className="bg-white rounded-lg border border-slate-200 shadow-panel p-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="font-semibold text-slate-900">Data vs questionnaire</h2>
+          <h2 className="font-semibold text-slate-900">Data vs questionnaire<InfoTip id="crosscheck" /></h2>
           <p className="text-sm text-slate-500 mt-1 max-w-xl">
             Checks every answer against what the questionnaire declared — codes,
             screen-outs, single answers and numeric ranges. No AI is involved,

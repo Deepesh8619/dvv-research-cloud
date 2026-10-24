@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import axios from 'axios'
 
 import { studiesApi, type FieldedData } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * The project's one data file. Uploaded here once, it is what the data check,
@@ -51,7 +52,7 @@ export default function ProjectDataBar({ studyId, canWrite }: { studyId: string;
   return (
     <section className="mb-4 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-panel" data-testid="project-data">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-        <span className="text-slate-500">Data</span>
+        <span className="inline-flex items-center text-slate-500">Data<InfoTip id="data" /></span>
         {has ? (
           <>
             <span className="font-medium text-slate-900">{data!.source_filename}</span>

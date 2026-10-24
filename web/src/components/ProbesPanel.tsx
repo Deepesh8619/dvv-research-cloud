@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { questionnaireApi } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * Which open questions get one follow-up when the answer is thin ("Lower the
@@ -30,7 +31,7 @@ export default function ProbesPanel({ studyId }: { studyId: string }) {
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel" data-testid="probes">
-      <h2 className="font-semibold text-slate-900">Follow-up probes</h2>
+      <h2 className="font-semibold text-slate-900">Follow-up probes<InfoTip id="probes" /></h2>
       <p className="mt-1 max-w-2xl text-sm text-slate-500">
         Tick the "why" questions. A respondent whose answer is a stock reply or under six words is asked once more, in
         words written for what they said. Leave job titles and names unticked: short is right there.

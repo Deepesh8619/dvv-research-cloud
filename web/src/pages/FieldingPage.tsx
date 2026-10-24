@@ -23,6 +23,7 @@ import PageHeader from '../components/ui/PageHeader'
 import { canWrite as hasWriteRole } from '../auth/roles'
 import FieldedDataPanel from '../components/FieldedDataPanel'
 import SuppliersPanel from '../components/SuppliersPanel'
+import InfoTip from '../components/ui/InfoTip'
 
 // Roles allowed to write (matches api/auth.py require_role(OWNER, ANALYST)).
 
@@ -337,12 +338,12 @@ function LinkCard({
       const dl = res.data.delivery
       setDelivery(dl?.formats ?? [])
       setMaterializeMsg(
-        `Materialized ${res.data.n_respondents} respondents × ${res.data.n_variables} variables` +
+        `Built the data file: ${res.data.n_respondents} respondents × ${res.data.n_variables} variables` +
           (dl ? `. Delivery files carry all ${dl.n_rows}, every disposition.` : '.'),
       )
       onChanged()
     } catch (err) {
-      setError(errorMessage(err) || 'Materialize failed')
+      setError(errorMessage(err) || 'Could not build the data file')
     } finally {
       setBusy(false)
     }
@@ -408,8 +409,9 @@ function LinkCard({
               title="Load completed responses into this study's tables and analysis"
               className="text-xs bg-primary-500 text-white font-medium px-3 py-1.5 rounded-md hover:bg-primary-600 disabled:opacity-50 transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
             >
-              {busy ? 'Working…' : 'Materialize'}
+              {busy ? 'Working…' : 'Build data file'}
             </button>
+            <InfoTip id="materialize" align="right" />
           </div>
         )}
       </div>
@@ -527,6 +529,7 @@ function LinkCard({
       >
         {showQuotas ? '▾ Hide quotas' : '▸ Manage quotas'}
       </button>
+      <InfoTip id="link_quotas" />
       {showQuotas && (
         <QuotaSection studyId={studyId} linkId={link.id} qidOptions={qidOptions} canWrite={canWrite} />
       )}
@@ -638,6 +641,7 @@ function CreatePanel({
           >
             Create test link
           </button>
+          <InfoTip id="test_link" />
           <button
             onClick={() => { setError(null); setChecking(true) }}
             disabled={creating || checking || !canCreate}
@@ -721,6 +725,7 @@ function CreatePanel({
           />
           Soft launch: hold at
         </label>
+        <InfoTip id="soft_launch" />
         <input
           type="number"
           min={1}
@@ -741,6 +746,7 @@ function CreatePanel({
       >
         {showRedirects ? '▾ Hide vendor redirects' : '▸ Vendor redirect templates (optional)'}
       </button>
+      <InfoTip id="redirects" />
       {showRedirects && (
         <div className="mt-2 space-y-2">
           <p className="text-xs text-slate-400">
