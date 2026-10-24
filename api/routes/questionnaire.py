@@ -1544,6 +1544,91 @@ def questionnaire_quote(
     return quote(survey, completes, incidence_pct, rate_per_minute, min_cpi, project_fee)
 
 
+@router.get("/questionnaire/library")
+def questionnaire_library(user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST))):
+    """Ready-made modules and study templates, with the inputs each asks for."""
+    from src.engines.questionnaire.library import catalogue
+
+    return catalogue()
+
+
+class ModuleRequest(BaseModel):
+    module: str
+    inputs: dict = {}
+    after_qid: str | None = None
+
+
+class TemplateRequest(BaseModel):
+    template: str
+    inputs: dict = {}
+
+
+def _insert(db: Session, questionnaire, survey: SurveyDefinition, added: list[Question],
+            after_qid: str | None) -> list[str]:
+    """Put new questions after `after_qid` (or at the end), in the list and its block."""
+    before = survey.validate()
+    order = [q.qid for q in survey.questions]
+    at = order.index(after_qid) + 1 if after_qid in order else len(order)
+    survey.questions[at:at] = added
+    ids = [q.qid for q in added]
+    if not survey.blocks:
+        survey.blocks.append(Block(block_id="B1", question_ids=[]))
+    block = next((b for b in survey.blocks if after_qid in b.question_ids), survey.blocks[-1])
+    pos = block.question_ids.index(after_qid) + 1 if after_qid in block.question_ids \
+        else len(block.question_ids)
+    block.question_ids[pos:pos] = ids
+    survey._rebuild_index()
+    new = [p for p in survey.validate() if p not in before]
+    if new:
+        raise HTTPException(status_code=422, detail={"error": "These questions would not fit",
+                                                     "problems": new})
+    survey.metadata["validation_errors"] = survey.validate()
+    _save_definition(db, questionnaire, survey)
+    update_questionnaire_status(db, questionnaire.id, "in_review")
+    return ids
+
+
+@router.post("/studies/{study_id}/questionnaire/modules")
+def add_module(
+    study_id: str,
+    body: ModuleRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Add a ready-made block (screener, awareness funnel, NPS…). (Owner/Analyst)"""
+    from src.engines.questionnaire.library import build_module
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    try:
+        added = build_module(body.module, body.inputs, {q.qid for q in survey.questions})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return {"added": _insert(db, questionnaire, survey, added, body.after_qid)}
+
+
+@router.post("/studies/{study_id}/questionnaire/template")
+def apply_template(
+    study_id: str,
+    body: TemplateRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Fill an empty questionnaire from a study template. (Owner/Analyst)"""
+    from src.engines.questionnaire.library import build_template
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    if survey.questions:
+        raise HTTPException(status_code=409, detail="A template starts an empty questionnaire; "
+                            "add modules to this one instead")
+    try:
+        added = build_template(body.template, body.inputs, set())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return {"added": _insert(db, questionnaire, survey, added, None)}
+
+
 @router.get("/studies/{study_id}/questionnaire/probes")
 def probe_settings(
     study_id: str,

@@ -21,6 +21,34 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-24 — build from scratch: study templates and ready-made blocks (branch feat/builder-library)
+
+User asked for a card-based way to build a good questionnaire with ease. The
+builder started blank with only a title box. Now (`questionnaire/library.py`):
+
+- **Templates** — Brand tracker, Concept test, Usage and attitudes, Customer
+  satisfaction, Doctor (HCP) study — chosen as cards when creating the
+  survey; each asks only for what it cannot know (category, brands,
+  attributes, the concept…) and arrives as standard sections.
+- **Blocks** — Consent and notice, Screener, Doctor screener, Awareness
+  funnel, NPS, Satisfaction, Concept test, MaxDiff, Van Westendorp pricing,
+  Open question, Demographics — added from "Add a block" after the selected
+  question.
+- Written the standard way: balanced 5-point scales labelled at both ends
+  ("Neither satisfied nor dissatisfied"), "None of these" exclusive and
+  anchored, brand lists randomised, "Prefer not to say" exclusive; routing in
+  the block (screener terminates under the minimum age, consideration asked
+  only of people aware of a brand, NPS "why" probed when thin); MaxDiff design
+  sized so each item is shown about three times; question ids renumbered
+  (`NPS_2`) when taken, with the block's routing following the new ids.
+- `GET /questionnaire/library`, `POST /questionnaire/modules`,
+  `POST /questionnaire/template` (empty questionnaire only, 409 otherwise).
+
+Every template and block validates, compiles to a link, and passes the MaxDiff
+design check (17 tests). In the browser: a new project from the Concept test
+template arrived as 16 questions; an NPS block added after S_GENDER landed
+there with its brand in the wording.
+
 ## 2026-10-24 — one data upload per project (branch feat/one-data-upload)
 
 User: "no need for 3 sections while uploading". The same data file could be

@@ -12,6 +12,7 @@ import {
 import { isConstantSumQuestion, TYPE_CHOICES, typeLabel } from '../labels/questionTypes'
 import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { InputsForm, ModulePicker, TemplatePicker, useLibrary } from '../components/BuilderLibrary'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import ThemeSelect from '../components/ThemeSelect'
 import { DEFAULT_THEME_SLUG } from '../api/themes'
@@ -600,15 +601,22 @@ function QuestionDetail({
 
 // --- Create (title prompt) ----------------------------------------------------
 
-function CreatePanel({ onCreate, canWrite }: { onCreate: (title: string) => Promise<string | null>; canWrite: boolean }) {
+function CreatePanel({ onCreate, canWrite }: {
+  onCreate: (title: string, template: string | null, inputs: Record<string, string>) => Promise<string | null>
+  canWrite: boolean
+}) {
+  const lib = useLibrary()
   const [title, setTitle] = useState('')
+  const [template, setTemplate] = useState<string | null>(null)
+  const [inputs, setInputs] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const chosen = lib?.templates.find((t) => t.id === template)
 
   const submit = async () => {
     setBusy(true)
     setError(null)
-    const err = await onCreate(title.trim() || 'Untitled survey')
+    const err = await onCreate(title.trim() || chosen?.title || 'Untitled survey', template, inputs)
     if (err) {
       setError(err)
       setBusy(false)
@@ -616,28 +624,43 @@ function CreatePanel({ onCreate, canWrite }: { onCreate: (title: string) => Prom
   }
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6 max-w-xl">
-      <h2 className="font-semibold text-slate-900 mb-1">Build a survey from scratch</h2>
-      <p className="text-sm text-slate-500 mb-4">
-        Give your survey a title, then add questions one by one.
-      </p>
+    <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6 max-w-4xl space-y-5">
+      <div>
+        <h2 className="font-semibold text-slate-900 mb-1">Build a survey from scratch</h2>
+        <p className="text-sm text-slate-500">
+          Start blank, or from a study template: its sections arrive written the standard way, routing included,
+          and you edit from there.
+        </p>
+      </div>
       {!canWrite ? (
         <p className="text-sm text-slate-400">You have read-only access; building is disabled.</p>
       ) : (
         <>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Survey title"
-            className="w-full h-9 px-3 rounded-md border border-slate-300 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-sky-500"
-          />
-          {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+          <label className="block text-xs font-medium text-slate-600">Survey title
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={chosen?.title ?? 'Survey title'}
+              className="mt-1 w-full h-9 px-3 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
+          </label>
+          {lib && (
+            <div>
+              <p className="mb-2 text-xs font-medium text-slate-600">Start from</p>
+              <TemplatePicker templates={lib.templates} chosen={template} onChoose={(t) => { setTemplate(t); setInputs({}) }} />
+            </div>
+          )}
+          {chosen && (
+            <div className="rounded-lg bg-slate-50 p-4 space-y-3">
+              <p className="text-sm text-slate-700">
+                Sections: {chosen.modules?.map((m) => lib?.modules.find((x) => x.id === m)?.title ?? m).join(' · ')}
+              </p>
+              <InputsForm fields={chosen.inputs} values={inputs} onChange={setInputs} />
+            </div>
+          )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
           <button
             onClick={submit}
             disabled={busy}
             className="bg-primary-500 text-white text-sm font-medium px-4 py-2 rounded-md hover:bg-primary-600 disabled:opacity-50"
           >
-            {busy ? 'Creating…' : 'Create survey'}
+            {busy ? 'Creating…' : chosen ? `Create from ${chosen.title.toLowerCase()}` : 'Create survey'}
           </button>
         </>
       )}
@@ -651,6 +674,7 @@ export default function SurveyBuilderPage() {
   const { id: studyId } = useParams<{ id: string }>()
   const { user } = useAuth()
   const canWrite = hasWriteRole(user?.role)
+  const lib = useLibrary()
 
   const [status, setStatus] = useState<QuestionnaireStatus | null>(null)
   const [questions, setQuestions] = useState<Question[]>([])
@@ -729,14 +753,36 @@ export default function SurveyBuilderPage() {
     load()
   }, [load])
 
-  const handleCreate = async (title: string): Promise<string | null> => {
+  const handleCreate = async (
+    title: string, template: string | null, inputs: Record<string, string>,
+  ): Promise<string | null> => {
     if (!studyId) return 'No study'
     try {
       await questionnaireApi.createAuthored(studyId, title)
-      await load()
-      return null
     } catch (err) {
       return errorMessage(err) || 'Could not create the survey.'
+    }
+    if (template) {
+      try {
+        await questionnaireApi.applyTemplate(studyId, template, inputs)
+      } catch (err) {
+        await load()  // the survey exists; say why the template did not fill it
+        return `The survey was created, but the template was not added: ${errorMessage(err) ?? 'try again'}`
+      }
+    }
+    await load()
+    return null
+  }
+
+  const handleAddModule = async (module: string, inputs: Record<string, string>): Promise<string | null> => {
+    if (!studyId) return 'No study'
+    try {
+      const res = await questionnaireApi.addModule(studyId, module, inputs, selectedQid)
+      await load()
+      setSelectedQid(res.data.added[0] ?? null)
+      return null
+    } catch (err) {
+      return errorMessage(err) || 'Could not add the block.'
     }
   }
 
@@ -1018,6 +1064,11 @@ export default function SurveyBuilderPage() {
             {canWrite && (
               <div className="p-3 border-b border-slate-200">
                 <AddQuestionPalette onPick={handleAddFromPalette} />
+                {lib && (
+                  <div className="mt-3 max-h-[50vh] overflow-y-auto border-t border-slate-100 pt-3">
+                    <ModulePicker modules={lib.modules} onAdd={handleAddModule} />
+                  </div>
+                )}
               </div>
             )}
 
