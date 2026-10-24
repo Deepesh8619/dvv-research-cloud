@@ -21,6 +21,29 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-25 — an (i) wherever a feature needs explaining (branch feat/info-tips)
+
+User asked for an info icon wherever someone might not know what a feature
+is: what it is, what it does, why, and how. `components/ui/InfoTip.tsx` is a
+small (i) that opens on hover, keyboard focus or tap (phones), closes on
+Escape, a click elsewhere or scroll, and is drawn above the page so scrolling
+lists and clipped cards cannot cut it off. Every text is in `help/help.ts`
+(What it is / Why / How), 41 entries, tested to have all three.
+
+Placed on: the Data bar; Questionnaire checks (consent and notice, quote and
+each of its inputs, translations, follow-up probes, data vs questionnaire);
+Reports (key findings, waves and countries, advanced methods and each method);
+Cleaning (the review, what each check means, lock; adverse events); Open ends;
+Field monitor (fielded data, dry run, soft launch, vendor redirects, test link,
+quotas, sample suppliers, accepted, reconciliation, incidence, build data file);
+the builder (templates, blocks, expert notes, quotas, both condition editors).
+
+Also: "Materialize" is now "Build data file"; Key drivers offers rating scales
+only (numbered points or scale wording) — gender, age bands and income were
+being offered as attributes; and field labels in the quote stay real labels
+(the (i) sits beside them, not inside, so clicking a label still focuses its
+input).
+
 ## 2026-10-24 — quotas written with the questionnaire (branch feat/quota-plan)
 
 Quotas were set per link, by hand, after the link existed. Now the builder

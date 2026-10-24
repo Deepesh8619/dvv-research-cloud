@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { studiesApi, type FieldedData } from '../api/client'
 import FieldworkCards from './FieldworkCards'
+import InfoTip from './ui/InfoTip'
 
 /**
  * Fielded data that arrived as a file. A study fielded on another platform
@@ -36,7 +37,7 @@ export default function FieldedDataPanel({ studyId }: { studyId: string }) {
     <section className="mb-6 rounded-lg border border-slate-200 bg-white p-5 shadow-panel" data-testid="fielded-data">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="font-semibold text-slate-900">Fielded data</h2>
+          <h2 className="font-semibold text-slate-900">Fielded data<InfoTip id="fielded_data" /></h2>
           <p className="mt-1 max-w-xl text-sm text-slate-500">
             {data?.available
               ? 'The respondent data in this project. Fielded on another platform? It is your fieldwork all the same.'

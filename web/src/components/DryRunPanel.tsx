@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { DryRunReport, fieldingApi } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * Find out what the script does to people, before it does it to people.
@@ -62,7 +63,7 @@ export default function DryRunPanel({
     <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="font-semibold text-slate-900">Dry run</h2>
+          <h2 className="font-semibold text-slate-900">Dry run<InfoTip id="dry_run" /></h2>
           <p className="text-sm text-slate-600 mt-0.5 max-w-xl">
             Send synthetic respondents through the survey's own conditions and see what it
             does to them — before a vendor sends real ones. No data is saved.

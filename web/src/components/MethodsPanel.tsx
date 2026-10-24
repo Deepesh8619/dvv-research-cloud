@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { studiesApi, type MethodInputs, type MethodRequest } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * MaxDiff scores, TURF reach, Van Westendorp price range and key drivers,
@@ -52,7 +53,7 @@ export default function MethodsPanel({ studyId }: { studyId: string }) {
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-panel" data-testid="methods">
-      <h2 className="font-semibold text-slate-900">Advanced methods</h2>
+      <h2 className="font-semibold text-slate-900">Advanced methods<InfoTip id="methods" /></h2>
       <p className="mt-1 text-sm text-slate-500">On the {inputs.n_respondents} completes, computed from the data file itself.</p>
       <div className="mt-3 flex flex-wrap gap-2">
         {(Object.keys(NAMES) as Method[]).map((m) => (
@@ -63,7 +64,8 @@ export default function MethodsPanel({ studyId }: { studyId: string }) {
         ))}
       </div>
 
-      <div className="mt-4 grid max-w-2xl gap-2">
+      <p className="mt-4 flex items-center text-sm font-medium text-slate-900">{NAMES[method]}<InfoTip id={method} /></p>
+      <div className="mt-2 grid max-w-2xl gap-2">
         {method === 'maxdiff' && (
           <label className="text-xs text-slate-600">Exercise
             <select className={select} value={pick.one} onChange={(e) => setPick({ ...pick, one: e.target.value })}>

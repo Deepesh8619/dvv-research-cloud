@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { questionnaireApi, type LibraryEntry, type LibraryField } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * Study templates and ready-made blocks for building a questionnaire from
@@ -82,6 +83,7 @@ export function ModulePicker({ modules, onAdd }: {
       <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-wider text-slate-500 hover:text-slate-700">
         <span className="mr-1 inline-block transition-transform group-open:rotate-90" aria-hidden>▸</span>
         Add a block ({modules.length})
+        <InfoTip id="blocks" />
       </summary>
       <div className="mt-2">
       {!current ? (

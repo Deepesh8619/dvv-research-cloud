@@ -17,6 +17,23 @@ from api.routes.studies import _run_artifacts
 
 router = APIRouter()
 
+# A rating scale point: "4", "1 - Strongly disagree", "10: Extremely likely"
+# (not an age band "13-17"), or the words scales are written in.
+_POINT = re.compile(r"^\d{1,2}(\s*[-–:.]\s*[^\d\s].*)?$")
+_SCALE_WORDS = re.compile(
+    r"\b(agree|disagree|satisf\w*|dissatisf\w*|likely|unlikely|important|excellent|poor|good|"
+    r"bad|very|extremely|somewhat|not at all|completely|trust\w*|recommend|appeal\w*)\b", re.I)
+
+
+def _is_scale(values: dict[int, str]) -> bool:
+    """A question someone rates on (4 to 11 points), not gender, age bands or income."""
+    labels = [str(lab) for code, lab in values.items() if code < 90]
+    if not 4 <= len(labels) <= 11:
+        return False
+    points = sum(bool(_POINT.match(lab.strip())) for lab in labels)
+    worded = sum(bool(_SCALE_WORDS.search(lab)) for lab in labels)
+    return points * 2 >= len(labels) or worded * 2 >= len(labels)
+
 
 def _data(db: Session, study_id: str):
     import polars as pl
@@ -57,7 +74,7 @@ def method_inputs(study_id: str, db: Session = Depends(get_db),
         "numeric": [{"variable": v.name, "label": (v.label or v.name)[:120]}
                     for v in shown if v.type == VarType.NUMERIC],
         "ratings": [{"variable": v.name, "label": (v.label or v.name)[:120]}
-                    for v in shown if v.type == VarType.SINGLE and 4 <= len(v.values) <= 11],
+                    for v in shown if v.type == VarType.SINGLE and _is_scale(v.values)],
     }
 
 

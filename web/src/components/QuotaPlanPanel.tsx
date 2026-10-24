@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { questionnaireApi, type Question, type QuotaPlanCell } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * Quotas as the researcher thinks of them: shares of the completes the study
@@ -42,11 +43,12 @@ export default function QuotaPlanPanel({ studyId, questions }: { studyId: string
   }
 
   return (
-    <div className="relative">
+    <div className="relative flex items-center">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
         className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600">
         Quotas{saved.length ? ` · ${saved.length}` : ''}
       </button>
+      <InfoTip id="quota_plan" align="right" />
       {open && (
         <div className="absolute right-0 top-9 z-20 w-[34rem] max-w-[92vw] space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
           <p className="text-sm text-slate-600">

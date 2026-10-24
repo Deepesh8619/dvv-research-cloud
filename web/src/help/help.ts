@@ -1,0 +1,253 @@
+/**
+ * The explanation behind every (i) in the app: what a feature is, why it is
+ * there, how to use it. One place, so the same thing is explained the same
+ * way wherever it appears, and so a feature without an explanation shows up
+ * in review as a missing entry here.
+ */
+export interface Help { title: string; what: string; why: string; how: string }
+
+export const HELP = {
+  // --- Project ----------------------------------------------------------
+  data: {
+    title: 'Project data',
+    what: 'The respondent-level data file this project holds: one row per respondent, one column per answer.',
+    why: 'Every check, table, cleaning step and report reads this one file, so they always agree.',
+    how: 'Upload the export from Decipher, Qualtrics or SPSS (.xlsx, .sav, .csv). Replacing it re-runs everything on the new file.',
+  },
+
+  // --- Questionnaire checks ----------------------------------------------
+  notice: {
+    title: 'Consent and notice',
+    what: 'Checks what respondents are told before they agree, against India’s DPDP Act (and, for health studies, the side-effect reporting statement).',
+    why: 'Collecting personal data without a proper notice and consent is unlawful, and a client audit will ask for it.',
+    how: 'Items marked ○ are missing. Fill in your organisation, purpose and contact, then “Add notice and consent question” puts both screens first.',
+  },
+  quote: {
+    title: 'Quote from the questionnaire',
+    what: 'An estimate of interview length from the questionnaire itself, the screeners that decide who qualifies, and — from your rates — the sample cost.',
+    why: 'Bids are usually priced on a guessed length; a study bid at 12 minutes that runs 17 is under-priced for every complete.',
+    how: 'Enter completes and incidence to see how many people must start; add your rate per minute to see cost per complete and total.',
+  },
+  incidence: {
+    title: 'Incidence',
+    what: 'The share of people who start the survey and qualify (are not screened out).',
+    why: 'Low incidence means many more people must start to reach your completes, which drives sample cost.',
+    how: 'From a panel quote or a past wave: 40% means 100 starts for 40 completes.',
+  },
+  rate_per_minute: {
+    title: 'Rate per minute',
+    what: 'What your panel charges per minute of interview, per complete, at 100% incidence.',
+    why: 'Cost per complete = rate × length ÷ incidence; it is the one number that turns length into money.',
+    how: 'Take it from your supplier’s rate card. Nothing here guesses a price.',
+  },
+  min_cpi: {
+    title: 'Minimum cost per complete',
+    what: 'The floor your panel charges however short the survey is.',
+    why: 'Short, high-incidence surveys would otherwise price below what any panel accepts.',
+    how: 'Optional. Leave blank if your supplier has no minimum.',
+  },
+  project_fee: {
+    title: 'Project fee',
+    what: 'Fixed costs on top of sample: programming, data processing, reporting.',
+    why: 'So the total is the number you actually quote.',
+    how: 'Optional; added once to the sample cost.',
+  },
+  translations: {
+    title: 'Translations',
+    what: 'Field the same questionnaire in other languages from one master.',
+    why: 'Multi-country and multi-language studies stay one study: same codes, one data file, one set of tables.',
+    how: 'Type a language code (hi, ta, pt-BR), download the sheet, have it translated, upload it. Then add ?lang=hi to the survey link.',
+  },
+  probes: {
+    title: 'Follow-up probes',
+    what: 'When an open answer is too short (“good”, “nothing”, under six words), the survey asks one more neutral question about it.',
+    why: 'Thin answers cannot be coded; one probe usually turns them into usable reasons, as a moderator would.',
+    how: 'Tick the “why” questions only — leave job titles or names unticked, where short is right. Links opened afterwards ask the probes.',
+  },
+  crosscheck: {
+    title: 'Data vs questionnaire',
+    what: 'Checks every answer in the data against what the questionnaire allows: codes, screen-outs, single answers, ranges.',
+    why: 'A scripting error (a wrong code, a screen-out that did not fire) shows up here before it reaches the client.',
+    how: 'Needs the questionnaire and the project data. Click “Check again”; open each discrepancy to see the respondents it affects.',
+  },
+
+  // --- Reports -----------------------------------------------------------
+  findings: {
+    title: 'Key findings',
+    what: 'The main results, read off the tables: significant differences first, then the leading answers.',
+    why: 'Every number is cited to its table and base, so nothing in a headline can be invented.',
+    how: 'Read them here; the same findings open the PowerPoint. Grey chips show the table, column, % and base behind each number.',
+  },
+  tracker: {
+    title: 'Waves and countries',
+    what: 'Compares this study with other waves or countries of the same tracker, and stacks them into one file.',
+    why: 'Before trending or pooling, you need to know what changed — a dropped question, a renumbered list, a code that now means something else.',
+    how: 'Tick the other studies and Compare. Red items must be fixed before stacking; with one other wave picked, significant moves are listed.',
+  },
+  methods: {
+    title: 'Advanced methods',
+    what: 'MaxDiff, TURF, Van Westendorp pricing and key-driver analysis on this study’s completes.',
+    why: 'The analyses usually done in a separate tool, computed from the same data as the tables.',
+    how: 'Pick a method (greyed ones need questions this study does not have), choose its inputs, and Run.',
+  },
+  maxdiff: {
+    title: 'MaxDiff',
+    what: 'Ranks items by importance from “most / least” choices: score = (times best − times worst) ÷ times shown.',
+    why: 'Forced trade-offs separate items that all score “very important” on a rating scale.',
+    how: 'Choose the exercise and Run. Scores run from −1 (always worst) to +1 (always best).',
+  },
+  turf: {
+    title: 'TURF',
+    what: 'Finds the set of options (flavours, channels, features) that reaches the most people — anyone choosing at least one.',
+    why: 'The most popular items often appeal to the same people; TURF picks the combination that adds new people.',
+    how: 'Choose a multi-select question and the largest set size, then Run. Reach is the share who chose at least one in the set.',
+  },
+  van_westendorp: {
+    title: 'Van Westendorp pricing',
+    what: 'From four price questions (too cheap, a bargain, getting expensive, too expensive) finds the acceptable price range.',
+    why: 'Shows where price starts to hurt and where it raises doubts about quality, before a launch.',
+    how: 'Needs the four numeric price questions (the Pricing block in the builder adds them). Map each one, then Run.',
+  },
+  drivers: {
+    title: 'Key drivers',
+    what: 'Which attributes matter most for an overall rating: each attribute’s share of what explains it (Johnson’s relative weights).',
+    why: 'Tells you what to improve first; unlike simple correlations it stays fair when attributes are related to each other.',
+    how: 'Outcome: the overall rating (satisfaction, likelihood to recommend). Attributes: two or more rating questions on the same kind of scale — not gender or age. Then Run.',
+  },
+
+  // --- Cleaning ----------------------------------------------------------
+  adverse_events: {
+    title: 'Adverse events in open answers',
+    what: 'Reads every open answer for side effects, a medicine not working, overdose, pregnancy or misuse.',
+    why: 'In health research, an event a respondent describes must be reported to the drug maker’s safety team within a working day.',
+    how: 'Red items mean someone had it — read each and report the real ones. Mentions (nobody said they had it) are folded below.',
+  },
+  cleaning: {
+    title: 'Cleaning review',
+    what: 'Respondents whose answers look unreliable, ranked by an authenticity score (0–100) with the reasons.',
+    why: 'Speeders, straight-liners, pasted or AI-written answers distort results; a person decides who is removed, with the evidence in front of them.',
+    how: 'Click a respondent to see their answers behind each flag. Keep (K) or Remove (R); the next one opens. Lock when none are left.',
+  },
+  cleaning_checks: {
+    title: 'What the checks mean',
+    what: 'Too fast: finished far quicker than most. Straight-lined: the same answer down a whole grid. Gibberish: keyboard mash. Pasted / few keystrokes: text not typed. AI-written: phrases a model leaves. Duplicate: the same answers as someone else.',
+    why: 'Each is a known sign of a fake or careless respondent — but none is proof on its own.',
+    how: 'Filter by a check to review all of one kind; read the evidence before deciding.',
+  },
+  cleaning_lock: {
+    title: 'Lock cleaning',
+    what: 'Freezes the decisions and makes a cleaned version of the data, which the tables and deliverables then use.',
+    why: 'So everything delivered is built on one agreed set of respondents.',
+    how: 'Available when no flagged respondent is left unreviewed. Only the owner can unlock, with a reason.',
+  },
+
+  // --- Open ends ---------------------------------------------------------
+  open_ends: {
+    title: 'Open ends',
+    what: 'The questions respondents answered in their own words, and their coding into categories (a codeframe).',
+    why: 'Coded answers can be counted and tabbed like any other question.',
+    how: '“Code open questions” builds a codeframe from a sample and codes every answer. Answers the model is unsure of appear below for you to accept or correct.',
+  },
+
+  // --- Field monitor -------------------------------------------------------
+  suppliers: {
+    title: 'Sample suppliers',
+    what: 'One row per live link: who supplies it, progress against target, quality, and what you owe them.',
+    why: 'Panels are paid per accepted complete; this shows which supplier sends good respondents and what to pay.',
+    how: 'Edit sets the supplier’s name, price and target. Reconciliation downloads the file the panel asks for at the end of field.',
+  },
+  accepted: {
+    title: 'Accepted',
+    what: 'Completes nobody removed in cleaning.',
+    why: 'Panels pay incentives and bill only for accepted completes.',
+    how: 'Removing a respondent in Cleaning moves them from accepted to rejected here.',
+  },
+  reconciliation: {
+    title: 'Reconciliation file',
+    what: 'Every respondent id the panel sent, how their interview ended, and accepted or rejected (with the reason).',
+    why: 'Panels need it to pay respondents and to bill you correctly.',
+    how: 'Finish cleaning first, then download and send it to the supplier.',
+  },
+  soft_launch: {
+    title: 'Soft launch',
+    what: 'Holds the link after a first small batch of completes (e.g. 50).',
+    why: 'Check the data for scripting errors before paying for the full sample.',
+    how: 'Set the number here; when it is reached the link pauses. Check the batch, then release to full sample.',
+  },
+  redirects: {
+    title: 'Vendor redirects',
+    what: 'The panel addresses a respondent is sent to when they complete, are screened out, are over quota or fail security.',
+    why: 'Panels count and pay respondents by where they land.',
+    how: 'Paste the URLs your panel gives you; keep their {pid}/{rid} markers so each respondent’s id is passed back.',
+  },
+  link_quotas: {
+    title: 'Quotas',
+    what: 'Limits on how many completes each group can have (e.g. 200 women).',
+    why: 'Keeps the sample representative; people in a full group are turned away as over quota.',
+    how: 'Set them here, or once in the builder’s Quotas card so every new link starts with them.',
+  },
+  test_link: {
+    title: 'Test link',
+    what: 'A link for checking the survey yourself: jump to any question, fill it with made-up respondents.',
+    why: 'Test answers never mix with real data.',
+    how: 'Create it, try every route, then create the real link for fieldwork.',
+  },
+  materialize: {
+    title: 'Build data file',
+    what: 'Turns the link’s interviews into the project’s data file: one row per complete, a column per answer.',
+    why: 'Tables, cleaning and reports read the data file, not the live interviews.',
+    how: 'Click it whenever you want the latest completes in the tables (at soft launch and at the end of field).',
+  },
+  dry_run: {
+    title: 'Dry run',
+    what: 'Sends made-up respondents through the questionnaire’s logic before any link exists.',
+    why: 'Shows who would be screened out, which questions nobody reaches, and dead ends — while it is still cheap to fix.',
+    how: 'Run it after approving the questionnaire; read each warning and fix the logic in the questionnaire.',
+  },
+  fielded_data: {
+    title: 'Fielded data',
+    what: 'The respondent data in this project as fieldwork: who is in it and how each interview ended.',
+    why: 'A survey fielded on another platform is still this study’s fieldwork and can be checked the same way.',
+    how: 'Upload or replace the file in the Data bar on the project page.',
+  },
+
+  // --- Builder -----------------------------------------------------------
+  templates: {
+    title: 'Start from a template',
+    what: 'A complete questionnaire for a type of study, written the standard way, routing included.',
+    why: 'Faster and more consistent than writing every screener and scale from scratch.',
+    how: 'Pick one and fill in what it asks (category, brands…). Edit, add or delete questions afterwards.',
+  },
+  blocks: {
+    title: 'Ready-made blocks',
+    what: 'Standard sections — consent, screener, awareness, NPS, satisfaction, MaxDiff, pricing — with their wording, scales and logic.',
+    why: 'Each comes with the details that are easy to get wrong: balanced scales, an exclusive “None of these”, randomised brand lists.',
+    how: 'Select the question it should follow, open a block, fill its few fields and “Add block”.',
+  },
+  expert_notes: {
+    title: 'Expert notes',
+    what: 'The estimated interview length and notes a senior researcher would make: leading wording, two questions in one, missing “None”, lopsided scales, long grids.',
+    why: 'These biases are cheap to fix now and impossible to fix after fieldwork.',
+    how: 'Click the chip to read the notes; click a question id to jump to it. Notes are advice and never block saving.',
+  },
+  quota_plan: {
+    title: 'Quota plan',
+    what: 'The groups the sample must contain, as shares of the completes you need (e.g. Women 50% of 400).',
+    why: 'Written once with the questionnaire, it is applied to every link opened afterwards.',
+    how: 'Enter completes, add a row per group: name, single-choice question, answer(s), share. Shares for one question must not exceed 100%.',
+  },
+  ask_if: {
+    title: 'Ask this question only if',
+    what: 'A condition on earlier answers; people who do not meet it skip the question.',
+    why: 'So people are only asked what applies to them (e.g. satisfaction only from users).',
+    how: 'Pick the earlier question, how it compares, and the answer. Several conditions can all or any have to hold.',
+  },
+  end_if: {
+    title: 'End the interview (screen out) if',
+    what: 'A condition that ends the interview for people outside the target.',
+    why: 'Screeners keep the sample to the people the study is about.',
+    how: 'Usually on the question itself: “What is your age? is less than 18”.',
+  },
+} satisfies Record<string, Help>
+
+export type HelpId = keyof typeof HELP

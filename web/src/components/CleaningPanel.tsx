@@ -5,6 +5,7 @@ import { canWrite, isOwner } from '../auth/roles'
 import Badge from './ui/Badge'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
+import InfoTip from './ui/InfoTip'
 
 // Mirrors src/engines/qc/cleaning.py REASON_CODES.
 const REASONS = [
@@ -238,7 +239,7 @@ export default function CleaningPanel({ studyId, role }: { studyId: string; role
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0 flex-1">
             <p className="text-sm text-slate-700">
-              <span className="text-lg font-semibold text-slate-900">{unreviewed}</span> of {all.length} flagged respondents to review
+              <span className="text-lg font-semibold text-slate-900">{unreviewed}</span> of {all.length} flagged respondents to review<InfoTip id="cleaning" />
               <span className="text-slate-500"> · {removed} removed · {kept} kept</span>
             </p>
             <div className="mt-2 h-1.5 w-full max-w-md rounded bg-slate-100" aria-hidden>
@@ -246,9 +247,12 @@ export default function CleaningPanel({ studyId, role }: { studyId: string; role
             </div>
           </div>
           {act && !s.locked && (
-            <Button disabled={busy || unreviewed > 0} onClick={() => run(() => cleaningApi.lock(studyId))}>
-              {unreviewed > 0 ? `Lock cleaning (${unreviewed} unreviewed)` : 'Lock cleaning'}
-            </Button>
+            <span className="inline-flex items-center">
+              <Button disabled={busy || unreviewed > 0} onClick={() => run(() => cleaningApi.lock(studyId))}>
+                {unreviewed > 0 ? `Lock cleaning (${unreviewed} unreviewed)` : 'Lock cleaning'}
+              </Button>
+              <InfoTip id="cleaning_lock" align="right" />
+            </span>
           )}
           {s.locked && <Badge tone="info">Locked · version {s.versions.length}</Badge>}
         </div>
@@ -266,6 +270,7 @@ export default function CleaningPanel({ studyId, role }: { studyId: string; role
               </button>
             ))}
             <span className="mx-1 h-5 w-px bg-slate-200" aria-hidden />
+            <InfoTip id="cleaning_checks" />
             {checks.map((c) => (
               <button key={c.check} type="button" className={chip(check === c.check)}
                 onClick={() => setCheck(check === c.check ? null : c.check)}>

@@ -10,6 +10,7 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from './LoadingSpinner'
 import { canWrite as hasWriteRole } from '../auth/roles'
+import InfoTip from './ui/InfoTip'
 
 // Roles allowed to resolve items (matches api require_role(OWNER, ANALYST)).
 
@@ -277,7 +278,7 @@ export default function OpenEndsPanel({ studyId }: { studyId: string }) {
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="font-semibold text-slate-900">Open questions</h2>
+            <h2 className="font-semibold text-slate-900">Open questions<InfoTip id="open_ends" /></h2>
             <p className="mt-1 max-w-2xl text-sm text-slate-500">
               Coding builds a codeframe from a sample of answers, codes every answer, and sends the ones it is unsure
               of to the list below for a person to check.

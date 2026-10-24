@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { downloadFile, questionnaireApi, type TranslationStatus } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * Languages the survey can be fielded in. The translator works in a sheet —
@@ -35,7 +36,7 @@ export default function TranslationsPanel({ studyId }: { studyId: string }) {
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel" data-testid="translations">
-      <h2 className="font-semibold text-slate-900">Translations</h2>
+      <h2 className="font-semibold text-slate-900">Translations<InfoTip id="translations" /></h2>
       <p className="mt-1 max-w-2xl text-sm text-slate-500">
         {nStrings} strings a respondent reads. A link opened after the upload serves a language with
         <code className="mx-1 rounded bg-slate-100 px-1">?lang=hi</code>on its address; the data records which one each

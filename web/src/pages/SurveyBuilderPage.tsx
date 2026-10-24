@@ -26,6 +26,7 @@ import { PasteOptionsBox } from '../components/builder/PasteOptionsBox'
 import { RespondentPreview } from '../components/builder/RespondentPreview'
 import { TypeIcon } from '../components/builder/TypeIcon'
 import { defaultQuestionFor } from '../components/builder/typeMeta'
+import InfoTip from '../components/ui/InfoTip'
 
 // This is the PROGRAM-FROM-SCRATCH screen: a researcher builds a questionnaire
 // one question at a time rather than uploading a document (that path lands on
@@ -557,6 +558,7 @@ function QuestionDetail({
       <div className="border border-slate-200 rounded-md p-3">
         <RoutingEditor
           label="Ask this question only if"
+          help="ask_if"
           flat={state.showIf}
           onChange={(f) => set('showIf', f)}
           qidOptions={priorQids}
@@ -567,6 +569,7 @@ function QuestionDetail({
       <div className="border border-slate-200 rounded-md p-3">
         <RoutingEditor
           label="End the interview (screen out) if"
+          help="end_if"
           flat={state.terminateIf}
           onChange={(f) => set('terminateIf', f)}
           qidOptions={[...priorQids, q.qid]}
@@ -646,7 +649,7 @@ function CreatePanel({ onCreate, canWrite }: {
           </label>
           {lib && (
             <div>
-              <p className="mb-2 text-xs font-medium text-slate-600">Start from</p>
+              <p className="mb-2 flex items-center text-xs font-medium text-slate-600">Start from<InfoTip id="templates" /></p>
               <TemplatePicker templates={lib.templates} chosen={template} onChoose={(t) => { setTemplate(t); setInputs({}) }} />
             </div>
           )}

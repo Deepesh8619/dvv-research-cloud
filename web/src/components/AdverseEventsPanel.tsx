@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { complianceApi, type AdverseEventHit, type AdverseEventScan } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * Open answers describing a side effect. "Possible" means someone had it — a
@@ -33,7 +34,7 @@ export default function AdverseEventsPanel({ studyId }: { studyId: string }) {
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel" data-testid="adverse-events">
-      <h2 className="font-semibold text-slate-900">Adverse events in open answers</h2>
+      <h2 className="font-semibold text-slate-900">Adverse events in open answers<InfoTip id="adverse_events" /></h2>
       <p className="mt-1 max-w-2xl text-sm text-slate-500">
         {scan.n_open_ends} open questions read across all {scan.n_respondents} interviews, screen-outs and partials
         included.

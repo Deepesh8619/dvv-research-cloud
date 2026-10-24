@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { downloadFile, studiesApi, type StackCheck, type Study, type WaveTrend } from '../api/client'
+import InfoTip from './ui/InfoTip'
 
 /**
  * Other waves or countries of this tracker: what drifted between the files
@@ -40,7 +41,7 @@ export default function TrackerPanel({ study }: { study: Study }) {
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-panel" data-testid="tracker">
-      <h2 className="font-semibold text-slate-900">Waves and countries</h2>
+      <h2 className="font-semibold text-slate-900">Waves and countries<InfoTip id="tracker" /></h2>
       <p className="mt-1 max-w-2xl text-sm text-slate-500">
         Pick the other files of this tracker. Their codes are checked against this one before anything is trended or
         pooled.
