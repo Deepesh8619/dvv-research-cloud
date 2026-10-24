@@ -21,6 +21,14 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-24 — awareness block asks only about brands the person knows (branch feat/awareness-masks)
+
+Consideration, purchase and preference in the Awareness block now list only
+the brands ticked at aided awareness (plus "None of these"), using the
+existing option masks; the mask follows a renumbered source (`AWR_AIDED_2`).
+Checked in the compiler output and in SurveyJS itself (aware of 1 and 3 →
+offered 1, 3 and None).
+
 ## 2026-10-24 — the survey link loads only the survey (branch perf/split-bundle)
 
 The whole app was one 2.5 MB script: a respondent opening a survey link on a
