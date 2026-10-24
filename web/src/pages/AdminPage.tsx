@@ -1,3 +1,6 @@
+import { useSearchParams } from 'react-router-dom'
+import ActivityPage from './ActivityPage'
+import WordingPage from './WordingPage'
 import { useEffect, useState } from 'react'
 import { authApi, User } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -12,7 +15,7 @@ const ROLES = [
   { role: 'Reviewer', desc: 'View-only access to tables and reports; can approve QC gates' },
 ]
 
-export default function AdminPage() {
+function TeamAdmin() {
   const { user: currentUser } = useAuth()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
@@ -194,6 +197,35 @@ export default function AdminPage() {
           ))}
         </div>
       </div>
+    </div>
+  )
+}
+
+
+/** Admin: the team (owner), the app's wording and the activity log (owner, founder). */
+export default function AdminPage() {
+  const { user } = useAuth()
+  const [params, setParams] = useSearchParams()
+  const tabs = [
+    ...(user?.role === 'owner' ? [{ key: 'team', label: 'Team' }] : []),
+    { key: 'wording', label: 'Wording' },
+    { key: 'activity', label: 'Activity' },
+  ]
+  const tab = tabs.find((t) => t.key === params.get('tab'))?.key ?? tabs[0].key
+  return (
+    <div>
+      <nav className="mb-6 flex gap-1 border-b border-slate-200" aria-label="Admin sections">
+        {tabs.map((t) => (
+          <button key={t.key} type="button" onClick={() => setParams({ tab: t.key })}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === t.key
+              ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            {t.label}
+          </button>
+        ))}
+      </nav>
+      {tab === 'team' && <TeamAdmin />}
+      {tab === 'wording' && <WordingPage />}
+      {tab === 'activity' && <ActivityPage />}
     </div>
   )
 }

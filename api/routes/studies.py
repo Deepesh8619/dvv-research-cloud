@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -18,6 +19,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.auth import UserRole, get_current_user, require_role
@@ -858,20 +860,33 @@ def _uncoded_open_ends_payload(study) -> dict:
         datamap = DataMap.from_json(datamap_json)
     except Exception:
         return {}
+    # The questions people wrote answers to, read from the data when it is on disk;
+    # every TEXT column listed uuid, dates and user agents as "not coded".
+    from src.engines.qc.variable_roles import classify_variable, open_end_columns
+
+    parquet = Path(study.excel_path).parent / "data.parquet" if study.excel_path else None
+    if parquet and parquet.exists():
+        import polars as pl
+
+        names = set(open_end_columns(pl.read_parquet(parquet), datamap))
+    else:
+        names = {v.name for v in datamap.variables if v.type == VarType.TEXT
+                 and classify_variable(v.name, v.label or "", v.question_ref)
+                 in ("question", "other_specify")}
     return {
         v.name: {
             "question_var": v.name,
             "label": v.label,
             "note": (
-                "Not coded — this run predates coding persistence or the coding "
-                "backends were unavailable. Re-run the study to code it."
+                "Not coded yet. Use “Code open ends” to build a codeframe and code "
+                "every answer."
             ),
             "codeframe": {"allow_multi": True, "version": 0, "codes": []},
             "summary": {"n_auto_coded": 0, "n_needs_review": 0, "confidence_mean": 0.0},
             "review_queue": [],
         }
         for v in datamap.variables
-        if v.type == VarType.TEXT
+        if v.name in names
     }
 
 
@@ -905,6 +920,115 @@ def get_coding(
         if fallback:
             return fallback
         raise exc
+
+
+def _set_coding_job(db: Session, study_id: str, job: dict) -> None:
+    study = get_study(db, study_id)
+    study.study_metadata = {**(study.study_metadata or {}), "coding_job": job}
+    db.commit()
+
+
+def _run_coding(bind, study_id: str, parquet: Path, datamap: Path, variables: list[str]) -> None:
+    """Background: code the chosen open questions and merge them into coding.json."""
+    import json
+
+    import polars as pl
+    from sqlalchemy.orm import sessionmaker
+
+    from api.db import set_study_artifacts
+    from src.core.models import DataMap
+    from src.engines.coding.runner import code_open_ends
+    from src.engines.qc.discrepancy import completes_only
+
+    db = sessionmaker(bind=bind)()
+    try:
+        dm = DataMap.from_json(datamap.read_text())
+        df, _fielded = completes_only(pl.read_parquet(parquet), dm)
+        _coded, blocks, failed = code_open_ends(df, dm, variables)
+        study = get_study(db, study_id)
+        existing = json.loads(study.coding_json) if getattr(study, "coding_json", None) else {}
+        merged = {k: v for k, v in existing.items() if k not in blocks} | blocks
+        text = json.dumps(merged, indent=1)
+        (parquet.parent / "coding.json").write_text(text)
+        set_study_artifacts(db, study_id, coding_json=text)
+        _set_coding_job(db, study_id, {"state": "done", "variables": variables,
+                                       "coded": sorted(blocks), "failed": failed,
+                                       "finished_at": datetime.now().isoformat()})
+    except Exception as exc:  # recorded for the page; never left "running"
+        logger.error(f"[{study_id}] on-demand coding failed: {exc}")
+        _set_coding_job(db, study_id, {"state": "failed", "variables": variables,
+                                       "error": "Coding stopped: " + str(exc)[:200]})
+    finally:
+        db.close()
+
+
+class CodingRunRequest(BaseModel):
+    variables: list[str] | None = None
+
+
+@router.get("/studies/{study_id}/coding/status")
+def coding_status(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The study's open questions, which are coded, and any coding in progress."""
+    import polars as pl
+
+    from src.core.models import DataMap
+    from src.engines.qc.variable_roles import open_end_columns
+
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    parquet, datamap = _run_artifacts(study, f"Study {study_id}")
+    dm = DataMap.from_json(datamap.read_text())
+    df = pl.read_parquet(parquet)
+    coded = set(json.loads(study.coding_json)) if getattr(study, "coding_json", None) else set()
+    return {
+        "open_ends": [{"variable": n, "question": (dm[n].question_text or dm[n].label or n)[:200],
+                       "n_answers": int(df[n].drop_nulls().len()), "coded": n in coded}
+                      for n in open_end_columns(df, dm)],
+        "job": (study.study_metadata or {}).get("coding_job"),
+    }
+
+
+@router.post("/studies/{study_id}/coding/run", status_code=202)
+def run_coding(
+    study_id: str,
+    body: CodingRunRequest,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Code open questions now, in the background; poll /coding/status. (Owner/Analyst)
+
+    Builds a codeframe from a sample and codes every answer with an open model.
+    """
+    import polars as pl
+
+    from src.core.models import DataMap
+    from src.engines.qc.variable_roles import open_end_columns
+
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    job = (study.study_metadata or {}).get("coding_job") or {}
+    if job.get("state") == "running":
+        raise HTTPException(status_code=409, detail="Coding is already running for this study")
+    parquet, datamap = _run_artifacts(study, f"Study {study_id}")
+    allowed = open_end_columns(pl.read_parquet(parquet), DataMap.from_json(datamap.read_text()))
+    variables = body.variables or allowed
+    unknown = sorted(set(variables) - set(allowed))
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Not open questions: {', '.join(unknown)}")
+    if not variables:
+        raise HTTPException(status_code=422, detail="This study has no open questions to code")
+    _set_coding_job(db, study_id, {"state": "running", "variables": variables,
+                                   "started_at": datetime.now().isoformat(),
+                                   "started_by": user.name})
+    background.add_task(_run_coding, db.get_bind(), study_id, parquet, datamap, variables)
+    return {"state": "running", "variables": variables}
 
 
 @router.patch("/studies/{study_id}/coding/{variable}/{respondent_id}")

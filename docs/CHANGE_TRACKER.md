@@ -21,6 +21,29 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-24 — Open ends in each project; Wording and Activity under Admin (branch feat/open-ends-and-nav)
+
+User asked what Coding, Activity and Wording do and whether they belong. Found:
+Coding listed script columns (uuid, date, markers, user agent) as "open
+questions", each "Not coded"; and coding had never worked on an uploaded
+Decipher export at all — the coder needed a `respondent_id` column the export
+does not have, so every question failed before a model was asked. Studies
+fielded through DVV links were never coded.
+
+- `variable_roles.open_end_columns`: a column respondents wrote in — role and
+  label say so AND most answers have two or more words (so not ZIP codes,
+  timestamps, hidden stores; MAXDIFF_OE kept). Google Ads: 6 real open
+  questions instead of 70+ text columns; TRD1 2, TRD2 3.
+- `coding.runner.code_open_ends`: adds a respondent id when missing; used by
+  the upload pipeline and by on-demand coding. Failures read in words ("no
+  model was reachable; try again in a few minutes"), details in the log.
+- `POST /coding/run` (background; 409 while running) and `GET /coding/status`.
+- A project's **Open ends** tab replaces the Coding page: each open question
+  with its answer count and coded state, "Code N open questions", progress,
+  and the review queue for answers the model was unsure of.
+- Sidebar: Dashboard, Projects, New Project, Admin. Admin has tabs Team
+  (owner), Wording and Activity (owner, founder); the old addresses redirect.
+
 ## 2026-10-23 — cleaning review as triage, with the answers behind each flag (branch feat/cleaning-triage)
 
 User feedback: the cleaning screen was hard to use — the reason defaulted to

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import polars as pl
 
 from src.engines.coding.codeframe import CodeFrame
 from src.engines.coding.coder import batch_code_verbatims, generate_codeframe_from_sample
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -131,3 +134,40 @@ def coding_run_to_artifact(run: CodingRun) -> dict:
             for item in extract_review_queue(run)
         ],
     }
+
+
+def code_open_ends(df: pl.DataFrame, datamap, variables: list[str] | None = None,
+                   min_confidence: float = 0.8) -> tuple[pl.DataFrame, dict, dict[str, str]]:
+    """Code each open question; returns (coded frame, coding.json blocks, failures).
+
+    A respondent id is added when the file has none (a Decipher export doesn't):
+    without it every question failed before the model was asked anything.
+    """
+    from src.engines.qc.variable_roles import open_end_columns
+
+    if "respondent_id" not in df.columns:
+        df = df.with_row_index("respondent_id", offset=1).with_columns(
+            pl.col("respondent_id").cast(pl.Int64))
+    names = variables or open_end_columns(df, datamap)
+    blocks, failed = {}, {}
+    for name in names:
+        var = datamap[name] if name in datamap else None
+        try:
+            run = run_coding_job(df, name, "respondent_id",
+                                 (var.question_text or var.label) if var else name,
+                                 min_confidence=min_confidence)
+        except Exception as exc:  # no model reachable, or nothing to code
+            logger.warning("coding %s failed: %s", name, exc)
+            text = str(exc)
+            failed[name] = ("no answers to code" if "no valid verbatims" in text
+                            else "no model was reachable; try again in a few minutes"
+                            if "backends failed" in text or "unavailable" in text
+                            else "the model's answer could not be used")
+            continue
+        df = run.df_coded.rename({
+            "codes": f"{name}_codes", "coding_confidence": f"{name}_coding_confidence",
+            "coding_reasoning": f"{name}_coding_reasoning",
+            "needs_coding_review": f"{name}_needs_coding_review",
+        })
+        blocks[name] = coding_run_to_artifact(run)
+    return df, blocks, failed

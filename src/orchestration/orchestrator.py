@@ -15,7 +15,6 @@ import polars as pl
 from src.adapters.spss import read_sav
 from src.adapters.tabular import read_tabular
 from src.core.models import DataMap, VarType
-from src.engines.coding.runner import coding_run_to_artifact, run_coding_job
 from src.engines.tabs.runner import deck_to_json, run_tab_plan
 from src.engines.tabs.spec import TableSpec, TabPlan, auto_nets, load_tab_plan
 from src.intake.classify import classify_file
@@ -311,40 +310,15 @@ class StudyOrchestrator:
         # 4. VERBATIM CODING (if any open-ends)
         if on_stage:
             on_stage("coding verbatims")
-        from src.core.models import VarType
-        open_ends = [v for v in datamap.variables if v.type == VarType.TEXT]
-        if open_ends:
-            logger.info(f"[{run_id}] Found {len(open_ends)} open-end questions; auto-coding...")
-            coding_artifacts: dict[str, dict] = {}
-            for var in open_ends:
-                try:
-                    coding_run = run_coding_job(
-                        df,
-                        var.name,
-                        "respondent_id",
-                        var.label,
-                        min_confidence=min_coding_confidence,
-                    )
-                    # batch_code_verbatims adds GENERIC column names (codes,
-                    # coding_confidence, ...) — with 2+ open-ends the second
-                    # run would silently overwrite the first's results, so
-                    # rename them per source variable immediately.
-                    df = coding_run.df_coded.rename(
-                        {
-                            "codes": f"{var.name}_codes",
-                            "coding_confidence": f"{var.name}_coding_confidence",
-                            "coding_reasoning": f"{var.name}_coding_reasoning",
-                            "needs_coding_review": f"{var.name}_needs_coding_review",
-                        }
-                    )
-                    coding_artifacts[var.name] = coding_run_to_artifact(coding_run)
-                    logger.info(
-                        f"[{run_id}] {var.name}: {coding_run.n_auto_coded} auto-coded, "
-                        f"{coding_run.n_needs_review} need review"
-                    )
-                except Exception as e:
-                    logger.error(f"[{run_id}] Coding failed for {var.name}: {e}")
+        from src.engines.coding.runner import code_open_ends
 
+        # Answers people wrote — not uuid, dates or user agents, which used to be
+        # sent to the model one row at a time and listed as "not coded".
+        df, coding_artifacts, failed = code_open_ends(df, datamap,
+                                                      min_confidence=min_coding_confidence)
+        for name, why in failed.items():
+            logger.error(f"[{run_id}] Coding failed for {name}: {why}")
+        if coding_artifacts or failed:
             if coding_artifacts:
                 # Re-persist the parquet WITH the coded columns — it was first
                 # written pre-coding, and tables/navigator read from the file,

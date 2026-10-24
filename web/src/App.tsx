@@ -4,13 +4,10 @@ import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-
 import { AuthProvider } from './auth/AuthContext'
 import { LabelProvider } from './labels/LabelContext'
 import Shell from './components/Shell'
-import WordingPage from './pages/WordingPage'
-import ActivityPage from './pages/ActivityPage'
 import RequireAuth from './components/RequireAuth'
 import RequireRole from './components/RequireRole'
 import { FOUNDER_ROLES, WRITE_ROLES } from './auth/roles'
 import AdminPage from './pages/AdminPage'
-import CodingPage from './pages/CodingPage'
 import DashboardPage from './pages/DashboardPage'
 import FieldingPage from './pages/FieldingPage'
 import LoginPage from './pages/LoginPage'
@@ -57,31 +54,18 @@ export default function App() {
             <Route path="/projects/:id/questionnaire" element={<QuestionnairePage />} />
             <Route path="/projects/:id/builder" element={<SurveyBuilderPage />} />
             <Route path="/projects/:id/fielding" element={<FieldingPage />} />
-            <Route path="/coding" element={<CodingPage />} />
             <Route
               path="/admin"
               element={
-                <RequireRole roles={['owner']}>
+                <RequireRole roles={FOUNDER_ROLES}>
                   <AdminPage />
                 </RequireRole>
               }
             />
-            <Route
-              path="/wording"
-              element={
-                <RequireRole roles={FOUNDER_ROLES}>
-                  <WordingPage />
-                </RequireRole>
-              }
-            />
-            <Route
-              path="/activity"
-              element={
-                <RequireRole roles={FOUNDER_ROLES}>
-                  <ActivityPage />
-                </RequireRole>
-              }
-            />
+            {/* Moved: coding is each project's Open ends tab; wording and activity are Admin tabs. */}
+            <Route path="/coding" element={<Navigate to="/projects" replace />} />
+            <Route path="/wording" element={<Navigate to="/admin?tab=wording" replace />} />
+            <Route path="/activity" element={<Navigate to="/admin?tab=activity" replace />} />
             {/* Legacy routes */}
             <Route path="/upload" element={<Navigate to="/projects/new" replace />} />
             <Route path="/studies" element={<Navigate to="/projects" replace />} />

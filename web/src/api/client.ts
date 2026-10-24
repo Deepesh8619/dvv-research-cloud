@@ -696,8 +696,18 @@ export interface CodingVariable {
 
 export type CodingPayload = Record<string, CodingVariable>
 
+export interface CodingStatus {
+  open_ends: Array<{ variable: string; question: string; n_answers: number; coded: boolean }>
+  job: { state: 'running' | 'done' | 'failed'; variables: string[]; coded?: string[];
+         failed?: Record<string, string>; error?: string } | null
+}
+
 export const codingApi = {
   get: async (studyId: string) => api.get<CodingPayload>(`/studies/${studyId}/coding`),
+  status: async (studyId: string) => api.get<CodingStatus>(`/studies/${studyId}/coding/status`),
+  /** Code open questions in the background; poll status. */
+  run: async (studyId: string, variables?: string[]) =>
+    api.post<{ state: string; variables: string[] }>(`/studies/${studyId}/coding/run`, { variables }),
 
   resolve: async (
     studyId: string,
