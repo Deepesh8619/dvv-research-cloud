@@ -162,10 +162,13 @@ def auto_tab_plan(datamap: DataMap, title: str = "Topline Tables") -> TabPlan | 
     Stubs: every question variable with 2+ codes, with auto T2B/B2B nets and
     means on 5+ point scales. System/paradata columns excluded.
     """
+    # Multi-select options too: DVV's own fielded data types each option column
+    # MULTI (Decipher exports call them SINGLE 0/1), and leaving them out meant
+    # a brand tracker's tables had no aided awareness, consideration or usage.
     singles = [
         v
         for v in datamap.variables
-        if v.type == VarType.SINGLE
+        if v.type in (VarType.SINGLE, VarType.MULTI)
         and v.values
         and len(v.valid_codes()) >= 2
         and not _is_system_variable(v.name)
