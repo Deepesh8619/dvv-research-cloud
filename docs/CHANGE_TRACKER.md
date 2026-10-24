@@ -21,6 +21,21 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-24 — the survey link loads only the survey (branch perf/split-bundle)
+
+The whole app was one 2.5 MB script: a respondent opening a survey link on a
+phone downloaded the analyst app with it. Pages now load when opened
+(`React.lazy` per route, the app frame included), and the respondent page
+imports the one SurveyJS theme it uses instead of all of them.
+
+Measured on the production build (compressed): a respondent downloads
+**469 kB, down from 588 kB**; what remains is mostly SurveyJS itself
+(survey-core is 1.3 MB minified). The login page is ~90 kB instead of 588 kB.
+Checked by serving the production build: the survey link fetches only the
+entry, the respondent page and the survey runtime. Also: the welcome screen
+counted the information screen as a question ("7 questions" against a
+progress bar of 6); it now counts what the progress bar counts.
+
 ## 2026-10-24 — CI, an end-to-end journey test, and multi-selects in the tables (branch chore/ci)
 
 Nothing ran the tests except a person, and nothing exercised the features
