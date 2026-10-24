@@ -790,7 +790,17 @@ export const complianceApi = {
 
 export interface TranslationStatus { lang: string; n_total: number; n_translated: number; n_problems: number }
 
+export interface LibraryField { key: string; label: string; kind: 'text' | 'number' | 'lines' | 'long'; placeholder: string }
+export interface LibraryEntry { id: string; title: string; description: string; inputs: LibraryField[]; modules?: string[] }
+
 export const questionnaireApi = {
+  library: async () => api.get<{ modules: LibraryEntry[]; templates: LibraryEntry[] }>('/questionnaire/library'),
+  /** Add a ready-made block after `afterQid` (or at the end). */
+  addModule: async (studyId: string, module: string, inputs: Record<string, string>, afterQid?: string | null) =>
+    api.post<{ added: string[] }>(`/studies/${studyId}/questionnaire/modules`, { module, inputs, after_qid: afterQid ?? null }),
+  /** Fill an empty questionnaire from a study template. */
+  applyTemplate: async (studyId: string, template: string, inputs: Record<string, string>) =>
+    api.post<{ added: string[] }>(`/studies/${studyId}/questionnaire/template`, { template, inputs }),
   probes: async (studyId: string) =>
     api.get<{ questions: Array<{ qid: string; text: string; probed: boolean }> }>(`/studies/${studyId}/questionnaire/probes`),
   setProbes: async (studyId: string, qids: string[]) =>
