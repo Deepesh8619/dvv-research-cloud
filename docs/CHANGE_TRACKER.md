@@ -33,6 +33,18 @@ override.
 
 ---
 
+## 2026-10-25 — the server drops answers a mask hid (branch feat/mask-enforcement)
+
+A masked list ("Which have you used?" showing only brands heard of) was narrowed
+in the browser only; a page sent by any other client could store a brand the
+respondent was never shown. The answers route now applies the same rule the
+compiler writes into `choicesVisibleIf` — one shared helper, `_mask_terms`, so
+the two cannot drift — and drops the hidden codes (logged). Dropped rather than
+refused, so a disagreement between this check and SurveyJS can never leave a
+real respondent stuck. Write-ins, "None" and options the source never offered
+stay allowed, as in the browser. Not checked server-side yet: grid rows and
+grid sources. Test: `test_an_option_the_mask_hid_is_dropped_on_the_server`
+(fails with the check removed).
 ## 2026-10-25 — a model drafts the blank translations (branch feat/translation-drafts)
 
 Translations → "Draft blanks with a model" fills every string still blank in

@@ -15,6 +15,7 @@ between runs.
 """
 
 import json
+import re
 
 import pytest
 
@@ -59,7 +60,10 @@ def test_extraction_is_reproducible(monkeypatch):
     monkeypatch.setattr(ex, "verify_question", lambda chunk, result: result)
     first = ex.extract_survey_definition(segment_into_questions(golden_blocks()), "golden")
     second = ex.extract_survey_definition(segment_into_questions(golden_blocks()), "golden")
-    assert json.loads(first.to_json()) == json.loads(second.to_json())
+    # The QA record's `ran_at` is a clock reading: two runs a second apart differ.
+    stamp = re.compile(r'"ran_at": "[^"]*"')
+    same = [json.loads(stamp.sub('"ran_at": ""', s.to_json())) for s in (first, second)]
+    assert same[0] == same[1]
 
 
 def test_the_screener_reads_exactly(extracted):

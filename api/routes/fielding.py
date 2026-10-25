@@ -110,7 +110,7 @@ from src.engines.fielding.rotation import order_pages
 from src.engines.fielding.translation import translated
 from src.engines.questionnaire.bipolar import FLIP_ARMS, apply_flip, flipping_questions
 from src.engines.questionnaire.derived import with_derived
-from src.renderers.surveyjs_compiler import compile_to_surveyjs, display_warnings
+from src.renderers.surveyjs_compiler import compile_to_surveyjs, display_warnings, masked_out
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -1088,7 +1088,17 @@ def submit_answers(
         # the session half-answered.
         raise HTTPException(status_code=400, detail=" ".join(over))
 
+    so_far = {**get_session_answers_map(db, session_id), **(body.answers or {})}
     for qid, value in (body.answers or {}).items():
+        hidden = masked_out(survey, qid, value, so_far)
+        if hidden:
+            # An option the mask hid cannot have been ticked in the survey we
+            # served. Dropped, not refused: if this check and the browser ever
+            # disagree, a real respondent must not be stuck on the page.
+            logger.warning(f"[{link.study_id}] {session_id} {qid}: dropped masked-out {hidden}")
+            value = ([v for v in value if v not in hidden] if isinstance(value, list) else None)
+            if value in (None, []):
+                continue
         upsert_respondent_answer(db, session_id, qid, _exclusive_only(survey, qid, value))
     touch_respondent_session(db, session_id, current_page=body.current_page)
 

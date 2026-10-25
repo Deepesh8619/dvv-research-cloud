@@ -1401,6 +1401,46 @@ def test_a_thin_answer_gets_one_recorded_follow_up(client, monkeypatch):
     assert test_client.post(url, json={"qid": "Q3", "answer": "ok"}).status_code == 409
 
 
+def test_an_option_the_mask_hid_is_dropped_on_the_server(client):
+    """A masked list offers only what was picked earlier; an answer naming any
+    other option cannot come from the survey we served, so it is not stored.
+    Write-ins and "None" stay: they belong to this question, not the source."""
+    from api.db import get_session_answers_map
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    survey = _sample_survey("study_f1")
+    brands = [Option(code=1, label="CVS"), Option(code=2, label="Walgreens"),
+              Option(code=3, label="Boots")]
+    survey.questions += [
+        Question(qid="Q8", text="Heard of?", type=QuestionType.MULTI, options=brands),
+        Question(qid="Q9", text="Used?", type=QuestionType.MULTI,
+                 options=[*brands, Option(code=98, label="Another not listed (specify)"),
+                          Option(code=99, label="None of these")],
+                 validation={"techniques": {"masks": [{"mode": "selected", "source_qid": "Q8"}]}}),
+        Question(qid="Q10", text="Use most?", type=QuestionType.SINGLE, options=brands,
+                 validation={"techniques": {"masks": [{"mode": "selected", "source_qid": "Q9"}]}}),
+    ]
+    survey.blocks[0].question_ids += ["Q8", "Q9", "Q10"]
+    _make_questionnaire(sf, survey=survey)
+    token = _create_link(test_client).json()["token"]
+    sid = test_client.get(f"/api/r/{token}").json()["session_id"]
+    post = lambda answers: test_client.post(  # noqa: E731
+        f"/api/r/{token}/sessions/{sid}/answers", json={"answers": answers, "current_page": 1})
+
+    assert post({"Q1": 30, "Q2": 1, "Q8": [1, 2]}).status_code == 200
+    assert post({"Q9": [1, 3, 98]}).status_code == 200
+    assert post({"Q10": 3}).status_code == 200
+    with sf() as db:
+        stored = get_session_answers_map(db, sid)
+    assert stored["Q9"] == [1, 98]
+    assert "Q10" not in stored
+
+    assert post({"Q10": 1}).status_code == 200
+    with sf() as db:
+        assert get_session_answers_map(db, sid)["Q10"] == 1
+
+
 def test_a_model_drafts_the_blanks_in_the_background_and_says_what_to_check(client, monkeypatch):
     import json
     from types import SimpleNamespace
