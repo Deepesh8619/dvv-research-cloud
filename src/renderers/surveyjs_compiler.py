@@ -220,6 +220,68 @@ def _choices_visible_if(mask: dict, by_qid: dict[str, Question]) -> str | None:
     return f"{{{against}}} {operator} {{item}}"
 
 
+def _mask_terms(question: Question, source: Question | None, own: list) -> tuple[list, dict, bool]:
+    """(exempt codes, {own code: source code}, whether the lists code differently).
+
+    An answer the source never offered — "98 Another brand not listed (Specify)"
+    under an awareness mask — cannot have been chosen there, so it is exempt. A
+    write-in or "None" belongs to THIS question even when the source has the same
+    code. Lists that code a brand differently (Bubble Q6 by its own 1..10 list,
+    Q2a alphabetically) are matched by name. Shared by the compiler and the
+    server's answer check, so the two can never disagree about what was shown.
+    """
+    listed = (source.options or source.rows or []) if source else []
+    to_own = mask_code_map(question, source) if source is not None else {}
+    to_source = {v: k for k, v in to_own.items()}
+    mapped = any(k != v for k, v in to_own.items())
+    known = set(to_source) if mapped else {o.code for o in listed}
+    exempt = [o.code for o in own if o.code not in known or o.open_other
+              or is_terminal_option(o.label) or _WRITE_IN.search(o.label or "")]
+    return exempt, to_source, mapped
+
+
+def masked_out(survey: SurveyDefinition, qid: str, value: Any, answers: dict) -> list:
+    """Codes in `value` that the question's mask hid from this respondent.
+
+    Mirrors what `choicesVisibleIf` shows, for choice lists masked by a single-
+    or multi-choice source. Empty when the source is unanswered: nothing to
+    judge by, and the compiled survey would not have shown the question at all.
+    """
+    # ponytail: grid rows and grid sources are not checked server-side; add when a
+    # grid mask is seen being bypassed.
+    by_qid = {q.qid: q for q in survey.questions}
+    question = by_qid.get(qid)
+    if question is None or not question.options or value in (None, "", []):
+        return []
+    for mask in _techniques(question).get("masks") or []:
+        mode = mask.get("mode")
+        if mode == "full_list":
+            continue
+        source = _find(by_qid, mask.get("exclude_qid") if mode == "list_except"
+                       else mask.get("source_qid"))
+        if source is None:
+            continue
+        if source.type not in (QuestionType.SINGLE, QuestionType.MULTI):
+            return []
+        picked = answers.get(source.qid)
+        if picked in (None, "", []):
+            return []
+        picked = set(picked) if isinstance(picked, list) else {picked}
+        exempt, to_source, mapped = _mask_terms(
+            question, _find(by_qid, mask.get("source_qid")), question.options)
+        if not mapped and mode not in ("selected", None):
+            exempt = []
+        keeps = mode == "selected"
+        hidden = []
+        for code in value if isinstance(value, list) else [value]:
+            if code in exempt or (mapped and code not in to_source):
+                continue
+            if (to_source.get(code, code) in picked) != keeps:
+                hidden.append(code)
+        return hidden
+    return []
+
+
 def _techniques(question: Question) -> dict:
     return (question.validation or {}).get("techniques") or {}
 
@@ -533,23 +595,11 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
                 # source has the same code: "Another brand not listed" in a
                 # carousel was shown only to people who ticked Other at Q2a.
                 source = _find(by_qid, mask.get("source_qid"))
+                own = question.options if masked == "choicesVisibleIf" else (question.rows or [])
+                exempt, to_source, mapped = _mask_terms(question, source, own)
                 listed = (source.options or source.rows or []) if source else []
                 offered = {o.code for o in listed}
-                own = question.options if masked == "choicesVisibleIf" else (question.rows or [])
-                exempt = [
-                    o.code for o in own
-                    if o.code not in offered or o.open_other or is_terminal_option(o.label)
-                    or _WRITE_IN.search(o.label or "")
-                ]
-                # Lists that code a brand differently (Bubble Q6 by its own
-                # 1..10 list, Q2a alphabetically) are matched by name: each
-                # choice tests the source's code for the same brand.
-                to_own = mask_code_map(question, source) if source is not None else {}
-                to_source = {v: k for k, v in to_own.items()}
-                if any(k != v for k, v in to_own.items()):
-                    exempt = [o.code for o in own if o.code not in to_source
-                              or o.open_other or is_terminal_option(o.label)
-                              or _WRITE_IN.search(o.label or "")]
+                if mapped:
                     for item in element["choices" if masked == "choicesVisibleIf" else "rows"]:
                         if item.get("value") in to_source and item.get("value") not in exempt:
                             item["visibleIf"] = condition.replace(
