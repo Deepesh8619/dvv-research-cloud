@@ -203,3 +203,47 @@ def score(flags: list[dict]) -> dict[str, Any]:
 
 def scores(flags_by_key: dict[str, list[dict]]) -> dict[str, dict[str, Any]]:
     return {key: score(found) for key, found in flags_by_key.items()}
+
+
+_LABELS = {
+    "pasted_answer": "Pasted answer", "ai_text": "Reads like AI text",
+    "too_fast_to_read": "Faster than reading", "duplicate": "Duplicate answers",
+    "trap_failed": "Failed a trap", "speeder": "Speeder", "fraud_signal": "Fraud signal",
+    "few_keystrokes": "Few keystrokes", "gibberish": "Gibberish", "straightliner": "Straight-lined",
+    "inconsistent": "Inconsistent answers",
+}
+
+
+def signals(flags: list[dict], near_duplicate_of: str | None = None) -> dict[str, Any]:
+    """The evidence panel's view of `score`: the same number the list ranks by,
+    with each reason named and weighted. A near-identical open end found by the
+    vector index is one more `duplicate` reason, unless one is already there."""
+    found = list(flags)
+    if near_duplicate_of and not any(f.get("check") == "duplicate" for f in found):
+        found.append({"check": "duplicate",
+                      "detail": f"an open answer is almost identical to {near_duplicate_of}'s"})
+    result = score(found)
+    seen: dict[str, int] = {}
+    named = []
+    for f in found:
+        if f.get("check") not in WEIGHTS:
+            continue
+        n = seen.get(f["check"], 0)
+        seen[f["check"]] = n + 1
+        named.append({"key": f["check"], "label": _LABELS.get(f["check"], f["check"]),
+                      "weight": WEIGHTS[f["check"]] if n == 0 else WEIGHTS[f["check"]] // 2,
+                      "detail": f.get("detail", "")})
+    return {"score": result["score"], "band": result["band"], "signals": named}
+
+
+def near_duplicate_partners(db, study_id: str) -> dict[str, str]:
+    """{session id: another session id with a near-identical open end}; {} with no index."""
+    from src.platform.vectors import near_duplicates
+
+    out: dict[str, str] = {}
+    for a, b, _s in near_duplicates(db, study_id):
+        sa, sb = a.split(":", 1)[-1], b.split(":", 1)[-1]
+        if sa != sb:
+            out.setdefault(sa, sb)
+            out.setdefault(sb, sa)
+    return out

@@ -110,7 +110,8 @@ class EvidenceRequest(BaseModel):
     flags: list[dict]
 
 
-def _evidence_job(parquet: Path, datamap: Path, key: str, flags: list[dict]):
+def _evidence_job(parquet: Path, datamap: Path, key: str, flags: list[dict],
+                  near_duplicate_of: str | None = None):
     import polars as pl
 
     from src.core.models import DataMap
@@ -123,7 +124,7 @@ def _evidence_job(parquet: Path, datamap: Path, key: str, flags: list[dict]):
     keys = respondent_keys(df)
     if key not in keys:
         return None
-    return evidence(df, dm, keys.index(key), flags)
+    return evidence(df, dm, keys.index(key), flags, near_duplicate_of)
 
 
 @router.post("/studies/{study_id}/cleaning/respondents/{key}/evidence")
@@ -145,7 +146,10 @@ def respondent_evidence(
     parquet, datamap = _run_artifacts(study, f"Study {study_id}")
     flags = [{"check": str(f.get("check", "")), "detail": str(f.get("detail", ""))[:500]}
              for f in body.flags[:50]]
-    found = run_heavy_detached(db, _evidence_job, parquet, datamap, key, flags)
+    from src.engines.qc.authenticity import near_duplicate_partners
+
+    partner = near_duplicate_partners(db, study_id).get(key)  # {} when no verbatim index
+    found = run_heavy_detached(db, _evidence_job, parquet, datamap, key, flags, partner)
     if found is None:
         raise HTTPException(status_code=404, detail="No such respondent in this study")
     return found

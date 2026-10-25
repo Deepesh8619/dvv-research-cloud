@@ -125,6 +125,12 @@
     "why": "Each is a known sign of a fake or careless respondent — but none is proof on its own.",
     "how": "Filter by a check to review all of one kind; read the evidence before deciding."
   },
+  "cleaning_authenticity": {
+    "title": "Authenticity score",
+    "what": "1.00 means nothing looked wrong; each warning sign (pasted answer, very fast, straight-lined grid, open end matching another respondent) lowers it.",
+    "why": "One number to order your review, with the reasons beside it so you never trust it blindly.",
+    "how": "Read the listed signals, then decide. The weights are a first setting and will be tuned on reviewed studies."
+  },
   "cleaning_lock": {
     "title": "Lock cleaning",
     "what": "Freezes the decisions and makes a cleaned version of the data, which the tables and deliverables then use.",
