@@ -1061,6 +1061,10 @@ export interface DryRunReport {
   questions_never_shown: string[]
   display_issues: Array<{ qid: string; kind: string; detail: string }>
   unenforced_routing: string[]
+  /** Logic X-ray data. `to` is "END" for the last question. */
+  transitions?: Array<{ from: string; to: string; n: number }>
+  paths?: Array<{ qids: string[]; n: number; disposition: string }>
+  exits?: Array<{ qid: string; disposition: string; n: number }>
 }
 
 /** What actually happened in the field. */
