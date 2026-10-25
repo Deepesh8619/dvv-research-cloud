@@ -6,9 +6,14 @@ import type { TabTable } from '../components/CrosstabTable'
 // frontend on Vercel, backend on Render), there's no dev proxy, so
 // VITE_API_URL must point at the backend's real URL — set at build time,
 // baked into the static bundle (standard Vite env var convention).
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api',
-})
+export const API_BASE = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api'
+const api = axios.create({ baseURL: API_BASE })
+
+/** The same Authorization header the axios client sends, for code that must use fetch. */
+export function authHeaders(): Record<string, string> {
+  const token = localStorage.getItem('authToken')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
 
 /**
  * Download a file through the API client rather than a plain <a href>.

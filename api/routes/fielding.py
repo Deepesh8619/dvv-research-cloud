@@ -111,9 +111,18 @@ from src.engines.fielding.rotation import order_pages
 from src.engines.fielding.translation import translated
 from src.engines.questionnaire.bipolar import FLIP_ARMS, apply_flip, flipping_questions
 from src.engines.questionnaire.derived import with_derived
+from src.platform.events import emit
 from src.renderers.surveyjs_compiler import compile_to_surveyjs, display_warnings, masked_out
 
 logger = logging.getLogger(__name__)
+
+
+def _emit_event(db, study_id: str, kind: str, session_id: str) -> None:
+    """Tell the control room; a failure here must never fail the respondent."""
+    try:
+        emit(db, study_id, kind, {"session_id": session_id})
+    except Exception:
+        logger.warning("[%s] could not emit %s", study_id, kind, exc_info=True)
 router = APIRouter()
 
 # Lucid/Cint status codes (key decision #7).
@@ -1149,6 +1158,7 @@ def submit_answers(
                 f"{question.qid}.terminate_if"
                 + (f" (dropped {dropped} post-screen-out answer(s))" if dropped else "")
             )
+            _emit_event(db, link.study_id, "respondent.terminate", session_id)
             return _with_redirect(
                 {"terminated": True, "status_code": STATUS_TERMINATE}, link, session
             )
@@ -1260,6 +1270,7 @@ def complete_survey(
 
     set_respondent_session_status(db, session_id, STATUS_COMPLETE)
     session = get_respondent_session(db, session_id)
+    _emit_event(db, link.study_id, "respondent.complete", session_id)
     return _with_redirect(
         {"status_code": STATUS_COMPLETE, "complete": True}, link, session
     )
