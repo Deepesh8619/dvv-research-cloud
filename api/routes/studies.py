@@ -213,6 +213,11 @@ def _run_orchestration_job(study_id: str, client_name: str, file_path: Path) -> 
             logger.info(f"[{study_id}] Data map stored ({len(datamap_json)} bytes)")
 
         if result.excel_deck_path:
+            from src.platform import ledger
+
+            for deck in (result.excel_deck_path, result.pptx_deck_path):
+                if deck and Path(deck).is_file():
+                    ledger.issue(job_db, study_id, deck)
             update_study_paths(
                 job_db,
                 study_id,
@@ -1058,6 +1063,10 @@ def stack_download(
     folder = Path(tempfile.mkdtemp())
     path = folder / f"{study_id}_stacked.sav"
     write_sav(data.to_pandas(), datamap, path)
+    from src.platform import ledger
+
+    ledger.issue(db, study_id, path, user.id)
+    db.commit()
     # Respondent data: gone from disk once sent.
     return FileResponse(path, filename=path.name, media_type="application/octet-stream",
                         background=BackgroundTask(shutil.rmtree, folder, ignore_errors=True))

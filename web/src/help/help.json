@@ -298,5 +298,11 @@
     "what": "Builds the data file, tables, report draft and decks from the completed interviews in one go.",
     "why": "One step instead of five, and every deliverable is built from the same data.",
     "how": "Press the button and confirm. It replaces earlier deliverables; interviewing is not stopped."
+  },
+  "ledger": {
+    "title": "Study ledger",
+    "what": "A tamper-evident chain of everything recorded about this study. Each entry carries a fingerprint of the one before it.",
+    "why": "If anyone edits or removes an earlier entry, the chain breaks at that entry, so history can be checked rather than trusted. It also lists every file the study has issued.",
+    "how": "Read the strip for the chain's state. To check a file you received, choose it under Check a file you received; it is compared with the files this study issued."
   }
 }

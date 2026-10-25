@@ -1772,6 +1772,27 @@ export const activityApi = {
     }),
 }
 
+export interface LedgerState {
+  ok: boolean
+  n: number
+  head: string
+  first_bad_seq: number | null
+  unchained?: number
+}
+
+export const ledgerApi = {
+  verify: async (studyId: string) => api.get<LedgerState>(`/studies/${studyId}/ledger/verify`),
+
+  checkFile: async (studyId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<{ issued: boolean; at: string | null; name: string | null }>(
+      `/studies/${studyId}/ledger/check-file`,
+      form,
+    )
+  },
+}
+
 // --- Copilot ---
 
 /** Best human-readable message from an API error (the server's `detail` first). */
