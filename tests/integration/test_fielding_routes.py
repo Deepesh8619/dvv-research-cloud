@@ -1399,3 +1399,35 @@ def test_a_thin_answer_gets_one_recorded_follow_up(client, monkeypatch):
     db.commit()
     db.close()
     assert test_client.post(url, json={"qid": "Q3", "answer": "ok"}).status_code == 409
+
+
+def test_a_model_drafts_the_blanks_in_the_background_and_says_what_to_check(client, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from src.ai import router as ai_router
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf, survey=_sample_survey("study_f1"))
+
+    def model(prompt, schema, timeout=120):
+        items = json.loads(prompt.rsplit("\n\n", 1)[1])
+        return SimpleNamespace(content={"translations": [
+            {"key": i["key"], "text": "अनुवाद " + i["text"]} for i in items]})
+    monkeypatch.setattr(ai_router, "run_private", model)
+
+    url = "/api/studies/study_f1/questionnaire/translations/hi/draft"
+    assert test_client.post(url).status_code == 202
+    body = test_client.get("/api/studies/study_f1/questionnaire/translations").json()
+    assert body["draft_job"]["state"] == "done", body["draft_job"]
+    assert body["languages"][0]["n_drafts"] == body["draft_job"]["drafted"] > 0
+    assert test_client.post(
+        "/api/studies/study_f1/questionnaire/translations/not a code/draft").status_code == 422
+
+    def down(prompt, schema, timeout=120):
+        raise ai_router.BackendUnavailable("none", config_error=True)
+    monkeypatch.setattr(ai_router, "run_private", down)
+    test_client.post("/api/studies/study_f1/questionnaire/translations/ta/draft")
+    job = test_client.get("/api/studies/study_f1/questionnaire/translations").json()["draft_job"]
+    assert job["state"] == "failed" and job["error"].startswith("No draft")

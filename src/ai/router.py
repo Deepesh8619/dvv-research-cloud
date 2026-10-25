@@ -729,6 +729,22 @@ def _run_one(
     return AIResponse(content=content, backend=backend, model=model)
 
 
+def run_private(prompt: str, schema: dict, timeout: int = 120) -> AIResponse:
+    """For a client's own documents: Bedrock (in region, paid, not trained on), else a
+    local model when no cloud key is set. Never a free tier — Groq and Hugging Face
+    are skipped even when their keys are present."""
+    keys = llm_key_presence()
+    if keys.get("BEDROCK_API_KEY"):
+        chain = [{"backend": "bedrock", "model": bedrock_model()}]
+    elif not any(keys.values()):
+        chain = [{"backend": "ollama", "model": _EXTRACTION_MODELS["ollama"]}]
+    else:
+        raise BackendUnavailable(
+            "No private model is set up: client text goes only to Bedrock or a local model.",
+            config_error=True)
+    return _run_chain(chain, prompt, schema, timeout)
+
+
 def _run_chain(
     chain: list[dict[str, str]], prompt: str, schema: dict, timeout: int
 ) -> AIResponse:

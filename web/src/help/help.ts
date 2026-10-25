@@ -52,6 +52,12 @@ export const HELP = {
     why: 'So the total is the number you actually quote.',
     how: 'Optional; added once to the sample cost.',
   },
+  translationDraft: {
+    title: 'Model drafts',
+    what: 'A model writes a first translation of every string that is still blank.',
+    why: 'Translators check a draft faster than they write from nothing. Their own translations are never overwritten.',
+    how: 'Type the language code and press Draft. Drafts that lose a piping token are refused. Download the sheet: drafted rows say "model draft — check". Only Bedrock or a local model is used — client text never goes to a free tier.',
+  },
   translations: {
     title: 'Translations',
     what: 'Field the same questionnaire in other languages from one master.',

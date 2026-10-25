@@ -21,6 +21,21 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-25 — a model drafts the blank translations (branch feat/translation-drafts)
+
+Translations → "Draft blanks with a model" fills every string still blank in
+that language, in the background. Only a private model is used: Bedrock, or a
+local model when no keys are set; with only free-tier keys it refuses
+(`router.run_private`) — client text never goes to Groq/HF/Cerebras. A person's
+translation is never overwritten, and a draft that loses a piping token is
+refused and left blank. Drafted rows carry "model draft — check" in the sheet's
+new `check` column and stay counted as drafts until the translator changes the
+text or clears the mark. Tests: `test_translation` (draft, marks, private
+route), `test_fielding_routes` (route end to end, failure message), panel test.
+Not yet run against Bedrock itself.
+
+---
+
 ## 2026-10-25 — one broken link no longer takes down the supplier report (branch fix/supplier-report-resilience)
 
 The supplier scorecard built every link's report in one go, so a single link
@@ -49,7 +64,7 @@ is: what it is, what it does, why, and how. `components/ui/InfoTip.tsx` is a
 small (i) that opens on hover, keyboard focus or tap (phones), closes on
 Escape, a click elsewhere or scroll, and is drawn above the page so scrolling
 lists and clipped cards cannot cut it off. Every text is in `help/help.ts`
-(What it is / Why / How), 38 entries, tested to have all three.
+(What it is / Why / How), 39 entries, tested to have all three.
 
 Placed on: the Data bar; Questionnaire checks (consent and notice, quote and
 each of its inputs, translations, follow-up probes, data vs questionnaire);
