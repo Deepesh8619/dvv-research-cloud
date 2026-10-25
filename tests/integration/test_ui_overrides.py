@@ -266,3 +266,16 @@ def test_activity_is_kept_out_of_the_change_log(client):
     changes = c.get("/api/corrections/audit").json()["entries"]
     assert all(not e["entity"].startswith("activity.") for e in changes)
     assert any(e["entity"] == "ui_override" for e in changes)
+
+
+def test_every_info_tip_is_editable_and_an_edit_reaches_every_user(client):
+    """Each (i) tip's four parts are registered with the wording it ships with."""
+    import json
+    from pathlib import Path
+
+    tips = json.loads((Path(__file__).resolve().parents[2] / "web/src/help/help.json").read_text())
+    by_key = {k["key"]: k for k in UI_KEYS}
+    for tip_id, tip in tips.items():
+        for part in ("title", "what", "why", "how"):
+            assert by_key[f"help.{tip_id}.{part}"]["default"] == tip[part]
+            assert len(tip[part]) <= MAX_OVERRIDE_CHARS

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { HELP, type HelpId } from '../../help/help'
+import { useLabel } from '../../labels/LabelContext'
 import { InfoIcon } from '../Icons'
 
 /**
@@ -17,7 +18,14 @@ import { InfoIcon } from '../Icons'
 const WIDTH = 320
 
 export default function InfoTip({ id, align = 'left' }: { id: HelpId; align?: 'left' | 'right' }) {
-  const help = HELP[id]
+  const shipped = HELP[id]
+  // Founders can reword any tip from Admin → Wording; the shipped text shows until then.
+  const help = {
+    title: useLabel(`help.${id}.title`, shipped.title),
+    what: useLabel(`help.${id}.what`, shipped.what),
+    why: useLabel(`help.${id}.why`, shipped.why),
+    how: useLabel(`help.${id}.how`, shipped.how),
+  }
   const [at, setAt] = useState<{ top: number; left: number } | null>(null)
   const tipId = useId()
   const button = useRef<HTMLButtonElement>(null)
