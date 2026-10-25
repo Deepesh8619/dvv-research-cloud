@@ -1,0 +1,406 @@
+<title>DVV Build Blueprint</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column for the plan; mockups break out to a wider frame drawn in the product's own slate/teal UI language. */
+:root{
+  --paper:#F2F4F3; --sheet:#FFFFFF; --ink:#14211F; --muted:#56635F; --rule:#D5DCD9;
+  --accent:#0F6E62; --accent-soft:#DCEFEB;
+  --ok:#0F6E62; --warn:#B07A0E; --bad:#A8442F; --warn-soft:#F6ECD6; --bad-soft:#F5E1DB;
+  --ui-bg:#F8FAFC; --ui-panel:#FFFFFF; --ui-line:#E2E8F0; --ui-text:#0F172A; --ui-dim:#64748B; --ui-primary:#0F6E62;
+  --display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --body:"Source Sans 3",ui-sans-serif,system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0F1716; --sheet:#16211F; --ink:#E4ECE9; --muted:#9AAAA5; --rule:#2A3936;
+  --accent:#4FC2AF; --accent-soft:#183A35; --ok:#4FC2AF; --warn:#E0B04F; --bad:#E58A73; --warn-soft:#3A2F17; --bad-soft:#3D221C;
+  --ui-bg:#0B1220; --ui-panel:#111A2B; --ui-line:#1F2A3D; --ui-text:#E2E8F0; --ui-dim:#94A3B8; --ui-primary:#4FC2AF; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#0F1716; --sheet:#16211F; --ink:#E4ECE9; --muted:#9AAAA5; --rule:#2A3936;
+  --accent:#4FC2AF; --accent-soft:#183A35; --ok:#4FC2AF; --warn:#E0B04F; --bad:#E58A73; --warn-soft:#3A2F17; --bad-soft:#3D221C;
+  --ui-bg:#0B1220; --ui-panel:#111A2B; --ui-line:#1F2A3D; --ui-text:#E2E8F0; --ui-dim:#94A3B8; --ui-primary:#4FC2AF; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font:17px/1.6 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:40px 80px}
+main{max-width:1040px;margin:0 auto;display:grid;gap:64px}
+.col{max-width:780px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;line-height:1.15;margin:0}
+h1{font-size:clamp(2rem,5vw,3rem);letter-spacing:-.02em}
+h2{font-size:1.6rem} h3{font-size:1.1rem}
+p{margin:0;max-width:70ch}
+section{display:grid;gap:18px}
+.eyebrow{font:600 .72rem/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.lede{font-size:1.12rem;color:var(--muted)}
+ul,ol{margin:0;padding-left:1.2em;display:grid;gap:6px;max-width:70ch}
+code,.mono{font-family:var(--mono);font-size:.84em}
+nav.toc{display:flex;flex-wrap:wrap;gap:8px}
+nav.toc a{font:600 .78rem var(--mono);color:var(--accent);text-decoration:none;border:1px solid var(--rule);padding:6px 10px;background:var(--sheet)}
+nav.toc a:focus-visible,nav.toc a:hover{border-color:var(--accent)}
+
+/* Mockup frame: the product's UI */
+.screen{background:var(--ui-bg);border:1px solid var(--ui-line);border-radius:10px;overflow:hidden;color:var(--ui-text);font:13px/1.45 var(--body)}
+.bar{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--ui-line);background:var(--ui-panel);flex-wrap:wrap}
+.bar b{font:700 13px var(--display)}
+.crumb{color:var(--ui-dim)}
+.pill{font:600 11px var(--mono);padding:3px 8px;border-radius:999px;background:var(--accent-soft);color:var(--ui-primary)}
+.pill.w{background:var(--warn-soft);color:var(--warn)} .pill.b{background:var(--bad-soft);color:var(--bad)}
+.btn{font:600 12px var(--body);padding:5px 10px;border-radius:6px;border:1px solid var(--ui-line);background:var(--ui-panel);color:var(--ui-text)}
+.btn.p{background:var(--ui-primary);border-color:var(--ui-primary);color:var(--ui-panel)}
+.rail{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:2px;padding:10px 14px;background:var(--ui-panel);border-bottom:1px solid var(--ui-line)}
+.rail div{font:600 11px var(--mono);padding:6px 4px;border-top:3px solid var(--ui-line);color:var(--ui-dim);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rail .d{border-color:var(--ok);color:var(--ui-text)} .rail .n{border-color:var(--warn);color:var(--ui-text)}
+.body{display:grid;gap:12px;padding:14px}
+.split{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:12px}
+.panel{background:var(--ui-panel);border:1px solid var(--ui-line);border-radius:8px;padding:12px;display:grid;gap:8px;align-content:start;min-width:0}
+.panel h4{margin:0;font:700 12px var(--display);text-transform:uppercase;letter-spacing:.06em;color:var(--ui-dim)}
+.dim{color:var(--ui-dim)}
+.svgwrap{overflow-x:auto}
+svg text{font-family:var(--mono)}
+@media (max-width:760px){.split{grid-template-columns:1fr}.rail{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.thread{display:grid;gap:0;border-left:2px solid var(--ui-primary);margin-left:6px}
+.knot{position:relative;padding:4px 0 10px 16px}
+.knot::before{content:"";position:absolute;left:-7px;top:8px;width:12px;height:12px;border-radius:50%;background:var(--ui-panel);border:2px solid var(--ui-primary)}
+.knot b{display:block;font-size:12px}
+.knot span{color:var(--ui-dim);font-size:12px}
+table.ui{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+table.ui td,table.ui th{padding:5px 6px;border-bottom:1px solid var(--ui-line);text-align:left}
+table.ui th{color:var(--ui-dim);font:600 10px var(--mono);text-transform:uppercase}
+td.hit{background:var(--accent-soft);outline:2px solid var(--ui-primary);outline-offset:-2px}
+.gauge{height:8px;background:var(--ui-line);border-radius:4px;overflow:hidden}
+.gauge i{display:block;height:100%;background:var(--ui-primary)}
+.gauge.w i{background:var(--warn)}
+.chip{font:600 10px var(--mono);vertical-align:super;padding:1px 4px;border-radius:3px;background:var(--accent-soft);color:var(--ui-primary)}
+.chip.x{background:var(--bad-soft);color:var(--bad)}
+.timeline{display:flex;gap:2px;align-items:flex-end;height:46px}
+.timeline i{flex:1;background:var(--ui-primary);opacity:.75;border-radius:2px 2px 0 0}
+.timeline i.paste{background:var(--bad);opacity:1}
+.timeline i.fast{background:var(--warn);opacity:1}
+
+.note{font-size:.92rem;color:var(--muted)}
+.tw{overflow-x:auto;background:var(--sheet)}
+table.plan{border-collapse:collapse;width:100%;font-size:.9rem;min-width:720px}
+table.plan th,table.plan td{text-align:left;vertical-align:top;padding:9px 11px;border-bottom:1px solid var(--rule)}
+table.plan th{font:600 .68rem/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+table.plan td:first-child{font-family:var(--mono);font-size:.82rem;white-space:nowrap}
+.mock{font:.78rem/1.45 var(--mono);background:var(--sheet);border:1px solid var(--rule);padding:14px;overflow-x:auto;white-space:pre;color:var(--ink);margin:0}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.grid2>div{background:var(--sheet);padding:16px 18px;display:grid;gap:8px;min-width:0}
+@media (max-width:700px){.grid2{grid-template-columns:1fr}}
+.wave{display:grid;gap:6px;background:var(--sheet);padding:16px 18px;border-left:4px solid var(--accent)}
+.wave.later{border-left-color:var(--rule)}
+</style>
+
+<main>
+<header class="col" style="display:grid;gap:16px">
+  <span class="eyebrow">DVV Research Cloud · build blueprint · 25 Oct 2026</span>
+  <h1>DVV Build Blueprint</h1>
+  <p class="lede">How the next version should look and work, how it is built underneath (graph, vectors, jobs, workflows), and the queue of tasks the builder agents take from. It follows on from the Provable Research Plan.</p>
+  <nav class="toc" aria-label="Sections">
+    <a href="#screens">Screens</a><a href="#arch">Architecture</a><a href="#graph">Study graph</a><a href="#vectors">Vectors</a><a href="#jobs">Jobs &amp; workflows</a><a href="#agents">Agents</a><a href="#queue">Build queue</a>
+  </nav>
+</header>
+
+<!-- ============ SCREENS ============ -->
+<section id="screens">
+  <div class="col" style="display:grid;gap:12px">
+    <span class="eyebrow">1 · What the user sees</span>
+    <h2>Six screens, one idea: every number shows its proof</h2>
+    <p>These screens keep the app's current look: slate on white, the teal primary, and cards with a light shadow. Two things are new everywhere. A <b>lifecycle rail</b> along the top of each project shows where the study is, and every number can be clicked to open its <b>thread</b>.</p>
+  </div>
+
+  <!-- Screen A: Project home with rail -->
+  <h3>A · Project home: the lifecycle rail and what needs you</h3>
+  <div class="screen" role="img" aria-label="Project home mockup">
+    <div class="bar"><b>DVV</b><span class="crumb">Projects / Bubble skincare U&amp;A · wave 2</span><span style="flex:1"></span><span class="pill w">2 need you</span><button class="btn">Share</button></div>
+    <div class="rail"><div class="d">Brief ✓</div><div class="d">Questionnaire ✓</div><div class="d">Proof ✓</div><div class="n">Field 212/300</div><div class="n">Verify 9 to review</div><div>Data</div><div>Tables</div><div>Insight</div></div>
+    <div class="body">
+      <div class="split">
+        <div class="panel"><h4>Needs you</h4>
+          <div>⚑ <b>Supplier B quality dropped</b> <span class="dim">· 31% of today's completes flagged · pausing saves about ₹14,200</span> <button class="btn">Review</button></div>
+          <div>⚑ <b>9 respondents to check</b> <span class="dim">· pasted open ends, 2× reading speed</span> <button class="btn">Open triage</button></div>
+        </div>
+        <div class="panel"><h4>On track</h4>
+          <div class="dim">Logic certificate issued 18 Oct · 0 dead ends · 41 paths</div>
+          <div class="dim">Finish forecast: Tue 29 Oct (deadline Thu 31)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="note">Each stage on the rail is a button that opens that stage. Its colour comes from real state (done, needs attention, not started), never from where the user is. The "Needs you" list is the same queue the job system writes to.</p>
+
+  <!-- Screen B: Logic X-ray -->
+  <h3>B · Logic X-ray: the questionnaire as a route map</h3>
+  <div class="screen" role="img" aria-label="Logic X-ray mockup">
+    <div class="bar"><b>Proof</b><span class="crumb">1,000 simulated respondents · 41 paths</span><span style="flex:1"></span><span class="pill">0 dead ends</span><span class="pill b">1 unreachable</span><button class="btn p">Issue certificate</button></div>
+    <div class="body"><div class="split">
+      <div class="panel svgwrap">
+        <svg viewBox="0 0 560 230" width="100%" style="min-width:480px" aria-hidden="true">
+          <g stroke="var(--ui-primary)" fill="none" stroke-linecap="round">
+            <path d="M30 115 H120" stroke-width="10"/>
+            <path d="M120 115 C160 115 160 60 200 60 H330" stroke-width="7"/>
+            <path d="M120 115 H330" stroke-width="3"/>
+            <path d="M330 60 C370 60 370 115 410 115 H530" stroke-width="7"/>
+            <path d="M330 115 H530" stroke-width="3"/>
+          </g>
+          <path d="M120 115 C150 115 150 190 190 190" stroke="var(--bad)" stroke-width="4" fill="none" stroke-dasharray="5 4"/>
+          <g fill="var(--ui-panel)" stroke="var(--ui-text)" stroke-width="2">
+            <circle cx="30" cy="115" r="9"/><circle cx="120" cy="115" r="9"/><circle cx="200" cy="60" r="8"/><circle cx="270" cy="60" r="8"/>
+            <circle cx="330" cy="60" r="8"/><circle cx="230" cy="115" r="8"/><circle cx="330" cy="115" r="8"/><circle cx="440" cy="115" r="8"/><circle cx="530" cy="115" r="9"/>
+          </g>
+          <circle cx="400" cy="190" r="8" fill="var(--bad-soft)" stroke="var(--bad)" stroke-width="2" stroke-dasharray="3 2"/>
+          <rect x="182" y="180" width="18" height="18" fill="var(--bad)"/>
+          <g fill="var(--ui-text)" font-size="10">
+            <text x="18" y="140">S1</text><text x="108" y="140">S2 age</text><text x="188" y="45">Q2a</text><text x="258" y="45">Q2b</text><text x="318" y="45">Q3</text>
+            <text x="218" y="140">Q4</text><text x="318" y="140">Q5</text><text x="428" y="140">Q6</text><text x="512" y="140">End</text>
+            <text x="206" y="194">exit: under 18 · 14%</text>
+          </g>
+          <text x="370" y="214" font-size="10" fill="var(--bad)">Q7 · nobody reaches it</text>
+          <text x="210" y="80" font-size="9" fill="var(--ui-dim)">uses brand · 68%</text>
+          <text x="210" y="108" font-size="9" fill="var(--ui-dim)">non-user · 18%</text>
+        </svg>
+      </div>
+      <div class="panel"><h4>Q7 is unreachable</h4>
+        <div>Shown only if <code>Q5 = 4</code>, but Q5 has codes 1–3.</div>
+        <div class="dim">Line thickness = share of simulated respondents. Dashed = screen-out.</div>
+        <div><button class="btn p">Fix in builder</button> <button class="btn">Mark intended</button></div>
+      </div>
+    </div></div>
+  </div>
+  <p class="note">Questions are stations and routing is track. A thicker line means more simulated respondents took that path, and screen-outs are exits. The certificate cannot be issued while anything is red. The layout is computed with dagre in the browser, and the path counts come from the dry run.</p>
+
+  <!-- Screen C: Study Thread -->
+  <h3>C · Study Thread: any number, back to its source</h3>
+  <div class="screen" role="img" aria-label="Study Thread mockup">
+    <div class="bar"><b>Tables</b><span class="crumb">T12 · Brand used most, by age</span><span style="flex:1"></span><button class="btn">Export</button></div>
+    <div class="body"><div class="split">
+      <div class="panel">
+        <table class="ui"><thead><tr><th></th><th>Total</th><th>18–34</th><th>35–54</th><th>55+</th></tr></thead>
+        <tbody><tr><td>Brand A</td><td>29%</td><td class="hit">34%</td><td>27%</td><td>22%</td></tr>
+        <tr><td>Brand B</td><td>24%</td><td>21%</td><td>26%</td><td>25%</td></tr>
+        <tr><td>Base</td><td class="dim">612</td><td class="dim">212</td><td class="dim">250</td><td class="dim">150</td></tr></tbody></table>
+      </div>
+      <div class="panel"><h4>Why 34%</h4>
+        <div class="thread">
+          <div class="knot"><b>72 of 212 respondents</b><span>weighted 71.9 ÷ 211.4</span></div>
+          <div class="knot"><b>Base: women and men 18–34 who completed</b><span>240 completes − 28 removed (19 speeders, 9 straight-liners) · <a href="#screens">see who</a></span></div>
+          <div class="knot"><b>Q9 "Which do you use most?"</b><span>shown if Q8 includes the brand (mask) · single choice</span></div>
+          <div class="knot"><b>Weight v2</b><span>age × region · efficiency 0.91</span></div>
+          <div class="knot"><b>Data file 7c1e…</b><span>uploaded 12 Oct by Vishal · 640 rows</span></div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+  <p class="note">The thread is a walk upstream in the study graph from the cell. "What would this change?" is the same walk downstream, and the builder shows it before a question is edited after field.</p>
+
+  <!-- Screen D: Respondent timeline -->
+  <h3>D · Verify people: one respondent's session, with its evidence</h3>
+  <div class="screen" role="img" aria-label="Respondent timeline mockup">
+    <div class="bar"><b>Verify</b><span class="crumb">Respondent 4417 · Supplier B</span><span style="flex:1"></span><span class="pill b">Authenticity 0.22</span><button class="btn">Keep · K</button><button class="btn p">Remove · R</button></div>
+    <div class="body"><div class="split">
+      <div class="panel"><h4>Time per question, against reading time</h4>
+        <div class="timeline" aria-hidden="true">
+          <i style="height:60%"></i><i style="height:40%"></i><i class="fast" style="height:12%"></i><i class="fast" style="height:10%"></i><i style="height:55%"></i><i class="paste" style="height:90%"></i><i class="fast" style="height:8%"></i><i style="height:35%"></i><i class="paste" style="height:85%"></i><i class="fast" style="height:9%"></i>
+        </div>
+        <div class="dim"><span style="color:var(--warn)">■</span> faster than anyone can read · <span style="color:var(--bad)">■</span> text pasted, not typed</div>
+      </div>
+      <div class="panel"><h4>Evidence</h4>
+        <div>Q14 open end: 412 characters, <b>1 keystroke</b> (pasted)</div>
+        <div>Q22 answer is 0.97 similar to respondent 4391's, same supplier</div>
+        <div class="dim">Grid Q11 in 6 s for 12 rows</div>
+      </div>
+    </div></div>
+  </div>
+  <p class="note">This extends today's triage list. The score is a sum of named signals, each one shown, so no reviewer has to trust a number they can't explain. The near-duplicate check uses the vector store.</p>
+
+  <!-- Screen E: Control room -->
+  <h3>E · Fieldwork control room</h3>
+  <div class="screen" role="img" aria-label="Control room mockup">
+    <div class="bar"><b>Field</b><span class="crumb">live · updated 4 s ago</span><span style="flex:1"></span><span class="pill">212 / 300</span><span class="pill">LOI 14 min</span><span class="pill w">IR 38%</span></div>
+    <div class="body"><div class="split">
+      <div class="panel"><h4>Quotas</h4>
+        <div>Women <span class="dim">· 118 / 150</span><div class="gauge"><i style="width:79%"></i></div></div>
+        <div>18–34 <span class="dim">· 61 / 120</span><div class="gauge w"><i style="width:51%"></i></div></div>
+        <div>North <span class="dim">· 70 / 75</span><div class="gauge"><i style="width:93%"></i></div></div>
+      </div>
+      <div class="panel"><h4>Suppliers</h4>
+        <table class="ui"><thead><tr><th></th><th>Done</th><th>Flagged</th><th>Cost</th></tr></thead>
+        <tbody><tr><td>A</td><td>140</td><td>6%</td><td>₹49k</td></tr><tr><td>B</td><td>72</td><td style="color:var(--bad)">31%</td><td>₹25k</td></tr></tbody></table>
+        <button class="btn">Pause B (needs your confirmation)</button>
+      </div>
+    </div></div>
+  </div>
+  <p class="note">The server pushes updates over server-sent events (SSE), with no polling. Actions only ever appear as a confirmation card, the way the copilot already works.</p>
+
+  <!-- Screen F: Cited report -->
+  <h3>F · Cited insight: each sentence shows its numbers</h3>
+  <div class="screen" role="img" aria-label="Cited report mockup">
+    <div class="bar"><b>Insight</b><span class="crumb">Draft by Bedrock · checked by code</span><span style="flex:1"></span><span class="pill">11 cited</span><span class="pill b">1 refused</span><button class="btn p">Export deck</button></div>
+    <div class="body"><div class="split">
+      <div class="panel">
+        <p>Brand A leads among 18–34s at 34%<span class="chip">T12·c3</span>, significantly ahead of 55+ (22%)<span class="chip">T12·c5 · p&lt;.05</span>.</p>
+        <p>Price is the top reason for switching<span class="chip">T20·r1</span>.</p>
+        <p style="text-decoration:line-through;color:var(--ui-dim)">Most users are loyal for over five years.<span class="chip x">no cell</span></p>
+      </div>
+      <div class="panel"><h4>Refused</h4><div>"Over five years" matches no table. Add a tenure table or remove the claim.</div></div>
+    </div></div>
+  </div>
+  <p class="note">The model only drafts. The checker is code: every number in a sentence must match a cited cell (within rounding) and every comparison must have a significance result, or the sentence is refused.</p>
+</section>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section id="arch" class="col">
+  <span class="eyebrow">2 · How it is built</span>
+  <h2>Architecture: one Postgres, four new layers</h2>
+  <p>The new pieces all live in the Postgres DVV already runs: a graph of the study, vectors through the <code>pgvector</code> extension, a job queue and workflows, and an event stream. That means no new services to run, back up or secure at each client's site. Each layer sits behind a small Python interface, so it could move to Neo4j or Qdrant later by changing one file, if a measurement ever says Postgres is too slow.</p>
+<pre class="mermaid">
+flowchart LR
+  UI[React app<br/>rail · thread · x-ray · control room] -->|REST + SSE| API[FastAPI routes]
+  API --> ENG[Engines<br/>questionnaire · fielding · qc · tabs · methods]
+  API --> JOBS[(jobs + workflow_runs)]
+  W[Worker process<br/>python -m src.platform.worker] -->|claim SKIP LOCKED| JOBS
+  W --> ENG
+  ENG --> G[(graph_nodes / graph_edges)]
+  ENG --> V[(project_chunks + pgvector)]
+  ENG --> EV[(events)]
+  EV -->|SSE| UI
+  W --> AI[Bedrock / local model<br/>private only]
+  subgraph Postgres
+    JOBS
+    G
+    V
+    EV
+  end
+</pre>
+  <p class="note">In tests and on a laptop, the same code runs on SQLite. The graph uses recursive SQL that both databases support. Vector search falls back to today's dot product in Python. The job worker claims jobs with a plain update instead of <code>SKIP LOCKED</code>.</p>
+  <div class="mock">src/platform/            new package, shared by every engine
+  jobs.py                enqueue(), claim(), complete(), fail(), retry with backoff
+  worker.py              python -m src.platform.worker — loop, heartbeat, graceful stop
+  workflows.py           Workflow / Step definitions, run_workflow(), resume after crash
+  graph.py               upsert_node(), link(), lineage(), impact()
+  vectors.py             VectorStore protocol; PgVectorStore, NumpyStore
+  events.py              emit(study_id, kind, data); SSE stream reader
+src/workflows/           the study's real workflows, declared, not coded as calls
+  field_close.py  qa_certificate.py  verify_respondents.py  cited_report.py
+api/routes/platform.py   GET /jobs/{id}, GET /studies/{id}/events (SSE),
+                         GET /studies/{id}/graph/lineage?node=, …/impact?node=</div>
+</section>
+
+<!-- ============ GRAPH ============ -->
+<section id="graph" class="col">
+  <span class="eyebrow">3 · Graph database</span>
+  <h2>The study graph</h2>
+  <p>Every object that can explain a number becomes a node, and each "comes from" becomes an edge. Two queries cover most of what the screens need. <b>Lineage</b> walks upstream from a node (why is this cell 34%?). <b>Impact</b> walks downstream (what changes if I edit Q9?).</p>
+  <div class="mock">graph_nodes  id · study_id · kind · ref · label · props(json) · version · created_at
+graph_edges  id · study_id · src · dst · kind · props(json) · created_at
+             unique (study_id, src, dst, kind); index (study_id, dst), (study_id, src)
+
+node kinds   brief · hypothesis · question · option · variable · derived_rule
+             data_file · cleaning_rule · cleaning_batch · weight · table · cell
+             finding · sentence · correction · learned_rule · supplier · link
+edge kinds   asks(question→variable)   routes_to   masks   pipes   derives
+             measured_by(hypothesis→question)   loaded_from(variable→data_file)
+             filtered_by(cell→cleaning_batch)   weighted_by(cell→weight)
+             computed_from(cell→variable)   cites(sentence→cell)
+             corrected_by(question→correction)  learned_from(learned_rule→correction)</div>
+  <ul>
+    <li><b>Who writes it:</b> engines write as they work. Approving the questionnaire writes question, option and variable nodes. A table run writes cell nodes, but only for cells someone opens or cites, so the graph doesn't grow to millions of rows.</li>
+    <li><b>Respondents are not nodes.</b> A cleaning batch node keeps the list of removed IDs in its props.</li>
+    <li><b>Queries:</b> recursive CTEs, depth-limited to 12, which run the same way on Postgres and SQLite.</li>
+  </ul>
+</section>
+
+<!-- ============ VECTORS ============ -->
+<section id="vectors" class="col">
+  <span class="eyebrow">4 · Vector database</span>
+  <h2>Vectors: pgvector behind the store that already exists</h2>
+  <p><code>src/engines/rag/store.py</code> already indexes questions and verbatims, and already guards against stale text and mixed embedding models. What changes is where the vectors live: a <code>vector(768)</code> column with an HNSW index in production, used through one <code>VectorStore</code> interface.</p>
+  <div class="grid2">
+    <div><h3>What it is used for</h3><ul>
+      <li>Copilot search over a project (exists)</li>
+      <li>Near-duplicate open ends across respondents, for screen D</li>
+      <li>Answers that read like a language model: similarity to a set of known model outputs</li>
+      <li>Reusing corrections: "a question like this was corrected before"</li>
+      <li>Norms: matching a new question to past studies' questions</li>
+    </ul></div>
+    <div><h3>Rules it keeps</h3><ul>
+      <li>Embeddings come only from the local model (<code>nomic-embed-text</code>) or Bedrock, never a free tier</li>
+      <li>One embedding model per index; a change of model means a rebuild</li>
+      <li>The Postgres image changes to <code>pgvector/pgvector:pg16</code>. It is the same major version, so the existing data volume works unchanged.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============ JOBS ============ -->
+<section id="jobs" class="col">
+  <span class="eyebrow">5 · Orchestration</span>
+  <h2>Jobs and workflows</h2>
+  <p>Background work runs today in FastAPI <code>BackgroundTasks</code> (coding, translation drafts). If the server restarts, those jobs are lost, and they can't be retried or seen. They move to a job table with a separate worker. A <b>workflow</b> is a named list of steps with dependencies, and each step runs as a job. That makes every run resumable and visible on the rail.</p>
+  <div class="mock">jobs           id · kind · study_id · payload(json) · state(queued|running|done|failed|cancelled)
+               attempts · max_attempts · run_after · locked_by · heartbeat_at
+               result(json) · error · workflow_run_id · step · created_by · created_at
+workflow_runs  id · workflow · study_id · state · inputs(json) · started_at · finished_at
+events         id · study_id · kind · data(json) · created_at       (feeds SSE, kept 30 days)
+
+claim:   UPDATE jobs SET state='running', locked_by=:w, heartbeat_at=now()
+         WHERE id = (SELECT id FROM jobs WHERE state='queued' AND run_after<=now()
+                     ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *
+retry:   failed with attempts &lt; max → queued, run_after = now() + 30s·2^attempts
+reaper:  running with heartbeat older than 5 min → queued again (worker died)</div>
+  <div class="grid2">
+    <div><h3>field_close</h3><p class="note">Runs when the deadline passes or the quota is full.</p><ol><li>build data file</li><li>verify respondents (scores)</li><li>apply approved cleaning</li><li>run the tab plan</li><li>advanced methods</li><li>draft cited report</li></ol></div>
+    <div><h3>qa_certificate</h3><p class="note">The paid QA service: a Word file in, a certificate out.</p><ol><li>extract the questionnaire</li><li>expert checks</li><li>simulate 1,000 respondents</li><li>path coverage</li><li>render the certificate PDF</li></ol></div>
+    <div><h3>verify_respondents</h3><ol><li>paradata features</li><li>near-duplicate open ends (vectors)</li><li>score and rank</li><li>write the triage list, and an event for "needs you"</li></ol></div>
+    <div><h3>learn_from_correction</h3><ol><li>store the correction (graph node)</li><li>propose a literal rule</li><li>dry-run the rule on the last 20 studies</li><li>a founder approves it, then it goes live</li></ol></div>
+  </div>
+  <p class="note">The product keeps its rule of <b>one planner calling engines</b>. The copilot reads the graph and vectors and starts workflows, and it acts only through confirmation cards. The many agents are on the build side, not in the product.</p>
+</section>
+
+<!-- ============ AGENTS ============ -->
+<section id="agents" class="col">
+  <span class="eyebrow">6 · Who builds it</span>
+  <h2>Builder agents</h2>
+  <p>The agent definitions live in <code>.claude/agents/</code> in the repo. Opus plans and reviews, and Sonnet builds against a precise task card. No builder agent commits: the orchestrator runs the full test suites, ruff and the build, checks the result in the browser, and only then opens the PR. A builder's own report that something works is never taken as proof.</p>
+  <div class="tw"><table class="plan">
+    <thead><tr><th>Agent</th><th>Model</th><th>Owns</th><th>Never does</th></tr></thead>
+    <tbody>
+      <tr><td>platform-builder</td><td>sonnet</td><td>src/platform, migrations, worker, SSE</td><td>UI, engine logic</td></tr>
+      <tr><td>engine-builder</td><td>sonnet</td><td>src/engines/*, src/workflows/*</td><td>new dependencies or services</td></tr>
+      <tr><td>ui-builder</td><td>sonnet</td><td>web/src, following the mockups above</td><td>new UI libraries without a task saying so</td></tr>
+      <tr><td>test-verifier</td><td>sonnet</td><td>tests that fail before the fix; runs the suites and pastes the raw output</td><td>edits to production code</td></tr>
+      <tr><td>reviewer</td><td>opus</td><td>reads the diff against the task card; reports what is missing or over-built</td><td>writes code</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ QUEUE ============ -->
+<section id="queue">
+  <div class="col" style="display:grid;gap:12px">
+    <span class="eyebrow">7 · Build queue</span>
+    <h2>Tasks, in waves</h2>
+    <p>Each wave's tasks run in parallel, each in its own worktree under <code>~/dev</code>. The full task cards, with files, functions, acceptance tests and dependencies, are in <code>docs/BUILD_QUEUE.md</code>.</p>
+  </div>
+  <div class="wave"><h3>Wave 1 · Foundations (started now)</h3>
+    <ul><li><b>F1</b> Job queue, worker and workflow runner. Agent: platform-builder.</li>
+    <li><b>F2</b> Study graph store with lineage and impact queries. Agent: platform-builder.</li>
+    <li><b>F3</b> The VectorStore interface, pgvector backend and Compose image change. Agent: platform-builder.</li></ul></div>
+  <div class="wave later"><h3>Wave 2 · Wiring (after wave 1 merges)</h3>
+    <ul><li><b>F4</b> Move coding and translation drafts onto the queue; add the events table and SSE route.</li>
+    <li><b>G1</b> Graph writers: questionnaire approval, and cell provenance from table runs.</li>
+    <li><b>X1</b> Path coverage in the dry run.</li>
+    <li><b>A1</b> Paradata features from export columns (keystrokes, paste, timing).</li></ul></div>
+  <div class="wave later"><h3>Wave 3 · Screens</h3>
+    <ul><li><b>R0</b> The lifecycle rail and "Needs you" (screen A).</li>
+    <li><b>X2</b> Logic X-ray and the certificate (B).</li>
+    <li><b>T1</b> The Study Thread drawer (C).</li>
+    <li><b>A2</b> The authenticity score and session timeline (D).</li>
+    <li><b>C1</b> The control room (E).</li></ul></div>
+  <div class="wave later"><h3>Wave 4 · Insight and learning</h3>
+    <ul><li><b>R1</b> The citation checker.</li>
+    <li><b>R2</b> The cited report writer (F).</li>
+    <li><b>K1</b> Corrections for cleaning and table specs.</li>
+    <li><b>N1</b> Norms from past studies.</li>
+    <li><b>W1</b> The field_close and qa_certificate workflows, end to end.</li></ul></div>
+  <p class="note col">Running alongside every wave, and only the founders can do it: field one real study with an outside analyst. That study is the test for whether the screens above earn their place.</p>
+</section>
+</main>
