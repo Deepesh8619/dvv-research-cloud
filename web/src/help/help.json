@@ -137,6 +137,12 @@
     "why": "Coded answers can be counted and tabbed like any other question.",
     "how": "“Code open questions” builds a codeframe from a sample and codes every answer. Answers the model is unsure of appear below for you to accept or correct."
   },
+  "control_room": {
+    "title": "Control room",
+    "what": "Live fieldwork at a glance: completes against target, quota fill, interview length, incidence and each supplier.",
+    "why": "Problems in field (a full quota, a supplier sending poor respondents) are cheapest to fix the day they start.",
+    "how": "It updates by itself when a respondent finishes or is screened out, and at least every 30 seconds. “Updated” shows how fresh it is."
+  },
   "suppliers": {
     "title": "Sample suppliers",
     "what": "One row per live link: who supplies it, progress against target, quality, and what you owe them.",

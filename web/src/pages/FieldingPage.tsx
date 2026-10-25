@@ -11,6 +11,7 @@ import {
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import DryRunPanel from '../components/DryRunPanel'
+import ControlRoom from '../components/ControlRoom'
 import FieldReportPanel from '../components/FieldReportPanel'
 import LiveResponsesPanel from '../components/LiveResponsesPanel'
 import Preflight from '../components/review/Preflight'
@@ -917,6 +918,8 @@ export default function FieldingPage() {
       {links && links.length === 0 && !loadError && (
         <p className="text-sm text-slate-400">No fielding links yet.</p>
       )}
+
+      {links && links.some((l) => !l.is_test) && <ControlRoom studyId={studyId!} links={links} />}
 
       {links && links.some((l) => !l.is_test) && <SuppliersPanel studyId={studyId!} canWrite={canWrite} />}
 

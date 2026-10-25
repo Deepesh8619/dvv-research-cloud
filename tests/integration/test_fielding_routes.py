@@ -1474,3 +1474,32 @@ def test_a_model_drafts_the_blanks_in_the_background_and_says_what_to_check(clie
     drain(sf)
     job = test_client.get("/api/studies/study_f1/questionnaire/translations").json()["draft_job"]
     assert job["state"] == "failed" and job["error"].startswith("No draft")
+
+
+def test_complete_and_terminate_emit_events_and_failure_does_not_block(client, monkeypatch):
+    from src.platform.events import since
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    token = _create_link(test_client).json()["token"]
+    done = test_client.get(f"/api/r/{token}").json()["session_id"]
+    test_client.post(f"/api/r/{token}/sessions/{done}/complete")
+    out = test_client.get(f"/api/r/{token}").json()["session_id"]
+    test_client.post(f"/api/r/{token}/sessions/{out}/answers", json={"answers": {"Q1": 15}})
+
+    db = sf()
+    evs = since(db, "study_f1", 0)
+    db.close()
+    assert [(e["kind"], e["data"]["session_id"]) for e in evs] == [
+        ("respondent.complete", done),
+        ("respondent.terminate", out),
+    ]
+
+    def boom(*a, **k):
+        raise RuntimeError("log is down")
+
+    monkeypatch.setattr("api.routes.fielding.emit", boom)
+    s3 = test_client.get(f"/api/r/{token}").json()["session_id"]
+    r = test_client.post(f"/api/r/{token}/sessions/{s3}/complete")
+    assert r.json()["complete"] is True
