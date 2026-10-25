@@ -648,6 +648,45 @@ class GraphEdgeDB(Base):
     props = Column(Text, default="{}")  # json
     created_at = Column(String)
 
+# --- F1 ---
+class JobDB(Base):
+    """One unit of background work. Lives in the database so a restart loses nothing."""
+
+    __tablename__ = "jobs"
+
+    id = Column(String, primary_key=True, index=True)  # job_<hex12>
+    kind = Column(String)
+    study_id = Column(String, nullable=True, index=True)
+    payload = Column(Text)  # json
+    state = Column(String, index=True)  # queued | running | done | failed | cancelled
+    attempts = Column(Integer, default=0)
+    max_attempts = Column(Integer, default=3)
+    run_after = Column(String)  # ISO UTC; not claimable before this
+    locked_by = Column(String, nullable=True)
+    heartbeat_at = Column(String, nullable=True)
+    result = Column(Text, nullable=True)  # json
+    error = Column(Text, nullable=True)
+    workflow_run_id = Column(String, nullable=True, index=True)
+    step = Column(String, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(String)
+    finished_at = Column(String, nullable=True)
+
+
+class WorkflowRunDB(Base):
+    """One run of a multi-step workflow; its steps are rows in `jobs`."""
+
+    __tablename__ = "workflow_runs"
+
+    id = Column(String, primary_key=True, index=True)  # wfr_<hex12>
+    workflow = Column(String)
+    study_id = Column(String, nullable=True, index=True)
+    state = Column(String)  # running | done | failed | cancelled
+    inputs = Column(Text)  # json
+    started_at = Column(String)
+    finished_at = Column(String, nullable=True)
+    error = Column(Text, nullable=True)
+
 
 def active_rules_for_profile(db, profile_slug: str) -> list[str]:
     """Ordered active rule texts for one profile — the prompt-ready rule set.

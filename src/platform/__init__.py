@@ -1,1 +1,1 @@
-"""Platform layer: jobs, workflows, study graph, vectors, events."""
+"""DVV platform layer: durable jobs, a worker and a workflow runner."""
