@@ -15,6 +15,7 @@ from typing import Any
 import polars as pl
 
 from src.core.models import DataMap
+from src.engines.qc.paradata import row_paradata
 from src.engines.qc.respondents import MIN_GRID_ITEMS, _find_duration_column, _grid_groups
 
 # Decipher writes a piped label as script: ${"Not at all Compelling1" if (...) else ...}
@@ -70,6 +71,9 @@ def evidence(df: pl.DataFrame, datamap: DataMap, row: int, flags: list[dict]) ->
     duration = _find_duration_column(df, datamap)
     seconds = record.get(duration) if duration else None
     median = df[duration].median() if duration else None
-    return {"items": items,
-            "seconds": float(seconds) if isinstance(seconds, int | float) else None,
-            "median_seconds": float(median) if isinstance(median, int | float) else None}
+    out = {"items": items,
+           "seconds": float(seconds) if isinstance(seconds, int | float) else None,
+           "median_seconds": float(median) if isinstance(median, int | float) else None}
+    if (para := row_paradata(df, row)) is not None:
+        out["paradata"] = para
+    return out
