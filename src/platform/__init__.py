@@ -1,1 +1,1 @@
-"""DVV platform layer: durable jobs, a worker and a workflow runner."""
+"""DVV platform layer: durable jobs and workflows, the study graph, vector search."""
