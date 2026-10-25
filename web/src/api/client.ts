@@ -788,7 +788,8 @@ export const complianceApi = {
     api.get<AdverseEventScan>(`/studies/${studyId}/compliance/adverse-events`),
 }
 
-export interface TranslationStatus { lang: string; n_total: number; n_translated: number; n_problems: number }
+export interface TranslationStatus { lang: string; n_total: number; n_translated: number; n_problems: number; n_drafts?: number }
+export interface TranslationJob { state: 'running' | 'done' | 'failed'; lang: string; drafted?: number; refused?: number; remaining?: number; error?: string }
 
 export interface LibraryField { key: string; label: string; kind: 'text' | 'number' | 'lines' | 'long'; placeholder: string }
 export interface LibraryEntry { id: string; title: string; description: string; inputs: LibraryField[]; modules?: string[] }
@@ -822,7 +823,11 @@ export const questionnaireApi = {
     api.put<{ questions: Array<{ qid: string; text: string; probed: boolean }> }>(
       `/studies/${studyId}/questionnaire/probes`, { qids }),
   translations: async (studyId: string) =>
-    api.get<{ n_strings: number; languages: TranslationStatus[] }>(`/studies/${studyId}/questionnaire/translations`),
+    api.get<{ n_strings: number; languages: TranslationStatus[]; draft_job?: TranslationJob | null }>(
+      `/studies/${studyId}/questionnaire/translations`),
+  /** A private model (Bedrock or local, never a free tier) drafts the blanks, in the background. */
+  draftTranslation: async (studyId: string, lang: string) =>
+    api.post(`/studies/${studyId}/questionnaire/translations/${encodeURIComponent(lang)}/draft`),
   /** Take back a filled sheet; blanks and broken piping tokens come back as problems. */
   uploadTranslation: async (studyId: string, lang: string, file: File) => {
     const form = new FormData()

@@ -1710,10 +1710,13 @@ def create_quota_cell(
     db: Session, fielding_link_id: str, name: str, condition_json: str, limit: int
 ) -> "QuotaCellDB":
     """Create one quota cell (count starts at 0)."""
+    import time
     from uuid import uuid4
 
     cell = QuotaCellDB(
-        id=f"quota_{uuid4().hex[:8]}",
+        # Time-prefixed so ids sort in creation order: list_quota_cells orders by
+        # id and the panel shows cells in the order they were planned.
+        id=f"quota_{time.time_ns():020d}_{uuid4().hex[:6]}",
         fielding_link_id=fielding_link_id,
         name=name,
         condition_json=condition_json,
