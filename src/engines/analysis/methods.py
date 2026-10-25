@@ -7,7 +7,9 @@ same data file as the tables, deterministically (numpy, no model):
   best and worst, and (best - worst) / times shown. Reads Decipher's layout
   (`<q>_<n>best`, `<q>_<n>worst`, the items shown in `MD_Items_<n>`) and DVV's
   own (`<q>_s<n>_best`). Without the items shown, the score is per respondent
-  and says so. Hierarchical-Bayes utilities are not attempted.
+  and says so. With them, an aggregate best-worst logit also gives each item a
+  utility and a share of preference (one model for the whole sample;
+  Hierarchical-Bayes per-respondent utilities are not attempted).
 - **TURF** — which set of k options reaches the most respondents (anyone
   choosing at least one), exhaustively while that is cheap, greedily beyond.
 - **Van Westendorp** — the four price questions' curves and their crossings:
@@ -65,6 +67,7 @@ def maxdiff_scores(df: pl.DataFrame, datamap: DataMap, exercise: str) -> dict[st
     shown: dict[int, int] = {}
     shown_known = all(f"MD_Items_{n}" in df.columns for n in cols)
     answered = set()
+    tasks: list[tuple[list[int], int, int]] = []  # (items shown, chosen, +1 best / -1 worst)
     for n, c in cols.items():
         b = _codes(df[c["best"]]) if "best" in c else [None] * df.height
         w = _codes(df[c["worst"]]) if "worst" in c else [None] * df.height
@@ -77,8 +80,14 @@ def maxdiff_scores(df: pl.DataFrame, datamap: DataMap, exercise: str) -> dict[st
                 best[b[i]] = best.get(b[i], 0) + 1
             if w[i] is not None:
                 worst[w[i]] = worst.get(w[i], 0) + 1
-            for item in _SHOWN.findall(lists[i] or ""):
-                shown[int(item)] = shown.get(int(item), 0) + 1
+            seen = [int(item) for item in _SHOWN.findall(lists[i] or "")]
+            for item in seen:
+                shown[item] = shown.get(item, 0) + 1
+            if b[i] in seen:
+                tasks.append((seen, b[i], 1))
+            rest = [x for x in seen if x != b[i]]
+            if w[i] in rest and len(rest) > 1:
+                tasks.append((rest, w[i], -1))
     n_resp = len(answered)
     items = sorted(set(labels) | set(best) | set(worst) | set(shown))
     rows = []
@@ -88,11 +97,62 @@ def maxdiff_scores(df: pl.DataFrame, datamap: DataMap, exercise: str) -> dict[st
         rows.append({"item": item, "label": labels.get(item, str(item)), "best": b, "worst": w,
                      "shown": shown.get(item) if shown_known else None,
                      "score": round((b - w) / base, 3) if base else None})
-    rows.sort(key=lambda r: -(r["score"] if r["score"] is not None else -9))
+    utilities = _best_worst_logit(tasks, items) if shown_known and tasks else None
+    if utilities:
+        total = sum(math.exp(u) for u in utilities.values())
+        for r in rows:
+            u = utilities.get(r["item"])
+            r["utility"] = round(u, 3) if u is not None else None
+            r["share"] = round(100 * math.exp(u) / total, 1) if u is not None else None
+        rows.sort(key=lambda r: -(r["utility"] if r["utility"] is not None else -99))
+    else:
+        rows.sort(key=lambda r: -(r["score"] if r["score"] is not None else -9))
     return {"exercise": exercise, "n_respondents": n_resp, "n_screens": len(cols),
             "basis": ("per time shown" if shown_known
                       else "per respondent (items shown not recorded)"),
+            "model": "aggregate best-worst logit" if utilities else None,
             "items": rows}
+
+
+def _best_worst_logit(tasks: list[tuple[list[int], int, int]], items: list[int],
+                      ridge: float = 0.01, iterations: int = 50) -> dict[int, float] | None:
+    """Maximum-likelihood utilities for best (u) and worst (-u) choices.
+
+    Best is a pick from the screen; worst a pick from what was left. Newton steps
+    on the concave log-likelihood; a small ridge keeps an item that was always
+    picked best finite. Centred to mean zero, so a utility reads against the
+    average item. None when the fit does not settle.
+    """
+    index = {item: k for k, item in enumerate(items)}
+    width = max(len(t[0]) for t in tasks)
+    alt = np.full((len(tasks), width), -1)
+    for t, (seen, _chosen, _sign) in enumerate(tasks):
+        alt[t, :len(seen)] = [index[x] for x in seen]
+    chosen = np.array([index[c] for _s, c, _g in tasks])
+    sign = np.array([g for _s, _c, g in tasks], dtype=float)
+    real = alt >= 0
+    safe = np.where(real, alt, 0)
+    beta = np.zeros(len(items))
+    for _ in range(iterations):
+        v = np.where(real, sign[:, None] * beta[safe], -np.inf)
+        p = np.exp(v - v.max(axis=1, keepdims=True))
+        p /= p.sum(axis=1, keepdims=True)
+        grad = -ridge * beta
+        np.add.at(grad, chosen, sign)
+        np.add.at(grad, safe[real], -(sign[:, None] * p)[real])
+        hess = -ridge * np.eye(len(items))
+        np.add.at(hess, (safe[real], safe[real]), -p[real])
+        both = real[:, :, None] & real[:, None, :]
+        rows_, cols_ = np.broadcast_arrays(safe[:, :, None], safe[:, None, :])
+        np.add.at(hess, (rows_[both], cols_[both]), (p[:, :, None] * p[:, None, :])[both])
+        step = np.linalg.solve(hess, grad)
+        beta -= step
+        if np.abs(step).max() < 1e-8:
+            break
+    else:
+        return None
+    beta -= beta.mean()
+    return {item: float(beta[k]) for item, k in index.items()}
 
 
 def option_columns(df: pl.DataFrame, question: str) -> list[str]:
