@@ -14,20 +14,19 @@ Two properties matter more than the retrieval quality:
 * **It is never mixed.** Vectors from different makers mean nothing to each
   other, so each row records what made it, and a change of maker rebuilds.
 
-Search is a dot product over one project's rows in Python. A questionnaire is
-hundreds of questions, not millions of documents.
-`ponytail: brute-force scan; move to pgvector if a project ever gets large.`
+Rows are written and searched through `src.platform.vectors.get_store()`:
+pgvector on Postgres when it is installed, a numpy dot product otherwise.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from src.engines.rag.embeddings import embed, similarity
+from src.engines.rag.embeddings import embed
+from src.platform.vectors import get_store
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +112,12 @@ def ensure_index(db, study_id: str, survey: Any, force: bool = False) -> dict:
 
     vectors, model = embed([c["text"] for c in chunks])
     now = datetime.now(UTC).isoformat()
+    store = get_store(db)
     for row in existing:
         db.delete(row)
     for chunk, vector in zip(chunks, vectors, strict=True):
-        db.add(
+        store.write(
+            db,
             ProjectChunkDB(
                 id=f"{study_id}:{chunk['kind']}:{chunk['ref']}",
                 study_id=study_id,
@@ -124,10 +125,10 @@ def ensure_index(db, study_id: str, survey: Any, force: bool = False) -> dict:
                 ref=chunk["ref"],
                 text=chunk["text"],
                 model=model,
-                vector_json=json.dumps([round(x, 6) for x in vector]),
                 fingerprint=print_,
                 created_at=now,
-            )
+            ),
+            vector,
         )
     db.commit()
     logger.info("[%s] indexed %d chunks with %s", study_id, len(chunks), model)
@@ -204,8 +205,10 @@ def ensure_verbatim_index(db, study_id: str, survey: Any, force: bool = False) -
         return {"indexed": 0, "remaining": 0, "model": None}
     vectors, model = embed([c["text"] for c in batch])
     now = datetime.now(UTC).isoformat()
+    store = get_store(db)
     for chunk, vector in zip(batch, vectors, strict=True):
-        db.add(
+        store.write(
+            db,
             ProjectChunkDB(
                 id=f"{study_id}:{VERBATIM}:{chunk['ref']}",
                 study_id=study_id,
@@ -213,10 +216,10 @@ def ensure_verbatim_index(db, study_id: str, survey: Any, force: bool = False) -
                 ref=chunk["ref"],
                 text=chunk["text"],
                 model=model,
-                vector_json=json.dumps([round(x, 6) for x in vector]),
                 fingerprint=fingerprint([chunk]),
                 created_at=now,
-            )
+            ),
+            vector,
         )
     db.commit()
     logger.info("[%s] indexed %d verbatims with %s", study_id, len(batch), model)
@@ -270,16 +273,12 @@ def search(
                 "note": f"Index was built by {rows[0].model} and cannot be searched "
                         f"with {model}; re-index this project."}
 
-    scored = [
-        (similarity(vector, json.loads(row.vector_json)), row)
-        for row in rows
-    ]
-    scored.sort(key=lambda pair: pair[0], reverse=True)
+    scored = get_store(db).search(db, study_id, vector, kinds=kinds, k=k, model=model)
     return {
         "model": model,
         "matches": [
             {"kind": row.kind, "ref": row.ref, "text": row.text, "score": round(score, 3)}
-            for score, row in scored[:k]
+            for score, row in scored
             if score > 0
         ],
     }

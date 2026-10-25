@@ -794,6 +794,21 @@ def _ensure_new_columns():
                         f"_ensure_new_columns: could not add {table}.{col} ({exc})"
                     )
 
+    # pgvector (F3). Postgres only; a database without the extension warns once.
+    if engine.dialect.name == "postgresql":
+        for stmt in (
+            "CREATE EXTENSION IF NOT EXISTS vector",
+            "ALTER TABLE project_chunks ADD COLUMN IF NOT EXISTS embedding vector(768)",
+            "CREATE INDEX IF NOT EXISTS project_chunks_embedding_hnsw "
+            "ON project_chunks USING hnsw (embedding vector_cosine_ops)",
+        ):
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(stmt))
+            except Exception as exc:  # pragma: no cover - needs a Postgres without pgvector
+                logger.warning(f"_ensure_new_columns: pgvector not available ({exc})")
+                break
+
 
 def get_db():
     """Get database session."""
