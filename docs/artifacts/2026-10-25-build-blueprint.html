@@ -93,11 +93,11 @@ table.plan td:first-child{font-family:var(--mono);font-size:.82rem;white-space:n
 
 <main>
 <header class="col" style="display:grid;gap:16px">
-  <span class="eyebrow">DVV Research Cloud · build blueprint · 25 Oct 2026</span>
+  <span class="eyebrow">DVV Research Cloud · build blueprint · 25 Oct 2026 · wave 1 merged</span>
   <h1>DVV Build Blueprint</h1>
   <p class="lede">How the next version should look and work, how it is built underneath (graph, vectors, jobs, workflows), and the queue of tasks the builder agents take from. It follows on from the Provable Research Plan.</p>
   <nav class="toc" aria-label="Sections">
-    <a href="#screens">Screens</a><a href="#arch">Architecture</a><a href="#graph">Study graph</a><a href="#vectors">Vectors</a><a href="#jobs">Jobs &amp; workflows</a><a href="#agents">Agents</a><a href="#queue">Build queue</a>
+    <a href="#screens">Screens</a><a href="#arch">Architecture</a><a href="#graph">Study graph</a><a href="#vectors">Vectors</a><a href="#jobs">Jobs &amp; workflows</a><a href="#agents">Agents</a><a href="#queue">Build queue</a><a href="#further">Going further</a>
   </nav>
 </header>
 
@@ -380,11 +380,11 @@ reaper:  running with heartbeat older than 5 min → queued again (worker died)<
     <h2>Tasks, in waves</h2>
     <p>Each wave's tasks run in parallel, each in its own worktree under <code>~/dev</code>. The full task cards, with files, functions, acceptance tests and dependencies, are in <code>docs/BUILD_QUEUE.md</code>.</p>
   </div>
-  <div class="wave"><h3>Wave 1 · Foundations (started now)</h3>
+  <div class="wave later"><h3>Wave 1 · Foundations (merged: #157, #158, #159)</h3>
     <ul><li><b>F1</b> Job queue, worker and workflow runner. Agent: platform-builder.</li>
     <li><b>F2</b> Study graph store with lineage and impact queries. Agent: platform-builder.</li>
     <li><b>F3</b> The VectorStore interface, pgvector backend and Compose image change. Agent: platform-builder.</li></ul></div>
-  <div class="wave later"><h3>Wave 2 · Wiring (after wave 1 merges)</h3>
+  <div class="wave"><h3>Wave 2 · Wiring (building now)</h3>
     <ul><li><b>F4</b> Move coding and translation drafts onto the queue; add the events table and SSE route.</li>
     <li><b>G1</b> Graph writers: questionnaire approval, and cell provenance from table runs.</li>
     <li><b>X1</b> Path coverage in the dry run.</li>
@@ -402,5 +402,42 @@ reaper:  running with heartbeat older than 5 min → queued again (worker died)<
     <li><b>N1</b> Norms from past studies.</li>
     <li><b>W1</b> The field_close and qa_certificate workflows, end to end.</li></ul></div>
   <p class="note col">Running alongside every wave, and only the founders can do it: field one real study with an outside analyst. That study is the test for whether the screens above earn their place.</p>
+</section>
+
+<!-- ============ FURTHER ============ -->
+<section id="further">
+  <div class="col" style="display:grid;gap:12px">
+    <span class="eyebrow">8 · Going further</span>
+    <h2>Eight technical moves that put DVV out of reach</h2>
+    <p>Each one deepens the same promise, that a number can be proven, using techniques research tools don't use today. All of them build on the wave 1 foundations, and none needs a new service. They are wave 5 in the queue.</p>
+  </div>
+
+  <h3>P1 · Prove the logic with a solver, not just a simulation</h3>
+  <div class="screen" role="img" aria-label="Solver proof mockup">
+    <div class="bar"><b>Proof</b><span class="crumb">Logic certificate · solver-checked</span><span style="flex:1"></span><span class="pill">proved: 40 reachable</span><span class="pill b">proved: Q7 unreachable</span></div>
+    <div class="body"><div class="split">
+      <div class="panel"><h4>Why Q7 can never be shown</h4>
+        <div><code>Q7.show_if: Q5 = 4</code></div>
+        <div><code>Q5 ∈ {1, 2, 3}</code> (single choice)</div>
+        <div class="dim">No possible respondent satisfies both. This is a proof, not a sample of 1,000.</div>
+      </div>
+      <div class="panel"><h4>Dead end at Q12, an example respondent</h4>
+        <div class="dim">S2 = 34 · Q2 = [1, 3] · Q4 = 2 → Q12 has no options left after the mask</div>
+        <button class="btn">Replay this respondent</button>
+      </div>
+    </div></div>
+  </div>
+  <p class="note col">The routing, masks and quotas already form an expression tree. Translated into Z3 constraints, the solver can answer "can anyone reach Q7?" exactly. A simulation of 1,000 respondents can miss a path that one person in 50,000 takes; the solver cannot. When something is impossible, it says why. When a dead end exists, it produces a concrete respondent who hits it, which the dry run can replay. Z3 is MIT-licensed and installs with pip.</p>
+
+  <div class="grid2">
+    <div><h3>P2 · A tamper-evident study ledger</h3><p class="note">Every event in a study (an approval, an upload, a cleaning decision, a weight, an export) is appended to a log in which each entry's hash includes the one before it. The deliverable carries a fingerprint, so a client can check that no number changed after sign-off. It costs one table and one hash per write.</p></div>
+    <div><h3>P3 · Replay any deliverable</h3><p class="note">Because every input and decision is in the ledger and the graph, any deck or table can be rebuilt byte for byte months later. A CI test replays the golden-path study on every PR, so a code change that alters a past deliverable fails the build before it ships.</p></div>
+    <div><h3>P4 · Person-fit statistics for authenticity</h3><p class="note">Psychometrics has measured for decades whether one person's answers fit the pattern of everyone else's (the lz statistic, Guttman errors). Combined with typing traces and near-duplicate text, these give a score built on more than speeding and straight-lining. Market research tools don't use them. A seeded set of known bots measures the gain.</p></div>
+    <div><h3>P5 · An error bar on every number</h3><p class="note">Bootstrap intervals on every table cell, share of preference, TURF reach and driver weight, computed as jobs on the queue. The Study Thread shows "34% ± 6", and the citation checker refuses a sentence that ranks two numbers whose intervals overlap.</p></div>
+    <div><h3>P6 · Supplier allocation as a bandit</h3><p class="note">During fieldwork, send more of the remaining sample to the supplier with the lowest cost per <i>verified</i> complete, rather than the cheapest per complete. It is a Thompson-sampling bandit over live quality data, and it only acts through the control room's confirmation cards.</p></div>
+    <div><h3>P7 · Semantic diff between waves</h3><p class="note">Wave 2 of a tracker differs from wave 1 in small ways: a reworded question, a new answer option. Structural diff plus embeddings find every change and warn which trends now break, before the client sees a jump caused by wording rather than the market.</p></div>
+    <div><h3>P8 · Hierarchical Bayes for MaxDiff and conjoint</h3><p class="note">Per-respondent utilities, which unlock segmentation on preferences and simulators. The sampler runs as a long job on the queue, and the aggregate logit stays as the fast first answer.</p></div>
+    <div><h3>The order I'd build them in</h3><p class="note"><b>P1</b> first: it makes the Logic X-ray a proof, and it sells the QA service. Then <b>P2 and P3</b>, which together turn "trust us" into "check it yourself". Then <b>P5</b>, then <b>P4</b>, after the seeded test set exists. P6 to P8 follow real fieldwork demand.</p></div>
+  </div>
 </section>
 </main>

@@ -29,7 +29,7 @@ Rules for every task:
 
 ## Wave 1: foundations
 
-### F1: Job queue, worker and workflow runner  · platform-builder · ready
+### F1: Job queue, worker and workflow runner  · platform-builder · done (#157)
 **Why:** background work runs in FastAPI `BackgroundTasks` today. If the server
 restarts, those jobs are lost, and they can't be retried or seen.
 **Files:** `api/db.py` (JobDB, WorkflowRunDB), `src/platform/__init__.py`,
@@ -69,7 +69,7 @@ B+C → D) runs to done through `run_once`, with D's payload carrying B's and C'
 results; a failing step fails the run and leaves D unqueued; cancel; validation
 rejects a cycle.
 
-### F2: Study graph  · platform-builder · ready
+### F2: Study graph  · platform-builder · done (#158)
 **Why:** the Study Thread (lineage) and "what would this change" (impact).
 **Files:** `api/db.py` (GraphNodeDB, GraphEdgeDB), `src/platform/graph.py`,
 `tests/unit/test_platform_graph.py`.
@@ -90,7 +90,7 @@ link is idempotent; lineage of a cell through variable → question → data_fil
 returns depths 1, 2, 3; impact from a question finds a sentence through a cell; a
 cycle terminates; max_depth is honoured; other studies' nodes never appear.
 
-### F3: Vector store interface and pgvector  · platform-builder · ready
+### F3: Vector store interface and pgvector  · platform-builder · done (#159)
 **Why:** near-duplicate open ends, reusing corrections, norms. Search in
 `src/engines/rag/store.py` is a dot product over a project's rows in Python.
 **Files:** `src/platform/vectors.py`, `src/engines/rag/store.py` (use the
@@ -115,23 +115,68 @@ volume works unchanged. The founders run `./dvv upgrade` as usual.
 
 ---
 
-## Wave 2: wiring (blocked on wave 1)
+## Wave 2: wiring
 
-- **F4** Move `_draft_translation` and `coding/run` onto the queue as job kinds
-  `translation.draft` and `coding.run`; the status routes read the job. Add the
-  `events` table, `emit()`, `GET /api/studies/{id}/events` (SSE, auth, study
-  access) and `GET /api/jobs/{id}`. Add a `worker` service to the compose file.
-  needs F1.
-- **G1** Graph writers: questionnaire approval writes question, option and variable
-  nodes plus routes_to, masks, pipes and derives edges. A table cell opened through
-  the new `GET /studies/{id}/tables/{t}/cells/{c}/provenance` writes the cell node,
-  with computed_from, filtered_by and weighted_by edges. needs F2.
-- **X1** Path coverage: the dry run records each simulated respondent's path and
-  returns `paths: [{qids, n}]`, `unreachable: [qid]` and `dead_ends`. needs nothing.
-- **A1** Paradata features: keystrokes, characters, paste, speech-to-text and time
-  columns that `variable_roles` currently discards become per-respondent
-  features (`src/engines/qc/paradata.py`). Test on the TRD2 shape (1,168
-  characters, 1 keystroke). needs nothing.
+### F4: Background work on the queue, plus live events  · platform-builder · ready
+**Why:** coding and translation drafts still run in FastAPI `BackgroundTasks`, so a
+restart loses them. The control room and "Needs you" need a live stream.
+**Files:** `api/db.py` (EventDB), `src/platform/events.py`, `src/platform/jobs.py`
+(JobError), `src/platform/worker.py` (`start_background`), `api/main.py` (start it),
+`api/routes/platform.py` (new) and its `include_router` line, `api/routes/studies.py`
+(coding), `api/routes/questionnaire.py` (translation draft), `tests/conftest.py`
+(env), `tests/unit/test_platform_events.py`, and the existing coding and translation
+route tests.
+- **Errors users can read:** add `class JobError(Exception)` in jobs.py. In `run_one`, a `JobError` stores `str(e)`. Any other exception is logged with its traceback and stored as "Something went wrong running this job. It has been logged."
+- **events table:** `seq` (Integer pk, autoincrement), study_id (indexed), kind, data (Text json), created_at. Then `emit(db, study_id, kind, data) -> int` (commits, returns seq) and `since(db, study_id, after_seq, limit=200) -> list[dict]`.
+- **In-process worker:** `worker.start_background(session_factory) -> threading.Thread` runs the `main()` loop in a daemon thread, stopped by an Event. `api/main.py` starts it at startup unless `DVV_INPROCESS_WORKER=0`, so production needs **no** new service. `tests/conftest.py` sets `DVV_INPROCESS_WORKER=0`, and tests drain the queue with a helper `drain(factory)` that calls `run_once` until it returns False (put it in `src/platform/worker.py`).
+- **Handlers:** `coding.run` and `translation.draft` take the bodies of today's background functions. They keep writing the same `study_metadata` job status the web app reads, and add `job_id` to it. They emit `job.done` or `job.failed` events. The routes enqueue instead of `background.add_task`, and keep their 202 and 409 behaviour.
+- **Routes** (`api/routes/platform.py`): `GET /api/jobs/{job_id}` (authenticated; a job with a study_id needs the same study access the study routes use) returns id, kind, state, attempts, result and error. `GET /api/studies/{study_id}/events?after=N` returns `text/event-stream` (each event as `id: seq`, `event: kind`, `data: json`). It polls `since()` each second, sends a `: keepalive` comment every 15 s, and closes after 300 s so the client reconnects with `after`. It uses the normal Authorization header, because the web app will read it with fetch streaming, not EventSource.
+**Acceptance:** the coding and translation route tests pass after a `drain()`; a job
+failing with JobError shows that message, and any other failure shows the generic
+one; `since()` returns events after a seq, in order; the SSE route streams an emitted
+event (TestClient, read the first lines); `/api/jobs/{id}` is 404 for an unknown id
+and 403 without study access.
+
+### G1: The questionnaire writes its graph  · engine-builder · ready
+**Why:** "what changes if I edit Q9", and the base the Study Thread starts from.
+**Files:** `src/engines/questionnaire/graph_sync.py`, the call sites in
+`api/routes/questionnaire.py` (approve-all, and any route that saves an approved
+questionnaire), `api/routes/graph.py` (new) and its include line,
+`tests/unit/test_graph_sync.py`, `tests/integration/test_graph_routes.py`.
+- `sync_questionnaire(db, study_id, survey) -> dict` uses `src.platform.graph`. It writes one `question` node per question (ref qid, label = first 200 characters of the text, props `{type, block}`) and edges from the question to the questions it depends on:
+  - `shown_if` for each qid in show_if;
+  - `terminates_on` for each in terminate_if;
+  - `masked_by` for each mask's source_qid (and exclude_qid);
+  - `piped_from` for each pipe's source_qid;
+  - `derived_from` for each approved derive rule's sources.
+- Before writing, it calls `unlink_kind` for each kind, and removes question nodes no longer in the survey (and their edges), so a re-approve leaves the graph exactly in step. It returns `{nodes, edges}`.
+- It is called after approve-all commits. A graph failure is logged and never fails the approval.
+- **Routes:** `GET /api/studies/{study_id}/graph/lineage?node=<kind>:<ref>` and `/graph/impact?node=...`. Both are authenticated with study access, return the `lineage()` or `impact()` list, and give 404 for an unknown node.
+**Acceptance:** a survey where Q3 is shown if Q2, Q5 is masked by Q4, and Q6 pipes Q5 gives the right edges; impact of Q4 reaches Q5 and Q6; removing Q6 and re-syncing drops its node and edges; approving through the route writes the graph; a broken graph write still approves.
+
+### X1: Paths through the questionnaire  · engine-builder · ready
+**Why:** the data the Logic X-ray draws (line thickness, exits, unreachable stations).
+**Files:** `src/engines/fielding/dryrun.py`, `tests/unit/test_dryrun_paths.py`.
+- During `simulate`, record each synthetic respondent's sequence of SHOWN qids and their disposition.
+- Add to `DryRunReport` and `to_dict()`:
+  - `transitions`: `[{"from": qid, "to": qid | "END" | "TERMINATE" | "OVERQUOTA", "n": int}]`, sorted by n descending;
+  - `paths`: the 50 most common distinct sequences, `[{"qids": [...], "n": int, "disposition": str}]`;
+  - `exits`: `[{"qid": qid, "disposition": str, "n": int}]`, the last question shown before a non-complete ending.
+- `questions_never_shown` stays as it is: it is the unreachable list.
+- No change to the existing fields or their meaning. Memory is bounded: paths are counted with a Counter of tuples, never stored per respondent beyond that.
+**Acceptance:** on a three-question survey with a screen-out at Q1 for code 2 and Q3 shown only if Q2 = 1, the transitions, path counts and exits match a hand count at a fixed seed; n = 1,000 runs in under a second; existing dry-run tests pass unchanged.
+
+### A1: Typing and timing evidence from exports  · engine-builder · ready
+**Why:** 3 of 5 real exports carry per-open-end keystrokes, characters, pasting and
+speech-to-text, and `variable_roles` classes them as system columns and throws them
+away. They are the strongest sign that a person did, or didn't, write an answer.
+**Files:** `src/engines/qc/paradata.py`, `src/engines/qc/evidence.py` (add a
+`paradata` block), `tests/unit/test_paradata.py`.
+- `paradata_columns(columns) -> dict[str, dict[str, str]]` maps each open end to its trace columns, by the Decipher naming in `variable_roles._SYSTEM_NAME_RE`. For example `hQ15OE_KeyStrokeCount`, `hQ15OE_CharacterCount`, `hQ15CopyResponse`, `hQ15OE_SpeechToTextText` and `hQ15OE_ManualTyping` give `{"Q15": {"keystrokes": col, "chars": col, "paste": col, "stt": col, "manual": col}}`. Base names match case-insensitively, with the `h` prefix and `OE` and `_` suffixes stripped.
+- `paradata_features(df, columns_map) -> pl.DataFrame` has one row per respondent (the `respondent_id` or `record` column, as `code_open_ends` finds it), with columns `n_open_ends_traced`, `n_pasted`, `n_speech`, `max_chars_per_key`, and `pasted_qids` (a comma-joined string).
+- A paste is either a CopyResponse value that is truthy, or chars ≥ 20 with keystrokes < chars × 0.3 when no speech-to-text text is present. Speech-to-text counts separately: it is a person speaking, not pasting.
+- **Evidence:** the per-respondent evidence endpoint gains `paradata: {pasted: [...], speech: [...], max_chars_per_key}` when the data has traces, and nothing when it doesn't.
+**Acceptance:** the TRD2 shape (an answer of 1,168 characters with 1 keystroke) is flagged as pasted; a speech-to-text answer is not; data with no trace columns gives an empty map and no evidence block; Q15 and Q15OE map to the same base.
 
 ## Wave 3: screens (each from the mockups)
 
@@ -150,6 +195,17 @@ volume works unchanged. The founders run `./dvv upgrade` as usual.
 - **K1** Corrections for cleaning and table specs, as literal rules. needs F2.
 - **N1** Norms from past studies' matched questions. needs F3, G1.
 - **W1** `field_close` and `qa_certificate` workflows, end to end. needs F4, X2, R2.
+
+## Wave 5: further (see the blueprint's "Going further" section)
+
+- **P1** Prove the logic with a solver: routing compiled to Z3, each unreachable question shown with a proof, each dead end with a counterexample respondent.
+- **P2** Tamper-evident study ledger: a hash-chained event log, and a deliverable fingerprint the client can check.
+- **P3** Replay: rebuild any deliverable byte for byte from the ledger, tested in CI.
+- **P4** Person-fit statistics (lz, Guttman errors) beside the paradata, for the authenticity score.
+- **P5** An error bar on every number: bootstrap intervals on tables and methods.
+- **P6** Supplier allocation as a bandit: shift sample toward the lowest cost per *verified* complete.
+- **P7** Wave-over-wave semantic diff: changed wording found by embeddings plus structure, with trend-break warnings.
+- **P8** Hierarchical Bayes for MaxDiff and conjoint, run on the job queue.
 
 ## Founders, alongside every wave
 - Field one real study with an outside analyst (P0). It is the test for every screen above.
