@@ -111,6 +111,13 @@ export interface StudyProfile {
   }
 }
 
+export interface CellProvenance {
+  value: number
+  label: string
+  column: string
+  steps: { title: string; detail: string }[]
+}
+
 export interface CrosstabsPayload {
   title: string
   weight: string | null
@@ -307,6 +314,9 @@ export const studiesApi = {
   crosstabs: async (id: string) => {
     return api.get<CrosstabsPayload>(`/studies/${id}/crosstabs`)
   },
+  /** The steps behind one table cell: base, question, cleaning, weight, data file. */
+  cellProvenance: async (id: string, tableId: string, row: number, col: number) =>
+    api.get<CellProvenance>(`/studies/${id}/tables/${tableId}/provenance`, { params: { row, col } }),
   methodInputs: async (id: string) => api.get<MethodInputs>(`/studies/${id}/methods`),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   runMethod: async (id: string, body: MethodRequest) => api.post<any>(`/studies/${id}/methods`, body),
@@ -1074,6 +1084,10 @@ export interface DryRunReport {
   questions_never_shown: string[]
   display_issues: Array<{ qid: string; kind: string; detail: string }>
   unenforced_routing: string[]
+  /** Logic X-ray data. `to` is "END" for the last question. */
+  transitions?: Array<{ from: string; to: string; n: number }>
+  paths?: Array<{ qids: string[]; n: number; disposition: string }>
+  exits?: Array<{ qid: string; disposition: string; n: number }>
 }
 
 /** What actually happened in the field. */
