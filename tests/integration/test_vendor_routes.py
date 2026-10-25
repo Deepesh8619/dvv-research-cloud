@@ -210,3 +210,18 @@ def test_reconciliation_accepts_completes_and_rejects_only_what_a_person_removed
     a = {v["link_id"]: v for v in c.get("/api/studies/s1/fielding/vendors").json()["vendors"]}["lA"]
     assert (a["accepted"], a["billable"], a["cpi"], a["target_completes"]) == (2, 4.0, 2.0, 10)
     assert c.get("/api/studies/s1/fielding/links/nope/reconciliation.csv").status_code == 404
+
+
+def test_one_broken_link_does_not_hide_the_other_suppliers(client):
+    c, Session, _ = client
+    _seed(Session)
+    db = Session()
+    db.get(FieldingLinkDB, "lB").survey_json = "{not json"
+    db.commit()
+    db.close()
+    r = c.get("/api/studies/s1/fielding/vendors")
+    assert r.status_code == 200
+    rows = {v["link_id"]: v for v in r.json()["vendors"]}
+    assert rows["lA"]["completes"] == 3  # still computed
+    assert rows["lB"]["error"].startswith("This link's report could not be built")
+    assert rows["lB"]["vendor_name"] == "Beta"

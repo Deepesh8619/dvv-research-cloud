@@ -21,6 +21,16 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-25 — one broken link no longer takes down the supplier report (branch fix/supplier-report-resilience)
+
+The supplier scorecard built every link's report in one go, so a single link
+whose questionnaire could not be read (or whose data could not be built) made
+the whole Sample suppliers panel fail with a server error. Now each link is
+on its own: an unreadable link gets a row saying so ("its interviews are
+safe"), and a link whose quality checks fail still shows completes, accepted
+and billable, marked "quality not checked". Test: a link with a corrupt
+questionnaire beside a healthy one — both rows come back.
+
 ## 2026-10-25 — quota bands on number questions (branch feat/numeric-quota-bands)
 
 The quota plan took single-choice answers only, so the most common quota of

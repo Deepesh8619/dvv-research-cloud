@@ -1211,6 +1211,10 @@ export interface MaterializeResult {
 }
 
 export interface SupplierRow {
+  /** Set when this link's report could not be built; the other fields are then absent. */
+  error?: string
+  /** Set when counts and cost stand but the quality checks could not run. */
+  quality_note?: string
   link_id: string
   vendor_name: string | null
   cpi: number | null
