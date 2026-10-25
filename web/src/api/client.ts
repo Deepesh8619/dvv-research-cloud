@@ -1777,6 +1777,11 @@ export interface CleaningState {
   flags: Record<string, Array<{ check: string; detail: string }>>
   /** Per flagged respondent: 0-100, a band, and the reasons. Missing on old servers. */
   authenticity?: Record<string, { score: number; band: 'review first' | 'worth a look' | 'fine'; reasons: string[] }>
+  /** Checks you have nearly always removed on past studies; a prompt, never applied. Missing on old servers. */
+  suggestions?: Array<{
+    check: string; label: string; removed: number; decided: number; removed_rate: number
+    studies: number; keys: string[]
+  }>
   skipped: unknown[]
   decisions: Record<string, { decision: 'remove' | 'keep'; reason_code?: string; note?: string | null }>
   n_unreviewed_flagged: number

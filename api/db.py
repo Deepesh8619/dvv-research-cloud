@@ -618,6 +618,23 @@ class ProjectChunkDB(Base):
     created_at = Column(String)
 
 
+# --- K1 ---
+class CleaningHabitDB(Base):
+    """How reviewers have decided respondents flagged by one check, across locked studies.
+
+    Counts are respondents, once per check per study. They only ever feed a
+    suggestion; nothing here removes anyone.
+    """
+
+    __tablename__ = "cleaning_habits"
+
+    check = Column(String, primary_key=True)
+    removed = Column(Integer, default=0)
+    kept = Column(Integer, default=0)
+    studies = Column(Integer, default=0)
+    updated_at = Column(String)
+
+
 # --- F2 ---
 class GraphNodeDB(Base):
     """One thing in a study (question, variable, cell, sentence...) for lineage."""
