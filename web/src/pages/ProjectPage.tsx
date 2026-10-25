@@ -4,9 +4,10 @@ import AdverseEventsPanel from '../components/AdverseEventsPanel'
 import CleaningPanel from '../components/CleaningPanel'
 import CrosscheckPanel from '../components/CrosscheckPanel'
 import axios from 'axios'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Study, studiesApi, shareApi, ShareLink, questionnaireApi } from '../api/client'
 import FieldworkCards from '../components/FieldworkCards'
+import LifecycleRail from '../components/LifecycleRail'
 import FindingsPanel from '../components/FindingsPanel'
 import TablesPanel from '../components/TablesPanel'
 import TrackerPanel from '../components/TrackerPanel'
@@ -68,6 +69,7 @@ type Tab = (typeof TABS)[number]
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>()
   const [params, setParams] = useSearchParams()
+  const navigate = useNavigate()
   const tab = (params.get('tab') as Tab) || 'Overview'
   const { user } = useAuth()
   const isStaff = user?.role === 'owner' || user?.role === 'analyst'
@@ -279,6 +281,11 @@ export default function ProjectPage() {
           {reprocessError}
         </p>
       )}
+
+      <LifecycleRail
+        studyId={study.id}
+        onOpen={(t) => (t.startsWith('/') ? navigate(`/projects/${study.id}${t}`) : setTab(t as Tab))}
+      />
 
       <ProjectDataBar studyId={study.id} canWrite={hasWriteRole(user?.role)} />
 

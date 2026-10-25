@@ -244,5 +244,11 @@
     "what": "The trail behind one number in a table: its base, the question, cleaning, weighting and the data file.",
     "why": "Anyone reading a figure can see exactly what it was computed from, so it can be checked instead of trusted.",
     "how": "Click a number in a table. The trail opens on the right; press Escape to close it."
+  },
+  "lifecycle": {
+    "title": "Lifecycle rail",
+    "what": "Eight steps a study moves through, from the brief to the insight, each coloured by what is actually stored for this project.",
+    "why": "You see at a glance what is done, what needs you and what has not started, without opening every tab.",
+    "how": "Click a step to open it. A step marked \"needs you\" is also listed below the rail. Proof stays unstarted until dry-run results are kept."
   }
 }
