@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
-import { DryRunReport, fieldingApi } from '../api/client'
+import { DryRunReport, fieldingApi, type WorkflowRun } from '../api/client'
+import { pollRun } from '../lib/pollRun'
 import LogicXray from './LogicXray'
 import InfoTip from './ui/InfoTip'
 
@@ -57,6 +58,34 @@ export default function DryRunPanel({
     }
   }
 
+  const [cert, setCert] = useState<WorkflowRun | null>(null)
+  const [certError, setCertError] = useState<string | null>(null)
+
+  const issue = async () => {
+    setCertError(null)
+    setCert({ id: '', workflow: 'qa_certificate', state: 'running', error: null, steps: [] })
+    try {
+      const { data } = await fieldingApi.issueCertificate(studyId)
+      await pollRun(data.run_id, setCert)
+    } catch {
+      setCert(null)
+      setCertError('The certificate could not be started. The questionnaire must be approved first.')
+    }
+  }
+  const result = (name: string) => cert?.steps.find((st) => st.name === name)?.result as
+    | { issued?: boolean; questions_never_shown?: string[]; impossible?: { qid: string; detail: string }[] }
+    | null
+    | undefined
+  const blockers = [
+    ...(result('dry_run')?.questions_never_shown ?? []).map((q) => `${q} can never be reached`),
+    ...(result('dry_run')?.impossible ?? []).map((i) => `${i.qid}: ${i.detail}`),
+  ]
+  const STEP_LABEL: Record<string, string> = {
+    expert_checks: 'Expert checks',
+    dry_run: 'Dry run of 1,000',
+    certificate: 'Certificate',
+  }
+
   const pct = (part: number) =>
     report && report.n_respondents ? Math.round((100 * part) / report.n_respondents) : 0
 
@@ -95,6 +124,53 @@ export default function DryRunPanel({
       </div>
 
       {error && <p className="text-sm text-red-600 mt-4">{error}</p>}
+
+      {canRun && !linkId && (
+        <div className="mt-4 border-t border-slate-100 pt-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={issue}
+              disabled={cert?.state === 'running'}
+              className="text-sm border border-slate-300 text-slate-800 font-medium px-3.5 py-2 rounded-md hover:bg-slate-50 disabled:opacity-50"
+            >
+              Issue logic certificate
+            </button>
+            <InfoTip id="logic_certificate" />
+            {cert && (
+              <ol aria-label="Certificate progress" className="flex flex-wrap gap-x-4 text-sm text-slate-600">
+                {['expert_checks', 'dry_run', 'certificate'].map((name) => {
+                  const st = cert.steps.find((x) => x.name === name)?.state ?? 'waiting'
+                  return (
+                    <li key={name}>
+                      {STEP_LABEL[name]}: {st === 'done' ? 'done' : st === 'failed' ? 'failed' : st === 'running' ? 'running' : 'waiting'}
+                    </li>
+                  )
+                })}
+              </ol>
+            )}
+          </div>
+          {certError && <p role="alert" className="text-sm text-red-600 mt-2">{certError}</p>}
+          {cert?.state === 'failed' && (
+            <p role="alert" className="text-sm text-red-600 mt-2">{cert.error ?? 'The certificate could not be built.'}</p>
+          )}
+          {cert?.state === 'done' && result('certificate')?.issued && (
+            <p className="text-sm text-emerald-700 mt-2">
+              Issued —{' '}
+              <button onClick={() => fieldingApi.downloadCertificate(studyId)} className="underline font-medium">
+                download
+              </button>
+            </p>
+          )}
+          {cert?.state === 'done' && result('certificate')?.issued === false && (
+            <div className="mt-2 text-sm text-red-700">
+              <p className="font-medium">Not issued — fix these first</p>
+              <ul className="list-disc ml-5">
+                {blockers.map((b) => <li key={b}>{b}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       {report && (
         <div className="mt-5 space-y-5">

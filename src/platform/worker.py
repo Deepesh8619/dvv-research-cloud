@@ -63,6 +63,8 @@ def _loop(session_factory, worker_id: str, stop: threading.Event) -> None:
 def _register_handlers() -> None:
     import api.routes.questionnaire  # noqa: F401 - importing registers their handlers
     import api.routes.studies  # noqa: F401
+    import src.workflows.field_close  # noqa: F401
+    import src.workflows.qa_certificate  # noqa: F401
 
 
 def start_background(session_factory) -> threading.Thread:

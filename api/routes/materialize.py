@@ -71,25 +71,35 @@ def _approved_survey(db: Session, study_id: str) -> SurveyDefinition:
     return SurveyDefinition.from_json(approved.definition_json)
 
 
-def _publish_tables(db: Session, study, run_dir, datamap) -> None:
-    """(Re)build crosstabs + deck from run_dir/data.parquet and point the study at them."""
+def _tab_run(study, run_dir, datamap):
+    """The auto tab plan run over data.parquet, or None when nothing is tabulatable."""
+    tab_plan = auto_tab_plan(datamap, title=f"{study.client_name} — Fielded Topline")
+    if not tab_plan:
+        return None
+    return run_tab_plan(str(run_dir / "data.parquet"), tab_plan, datamap)
+
+
+def publish_tabs(db: Session, study, run_dir, datamap) -> int:
+    """Run the tab plan, store crosstabs.json (file and column); returns the table count."""
+    deck_run = _tab_run(study, run_dir, datamap)
+    if deck_run is None:
+        return 0
+    deck_to_json(deck_run, run_dir / "crosstabs.json")
+    set_study_artifacts(db, study.id, crosstabs_json=(run_dir / "crosstabs.json").read_text())
+    return len(json.loads((run_dir / "crosstabs.json").read_text()).get("tables") or [])
+
+
+def publish_deck(db: Session, study, run_dir, datamap) -> None:
+    """Render the .xlsx and .pptx decks from the tab plan and point the study at them."""
     study_id = study.id
-    parquet_path = run_dir / "data.parquet"
-    # Auto crosstabs deck so the Tables tab / durable crosstabs_json activate,
-    # same machinery the orchestrator uses. Skipped cleanly if no tabulatable
-    # (single-coded) questions exist.
-    crosstabs_json = None
     # Fallback when there are no tabulatable (single-coded) questions: keep the
     # marker. excel_path only needs to point INTO run_dir for _study_dir to
     # resolve it; the deck download then 404s, which download_deck already
     # handles gracefully (it 404s on any missing file, never 500s).
     excel_path = str(run_dir / "fielded.marker")
     pptx_path = None
-    tab_plan = auto_tab_plan(datamap, title=f"{study.client_name} — Fielded Topline")
-    if tab_plan:
-        deck_run = run_tab_plan(str(parquet_path), tab_plan, datamap)
-        deck_to_json(deck_run, run_dir / "crosstabs.json")
-        crosstabs_json = (run_dir / "crosstabs.json").read_text()
+    deck_run = _tab_run(study, run_dir, datamap)
+    if deck_run is not None:
         # Render the SAME deck to .xlsx via the existing renderer — the exact
         # call the orchestrator uses for uploaded studies. Ephemeral disk is
         # acceptable for v1: re-materializing (one click) regenerates it.
@@ -108,11 +118,15 @@ def _publish_tables(db: Session, study, run_dir, datamap) -> None:
                     report=(study.study_metadata or {}).get("report"))
     update_study_paths(db, study_id, excel_path=excel_path, pptx_path=pptx_path,
                        datamap_json=datamap.to_json())
-    if crosstabs_json is not None:
-        set_study_artifacts(db, study_id, crosstabs_json=crosstabs_json)
 
 
-def _write_and_publish(db, study, datamap, df, delivery_map, delivery_df):
+def _publish_tables(db: Session, study, run_dir, datamap) -> None:
+    """(Re)build crosstabs + deck from run_dir/data.parquet and point the study at them."""
+    publish_tabs(db, study, run_dir, datamap)
+    publish_deck(db, study, run_dir, datamap)
+
+
+def _write_and_publish(db, study, datamap, df, delivery_map, delivery_df, publish=True):
     """Shared tail: write study-level data + delivery files, re-apply a locked
     cleaning version, publish tables. Returns (run_dir, df, delivery_df, removed, exports)."""
     study_id = study.id
@@ -167,7 +181,8 @@ def _write_and_publish(db, study, datamap, df, delivery_map, delivery_df):
     except Exception as exc:
         logger.warning(f"[{study_id}] respondent-level xlsx failed (non-fatal): {exc}")
 
-    _publish_tables(db, study, run_dir, datamap)
+    if publish:
+        _publish_tables(db, study, run_dir, datamap)
     # Erasure sets this; a successful write is what clears it.
     study.study_metadata = {**(study.study_metadata or {}), "needs_rematerialize": False}
     db.commit()
@@ -324,15 +339,11 @@ def _merge_datamaps(maps: list, versions: list[tuple[int, object]]):
     return merged
 
 
-@router.post("/studies/{study_id}/fielding/materialize")
-def materialize_study(
-    study_id: str,
-    db: Session = Depends(get_db),
-    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
-):
+def build_study_dataset(db: Session, study_id: str, publish: bool = True) -> dict:
     """Materialize ALL non-test links into ONE study dataset with a `vSource` column.
 
-    (Owner/Analyst) Same outputs as the per-link route, combined across vendors.
+    The engine behind the route and the field_close workflow. `publish=False`
+    leaves the tables and decks to the caller. Raises HTTPException (404/409/422).
     """
     import pandas as pd
 
@@ -387,7 +398,7 @@ def materialize_study(
 
     df, delivery_df = _combine(3), _combine(5)
     run_dir, df, delivery_df, removed, exports = _write_and_publish(
-        db, study, datamap, df, delivery_map, delivery_df
+        db, study, datamap, df, delivery_map, delivery_df, publish
     )
     update_study_status(
         db, study_id, "rendered", {"materialized_from_links": [p[0].id for p in parts]}
@@ -401,7 +412,7 @@ def materialize_study(
         for k, v in rep["by_cell"].items():
             by_cell[k] = by_cell.get(k, 0) + v
     logger.info(
-        f"[{study_id}] Materialized {len(parts)} links: {len(df)} respondents by {user.name}"
+        f"[{study_id}] Materialized {len(parts)} links: {len(df)} respondents"
     )
     return {
         "n_respondents": len(df),
@@ -413,6 +424,23 @@ def materialize_study(
         "replacement_needed": {"total": total, "by_cell": by_cell},
         "replacement_note": _REPLACEMENT_NOTE,
     }
+
+
+
+
+@router.post("/studies/{study_id}/fielding/materialize")
+def materialize_study(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Materialize ALL non-test links into ONE study dataset with a `vSource` column.
+
+    (Owner/Analyst) Same outputs as the per-link route, combined across vendors.
+    """
+    out = build_study_dataset(db, study_id)
+    logger.info(f"[{study_id}] Materialized {out['n_links']} links by {user.name}")
+    return out
 
 
 def _write_labelled_xlsx(df, datamap, path) -> None:

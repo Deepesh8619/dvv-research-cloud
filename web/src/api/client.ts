@@ -1088,6 +1088,14 @@ export interface FieldingRedirects {
 }
 
 /** What a dry run found, before anyone real was pointed at the link. */
+export interface WorkflowRun {
+  id: string
+  workflow: string
+  state: 'running' | 'done' | 'failed' | 'cancelled'
+  error: string | null
+  steps: { name: string; state: string; error: string | null; result: Record<string, unknown> | null }[]
+}
+
 export interface DryRunReport {
   n_respondents: number
   seed: number
@@ -1421,6 +1429,17 @@ export const fieldingApi = {
       seed,
       ...(linkId ? { link_id: linkId } : {}),
     }),
+
+  issueCertificate: async (studyId: string) =>
+    api.post<{ run_id: string }>(`/studies/${studyId}/certificate`),
+
+  closeFieldwork: async (studyId: string) =>
+    api.post<{ run_id: string }>(`/studies/${studyId}/workflows/field-close`),
+
+  workflowRun: async (runId: string) => api.get<WorkflowRun>(`/workflow-runs/${runId}`),
+
+  downloadCertificate: (studyId: string) =>
+    downloadFile(`/studies/${studyId}/certificate.pdf`, 'logic_certificate.pdf'),
 
   fieldReport: async (studyId: string, linkId: string) =>
     api.get<FieldReport>(`/studies/${studyId}/fielding/links/${linkId}/field-report`),
