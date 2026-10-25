@@ -800,7 +800,8 @@ export interface ExpertNotes {
   n_consider: number
 }
 
-export interface QuotaPlanCell { name: string; qid: string; codes: number[]; share_pct: number }
+/** A share of completes: answers to a choice question (codes) or a band of a number question (min/max, inclusive). */
+export interface QuotaPlanCell { name: string; qid: string; codes: number[]; share_pct: number; min?: number | null; max?: number | null }
 export interface QuotaPlan { completes: number | null; cells: QuotaPlanCell[]; limits: Array<{ name: string; limit: number }> }
 
 export const questionnaireApi = {
