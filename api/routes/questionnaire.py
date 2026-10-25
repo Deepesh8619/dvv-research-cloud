@@ -1923,6 +1923,17 @@ def approve_all(
     except Exception:
         logger.exception(f"[{study_id}] could not index the questionnaire for search")
 
+    # The questionnaire's dependencies go into the study graph. Best-effort:
+    # a graph that could not be written must never un-approve a questionnaire.
+    try:
+        from src.engines.questionnaire import graph_sync
+
+        graph_sync.sync_questionnaire(db, study_id, survey)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception(f"[{study_id}] could not write the questionnaire graph")
+
     # Label merge (§3.2's datamap-merge fix): an approved questionnaire carries
     # the real question/option wording that a CSV/Excel import lacks. If this
     # study's data is already processed, regenerate its tables/decks with those
