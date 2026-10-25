@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { downloadFile, questionnaireApi, type TranslationStatus } from '../api/client'
+import { downloadFile, questionnaireApi, type TranslationJob, type TranslationStatus } from '../api/client'
 import InfoTip from './ui/InfoTip'
 
 /**
@@ -16,13 +16,20 @@ export default function TranslationsPanel({ studyId }: { studyId: string }) {
   const [lang, setLang] = useState('')
   const [problems, setProblems] = useState<Array<{ key: string; problem: string }> | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [job, setJob] = useState<TranslationJob | null>(null)
 
   const load = useCallback(() => {
     questionnaireApi.translations(studyId)
-      .then((r) => { setNStrings(r.data.n_strings); setLanguages(r.data.languages) })
+      .then((r) => { setNStrings(r.data.n_strings); setLanguages(r.data.languages); setJob(r.data.draft_job ?? null) })
       .catch(() => setNStrings(null))
   }, [studyId])
   useEffect(load, [load])
+  const running = job?.state === 'running'
+  useEffect(() => {
+    if (!running) return
+    const t = setInterval(load, 3000)
+    return () => clearInterval(t)
+  }, [running, load])
 
   if (nStrings === null) return null
   const ok = LANG.test(lang)
@@ -32,6 +39,13 @@ export default function TranslationsPanel({ studyId }: { studyId: string }) {
     questionnaireApi.uploadTranslation(studyId, lang, file)
       .then((r) => { setProblems(r.data.problems); load() })
       .catch((e) => setError(e?.response?.data?.detail ?? 'Could not read that sheet.'))
+  }
+
+  const startDraft = () => {
+    setError(null)
+    questionnaireApi.draftTranslation(studyId, lang)
+      .then(load)
+      .catch((e) => setError(e?.response?.data?.detail ?? 'Could not start the draft.'))
   }
 
   return (
@@ -49,6 +63,7 @@ export default function TranslationsPanel({ studyId }: { studyId: string }) {
               <span className="font-mono font-medium text-slate-900">{l.lang}</span>
               <span className="text-slate-600">{l.n_translated} of {l.n_total} translated</span>
               {l.n_problems > 0 && <span className="text-amber-700">· {l.n_problems} to fix</span>}
+              {(l.n_drafts ?? 0) > 0 && <span className="text-amber-700">· {l.n_drafts} model drafts to check</span>}
               <button type="button" className="text-primary-500 hover:text-primary-600"
                 onClick={() => setLang(l.lang)}>select</button>
             </li>
@@ -70,8 +85,21 @@ export default function TranslationsPanel({ studyId }: { studyId: string }) {
           <input type="file" accept=".csv,text/csv" className="sr-only" disabled={!ok}
             onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = '' }} />
         </label>
+        <button type="button" disabled={!ok || running}
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-40" onClick={startDraft}>
+          {running ? 'Drafting…' : 'Draft blanks with a model'}
+        </button>
+        <InfoTip id="translationDraft" />
       </div>
       {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+      {job?.state === 'done' && (
+        <p className="mt-2 text-sm text-slate-600">
+          {job.lang}: {job.drafted} drafted{job.refused ? `, ${job.refused} refused for losing a token` : ''}
+          {job.remaining ? `, ${job.remaining} still blank` : ''}. Download the sheet — drafts are marked
+          “model draft — check” for the translator.
+        </p>
+      )}
+      {job?.state === 'failed' && <p className="mt-2 text-sm text-red-700">{job.error}</p>}
       {problems && (
         problems.length === 0
           ? <p className="mt-3 text-sm text-emerald-700">Every string translated, every token kept.</p>
