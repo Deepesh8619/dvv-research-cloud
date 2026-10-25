@@ -364,3 +364,89 @@ def test_evidence_shows_the_flagged_answers(client):
     assert r.json()["items"][1]["answers"][0]["column"] == COLS[0]
     assert c.post("/api/studies/st1/cleaning/respondents/nobody/evidence",
                   json={"flags": []}).status_code == 404
+
+
+# --- K1: habits become suggestions ---
+
+def _second_study(sf, tmp_path):
+    """st2: a copy of st1's data in its own run directory."""
+    import shutil
+
+    run2 = tmp_path / "run2"
+    shutil.copytree(tmp_path / "run", run2)
+    now = datetime.now().isoformat()
+    db = sf()
+    db.add(StudyDB(
+        id="st2", client_name="T", status="qc", created_at=now, updated_at=now,
+        excel_path=str(run2 / "out.xlsx"), study_metadata={}, approval_chain={},
+    ))
+    db.add(QuestionnaireDB(
+        id="q2", study_id="st2", status="approved", source_filename="s.docx",
+        definition_json="{}", approved_qids=[], created_at=now, updated_at=now,
+    ))
+    db.commit()
+    db.close()
+
+
+def _lock(c, sid, tmp_path):
+    flagged = sorted(c.get(f"/api/studies/{sid}/cleaning").json()["flags"])
+    r = c.post(f"/api/studies/{sid}/cleaning/decisions", json={
+        "keys": flagged, "decision": "remove", "reason_code": "duplicate", "note": None})
+    assert r.status_code == 200
+    assert c.post(f"/api/studies/{sid}/cleaning/lock").status_code == 200, sid
+    return flagged
+
+
+def _habit(c, check):
+    habits = c.get("/api/cleaning/habits").json()["habits"]
+    return next((h for h in habits if h["check"] == check), None)
+
+
+def test_locking_builds_the_habit_once_and_never_removes_anyone(client, tmp_path, monkeypatch):
+    import api.routes.cleaning as cl
+    from src.core.models import VarType
+
+    monkeypatch.setattr(cl, "STUDIES_DIR", tmp_path / "studies")
+    c, sf, _ = client
+    (tmp_path / "run" / "datamap.json").write_text(DataMap([
+        Variable(name=c_, label=f"Question {c_}", question_ref=c_, type=VarType.SINGLE,
+                 values={i: f"Opt {i}" for i in range(6)}) for c_ in COLS]).to_json())
+    _second_study(sf, tmp_path)
+    assert c.get("/api/cleaning/habits").json() == {"habits": []}
+    flagged = _lock(c, "st1", tmp_path)
+    h = _habit(c, "duplicate")
+    assert h["removed"] == len(flagged) and h["kept"] == 0 and h["studies"] == 1
+    # unlock + re-lock the same study: no double count
+    assert c.post("/api/studies/st1/cleaning/unlock", json={"note": "redo"}).status_code == 200
+    assert c.post("/api/studies/st1/cleaning/lock").status_code == 200
+    again = _habit(c, "duplicate")
+    assert again["removed"] == h["removed"] and again["studies"] == 1
+    _lock(c, "st2", tmp_path)
+    assert _habit(c, "duplicate")["studies"] == 2
+    assert _habit(c, "duplicate")["removed"] == 2 * len(flagged)
+
+
+def test_third_study_gets_a_suggestion_only_over_the_thresholds(client):
+    from api.db import CleaningHabitDB
+
+    c, sf, _ = client
+    flagged = sorted(c.get("/api/studies/st1/cleaning").json()["flags"])
+
+    def seed(removed, kept, studies):
+        db = sf()
+        db.merge(CleaningHabitDB(check="duplicate", removed=removed, kept=kept,
+                                 studies=studies, updated_at="x"))
+        db.commit()
+        db.close()
+        return c.get("/api/studies/st1/cleaning").json()["suggestions"]
+
+    assert seed(8, 0, 3) == []      # under 10 decisions
+    assert seed(46, 2, 1) == []     # one study only
+    assert seed(40, 8, 3) == []     # removal rate 0.83
+    got = seed(46, 2, 3)
+    assert len(got) == 1 and got[0]["check"] == "duplicate" and got[0]["keys"] == flagged
+    assert got[0]["label"] and got[0]["studies"] == 3 and got[0]["removed"] == 46
+    # decided respondents are no longer suggested, and nothing was decided for them
+    assert c.get("/api/studies/st1/cleaning").json()["decisions"] == {}
+    assert _post(c, flagged[:1]).status_code == 200
+    assert seed(46, 2, 3)[0]["keys"] == flagged[1:]

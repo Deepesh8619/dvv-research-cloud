@@ -108,6 +108,45 @@ def current_decisions(audit_rows: list[dict]) -> dict[str, dict]:
     return out
 
 
+HABIT_MIN_DECISIONS, HABIT_MIN_RATE, HABIT_MIN_STUDIES = 10, 0.9, 2
+
+
+def check_tally(flags: dict[str, list[dict]], decisions: dict[str, dict]) -> dict[str, list[int]]:
+    """{check: [removed, kept]} over decided flagged respondents, once per respondent per check."""
+    out: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for key, items in flags.items():
+        d = decisions.get(key)
+        if not d:
+            continue
+        for check in {f["check"] for f in items}:
+            out[check][0 if d["decision"] == "remove" else 1] += 1
+    return dict(out)
+
+
+def suggestions(
+    habits: dict[str, dict], flags: dict[str, list[dict]], decisions: dict[str, dict]
+) -> list[dict]:
+    """Checks this reviewer nearly always removes, with this study's undecided matches.
+
+    habits: {check: {removed, kept, studies}}. A suggestion, never a decision.
+    """
+    from src.engines.qc.authenticity import _LABELS
+
+    out = []
+    for check, h in habits.items():
+        total = h["removed"] + h["kept"]
+        if total < HABIT_MIN_DECISIONS or h["studies"] < HABIT_MIN_STUDIES:
+            continue
+        rate = h["removed"] / total
+        keys = sorted(k for k, items in flags.items()
+                      if k not in decisions and any(f["check"] == check for f in items))
+        if rate >= HABIT_MIN_RATE and keys:
+            out.append({"check": check, "label": _LABELS.get(check, check.replace("_", " ")),
+                        "removed": h["removed"], "decided": total, "removed_rate": round(rate, 3),
+                        "studies": h["studies"], "keys": keys})
+    return sorted(out, key=lambda s: -len(s["keys"]))
+
+
 def apply_cleaning(
     run_dir: str | Path, removed_keys, imputations: list[dict] | None = None
 ) -> dict[str, int]:

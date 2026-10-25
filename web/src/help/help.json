@@ -131,6 +131,12 @@
     "why": "One number to order your review, with the reasons beside it so you never trust it blindly.",
     "how": "Read the listed signals, then decide. The weights are a first setting and will be tuned on reviewed studies."
   },
+  "cleaning_habits": {
+    "title": "Suggested from your past decisions",
+    "what": "A check you have removed almost every time (at least 9 in 10, over 10 or more decisions on 2 or more locked studies) shows up here when respondents in this study are flagged the same way.",
+    "why": "So you do not repeat the same decision by hand on every study. It is only a prompt: nothing is removed until you press the button.",
+    "how": "Review them to filter the list to that check, or Remove all to remove them together with a note saying why. Remove all can be undone by deciding each one again."
+  },
   "cleaning_lock": {
     "title": "Lock cleaning",
     "what": "Freezes the decisions and makes a cleaned version of the data, which the tables and deliverables then use.",

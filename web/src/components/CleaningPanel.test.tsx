@@ -100,7 +100,30 @@ describe('CleaningPanel', () => {
     render(<CleaningPanel studyId="s" role="analyst" />)
     fireEvent.click(await screen.findByRole('button', { name: 'Review first' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove all 2' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove 2' }))
     expect(api.decide.mock.calls[0][1]).toMatchObject({ keys: ['a1', 'b2'], decision: 'remove', reason_code: 'other' })
+  })
+
+  it('shows a habit suggestion and removes its respondents only when asked, with a note', async () => {
+    const api = await setup(2, { suggestions: [{
+      check: 'speeder', label: 'Speeder', removed: 46, decided: 48, removed_rate: 0.958, studies: 3, keys: ['a1'] }] })
+    render(<CleaningPanel studyId="s" role="analyst" />)
+    expect(await screen.findByText(/you removed 46 of 48 respondents flagged/)).toBeTruthy()
+    expect(api.decide).not.toHaveBeenCalled()  // nothing is ever applied on its own
+    fireEvent.click(screen.getByRole('button', { name: 'Remove all 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove 1' }))
+    expect(api.decide.mock.calls[0][1]).toMatchObject({
+      keys: ['a1'], decision: 'remove', reason_code: 'other', note: expect.stringContaining('too fast') })
+  })
+
+  it('"Review them" filters the list to that check', async () => {
+    await setup(2, { suggestions: [{
+      check: 'gibberish', label: 'Gibberish', removed: 20, decided: 20, removed_rate: 1, studies: 2, keys: ['b2'] }] })
+    render(<CleaningPanel studyId="s" role="analyst" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Review them' }))
+    const list = screen.getByRole('list', { name: 'Flagged respondents' })
+    expect(within(list).getByText('b2')).toBeTruthy()
+    expect(within(list).queryByText('a1')).toBeNull()
   })
 
   it('disables Lock while unreviewed > 0 and enables it at 0', async () => {
