@@ -14,6 +14,8 @@ Evidence, strongest first:
 - **AI-written text** — the phrases a language model leaves behind.
 - **Reading time** — finished faster than the words they were asked could be
   skimmed at 600 words a minute (three times normal reading speed).
+- **Person-fit** — answers that contradict the item order everyone else gives
+  (normalised Guttman errors, `person_fit.py`).
 - **The existing checks** — speeders, straight-liners, duplicates, gibberish,
   copied open ends, failed traps.
 
@@ -45,6 +47,7 @@ WEIGHTS = {
     "gibberish": 15,
     "straightliner": 10,
     "inconsistent": 20,
+    "person_fit": 15,
 }
 #: Review first at or above this; worth a look from REVIEW_AT.
 HIGH_AT, REVIEW_AT = 60, 30
@@ -211,6 +214,7 @@ _LABELS = {
     "trap_failed": "Failed a trap", "speeder": "Speeder", "fraud_signal": "Fraud signal",
     "few_keystrokes": "Few keystrokes", "gibberish": "Gibberish", "straightliner": "Straight-lined",
     "inconsistent": "Inconsistent answers",
+    "person_fit": "Answers don't fit the pattern",
 }
 
 

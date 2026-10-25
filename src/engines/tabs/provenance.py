@@ -11,6 +11,7 @@ from collections import Counter
 from sqlalchemy.orm import Session
 
 from api.db import GraphNodeDB
+from src.engines.tabs.intervals import interval
 from src.platform import graph
 
 # What each routing edge says, from the question's point of view.
@@ -68,9 +69,13 @@ def provenance(
     `survey` is the fallback for the question step when the graph has no node."""
     r, c = table["rows"][row], table["columns"][col]
     value = r["pct"][col]
+    eff = c.get("effective_base") or c.get("unweighted_base")
+    iv = interval(value, eff)
+    shown = (f"{_fmt(value)}% (95% interval {iv[0]:.0f}%–{iv[1]:.0f}%, effective base "
+             f"{_fmt(eff)})" if iv else f"{_fmt(value)}%")
     steps = [{
         "title": "The cell",
-        "detail": f"{r['label']} among {c['label']}: {_fmt(value)}%. Weighted base "
+        "detail": f"{r['label']} among {c['label']}: {shown}. Weighted base "
                   f"{_fmt(c['base'])}, unweighted base {c.get('unweighted_base')}.",
     }]
 

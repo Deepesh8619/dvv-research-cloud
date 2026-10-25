@@ -12,10 +12,14 @@ from __future__ import annotations
 import re
 
 from src.engines.analysis.findings import MIN_BASE, checked_row, unmatched_numbers
+from src.engines.tabs.intervals import differs
 
 COMPARE = re.compile(r"\b(ahead of|more than|higher|lower|than|leads?|vs\.?|versus|outperform\w*"
                      r"|significant\w*)\b", re.I)
 SIGNIFICANT = re.compile(r"\bsignificant", re.I)
+RANKS = re.compile(r"\b(ahead of|more than|higher|lower|leads?|outperform\w*)\b", re.I)
+SIMILAR = re.compile(r"\b(similar|in line with|level with|close to|no significant difference)\b",
+                     re.I)
 # Question ids (Q5, S1) and the "Base under 30" caution are not claims.
 _NOT_CLAIMS = re.compile(r"\b[A-Za-z]+\d+\w*\b|\bbase under \d+", re.I)
 
@@ -73,6 +77,15 @@ def check(text: str, cites: list[dict], tables: list[dict]) -> dict:
         problems.append("It says significant, but no cited cell is marked significantly higher "
                         "than another. Cite the cells the test compares or drop the word.")
 
+    if RANKS.search(text) and not SIMILAR.search(text):
+        for i, a in enumerate(cells):
+            for b in cells[i + 1:]:
+                if _differ(a, b) is False and not _sig_between(a, b):
+                    problems.append(
+                        f"{a[1]['pct'][a[2]]:.0f}% and {b[1]['pct'][b[2]]:.0f}% are not reliably "
+                        "different on these bases. Say they are close, or cite a tested "
+                        "difference.")
+
     if "indicative" not in text.lower():
         for _t, _r, _j, col in cells:
             if col["unweighted_base"] < MIN_BASE:
@@ -91,3 +104,20 @@ def _has_sig(cells: list[tuple]) -> bool:
                     and r["pct"][j] > r["pct"][k]:
                 return True
     return False
+
+
+def _n(col: dict) -> float:
+    return col.get("effective_base") or col["unweighted_base"]
+
+
+def _differ(a: tuple, b: tuple) -> bool | None:
+    """Two rows of one column share respondents; anything else is two groups."""
+    (ta, ra, ja, ca), (tb, rb, jb, cb) = a, b
+    if ta is tb and ja == jb:
+        return differs(ra["pct"][ja], rb["pct"][jb], _n(ca))
+    return differs(ra["pct"][ja], rb["pct"][jb], _n(ca), _n(cb))
+
+
+def _sig_between(a: tuple, b: tuple) -> bool:
+    """One cell is marked significantly higher than the other, in the same row."""
+    return _has_sig([a, b]) or _has_sig([b, a])

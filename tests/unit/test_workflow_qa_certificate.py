@@ -111,3 +111,22 @@ def test_no_approved_questionnaire_fails_with_a_plain_sentence(env):
     with factory() as db:
         job = db.query(JobDB).one()
     assert job.error == "This study has no approved questionnaire to check."
+
+
+def test_a_proved_contradiction_blocks_the_certificate_with_its_reason(env):
+    client, factory = env
+    q7 = Question(qid="Q7", text="Q7", type=QuestionType.SINGLE,
+                  options=[Option(code=1, label="a")],
+                  show_if=Expression(op="eq", qid="S2", value=4))
+    _approve(factory, _gender(), q7)
+    run, text = _issue(client, factory)
+    assert "Not issued" in text and "Q7 needs S2 = 4" in text
+    dry = next(s for s in run["steps"] if s["name"] == "dry_run")["result"]
+    assert dry["proof"]["unreachable"][0]["qid"] == "Q7"
+
+
+def test_a_clean_survey_says_it_is_proved_for_every_respondent(env):
+    client, factory = env
+    _approve(factory, _gender())
+    _, text = _issue(client, factory)
+    assert "Proved for every possible respondent" in text

@@ -26,3 +26,4 @@ python-docx>=1.0  # Read .docx questionnaires (paragraphs, runs, tables) at inta
 PyMuPDF>=1.24  # Read PDF questionnaires with block/position-aware reading order
 rapidfuzz>=3.0  # Fuzzy label matching for question<->variable linking (no compiled deps)
 cryptography>=42.0  # Ed25519 licence signatures (api/licence.py)
+z3-solver==4.15.4.0  # SMT solver: proves which questions anyone can reach (src/engines/questionnaire/logic_proof.py)

@@ -1124,6 +1124,11 @@ export interface DryRunReport {
   /** Arithmetic: these cannot fire for any respondent who will ever live. */
   impossible: Array<{ qid: string; kind: string; detail: string }>
   questions_never_shown: string[]
+  /** Solver proof over every possible respondent; null when it could not run. */
+  proof?: {
+    unreachable: Array<{ qid: string; why: string }>
+    not_provable: Array<{ qid: string; reason: string }>
+  } | null
   display_issues: Array<{ qid: string; kind: string; detail: string }>
   unenforced_routing: string[]
   /** Logic X-ray data. `to` is "END" for the last question. */
