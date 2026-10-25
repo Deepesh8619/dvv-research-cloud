@@ -74,7 +74,7 @@ def _walk(db: Session, study_id: str, node: str, max_depth: int, direction: str)
                       {"study": study_id, "node": node, "max_depth": max_depth}).all()
     out, seen = [], set()
     for r in rows:  # ordered by depth, so the first sighting is the shallowest
-        if r.id in seen:
+        if r.id in seen or r.id == node:  # a cycle back to the start is not an ancestor
             continue
         seen.add(r.id)
         out.append({"id": r.id, "kind": r.kind, "ref": r.ref, "label": r.label,

@@ -77,7 +77,7 @@ def test_cycle_terminates(db):
     link(db, "s1", b, a, "k")
     db.commit()
     out = lineage(db, "s1", a)
-    assert sorted((r["id"], r["depth"]) for r in out) == [(a, 2), (b, 1)]
+    assert [(r["id"], r["depth"]) for r in out] == [(b, 1)]  # the start is not its own ancestor
 
 
 def test_max_depth(db):
