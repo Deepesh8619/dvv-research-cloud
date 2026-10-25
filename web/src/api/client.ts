@@ -111,6 +111,13 @@ export interface StudyProfile {
   }
 }
 
+export interface CellProvenance {
+  value: number
+  label: string
+  column: string
+  steps: { title: string; detail: string }[]
+}
+
 export interface CrosstabsPayload {
   title: string
   weight: string | null
@@ -294,6 +301,9 @@ export const studiesApi = {
   crosstabs: async (id: string) => {
     return api.get<CrosstabsPayload>(`/studies/${id}/crosstabs`)
   },
+  /** The steps behind one table cell: base, question, cleaning, weight, data file. */
+  cellProvenance: async (id: string, tableId: string, row: number, col: number) =>
+    api.get<CellProvenance>(`/studies/${id}/tables/${tableId}/provenance`, { params: { row, col } }),
   methodInputs: async (id: string) => api.get<MethodInputs>(`/studies/${id}/methods`),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   runMethod: async (id: string, body: MethodRequest) => api.post<any>(`/studies/${id}/methods`, body),
