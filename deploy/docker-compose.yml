@@ -32,7 +32,7 @@ services:
       retries: 3
 
   db:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     # 40 app connections (api/db.py pool) + backups + headroom for maintenance.
     command: ["postgres", "-c", "max_connections=100", "-c", "shared_buffers=256MB"]
@@ -62,7 +62,7 @@ services:
     depends_on: [app]
 
   backup:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       PGHOST: db
