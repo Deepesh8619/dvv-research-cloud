@@ -103,3 +103,12 @@ def test_replacement_needed_counts_per_quota_cell():
     ]
     got = replacement_needed({"a": {"Q2": 1}, "b": {"Q2": 1}, "c": {"Q2": 2}}, cells)
     assert got == {"total": 3, "by_cell": {"yes": 2, "no": 1}}
+
+
+def test_check_tally_counts_each_respondent_once_per_check():
+    from src.engines.qc.cleaning import check_tally
+
+    flags = {"a": [{"check": "speeder"}, {"check": "speeder"}], "b": [{"check": "speeder"}],
+             "c": [{"check": "speeder"}], "d": [{"check": "gibberish"}]}
+    dec = {"a": {"decision": "remove"}, "b": {"decision": "keep"}, "d": {"decision": "remove"}}
+    assert check_tally(flags, dec) == {"speeder": [1, 1], "gibberish": [1, 0]}
