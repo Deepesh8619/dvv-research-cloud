@@ -730,6 +730,27 @@ export interface CodingStatus {
          failed?: Record<string, string>; error?: string } | null
 }
 
+export interface ReportCite { table: string; row: number; col: number }
+export interface ReportSentence {
+  id: string; text: string; cites: ReportCite[]; ok: boolean; problems: string[]
+  source: 'finding' | 'model' | 'person'
+}
+export interface ReportPayload {
+  sentences: ReportSentence[]; drafted_at: string | null
+  job: { state: 'running' | 'done' | 'failed'; error?: string } | null
+}
+
+export const reportApi = {
+  get: async (id: string) => api.get<ReportPayload>(`/studies/${id}/report`),
+  /** Draft the cited report in the background; poll get. */
+  draft: async (id: string) => api.post<{ state: string }>(`/studies/${id}/report/draft`),
+  edit: async (id: string, sid: string, text: string, cites?: ReportCite[]) =>
+    api.put<ReportSentence>(`/studies/${id}/report/sentences/${sid}`, { text, cites }),
+  add: async (id: string, text: string, cites: ReportCite[]) =>
+    api.post<ReportSentence>(`/studies/${id}/report/sentences`, { text, cites }),
+  remove: async (id: string, sid: string) => api.delete(`/studies/${id}/report/sentences/${sid}`),
+}
+
 export const codingApi = {
   get: async (studyId: string) => api.get<CodingPayload>(`/studies/${studyId}/coding`),
   status: async (studyId: string) => api.get<CodingStatus>(`/studies/${studyId}/coding/status`),

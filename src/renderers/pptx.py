@@ -88,12 +88,15 @@ def _cited(f: dict) -> str:
 
 
 def render_deck(run: DeckRun, path: str | Path, questions: dict[str, str] | None = None,
-                screeners: set[str] | None = None, narrate: bool = True) -> Path:
+                screeners: set[str] | None = None, narrate: bool = True,
+                report: dict | None = None) -> Path:
     """Write the deck to .pptx and return the path.
 
     `questions` (qid -> wording) and `screeners` come from the questionnaire
     when there is one; without them findings still read, less well named.
     `narrate=False` skips the model entirely (computed findings only).
+    `report` (study_metadata["report"]) adds a "Report" slide after the title with the
+    sentences that passed the checker; each one's cells go into the speaker notes.
     """
     prs = Presentation()
     prs.slide_width = Inches(10)
@@ -115,6 +118,22 @@ def render_deck(run: DeckRun, path: str | Path, questions: dict[str, str] | None
     p.font.bold = True
     p.font.color.rgb = RGBColor(31, 42, 68)
     p.alignment = PP_ALIGN.CENTER
+
+    if accepted := [x for x in (report or {}).get("sentences") or [] if x.get("ok")]:
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        _text(slide, "Report", 0.3, 0.6, 28, bold=True, color=(31, 42, 68))
+        box = slide.shapes.add_textbox(Inches(0.5), Inches(1.1), Inches(9), Inches(5.6))
+        box.text_frame.word_wrap = True
+        notes = []
+        for n, x in enumerate(accepted):
+            p = box.text_frame.paragraphs[0] if n == 0 else box.text_frame.add_paragraph()
+            p.text = x["text"]
+            p.font.size = Pt(14)
+            p.space_after = Pt(10)
+            notes.append(f"{n + 1}. " + "; ".join(
+                f"{c['table'].upper()} row {c['row'] + 1}, column {c['col'] + 1}"
+                for c in x["cites"]))
+        slide.notes_slide.notes_text_frame.text = "Citations\n" + "\n".join(notes)
 
     confidence = run.plan.confidence  # `run` is reused below for text runs
     tables = [table_to_dict(r, f"t{idx}") for idx, r in enumerate(run.results, start=1)]
