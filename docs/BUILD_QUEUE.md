@@ -249,7 +249,7 @@ It refreshes on any event and every 30 s regardless. "Updated N s ago" ticks.
 
 Shared rules are as in wave 3. Any model call goes through `src.ai.router.run_private`, and everything must work with no model at all.
 
-### R: Cited report (R1 checker + R2 writer, screen F)  · engine-builder + ui-builder · ready
+### R: Cited report (R1 checker + R2 writer, screen F)  · engine-builder + ui-builder · done (#173)
 **Why:** a report sentence is the claim a client repeats. Every sentence must point at the cells it rests on, and code, not a model, decides whether it stands.
 
 **R1 checker:** `src/engines/analysis/citations.py: check(text, cites, tables) -> {"ok": bool, "problems": [str]}`. `cites` is a list of `{table, row, col}`, with row and col as indexes into `runner.table_to_dict` tables. The rules:
@@ -279,7 +279,7 @@ Shared rules are as in wave 3. Any model call goes through `src.ai.router.run_pr
 - the deck has the Report slide, with notes;
 - component tests for chips, refused sentences and editing.
 
-### N1: Norms from past studies  · engine-builder · ready
+### N1: Norms from past studies  · engine-builder · done (#175)
 **Why:** "34% chose Brand A" means little alone. Across the agency's past studies the same question has a range.
 - `src/engines/analysis/norms.py: norms_for(db, study_id, table) -> dict | None`.
 - **Matching:** find other studies' tables whose question matches this one, using the `question` vectors in `project_chunks` (same embedding model; `src.platform.vectors` / numpy cosine at or above 0.90), whose row labels overlap with at least 80% (case-insensitive), and whose studies have processed tables.
@@ -290,7 +290,7 @@ Shared rules are as in wave 3. Any model call goes through `src.ai.router.run_pr
 
 **Acceptance:** with three synthetic studies with indexed questions and tables, a 4th study's matching table gets the right range; a different question does not match; one past study gives None.
 
-### W1: The QA certificate and field-close workflows  · platform-builder · ready
+### W1: The QA certificate and field-close workflows  · platform-builder · done (#174)
 Read `src/platform/workflows.py` and `jobs.py` (wave 1, F4) first.
 
 **qa_certificate** (`src/workflows/qa_certificate.py`) is three steps: `qa.expert_checks` (the existing expert checks) → `qa.dry_run` (simulate n=1000, fixed seed, on the approved questionnaire) → `qa.certificate`.
@@ -319,7 +319,7 @@ Read `src/platform/workflows.py` and `jobs.py` (wave 1, F4) first.
 - the run route shows the step states;
 - field_close runs end to end on the golden-path fixture and leaves tables and a deck.
 
-### K1: Cleaning decisions become suggestions  · engine-builder · ready
+### K1: Cleaning decisions become suggestions  · engine-builder · done (#172)
 **Why:** a reviewer who removes every "too fast to read" respondent on every study should not have to do it by hand again. The system learns that habit literally and asks, rather than deciding for them.
 - **Table** `cleaning_habits` in `api/db.py`: `check` (pk), `removed` (int), `kept` (int), `studies` (int), `updated_at`.
 - **Learning:** when a study's cleaning is locked (find the lock route in `api/routes/cleaning.py`), each flag check among that study's decided respondents adds its removed and kept counts and bumps `studies`. This happens once per lock; a re-lock of the same study must not double-count, so store `study_metadata["cleaning_habits_counted"] = true`.
@@ -328,16 +328,71 @@ Read `src/platform/workflows.py` and `jobs.py` (wave 1, F4) first.
 
 **Acceptance:** locking two synthetic studies builds the habit; a re-lock doesn't double-count; a third study gets the suggestion with the right keys; a habit under the thresholds suggests nothing; the component test shows the card, and "Remove all" calls the bulk decision with the note.
 
-## Wave 5: further (see the blueprint's "Going further" section)
+## Wave 5a: proof, all the way down
 
-- **P1** Prove the logic with a solver: routing compiled to Z3, each unreachable question shown with a proof, each dead end with a counterexample respondent.
-- **P2** Tamper-evident study ledger: a hash-chained event log, and a deliverable fingerprint the client can check.
-- **P3** Replay: rebuild any deliverable byte for byte from the ledger, tested in CI.
-- **P4** Person-fit statistics (lz, Guttman errors) beside the paradata, for the authenticity score.
-- **P5** An error bar on every number: bootstrap intervals on tables and methods.
-- **P6** Supplier allocation as a bandit: shift sample toward the lowest cost per *verified* complete.
-- **P7** Wave-over-wave semantic diff: changed wording found by embeddings plus structure, with trend-break warnings.
-- **P8** Hierarchical Bayes for MaxDiff and conjoint, run on the job queue.
+Shared rules as before. Each card says whether it may add a dependency.
+
+### P1: Logic proved by a solver  · engine-builder · ready
+**Why:** a dry run of 1,000 respondents can miss a path that 1 person in 50,000 takes. A solver answers "can anyone reach Q7?" for every possible respondent, and when the answer is no, it says why.
+**New dependency allowed:** `z3-solver` (MIT), pinned to an exact version in requirements.txt.
+**Files:** `src/engines/questionnaire/logic_proof.py`, `tests/unit/test_logic_proof.py`, plus the certificate (`src/workflows/qa_certificate.py`) and the X-ray panel copy.
+- **Encoding:** for each question in `survey.question_order()`, an `answered_<qid>` Bool, plus:
+  - single or numeric: an Int (numeric bounds from `validation` min/max when present; single constrained to its option codes);
+  - multi: one Bool per option code, with at least one chosen when answered, and an exclusive option excluding the others;
+  - grid rows (`row` set): an Int per (qid, row) over the column codes.
+- **Semantics:** the encoding must mirror `survey_definition.evaluate` exactly. A leaf over an unanswered qid is False, so `not(leaf)` over an unanswered qid is True. `in`, `selected`, `eq`, `ne`, `gt` and `lt` behave as `evaluate` does. The question order is the survey's.
+  - `answered_Q` ⇔ (no show_if, or show_if holds) ∧ the respondent was not screened out earlier. Screened out earlier means: some earlier question P that was answered and whose terminate_if holds.
+  - Derived variables (`derive_if`) and masks are out of scope for v1. A question whose show_if references one is reported as "not provable (uses a derived variable)", never as unreachable.
+- **API:** `prove(survey) -> {"unreachable": [{qid, why}], "impossible_screenouts": [{qid}], "always_screened_out": [qid], "not_provable": [{qid, reason}], "examples": {qid: answers}}`.
+  - `why` comes from an unsat core, in plain words (e.g. "Q7 needs Q5 = 4, but Q5 only allows 1–3").
+  - `examples` holds, for each reachable question, one satisfying respondent as a plain answers dict.
+- **Cross-check (required tests):**
+  1. On the golden-path template and three hand-built surveys, every question the dry run reached is provably reachable.
+  2. Every `examples` answer set, replayed through `evaluate` in question order, really reaches its question (write the replay helper).
+  3. A question reachable only by a 1-in-10,000 combination is proved reachable, though the dry run (n=1,000) misses it.
+  4. A contradiction (Q7 shown if Q5 = 4, with Q5 codes 1–3) is proved unreachable, with the reason naming both.
+- **Certificate:** the `qa.dry_run` step also calls `prove`. The verdict uses the proof: Issued only when nothing is proved unreachable. The PDF says "Proved for every possible respondent" when nothing is not_provable, otherwise "Proved except: …". Unreachable questions list their reasons.
+- **X-ray:** `DryRunPanel` shows a line, "Solver: every question is reachable" or "Solver: Q7 can never be shown — <why>". The dry-run route returns `proof` alongside the report.
+- **Performance:** a 150-question survey proves in under 5 s (test with a generated survey).
+
+### P2: Tamper-evident study ledger  · platform-builder · ready
+**Why:** "trust us" becomes "check it yourself". Every recorded change to a study is chained, so an edit to history shows. A delivered file can be checked against what was issued.
+**Files:** `api/db.py` (`audit_log` gains `seq`, `prev_hash`, `hash` via `_ensure_new_columns`; new `ledger_heads` table: `study_id` pk, `seq`, `hash`), `src/platform/ledger.py`, `record_audit` in `api/db.py`, the deliverable writers, `api/routes/platform.py`, `web/src/pages/ActivityPage.tsx` or the project's Activity tab (whichever shows the study's audit log; find it), and tests.
+- **Chaining:** `record_audit` with a `study_id` locks that study's `ledger_heads` row (`with_for_update`; SQLite needs no lock) and computes `seq = head.seq + 1` and `hash = sha256(prev_hash + canonical_json(entry))`. The canonical form covers entity, entity_id, action, actor_id, study_id, summary, before, after and created_at, with sorted keys and no whitespace. It then stores the entry and moves the head.
+  - Entries without a study_id chain under the key `"_global"`.
+  - `record_audit` keeps its never-raise contract.
+- `ledger.verify(db, study_id) -> {ok, n, head, first_bad_seq}` recomputes the chain. Entries written before the chain existed (seq null) are reported as `{"unchained": n}`, not as tampering.
+- **Deliverables:** every time a pptx, xlsx, data export, report or logic certificate is written, record `entity="deliverable"`, `action="issued"`, `after={"file": name, "sha256": ...}`.
+- **Routes:**
+  - `GET /studies/{id}/ledger/verify`;
+  - `POST /studies/{id}/ledger/check-file` (multipart) returns `{issued: bool, at, name}` for a file whose sha256 was recorded as issued for this study.
+- **Web:** on the study's Activity view, a strip reading "Ledger: 214 entries · intact ✓ · fingerprint a1b2c3…", or "Ledger broken at entry 57". Below it, "Check a file you received": upload, then "This file was issued on 25 Oct 2026" or "This file was not issued by this study".
+- **Tests:** a chain of 20 entries verifies; editing one stored entry is reported at its seq; a deliverable written by materialize is found by check-file; a different file is not; concurrent writes on Postgres are covered by a `DVV_TEST_PG` test.
+
+### P4: Person-fit scores for authenticity  · engine-builder · ready
+**Why:** psychometrics has measured for decades whether one person's answers fit everyone else's pattern. Bots and inattentive respondents misfit in ways speeders and straight-liners don't catch.
+**Files:** `src/engines/qc/person_fit.py`, a hook in the authenticity flag pipeline (`src/engines/qc/authenticity.py`, where flags are built), and tests.
+- For each rating grid with at least 6 items (reuse `respondents._grid_groups`), compute per respondent:
+  - **IRV**, the intra-individual response variability (SD across the grid's items);
+  - **normalised Guttman errors G\***, polytomous, with items ordered by mean score.
+- Flag `person_fit` (weight 15 in `WEIGHTS`, label "Answers don't fit the pattern") when a respondent is in the top 5% of G\* on at least two grids, or on the only grid when there's one. Its detail is plain words: "On SAT_ATTR and BRAND_IMG, answers contradict the order everyone else gives these items (top 5%)."
+- It never flags when fewer than 30 respondents answered the grid.
+- **Tests:** synthetic data where 5 respondents answer in reverse of the common item order are flagged; consistent respondents are not; under 30 respondents gives no flag; straight-liners are not double-flagged as misfit (their G\* is 0).
+
+### P5: An error bar on every number  · engine-builder + ui-builder · ready
+**Why:** "34%" from 61 people is not "34%" from 600. Every percentage should carry its uncertainty, and a sentence that ranks two overlapping numbers should be refused.
+**Files:** `src/engines/tabs/intervals.py`, the provenance step, the citation checker, `StudyThread.tsx`, the cited report chips, and tests.
+- `interval(pct, n_eff, level=0.95) -> (lo, hi)` is the Wilson score interval on the **effective** base (so a weighted column's design effect counts). It works from the cell's pct and `effective_base`, which tables already carry, so nothing needs recomputing. Edge cases: pct 0 or 100, and n_eff under 1 (returns None).
+- **Study Thread:** the cell step reads "34% (95% interval 28%–40%, effective base 212)".
+- **Report chips:** the hover shows the interval.
+- **Checker (new rule):** a sentence that ranks two cited cells ("ahead of", "more than", "higher", "lower", "leads", "outperform") whose intervals overlap, and that has no sig letter between them, gets the problem "These two numbers are within each other's margin of error (28–40% vs 25–37%). Say they are similar, or cite a tested difference." A sentence that says "similar", "in line with" or "no significant difference" is exempt.
+- **Tests:** Wilson values against known references (e.g. 50% of 100 gives 40.4–59.6); the effective base drives the width; the new rule refuses an overlapping ranking and accepts it when sig is present or the sentence says similar; the findings-generated report from the golden path still passes, so the report writer must already avoid this. If it doesn't, adjust `findings` so a lead with overlapping intervals is worded "is level with" rather than "leads", and test it.
+
+## Wave 5b: (cards to write after 5a)
+- **P3** Replay any deliverable byte for byte from the ledger (needs P2).
+- **P6** Supplier allocation as a bandit.
+- **P7** Semantic diff between tracker waves.
+- **P8** Hierarchical Bayes for MaxDiff and conjoint.
 
 ## Founders, alongside every wave
 - Field one real study with an outside analyst (P0). It is the test for every screen above.
