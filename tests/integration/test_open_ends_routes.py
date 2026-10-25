@@ -14,6 +14,7 @@ from api.auth import get_current_user
 from api.db import Base, StudyDB, UserDB, get_db
 from api.main import app
 from src.core.models import DataMap, Variable, VarType
+from src.platform.worker import drain
 
 
 @pytest.fixture
@@ -65,6 +66,7 @@ def test_only_real_open_questions_are_listed_and_coded_on_demand(client, monkeyp
     assert c.post("/api/studies/s1/coding/run", json={"variables": ["uuid"]}).status_code == 422
     r = c.post("/api/studies/s1/coding/run", json={})
     assert r.status_code == 202 and r.json()["variables"] == ["WHY_OE"]
+    drain(sessionmaker(bind=db.get_bind()))
     after = c.get("/api/studies/s1/coding/status").json()
     assert after["job"]["state"] == "done" and after["job"]["coded"] == ["WHY_OE"]
     assert after["open_ends"][0]["coded"] is True

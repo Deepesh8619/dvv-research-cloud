@@ -102,20 +102,27 @@ def test_unknown_kind_fails_cleanly(factory):
         assert worker.run_once(factory, "w") is False
 
 
-def test_handler_exception_stored_truncated(factory):
+def test_handler_exception_shows_generic_sentence_and_joberror_its_message(factory):
     @jobs.handler("explode")
     def _(payload, db):
-        raise ValueError("x" * 800)
+        raise ValueError("secret detail")
+
+    @jobs.handler("polite")
+    def _(payload, db):
+        raise jobs.JobError("No draft: no model is set up.")
 
     try:
         with factory() as db:
             job = jobs.enqueue(db, "explode", {}, max_attempts=1)
-            worker.run_once(factory, "w")
+            nice = jobs.enqueue(db, "polite", {}, max_attempts=1)
+            worker.drain(factory)
             db.refresh(job)
-            assert job.state == "failed"
-            assert job.error.startswith("ValueError: xxx") and len(job.error) == 500
+            db.refresh(nice)
+            assert job.state == "failed" and job.error == jobs.GENERIC_ERROR
+            assert nice.state == "failed" and nice.error == "No draft: no model is set up."
     finally:
         jobs.HANDLERS.pop("explode")
+        jobs.HANDLERS.pop("polite")
 
 
 def test_handler_result_stored(factory):

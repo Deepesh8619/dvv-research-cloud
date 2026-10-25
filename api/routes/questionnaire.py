@@ -26,7 +26,7 @@ from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -83,6 +83,8 @@ from src.intake.questionnaire_loader import (
     load_pdf,
     segment_into_questions,
 )
+from src.platform.events import emit
+from src.platform.jobs import JobError, enqueue, handler
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -1754,35 +1756,40 @@ def _set_translation_job(db: Session, study_id: str, job: dict) -> None:
     db.commit()
 
 
-def _draft_translation(bind, study_id: str, lang: str) -> None:
-    """Background: a private model's first draft of every untranslated string."""
-    from sqlalchemy.orm import sessionmaker
-
+@handler("translation.draft")
+def _draft_translation(payload: dict, db: Session) -> dict:
+    """Queue handler: a private model's first draft of every untranslated string."""
     from src.engines.fielding.translation import draft
 
-    db = sessionmaker(bind=bind)()
+    study_id, lang = payload["study_id"], payload["lang"]
+    job_id = payload.get("job_id")
     try:
         questionnaire = _latest_questionnaire(db, study_id)
         survey = _load_definition(db, questionnaire)
         result = draft(survey, lang)
         _save_definition(db, questionnaire, survey)
-        _set_translation_job(db, study_id, {"state": "done", "lang": lang, **result})
+        _set_translation_job(db, study_id, {"state": "done", "lang": lang, "job_id": job_id,
+                                            **result})
     except Exception as exc:  # recorded for the panel; never left "running"
         logger.warning(f"[{study_id}] translation draft failed: {exc}")
+        db.rollback()
         reason = ("no private model is set up (Bedrock, or a local model)"
                   if "private model" in str(exc) or "backends failed" in str(exc)
                   else "the model's answer could not be used")
-        _set_translation_job(db, study_id, {"state": "failed", "lang": lang,
-                                            "error": f"No draft: {reason}."})
-    finally:
-        db.close()
+        message = f"No draft: {reason}."
+        _set_translation_job(db, study_id, {"state": "failed", "lang": lang, "job_id": job_id,
+                                            "error": message})
+        emit(db, study_id, "job.failed", {"kind": "translation.draft", "lang": lang,
+                                          "error": message})
+        raise JobError(message) from None
+    emit(db, study_id, "job.done", {"kind": "translation.draft", "lang": lang})
+    return {"lang": lang, **result}
 
 
 @router.post("/studies/{study_id}/questionnaire/translations/{lang}/draft", status_code=202)
 def draft_translation(
     study_id: str,
     lang: str,
-    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
 ):
@@ -1794,7 +1801,12 @@ def draft_translation(
     if ((study.study_metadata or {}).get("translation_job") or {}).get("state") == "running":
         raise HTTPException(status_code=409, detail="A draft is already being written")
     _set_translation_job(db, study_id, {"state": "running", "lang": lang})
-    background.add_task(_draft_translation, db.get_bind(), study_id, lang)
+    job = enqueue(db, "translation.draft", {"study_id": study_id, "lang": lang},
+                  study_id=study_id, max_attempts=1, created_by=user.id)
+    db.refresh(study)
+    running = (study.study_metadata or {}).get("translation_job") or {}
+    if running.get("state") == "running":  # the worker may already have finished it
+        _set_translation_job(db, study_id, {**running, "job_id": job.id})
     return {"state": "running", "lang": lang}
 
 

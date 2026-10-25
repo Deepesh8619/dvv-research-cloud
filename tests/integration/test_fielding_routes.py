@@ -34,6 +34,7 @@ from src.core.survey_definition import (
     QuestionType,
     SurveyDefinition,
 )
+from src.platform.worker import drain
 
 
 def _sample_survey(study_id: str) -> SurveyDefinition:
@@ -1459,6 +1460,7 @@ def test_a_model_drafts_the_blanks_in_the_background_and_says_what_to_check(clie
 
     url = "/api/studies/study_f1/questionnaire/translations/hi/draft"
     assert test_client.post(url).status_code == 202
+    drain(sf)
     body = test_client.get("/api/studies/study_f1/questionnaire/translations").json()
     assert body["draft_job"]["state"] == "done", body["draft_job"]
     assert body["languages"][0]["n_drafts"] == body["draft_job"]["drafted"] > 0
@@ -1469,5 +1471,6 @@ def test_a_model_drafts_the_blanks_in_the_background_and_says_what_to_check(clie
         raise ai_router.BackendUnavailable("none", config_error=True)
     monkeypatch.setattr(ai_router, "run_private", down)
     test_client.post("/api/studies/study_f1/questionnaire/translations/ta/draft")
+    drain(sf)
     job = test_client.get("/api/studies/study_f1/questionnaire/translations").json()["draft_job"]
     assert job["state"] == "failed" and job["error"].startswith("No draft")

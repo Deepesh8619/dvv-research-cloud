@@ -71,7 +71,7 @@ def test_failing_step_fails_run_and_leaves_d_unqueued(factory):
         db.commit()
         drain(factory)
         db.refresh(run)
-        assert run.state == "failed" and run.error.startswith("ZeroDivisionError")
+        assert run.state == "failed" and run.error == jobs.GENERIC_ERROR
         assert db.query(JobDB).filter_by(step="D").count() == 0
 
 

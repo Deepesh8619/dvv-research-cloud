@@ -1,6 +1,8 @@
 """FastAPI application."""
 
 import logging
+import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -24,8 +26,23 @@ logger = logging.getLogger(__name__)
 init_db()
 logger.info("✅ Database initialized")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run queued jobs in this process, so production needs no second service."""
+    worker = None
+    if os.environ.get("DVV_INPROCESS_WORKER", "1") != "0":
+        from api.db import SessionLocal
+        from src.platform.worker import start_background
+
+        worker = start_background(SessionLocal)
+    yield
+    if worker is not None:
+        worker.stop_event.set()
+
+
 # Create FastAPI app
 app = FastAPI(
+    lifespan=lifespan,
     title="DVV Research Cloud API",
     version="0.1.0",
     description="End-to-end survey data processing pipeline",
@@ -172,6 +189,7 @@ try:
         fielding,
         materialize,
         methods,
+        platform,
         public,
         questionnaire,
         studies,
@@ -208,6 +226,7 @@ try:
     app.include_router(ui_overrides.router, prefix="/api")
     logger.info("✅ UI-override routes loaded")
 
+    app.include_router(platform.router, prefix="/api")
     app.include_router(cleaning.router, prefix="/api")
     app.include_router(codeframes.router, prefix="/api")
     app.include_router(methods.router, prefix="/api")

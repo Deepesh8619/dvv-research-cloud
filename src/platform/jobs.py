@@ -1,6 +1,7 @@
 """Database-backed job queue. A restart loses nothing; failures retry with backoff."""
 
 import json
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -9,6 +10,15 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from api.db import JobDB
+
+logger = logging.getLogger(__name__)
+
+GENERIC_ERROR = "Something went wrong running this job. It has been logged."
+
+
+class JobError(Exception):
+    """A failure whose message is written for the person reading it."""
+
 
 HANDLERS: dict[str, Callable[[dict, Session], dict]] = {}
 
@@ -143,10 +153,14 @@ def run_one(db: Session, job: JobDB) -> None:
         fail(db, job.id, f"No handler for {job.kind}")
     else:
         try:
-            result = fn(json.loads(job.payload or "{}"), db)
+            result = fn({"job_id": job.id, **json.loads(job.payload or "{}")}, db)
         except Exception as e:  # noqa: BLE001 - a handler failure is recorded, never raised
             db.rollback()
-            fail(db, job.id, f"{type(e).__name__}: {e}"[:500])
+            if isinstance(e, JobError):
+                fail(db, job.id, str(e)[:500])
+            else:
+                logger.exception("job %s (%s) failed", job.id, job.kind)
+                fail(db, job.id, GENERIC_ERROR)
         else:
             complete(db, job.id, result)
     if job.workflow_run_id:

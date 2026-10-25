@@ -16,6 +16,7 @@ fictional one. A test that genuinely needs a canned response patches
 
 from __future__ import annotations
 
+import os
 import sys
 import urllib.error
 
@@ -29,6 +30,9 @@ import src.ai.router
 # function; patching only `src.ai.router.http_json` left the navigator (the
 # data chat, the copilot) free to reach the real network.
 _REAL_HTTP_JSON = src.ai.router.http_json
+
+# No worker thread in tests: they run queued jobs themselves with `drain(factory)`.
+os.environ["DVV_INPROCESS_WORKER"] = "0"
 
 
 @pytest.fixture(autouse=True)
