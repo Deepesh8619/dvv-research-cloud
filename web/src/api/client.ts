@@ -123,6 +123,12 @@ export interface CellProvenance {
   steps: { title: string; detail: string }[]
 }
 
+export interface Norms {
+  rows: { label: string; n_studies: number; min: number; median: number; max: number }[]
+  matched: { study_id: string; title: string }[]
+  label?: string
+}
+
 export interface CrosstabsPayload {
   title: string
   weight: string | null
@@ -322,6 +328,8 @@ export const studiesApi = {
   /** The steps behind one table cell: base, question, cleaning, weight, data file. */
   cellProvenance: async (id: string, tableId: string, row: number, col: number) =>
     api.get<CellProvenance>(`/studies/${id}/tables/${tableId}/provenance`, { params: { row, col } }),
+  /** The range this table's rows take across past studies. */
+  norms: async (id: string, tableId: string) => api.get<Norms>(`/studies/${id}/tables/${tableId}/norms`),
   methodInputs: async (id: string) => api.get<MethodInputs>(`/studies/${id}/methods`),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   runMethod: async (id: string, body: MethodRequest) => api.post<any>(`/studies/${id}/methods`, body),

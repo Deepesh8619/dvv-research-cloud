@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { studiesApi, type CellProvenance } from '../api/client'
+import { studiesApi, type CellProvenance, type Norms } from '../api/client'
 import InfoTip from './ui/InfoTip'
 
 /**
@@ -19,6 +19,7 @@ interface Props {
 export default function StudyThread({ studyId, tableId, row, col, onClose }: Props) {
   const [data, setData] = useState<CellProvenance | null>(null)
   const [failed, setFailed] = useState(false)
+  const [norms, setNorms] = useState<Norms | null>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -37,7 +38,12 @@ export default function StudyThread({ studyId, tableId, row, col, onClose }: Pro
     setData(null)
     setFailed(false)
     studiesApi.cellProvenance(studyId, tableId, row, col).then((r) => setData(r.data)).catch(() => setFailed(true))
+    setNorms(null)
+    studiesApi.norms(studyId, tableId).then((r) => setNorms(r.data)).catch(() => setNorms({ rows: [], matched: [] }))
   }, [studyId, tableId, row, col])
+
+  const norm = norms?.rows.find((n) => n.label === data?.label)
+  const pct = (v: number) => `${Math.round(v)}%`
 
   return (
     <aside
@@ -70,6 +76,17 @@ export default function StudyThread({ studyId, tableId, row, col, onClose }: Pro
               <span className="text-sm text-slate-600">{s.detail}</span>
             </li>
           ))}
+          {norms && (
+            <li className="relative pb-5 last:pb-0" data-testid="knot">
+              <span aria-hidden className="absolute -left-[27px] top-1.5 h-3 w-3 rounded-full border-2 border-primary-500 bg-white" />
+              <b className="block text-sm text-slate-900">Compared with past studies<InfoTip id="norms" /></b>
+              <span className="text-sm text-slate-600">
+                {norm
+                  ? `Across ${norms.matched.length} past studies: ${pct(norm.min)}–${pct(norm.max)} (median ${pct(norm.median)})`
+                  : 'Not enough past studies yet'}
+              </span>
+            </li>
+          )}
         </ol>
       )}
     </aside>

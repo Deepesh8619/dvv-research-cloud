@@ -8,6 +8,7 @@ vi.mock('../api/client', () => ({
       columns: [{ label: 'Total', letter: null, base: 80, unweighted_base: 80, effective_base: 80 }],
       rows: [{ label: 'Price', pct: [64], sig: [''], kind: 'category' }],
     }] } }),
+    norms: vi.fn().mockResolvedValue({ data: { rows: [], matched: [] } }),
     cellProvenance: vi.fn().mockResolvedValue({ data: { value: 64, label: 'Price', column: 'Total',
       steps: [{ title: 'The cell', detail: 'x' }] } }),
   },
