@@ -36,7 +36,7 @@ describe('ReportPanel', () => {
     render(<ReportPanel studyId="s1" />)
     const chip = await screen.findByRole('button', { name: /Citation 1/ })
     expect(chip.textContent).toContain('T1·r1c1')
-    expect(chip.getAttribute('aria-label')).toBe('Citation 1: Yes, Total: 70% · base 80')
+    expect(chip.getAttribute('aria-label')).toBe('Citation 1: Yes, Total: 70% (95% interval 59%–79%) · base 80')
   })
 
   it('strikes through a refused sentence and says what to change', async () => {
@@ -53,5 +53,15 @@ describe('ReportPanel', () => {
     fireEvent.change(screen.getByLabelText('Sentence'), { target: { value: 'Yes is at 70%.' } })
     fireEvent.click(screen.getByText('Save sentence'))
     await waitFor(() => expect(edit).toHaveBeenCalledWith('s1', 's1', 'Yes is at 70%.', [{ table: 't1', row: 0, col: 0 }]))
+  })
+})
+
+describe('wilson', () => {
+  it('matches the server and the published reference: 50% of 100 is 40.4–59.6', async () => {
+    const { wilson } = await import('./ReportPanel')
+    const [lo, hi] = wilson(50, 100)!
+    expect(lo).toBeCloseTo(40.38, 1)
+    expect(hi).toBeCloseTo(59.62, 1)
+    expect(wilson(30, 0.5)).toBeNull()
   })
 })

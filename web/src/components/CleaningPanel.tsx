@@ -50,12 +50,14 @@ const CHECK_LABEL: Record<string, string> = {
   speeder: 'Too fast', too_fast_to_read: 'Faster than reading', straightliner: 'Straight-lined',
   duplicate: 'Duplicate', gibberish: 'Gibberish', pasted_answer: 'Pasted answer', ai_text: 'AI-written',
   few_keystrokes: 'Few keystrokes', trap_failed: 'Failed a trap', fraud_signal: 'Fraud signal', inconsistent: 'Inconsistent',
+  person_fit: "Answers don't fit the pattern",
 }
 // The reason a reviewer would pick for the strongest flag; "other" needs a note.
 const REASON_FOR: Record<string, string> = {
   speeder: 'speeder', too_fast_to_read: 'speeder', straightliner: 'straightliner', duplicate: 'duplicate',
   gibberish: 'gibberish', pasted_answer: 'fraud_signal', ai_text: 'fraud_signal', few_keystrokes: 'fraud_signal',
   fraud_signal: 'fraud_signal', trap_failed: 'trap_failed', inconsistent: 'inconsistent',
+  person_fit: 'fraud_signal',
 }
 const BAND_DOT: Record<Band, string> = { 'review first': 'bg-red-500', 'worth a look': 'bg-amber-400', fine: 'bg-slate-300' }
 
