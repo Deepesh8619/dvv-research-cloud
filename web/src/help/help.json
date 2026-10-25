@@ -209,6 +209,12 @@
     "why": "Shows who would be screened out, which questions nobody reaches, and dead ends — while it is still cheap to fix.",
     "how": "Run it after approving the questionnaire; read each warning and fix the logic in the questionnaire."
   },
+  "solver_proof": {
+    "title": "Solver proof",
+    "what": "A logic solver checks every possible respondent at once, not a sample, to see whether each question can ever be shown.",
+    "why": "A dry run can miss a path that one person in thousands takes. The solver cannot, and when a question is unreachable it says which rules collide.",
+    "how": "If it names a question, fix the base or the answer codes it points to, then run again."
+  },
   "logic_xray": {
     "title": "Logic X-ray",
     "what": "Draws the questionnaire as a line of questions, with the paths simulated respondents took between them.",

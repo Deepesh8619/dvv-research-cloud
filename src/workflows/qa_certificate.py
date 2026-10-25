@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from api.config import STUDIES_DIR
 from api.db import JobDB, get_study, list_questionnaires_for_study
+from src.engines.questionnaire.logic_proof import summary
 from src.platform.jobs import JobError, handler
 from src.platform.workflows import Step, Workflow, register_workflow
 
@@ -46,10 +47,16 @@ def _dry_run(payload: dict, db: Session) -> dict:
     from api.heavy import run_heavy
     from src.core.survey_definition import SurveyDefinition
     from src.engines.fielding.dryrun import simulate
+    from src.engines.questionnaire.logic_proof import prove
 
     survey = SurveyDefinition.from_json(_approved(db, payload["inputs"]["study_id"]))
     r = run_heavy(simulate, survey, [], n=N_RESPONDENTS, seed=SEED)
+    try:
+        proof = {**run_heavy(prove, survey), "examples": {}}  # examples are for tests
+    except Exception:  # the proof is an addition; without it the dry run decides
+        proof = None
     return {
+        "proof": proof,
         "n_respondents": r.n_respondents,
         "seed": r.seed,
         "dispositions": r.dispositions,
@@ -112,7 +119,17 @@ def _certificate(payload: dict, db: Session) -> dict:
     survey = SurveyDefinition.from_json(definition)
     sha = hashlib.sha256(definition.encode()).hexdigest()
     dry, expert = payload["results"]["dry_run"], payload["results"]["expert_checks"]
-    unreachable, impossible = dry["questions_never_shown"], dry["impossible"]
+    impossible = dry["impossible"]
+    proof = dry.get("proof")
+    if proof:
+        # The proof decides. A question the solver could not model still blocks if the
+        # dry run never showed it: that is evidence without a proof either way.
+        unprovable = {n["qid"] for n in proof["not_provable"]}
+        unreachable = [u["qid"] for u in proof["unreachable"]] + [
+            q for q in dry["questions_never_shown"] if q in unprovable]
+        why = {u["qid"]: u["why"] for u in proof["unreachable"]}
+    else:
+        unreachable, why = dry["questions_never_shown"], {}
     issued = not unreachable and not impossible
     study = get_study(db, study_id)
     now = datetime.now(UTC)
@@ -132,8 +149,11 @@ def _certificate(payload: dict, db: Session) -> dict:
         ("Rules that never fired", listed(dry["never_fired"])),
         ("Impossible rules", listed(impossible_qids)),
         ("Unreachable questions", listed(unreachable)),
+        ("Solver proof", summary(proof) if proof and not proof["unreachable"]
+         else "Not available" if not proof else "Not proved — see below"),
     ]
-    blockers = [f"Unreachable: {q} — nobody can be shown it" for q in unreachable] + [
+    blockers = [f"Unreachable: {q} — {why.get(q, 'nobody can be shown it')}"
+                for q in unreachable] + [
         f"Impossible: {i['detail']}" for i in impossible]
     shown_notes = [f"{n['qid'] or 'Overall'}: {n['note']}" for n in notes[:12]] + (
         [f"…and {len(notes) - 12} more."] if len(notes) > 12 else [])
