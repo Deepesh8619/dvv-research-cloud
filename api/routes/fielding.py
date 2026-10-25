@@ -111,6 +111,7 @@ from src.engines.fielding.rotation import order_pages
 from src.engines.fielding.translation import translated
 from src.engines.questionnaire.bipolar import FLIP_ARMS, apply_flip, flipping_questions
 from src.engines.questionnaire.derived import with_derived
+from src.engines.questionnaire.logic_proof import prove
 from src.platform.events import emit
 from src.renderers.surveyjs_compiler import compile_to_surveyjs, display_warnings, masked_out
 
@@ -493,6 +494,12 @@ def dry_run(
         cells = []
 
     report = run_heavy_detached(db, simulate, survey, cells, n=request.n, seed=request.seed)
+    try:
+        proof = run_heavy_detached(db, prove, survey)
+        proof["examples"] = {}  # the replayable answers are for tests; the panel needs verdicts
+    except Exception:
+        logger.exception(f"[{study_id}] the solver proof failed")
+        proof = None
     logger.info(
         f"[{study_id}] Dry run by {user.name}: {report.n_respondents} respondents, "
         f"{report.dispositions}, {len(report.never_fired)} condition(s) never fired"
@@ -512,6 +519,7 @@ def dry_run(
             logger.exception(f"[{study_id}] could not record the dry run")
     return {
         **report.to_dict(),
+        "proof": proof,
         "display_issues": display_warnings(survey),
         "unenforced_routing": _unenforced_routing(survey),
         "run_by": user.name,

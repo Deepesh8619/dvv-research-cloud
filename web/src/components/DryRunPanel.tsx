@@ -272,6 +272,26 @@ export default function DryRunPanel({
             </p>
           )}
 
+          {report.proof && (
+            <p className="text-sm text-slate-700" data-testid="solver-line">
+              {report.proof.unreachable.length === 0 ? (
+                <>
+                  <span className="font-medium">Solver:</span> every question is reachable
+                  {report.proof.not_provable.length > 0 &&
+                    ` (except ${report.proof.not_provable.map((n) => n.qid).join(', ')}, which it cannot check)`}
+                </>
+              ) : (
+                report.proof.unreachable.map((u) => (
+                  <span key={u.qid} className="block">
+                    <span className="font-medium">Solver:</span> {u.qid} can never be shown —{' '}
+                    {u.why}
+                  </span>
+                ))
+              )}
+              <InfoTip id="solver_proof" />
+            </p>
+          )}
+
           {report.transitions && report.transitions.length > 0 && <LogicXray report={report} />}
 
           <p className="text-xs text-slate-400">
