@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import logging
 import os
 from types import SimpleNamespace
 
@@ -36,6 +37,7 @@ from src.engines.fielding.vendors import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _report_and_quality(survey, sessions, answers, cells):
@@ -50,9 +52,15 @@ def _report_and_quality(survey, sessions, answers, cells):
     completes = [s for s in sessions if s.status_code == STATUS_COMPLETE]
     if not completes:
         return report, flag_rates(0, {}), []
-    datamap, frame = materialize_fielding(survey, completes, answers)
-    flags, _ = collect_flags(pl.from_pandas(frame, nan_to_null=True), datamap)
-    return report, flag_rates(len(completes), flags), [s.id for s in completes]
+    ids = [s.id for s in completes]
+    try:
+        datamap, frame = materialize_fielding(survey, completes, answers)
+        flags, _ = collect_flags(pl.from_pandas(frame, nan_to_null=True), datamap)
+    except Exception as exc:  # the counts and cost still stand without the quality rates
+        quality = {k: None for k in flag_rates(0, {})}
+        note = f"Quality checks could not run: {exc}"[:200]
+        return report, {**quality, "quality_note": note}, ids
+    return report, flag_rates(len(completes), flags), ids
 
 
 @router.get("/studies/{study_id}/fielding/vendors")
@@ -75,24 +83,37 @@ def vendor_scorecard(
     for link in list_fielding_links_for_study(db, study_id):
         if link.is_test:
             continue
-        cells = [
-            QuotaCell(id=c.id, condition=Expression.from_dict(json.loads(c.condition_json)),
-                      limit=c.cell_limit, count=c.count)
-            for c in list_quota_cells(db, link.id)
-        ]
-        jobs.append((
-            SimpleNamespace(id=link.id, vendor_name=link.vendor_name, cpi=link.cpi,
-                            target_completes=link.target_completes),
-            SurveyDefinition.from_json(link.survey_json),
-            plain_sessions(list_respondent_sessions(db, link.id)),
-            answers_by_session(db, link.id), cells,
-        ))
+        who = SimpleNamespace(id=link.id, vendor_name=link.vendor_name, cpi=link.cpi,
+                              target_completes=link.target_completes)
+        try:
+            cells = [
+                QuotaCell(id=c.id, condition=Expression.from_dict(json.loads(c.condition_json)),
+                          limit=c.cell_limit, count=c.count)
+                for c in list_quota_cells(db, link.id)
+            ]
+            jobs.append((who, SurveyDefinition.from_json(link.survey_json),
+                         plain_sessions(list_respondent_sessions(db, link.id)),
+                         answers_by_session(db, link.id), cells))
+        except Exception as exc:
+            jobs.append((who, exc))  # reported as this link's row below
     decisions = _decisions(db, study_id)
 
     rows = []
     for job in jobs:
-        # The first call closes the session; everything is already loaded.
-        report, quality, ids = run_heavy_detached(db, _report_and_quality, *job[1:])
+        # One link that cannot be read must not hide every other supplier: its
+        # row says why, the rest are computed as usual.
+        try:
+            if isinstance(job[1], Exception):
+                raise job[1]
+            # The first call closes the session; everything is already loaded.
+            report, quality, ids = run_heavy_detached(db, _report_and_quality, *job[1:])
+        except Exception as exc:
+            logger.warning(f"[{study_id}] supplier report for link {job[0].id} failed: {exc}")
+            rows.append({"link_id": job[0].id, "vendor_name": job[0].vendor_name,
+                         "cpi": job[0].cpi, "target_completes": job[0].target_completes,
+                         "error": "This link's report could not be built; its interviews are "
+                                  "safe. Check the link's questionnaire version."})
+            continue
         n_removed = sum(decisions.get(i, {}).get("decision") == "remove" for i in ids)
         rows.append(scorecard_row(job[0], report, quality, pct_removed(ids, decisions), n_removed))
     return {"study_id": study_id, "vendors": rows, "run_by": user.name}

@@ -33,3 +33,14 @@ describe('SuppliersPanel', () => {
       vendor_name: 'Alpha Panel', cpi: 2.5, target_completes: 10 })
   })
 })
+
+describe('SuppliersPanel with a broken link', () => {
+  it('shows the broken link as a message and keeps the others', async () => {
+    vi.mocked(fieldingApi.suppliers).mockResolvedValueOnce({ data: { vendors: [row,
+      { link_id: 'lB', vendor_name: 'Beta', cpi: null, target_completes: null,
+        error: "This link's report could not be built; its interviews are safe." }] } } as never)
+    render(<SuppliersPanel studyId="s1" canWrite />)
+    expect(await screen.findByText('Alpha Panel')).toBeTruthy()
+    expect(screen.getByText(/could not be built; its interviews are safe/)).toBeTruthy()
+  })
+})

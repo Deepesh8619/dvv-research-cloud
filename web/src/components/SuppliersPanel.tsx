@@ -80,7 +80,12 @@ export default function SuppliersPanel({ studyId, canWrite }: { studyId: string;
             </tr>
           </thead>
           <tbody className="tabular-nums">
-            {rows.map((r) => (
+            {rows.map((r) => r.error ? (
+              <tr key={r.link_id} className="border-t border-slate-100 align-top">
+                <td className="py-2 pr-3 font-medium text-slate-900">{r.vendor_name || 'Unnamed link'}</td>
+                <td colSpan={6} className="py-2 text-sm text-amber-800">{r.error}</td>
+              </tr>
+            ) : (
               <tr key={r.link_id} className="border-t border-slate-100 align-top">
                 <td className="py-2 pr-3">
                   <span className="font-medium text-slate-900">{r.vendor_name || 'Unnamed link'}</span>
@@ -93,7 +98,9 @@ export default function SuppliersPanel({ studyId, canWrite }: { studyId: string;
                   {r.pct_of_target !== null && <span className="block text-xs text-slate-500">{r.pct_of_target}%</span>}
                 </td>
                 <td className="py-2 pr-3">{n(r.incidence_pct, '%')}</td>
-                <td className={`py-2 pr-3 ${(r.pct_removed ?? 0) >= 15 ? 'text-amber-700' : ''}`}>{n(r.pct_removed, '%')}</td>
+                <td className={`py-2 pr-3 ${(r.pct_removed ?? 0) >= 15 ? 'text-amber-700' : ''}`} title={r.quality_note}>
+                  {n(r.pct_removed, '%')}{r.quality_note && <span className="block text-xs text-amber-700">quality not checked</span>}
+                </td>
                 <td className="py-2 pr-3">{r.accepted}</td>
                 <td className="py-2 pr-3">{n(r.billable)}</td>
                 <td className="py-2 text-right">
