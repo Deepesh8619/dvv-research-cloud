@@ -163,12 +163,18 @@ def unverified_numbers(text: str, tables: list[dict]) -> list[str]:
     means = [m for t in tables for m in t.get("means") or []]
     gaps = [abs(a - b) for t in tables for r in t["rows"] for s in t["rows"]
             for a in r["pct"] for b in s["pct"]]
-    # "Under 35", "250-499": numbers that are part of a label are not claims.
+    return unmatched_numbers(text, tables, pcts, bases, means, gaps)
+
+
+def unmatched_numbers(text: str, tables: list[dict], pcts: list[float], bases: list[float],
+                      means: list[float], gaps: list[float]) -> list[str]:
+    """Numbers in `text` that match none of the allowed values. `tables` only supply
+    the labels to strip: "Under 35", "250-499": numbers in a label are not claims."""
     labels = {x for t in tables for x in [t["title"], *(r["label"] for r in t["rows"]),
                                            *(c["label"] for c in t["columns"])]}
     for label in sorted(labels, key=len, reverse=True):
         # Bounded, so a row labelled "1" never eats the 1 of "71%".
-        text = re.sub(rf"(?<![\d.]){re.escape(label)}(?![\d.%])", " ", text)
+        text = re.sub(rf"(?<![\d.]){re.escape(label)}(?!\d|\.\d|%)", " ", text)
     bad = []
     for raw, unit in _NUMBER.findall(text):
         x = float(raw.replace(",", ""))

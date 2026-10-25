@@ -65,6 +65,20 @@ function grouped(flags: Flag[]): Array<{ check: string; n: number }> {
   return Object.entries(out).map(([check, n]) => ({ check, n })).sort((a, b) => b.n - a.n)
 }
 
+/** "Remove all N", then a second, explicit step: many respondents at once is
+ *  not a click to make by accident. Each stays changeable until cleaning is locked. */
+function ConfirmRemove({ n, busy, onConfirm }: { n: number; busy: boolean; onConfirm: () => void }) {
+  const [asking, setAsking] = useState(false)
+  if (!asking) return <Button variant="danger" disabled={busy} onClick={() => setAsking(true)}>Remove all {n}</Button>
+  return (
+    <span className="flex flex-wrap items-center gap-2 text-sm text-slate-800" role="group" aria-label="Confirm removal">
+      Remove {n} respondent{n === 1 ? '' : 's'}? You can change each one until cleaning is locked.
+      <Button variant="danger" disabled={busy} onClick={() => { setAsking(false); onConfirm() }}>Yes, remove {n}</Button>
+      <Button variant="secondary" onClick={() => setAsking(false)}>Cancel</Button>
+    </span>
+  )
+}
+
 /** Authenticity pill, signals in words, and total time against the median.
  *  Exports carry no per-question times, so the strip is total vs. median. */
 function Authenticity({ ev }: { ev: CleaningEvidence }) {
@@ -299,6 +313,25 @@ export default function CleaningPanel({ studyId, role }: { studyId: string; role
         <Err text={err} />
       </Card>
 
+      {open && (s.suggestions ?? []).map((g) => {
+        const name = (CHECK_LABEL[g.check] ?? g.label).toLowerCase()
+        return (
+          <Card key={g.check}>
+            <p className="text-sm text-slate-800">
+              On {g.studies} past studies you removed {g.removed} of {g.decided} respondents flagged <em>{name}</em>.{' '}
+              {g.keys.length} here {g.keys.length === 1 ? 'is' : 'are'} flagged the same way.
+              <InfoTip id="cleaning_habits" />
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button variant="secondary" disabled={busy}
+                onClick={() => { setBand('all'); setCheck(g.check); setShowReviewed(false) }}>Review them</Button>
+              <ConfirmRemove n={g.keys.length} busy={busy}
+                onConfirm={() => decide(g.keys, 'remove', 'other', `Removed together: you usually remove “${name}” (${g.removed} of ${g.decided} on ${g.studies} past studies)`)} />
+            </div>
+          </Card>
+        )
+      })}
+
       {all.length === 0 ? (
         <Card><p className="text-sm text-slate-600">No respondent was flagged. Nothing to review.</p></Card>
       ) : (
@@ -325,10 +358,8 @@ export default function CleaningPanel({ studyId, role }: { studyId: string; role
           {open && reviewFirst.length > 1 && band === 'review first' && (
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-red-50 p-3 text-sm text-red-900">
               {reviewFirst.length} still marked “review first”.
-              <Button variant="danger" disabled={busy}
-                onClick={() => decide(reviewFirst, 'remove', 'other', 'Removed together: all marked review first by the authenticity score')}>
-                Remove all {reviewFirst.length}
-              </Button>
+              <ConfirmRemove n={reviewFirst.length} busy={busy}
+                onConfirm={() => decide(reviewFirst, 'remove', 'other', 'Removed together: all marked review first by the authenticity score')} />
             </div>
           )}
           {keys.length === 0 ? (

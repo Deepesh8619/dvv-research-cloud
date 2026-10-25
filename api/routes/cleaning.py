@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from api.auth import UserRole, get_current_user, require_role
 from api.config import STUDIES_DIR
-from api.db import AuditLogDB, UserDB, get_db, get_study, record_audit
+from api.db import AuditLogDB, CleaningHabitDB, UserDB, get_db, get_study, record_audit
 from api.heavy import run_heavy_detached
 from api.routes.materialize import data_access
 from api.routes.studies import _run_artifacts
@@ -71,6 +71,34 @@ def _decisions(db: Session, study_id: str) -> dict[str, dict]:
     ])
 
 
+def _habits(db: Session) -> dict[str, dict]:
+    return {h.check: {"removed": h.removed or 0, "kept": h.kept or 0, "studies": h.studies or 0}
+            for h in db.query(CleaningHabitDB).all()}
+
+
+@router.get("/cleaning/habits")
+def get_habits(db: Session = Depends(get_db), user: UserDB = Depends(get_current_user)):
+    """What reviewers have decided per check across locked studies: counts only."""
+    return {"habits": [{"check": c, **h} for c, h in sorted(_habits(db).items())]}
+
+
+def _learn_habits(db: Session, study_id: str, flags: dict, decisions: dict) -> None:
+    """Add this study's per-check counts once; a re-lock must not count it again."""
+    from src.engines.qc.cleaning import check_tally
+
+    study = get_study(db, study_id)
+    if (study.study_metadata or {}).get("cleaning_habits_counted"):
+        return
+    now = datetime.now().isoformat()
+    for check, (rem, kept) in check_tally(flags, decisions).items():
+        row = db.get(CleaningHabitDB, check) or CleaningHabitDB(
+            check=check, removed=0, kept=0, studies=0)
+        row.removed, row.kept = (row.removed or 0) + rem, (row.kept or 0) + kept
+        row.studies, row.updated_at = (row.studies or 0) + 1, now
+        db.add(row)
+    study.study_metadata = {**(study.study_metadata or {}), "cleaning_habits_counted": True}
+
+
 @router.get("/studies/{study_id}/cleaning")
 def get_cleaning(
     study_id: str,
@@ -90,9 +118,13 @@ def get_cleaning(
     key_column, _keys, flags, skipped, authenticity = run_heavy_detached(
         db, _flags_job, parquet, datamap, state["rules"]
     )
+    from src.engines.qc.cleaning import suggestions
+
     return {
         "key_column": key_column,
         "flags": flags,
+        # Habits from past locked studies; the reviewer accepts or ignores them.
+        "suggestions": suggestions(_habits(db), flags, decisions),
         # One score per flagged respondent, every reason shown; highest first
         # is the order a reviewer should work in. Removal stays their call.
         "authenticity": authenticity,
@@ -326,6 +358,7 @@ def lock_cleaning(
     _save_cleaning(db, study_id, {
         **state, "locked": True, "versions": [*state["versions"], version],
     })
+    _learn_habits(db, study_id, flags, decisions)
     record_audit(
         db, entity="cleaning.lock", entity_id=study_id, action="lock", actor_id=user.id,
         study_id=study_id, after={"version": version["version"], **counts},

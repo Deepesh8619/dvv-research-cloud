@@ -131,6 +131,12 @@
     "why": "One number to order your review, with the reasons beside it so you never trust it blindly.",
     "how": "Read the listed signals, then decide. The weights are a first setting and will be tuned on reviewed studies."
   },
+  "cleaning_habits": {
+    "title": "Suggested from your past decisions",
+    "what": "A check you have removed almost every time (at least 9 in 10, over 10 or more decisions on 2 or more locked studies) shows up here when respondents in this study are flagged the same way.",
+    "why": "So you do not repeat the same decision by hand on every study. It is only a prompt: nothing is removed until you press the button.",
+    "how": "Review them to filter the list to that check, or Remove all to remove them together with a note saying why. Remove all can be undone by deciding each one again."
+  },
   "cleaning_lock": {
     "title": "Lock cleaning",
     "what": "Freezes the decisions and makes a cleaned version of the data, which the tables and deliverables then use.",
@@ -268,5 +274,23 @@
     "what": "Eight steps a study moves through, from the brief to the insight, each coloured by what is actually stored for this project.",
     "why": "You see at a glance what is done, what needs you and what has not started, without opening every tab.",
     "how": "Click a step to open it. A step marked \"needs you\" is also listed below the rail. Proof stays unstarted until dry-run results are kept."
+  },
+  "report": {
+    "title": "Cited report",
+    "what": "The report's sentences, each pointing at the table cells it rests on.",
+    "why": "A sentence is the claim a client repeats. Code, not a model, checks every number, comparison and small base against the cited cells.",
+    "how": "Draft report writes sentences from the findings. Click a sentence to edit it; a struck-through one failed the check and says what to change. Accepted sentences go on the deck's Report slide."
+  },
+  "logic_certificate": {
+    "title": "Logic certificate",
+    "what": "A one-page PDF saying the approved questionnaire was checked by a senior researcher's rules and fielded against 1,000 made-up respondents.",
+    "why": "It is proof for the client that no question is unreachable and no rule is impossible before real people are paid for.",
+    "how": "Press Issue logic certificate. If it says Not issued, fix the questions it names and run it again."
+  },
+  "field_close": {
+    "title": "Close fieldwork",
+    "what": "Builds the data file, tables, report draft and decks from the completed interviews in one go.",
+    "why": "One step instead of five, and every deliverable is built from the same data.",
+    "how": "Press the button and confirm. It replaces earlier deliverables; interviewing is not stopped."
   }
 }

@@ -51,7 +51,9 @@ def client(tmp_path, monkeypatch):
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_current_user] = lambda: UserDB(
         id="u1", email="owner@x.com", name="Owner", role="owner", is_active=True)
-    yield TestClient(app)
+    c = TestClient(app)
+    c.factory = session
+    yield c
     app.dependency_overrides.clear()
 
 
@@ -155,3 +157,25 @@ def test_a_study_runs_from_template_to_deck(client):
     assert {r["panel_id"] for r in recon} >= {"P001", "P002"}
     vendors = c.get(f"/api/studies/{sid}/fielding/vendors").json()["vendors"]
     assert vendors[0]["billable"] == pytest.approx(34 * 3.5)
+
+    # Closing fieldwork rebuilds the same deliverables through the job queue.
+    from src.platform.worker import drain
+
+    started = c.post(f"/api/studies/{sid}/workflows/field-close")
+    assert started.status_code == 202, started.text
+    drain(c.factory)
+    run = c.get(f"/api/workflow-runs/{started.json()['run_id']}").json()
+    assert run["state"] == "done", run
+    assert [s["name"] for s in run["steps"]] == ["materialize", "tabs", "report", "deck"]
+    assert c.get(f"/api/studies/{sid}/crosstabs").json()["tables"]
+    # The report step really ran (not skipped): every drafted sentence passed its checker.
+    report = c.get(f"/api/studies/{sid}/report").json()
+    assert report["sentences"] and all(x["ok"] for x in report["sentences"]), report
+    deck = c.get(f"/api/studies/{sid}/download/pptx")
+    assert deck.status_code == 200 and deck.content[:2] == b"PK"
+    from io import BytesIO
+
+    from pptx import Presentation
+    titles = [sh.text_frame.text for sl in Presentation(BytesIO(deck.content)).slides
+              for sh in sl.shapes if sh.has_text_frame]
+    assert any(t.strip() == "Report" for t in titles)
