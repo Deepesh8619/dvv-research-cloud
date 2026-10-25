@@ -117,7 +117,7 @@ volume works unchanged. The founders run `./dvv upgrade` as usual.
 
 ## Wave 2: wiring
 
-### F4: Background work on the queue, plus live events  · platform-builder · ready
+### F4: Background work on the queue, plus live events  · platform-builder · done (#164)
 **Why:** coding and translation drafts still run in FastAPI `BackgroundTasks`, so a
 restart loses them. The control room and "Needs you" need a live stream.
 **Files:** `api/db.py` (EventDB), `src/platform/events.py`, `src/platform/jobs.py`
@@ -137,7 +137,7 @@ one; `since()` returns events after a seq, in order; the SSE route streams an em
 event (TestClient, read the first lines); `/api/jobs/{id}` is 404 for an unknown id
 and 403 without study access.
 
-### G1: The questionnaire writes its graph  · engine-builder · ready
+### G1: The questionnaire writes its graph  · engine-builder · done (#162)
 **Why:** "what changes if I edit Q9", and the base the Study Thread starts from.
 **Files:** `src/engines/questionnaire/graph_sync.py`, the call sites in
 `api/routes/questionnaire.py` (approve-all, and any route that saves an approved
@@ -154,7 +154,7 @@ questionnaire), `api/routes/graph.py` (new) and its include line,
 - **Routes:** `GET /api/studies/{study_id}/graph/lineage?node=<kind>:<ref>` and `/graph/impact?node=...`. Both are authenticated with study access, return the `lineage()` or `impact()` list, and give 404 for an unknown node.
 **Acceptance:** a survey where Q3 is shown if Q2, Q5 is masked by Q4, and Q6 pipes Q5 gives the right edges; impact of Q4 reaches Q5 and Q6; removing Q6 and re-syncing drops its node and edges; approving through the route writes the graph; a broken graph write still approves.
 
-### X1: Paths through the questionnaire  · engine-builder · ready
+### X1: Paths through the questionnaire  · engine-builder · done (#161)
 **Why:** the data the Logic X-ray draws (line thickness, exits, unreachable stations).
 **Files:** `src/engines/fielding/dryrun.py`, `tests/unit/test_dryrun_paths.py`.
 - During `simulate`, record each synthetic respondent's sequence of SHOWN qids and their disposition.
@@ -166,7 +166,7 @@ questionnaire), `api/routes/graph.py` (new) and its include line,
 - No change to the existing fields or their meaning. Memory is bounded: paths are counted with a Counter of tuples, never stored per respondent beyond that.
 **Acceptance:** on a three-question survey with a screen-out at Q1 for code 2 and Q3 shown only if Q2 = 1, the transitions, path counts and exits match a hand count at a fixed seed; n = 1,000 runs in under a second; existing dry-run tests pass unchanged.
 
-### A1: Typing and timing evidence from exports  · engine-builder · ready
+### A1: Typing and timing evidence from exports  · engine-builder · done (#163)
 **Why:** 3 of 5 real exports carry per-open-end keystrokes, characters, pasting and
 speech-to-text, and `variable_roles` classes them as system columns and throws them
 away. They are the strongest sign that a person did, or didn't, write an answer.
@@ -178,14 +178,72 @@ away. They are the strongest sign that a person did, or didn't, write an answer.
 - **Evidence:** the per-respondent evidence endpoint gains `paradata: {pasted: [...], speech: [...], max_chars_per_key}` when the data has traces, and nothing when it doesn't.
 **Acceptance:** the TRD2 shape (an answer of 1,168 characters with 1 keystroke) is flagged as pasted; a speech-to-text answer is not; data with no trace columns gives an empty map and no evidence block; Q15 and Q15OE map to the same base.
 
-## Wave 3: screens (each from the mockups)
+## Wave 3: screens
 
-- **R0** Lifecycle rail and "Needs you" (screen A). needs F4.
-- **X2** Logic X-ray map (dagre) and the certificate PDF (screen B). needs X1.
-- **T1** Study Thread drawer on every table cell (screen C). needs G1.
-- **A2** Authenticity score as named signals, plus the session timeline in triage
-  (screen D). needs A1, F3.
-- **C1** Control room over SSE (screen E). needs F4.
+Shared rules for every screen:
+- Follow the mockup in `docs/artifacts/2026-10-25-build-blueprint.html` (section 1, screens A–E) for layout and copy, using the app's own Tailwind tokens (slate, `primary-*`, `shadow-panel`), `InfoTip`, and `web/src/api/client.ts`.
+- **No new npm dependency.** Draw diagrams in plain SVG.
+- Each feature gets a `help.json` entry and an InfoTip.
+- Each component gets a vitest test; each route gets an integration test.
+- Accessibility: every control is reachable by keyboard and visibly focused, and colour is never the only signal (pair it with text or an icon).
+- Copy is in sentence case and says what happens. Errors say what to do.
+
+### R0: Lifecycle rail and "Needs you" (screen A)  · ui-builder · ready
+**Backend:** `GET /api/studies/{id}/lifecycle` (signed in), from a new `src/engines/lifecycle.py: lifecycle(db, study) -> dict`. It returns `stages`: eight items in the order Brief, Questionnaire, Proof, Field, Verify, Data, Tables, Insight, each `{key, label, state: "done"|"attention"|"todo", detail, tab}`. It also returns `needs_you: [{kind, title, detail, tab}]`. Derive the states only from facts already stored; compute none of them:
+- **Questionnaire** is done when approved, attention when draft with flags.
+- **Proof** is done when the last dry run had nothing impossible or never-fired, if a result is stored. Otherwise it is todo.
+- **Field** shows completes against the target from links and quotas.
+- **Verify** is attention when cleaning has unreviewed flagged respondents.
+- **Data** is done when a data file is processed. **Tables** is done when tables exist. **Insight** is done when a report or deck exists.
+- **Brief** is done when the study has a description or template.
+
+`needs_you` lists each attention item. Each stage's `tab` names the ProjectPage tab or route that opens it.
+**Web:** `web/src/components/LifecycleRail.tsx` sits under the project header in `ProjectPage.tsx`. It shows eight segments, each a button that opens its tab, with the state shown by both a top-border colour and a text mark (✓, "needs you", nothing). Below the rail, a "Needs you" list appears when non-empty. It refreshes on the `DATA_CHANGED` event.
+**Acceptance:** route tests on a study at three points (new, approved with a link, data processed) give the expected states; the component test shows the states and that a click opens the right tab.
+
+### X2: Logic X-ray (screen B)  · ui-builder · ready
+**Web:** `web/src/components/LogicXray.tsx`, rendered in `DryRunPanel.tsx` under the existing results whenever a report has `transitions`.
+- **Layout, no library:** stations (questions) sit left to right in questionnaire order (`questions_never_shown` included). Each transition is a path. Adjacent stations are joined by a straight segment on the main line; a transition that skips stations is an arc above the line. TERMINATE and OVERQUOTA exits drop below the line to a labelled exit marker.
+- Stroke width is proportional to `n / n_respondents` (minimum 1.5 px). Unreachable stations are drawn dashed in the warning colour with the label "nobody reaches it".
+- The SVG scrolls horizontally inside its own container. Station labels are the qids, with the full question text in a `<title>`.
+- **Side panel:** the selected station shows its share of respondents and where they go next. Clicking or pressing Enter on a station selects it. The panel lists the unreachable questions and the exits with their counts.
+- **Copy:** "Line thickness = share of simulated respondents. Dashed = nobody reaches it."
+**Acceptance:** a vitest test on a report fixture checks the station count, that an arc is drawn for a skip, an exit marker for a terminate and dashing for an unreachable question, and that selecting a station updates the panel.
+
+### T1: Study Thread (screen C)  · ui-builder · ready
+**Backend:** `GET /api/studies/{id}/tables/{table_id}/provenance?row=<i>&col=<j>` (signed in), in `src/engines/tabs/provenance.py`. It finds the table in the study's processed tables (find where `crosstabs.json` / `deck_to_json` output is stored and read it the same way the Tables view does), and returns `{value, label, column, steps: [...]}`. Each step is `{title, detail}`, in this order, skipping a step when the fact is missing:
+1. The cell: value, row and column labels, weighted and unweighted base.
+2. The base: the column's filter text and the table's filter.
+3. The question: the stub's question text, its type, and its routing, masks and pipes in plain words, from `src.platform.graph.lineage` of the `question` node when it exists, otherwise from the survey.
+4. Cleaning: how many respondents were removed and for which reasons, from the cleaning decisions the cleaning engine stores.
+5. Weight: its name, plus efficiency = effective base ÷ unweighted base for that column, when weighted.
+6. The data file: its name, when it was uploaded and by whom, and its row count.
+
+It writes a `cell` node with `computed_from` (to the question) through the graph, so that wave 4's citations can point at it.
+**Web:** `web/src/components/StudyThread.tsx`, a drawer from the right. `CrosstabTable` gets an optional `onCellClick(row, col)`. The ProjectPage table view opens the drawer and highlights the cell. The steps are drawn as a vertical thread of knots, as in the mockup. Escape and a close button dismiss it, and focus returns to the cell.
+**Acceptance:** a route test on a processed fixture study returns the steps in order with the right base, and returns 404 for a bad table, row or column; the component tests check the knots render and that Escape closes the drawer.
+
+### A2: Authenticity score and session timeline (screen D)  · ui-builder · ready
+**Backend:** `src/engines/qc/authenticity.py` already exists. Read it first, and extend it rather than writing a parallel one. The score is a sum of named signals, each `{key, label, weight, detail}`, built from:
+- the paradata evidence (A1);
+- speed against the median (`seconds` / `median_seconds`, which evidence already returns);
+- straight-lining flags;
+- near-duplicate open ends, from `src.platform.vectors.near_duplicates` when the study has a verbatim index. Skip this signal when there is none.
+
+The score is `1 - min(1, Σ weights)`, with weights as module constants and a comment saying they are a starting point, to be calibrated by research task R9. The evidence endpoint returns `authenticity: {score, signals}`.
+**Web:** in `CleaningPanel.tsx`'s evidence panel, an "Authenticity 0.22" pill (text, plus colour by band), the signals listed in plain words, and a time-per-question bar strip when per-question times exist (find whether exports carry them; if they don't, show only total time against the median). Pasted questions are marked with text, not colour alone.
+**Acceptance:** unit tests check that a pasted, fast respondent scores lower than a typed, median-speed one, and that the signals are listed; the component test shows the pill and the signals.
+
+### C1: Control room (screen E)  · ui-builder · ready
+**Web:** `web/src/lib/useStudyEvents.ts` is a hook that reads `GET /api/studies/{id}/events` by **fetch streaming** with the Authorization header the API client uses. It parses SSE frames, reconnects with `after=<last id>` when the stream closes, and backs off on errors (1 s, then 2, 4, up to 30 s). `web/src/components/ControlRoom.tsx` sits on the FieldingPage above the links. It shows:
+- quota gauges, from the link quota endpoints;
+- completes against the target;
+- LOI and incidence when the existing field report has them;
+- a supplier table, from the existing vendors report: completes, flagged share, cost.
+
+It refreshes on any event and every 30 s regardless. "Updated N s ago" ticks.
+**Backend:** emit a `respondent.complete` event, through `src.platform.events.emit`, from the complete route in `api/routes/fielding.py`. Wrap it so an event failure never fails a complete. Emit `respondent.terminate` from the screen-out path too.
+**Acceptance:** a route test checks that completing a session emits an event; the hook test (mock fetch with a ReadableStream) checks frame parsing and that it reconnects with `after`; the component test shows the gauges and the supplier rows.
 
 ## Wave 4: insight and learning
 
