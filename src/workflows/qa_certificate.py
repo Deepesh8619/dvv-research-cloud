@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from api.config import STUDIES_DIR
 from api.db import JobDB, get_study, list_questionnaires_for_study
+from src.platform import ledger
 from src.platform.jobs import JobError, handler
 from src.platform.workflows import Step, Workflow, register_workflow
 
@@ -150,6 +151,7 @@ def _certificate(payload: dict, db: Session) -> dict:
     run_id = db.get(JobDB, payload["job_id"]).workflow_run_id
     cert = {"issued": issued, "at": now.isoformat(), "sha256": sha, "run_id": run_id}
     study.study_metadata = {**(study.study_metadata or {}), "certificate": cert}
+    ledger.issue(db, study_id, path)
     db.commit()
     return cert
 

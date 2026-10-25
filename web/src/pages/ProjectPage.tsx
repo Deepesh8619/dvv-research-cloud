@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import LedgerStrip from '../components/LedgerStrip'
 import AdverseEventsPanel from '../components/AdverseEventsPanel'
 import CleaningPanel from '../components/CleaningPanel'
 import CrosscheckPanel from '../components/CrosscheckPanel'
@@ -608,6 +609,8 @@ function ActivityTab({ study }: { study: Study }) {
     delivery: 'Delivery sign-off',
   }
   return (
+    <>
+    <LedgerStrip studyId={study.id} />
     <div className="bg-white rounded-lg border border-slate-200 shadow-panel p-6 max-w-2xl">
       <h2 className="font-semibold text-slate-900 mb-5">Approval history</h2>
       {events.length === 0 ? (
@@ -631,5 +634,6 @@ function ActivityTab({ study }: { study: Study }) {
         </ol>
       )}
     </div>
+    </>
   )
 }

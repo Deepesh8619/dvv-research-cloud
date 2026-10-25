@@ -4,14 +4,14 @@ import asyncio
 import json
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
 from api.auth import UserRole, get_current_user, require_role
 from api.db import JobDB, UserDB, WorkflowRunDB, get_db, get_study
-from src.platform import workflows
+from src.platform import ledger, workflows
 from src.platform.events import since
 from src.workflows import field_close, qa_certificate  # noqa: F401 - registers them
 
@@ -149,3 +149,36 @@ def download_certificate(
     if not path.is_file():
         raise HTTPException(status_code=404, detail="No certificate has been issued yet")
     return FileResponse(path, media_type="application/pdf", filename="logic_certificate.pdf")
+
+
+@router.get("/studies/{study_id}/ledger/verify")
+def verify_ledger(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """Recompute the study's audit chain. `first_bad_seq` is where history was changed."""
+    _study_access(user)
+    if not get_study(db, study_id):
+        raise HTTPException(status_code=404, detail="Study not found")
+    return ledger.verify(db, study_id)
+
+
+@router.post("/studies/{study_id}/ledger/check-file")
+def check_file(
+    study_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """Was this exact file issued by this study? Compares its sha256 to the ledger."""
+    import hashlib
+
+    _study_access(user)
+    if not get_study(db, study_id):
+        raise HTTPException(status_code=404, detail="Study not found")
+    h = hashlib.sha256()
+    for block in iter(lambda: file.file.read(1 << 20), b""):
+        h.update(block)
+    found = ledger.was_issued(db, study_id, h.hexdigest())
+    return {"issued": found is not None, **(found or {"at": None, "name": None})}

@@ -16,6 +16,7 @@ the fresh full dataset. Zero completes -> 422, not a crash.
 import json
 import logging
 import os
+from pathlib import Path
 
 import polars as pl
 from fastapi import APIRouter, Depends, HTTPException
@@ -45,6 +46,7 @@ from src.engines.fielding.materialize import (
 )
 from src.engines.tabs.runner import deck_to_json, run_tab_plan
 from src.orchestration.orchestrator import auto_tab_plan
+from src.platform import ledger
 from src.renderers.excel import render_deck as render_excel
 from src.renderers.pptx import render_deck as render_pptx
 
@@ -116,6 +118,9 @@ def publish_deck(db: Session, study, run_dir, datamap) -> None:
         render_pptx(deck_run, pptx_path, questions={q.qid: q.text for q in qs},
                     screeners={q.qid for q in qs if q.terminate_if}, narrate=False,
                     report=(study.study_metadata or {}).get("report"))
+    for issued in (excel_path, pptx_path):
+        if issued and Path(issued).is_file():
+            ledger.issue(db, study_id, issued)
     update_study_paths(db, study_id, excel_path=excel_path, pptx_path=pptx_path,
                        datamap_json=datamap.to_json())
 
@@ -181,6 +186,8 @@ def _write_and_publish(db, study, datamap, df, delivery_map, delivery_df, publis
     except Exception as exc:
         logger.warning(f"[{study_id}] respondent-level xlsx failed (non-fatal): {exc}")
 
+    for exported in exports.values():
+        ledger.issue(db, study_id, exported)
     if publish:
         _publish_tables(db, study, run_dir, datamap)
     # Erasure sets this; a successful write is what clears it.

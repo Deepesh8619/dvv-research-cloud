@@ -517,6 +517,10 @@ class AuditLogDB(Base):
     before_json = Column(Text, nullable=True)
     after_json = Column(Text, nullable=True)
     at = Column(String, index=True)
+    # P2 hash chain, per study. Null on entries written before the chain existed.
+    seq = Column(Integer, nullable=True)
+    prev_hash = Column(String, nullable=True)
+    hash = Column(String, nullable=True)
 
 
 def record_audit(
@@ -542,23 +546,32 @@ def record_audit(
     from datetime import datetime as _dt
     from uuid import uuid4 as _uuid
 
+    entry = None
     try:
-        db.add(
-            AuditLogDB(
-                id=f"aud_{_uuid().hex[:12]}",
-                entity=entity,
-                entity_id=entity_id,
-                action=action,
-                actor_id=actor_id,
-                study_id=study_id,
-                summary=summary,
-                before_json=_json.dumps(before) if before is not None else None,
-                after_json=_json.dumps(after) if after is not None else None,
-                at=_dt.now(UTC).isoformat(),
-            )
+        entry = AuditLogDB(
+            id=f"aud_{_uuid().hex[:12]}",
+            entity=entity,
+            entity_id=entity_id,
+            action=action,
+            actor_id=actor_id,
+            study_id=study_id,
+            summary=summary,
+            before_json=_json.dumps(before) if before is not None else None,
+            after_json=_json.dumps(after) if after is not None else None,
+            at=_dt.now(UTC).isoformat(),
         )
+        from src.platform.ledger import chain
+
+        chain(db, entry)  # moves the study's head; the caller's commit saves both
+        db.add(entry)
     except Exception as exc:  # noqa: BLE001
         _logging.getLogger(__name__).warning(f"audit record failed: {exc}")
+        try:
+            if entry is not None:
+                entry.seq = entry.prev_hash = entry.hash = None  # keep the line, unchained
+                db.add(entry)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 class CorrectionPreviewDB(Base):
@@ -616,6 +629,17 @@ class ProjectChunkDB(Base):
     vector_json = Column(Text)
     fingerprint = Column(String, index=True)
     created_at = Column(String)
+
+
+# --- P2 ---
+class LedgerHeadDB(Base):
+    """The last entry of one study's audit chain ("_global" for entries with no study)."""
+
+    __tablename__ = "ledger_heads"
+
+    study_id = Column(String, primary_key=True)
+    seq = Column(Integer, default=0)
+    hash = Column(String, default="")
 
 
 # --- K1 ---
@@ -836,6 +860,12 @@ def _ensure_new_columns():
             "source_filename": "VARCHAR",
             "source_file_b64": "TEXT",
             "crosscheck_json": "TEXT",
+        },
+        "audit_log": {
+            # P2 hash chain.
+            "seq": "INTEGER",
+            "prev_hash": "VARCHAR",
+            "hash": "VARCHAR",
         },
         "profile_rules": {
             # The machine-applicable half of a learned rule, added after
