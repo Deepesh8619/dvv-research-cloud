@@ -257,7 +257,20 @@ export type MethodRequest =
   | { method: 'van_westendorp'; prices: string[] }
   | { method: 'drivers'; outcome: string; predictors: string[] }
 
+export interface LifecycleStage {
+  key: string
+  label: string
+  state: 'done' | 'attention' | 'todo'
+  detail: string
+  tab: string
+}
+export interface LifecycleResponse {
+  stages: LifecycleStage[]
+  needs_you: { kind: string; title: string; detail: string; tab: string }[]
+}
+
 export const studiesApi = {
+  lifecycle: (id: string) => api.get<LifecycleResponse>(`/studies/${id}/lifecycle`),
   upload: async (file: File, clientName?: string, onProgress?: (pct: number) => void) => {
     const formData = new FormData()
     formData.append('file', file)

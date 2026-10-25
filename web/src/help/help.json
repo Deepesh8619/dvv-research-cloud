@@ -232,5 +232,11 @@
     "what": "A condition that ends the interview for people outside the target.",
     "why": "Screeners keep the sample to the people the study is about.",
     "how": "Usually on the question itself: “What is your age? is less than 18”."
+  },
+  "lifecycle": {
+    "title": "Lifecycle rail",
+    "what": "Eight steps a study moves through, from the brief to the insight, each coloured by what is actually stored for this project.",
+    "why": "You see at a glance what is done, what needs you and what has not started, without opening every tab.",
+    "how": "Click a step to open it. A step marked \"needs you\" is also listed below the rail. Proof stays unstarted until dry-run results are kept."
   }
 }
