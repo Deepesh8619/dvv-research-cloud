@@ -17,8 +17,10 @@ per-key semantics and validation, and each can genuinely break a screen. Text
 first, where the blast radius is a word.
 """
 
+import json
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -124,6 +126,16 @@ UI_KEYS: list[dict] = [
     {"key": "fielding.overquota", "default": "Over quota",
      "where": "Fielding", "note": "Respondent status"},
 ]
+
+# Every (i) tip is editable too. Its shipped wording lives in the web app's
+# help.json (the API image copies the whole repo), read here so the defaults
+# shown in the console are the ones the tips actually render.
+_HELP_FILE = Path(__file__).resolve().parents[2] / "web" / "src" / "help" / "help.json"
+_PARTS = {"title": "Title", "what": "What it is", "why": "Why", "how": "How to use it"}
+for _id, _tip in json.loads(_HELP_FILE.read_text(encoding="utf-8")).items():
+    UI_KEYS += [{"key": f"help.{_id}.{part}", "default": _tip[part],
+                 "where": f"Info tip — {_tip['title']}", "note": label}
+                for part, label in _PARTS.items()]
 
 _KEYS_BY_ID = {k["key"]: k for k in UI_KEYS}
 

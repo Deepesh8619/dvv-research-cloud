@@ -1,7 +1,14 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('../../api/client', () => ({
+  uiApi: { overrides: vi.fn().mockResolvedValue({ data: { overrides: {
+    'help.drivers.what': 'Which ratings move the overall score most.' } } }) },
+}))
 
 import { HELP } from '../../help/help'
+import { LabelProvider } from '../../labels/LabelContext'
 import InfoTip from './InfoTip'
 
 describe('InfoTip', () => {
@@ -17,6 +24,14 @@ describe('InfoTip', () => {
     expect(screen.queryByRole('tooltip')).toBeNull()
     fireEvent.click(button)  // a tap on a phone
     expect(screen.getByRole('tooltip')).toBeTruthy()
+  })
+
+  it("shows a founder's rewording from Admin → Wording", async () => {
+    localStorage.setItem('authToken', 't')
+    render(<MemoryRouter><LabelProvider><InfoTip id="drivers" /></LabelProvider></MemoryRouter>)
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'About Key drivers' }))
+    expect(await screen.findByText('Which ratings move the overall score most.')).toBeTruthy()
+    localStorage.removeItem('authToken')
   })
 
   it('every entry says what, why and how', () => {

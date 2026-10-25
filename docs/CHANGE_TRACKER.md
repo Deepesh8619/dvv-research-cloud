@@ -21,6 +21,18 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-25 — founders can reword every (i) tip (branch feat/editable-help)
+
+The 39 info tips moved from `help.ts` into `web/src/help/help.json`, which the
+API reads too: each tip's title, what, why and how is now a key in Admin →
+Wording (`help.<id>.<part>`, grouped as "Info tip — <title>"), with the shipped
+text as its default. InfoTip reads overrides through `useLabel`, so the shipped
+wording renders until a founder changes it, and if overrides fail to load.
+Tests: registry defaults match the JSON for every tip; a tip shows a founder's
+override.
+
+---
+
 ## 2026-10-25 — the server drops answers a mask hid (branch feat/mask-enforcement)
 
 A masked list ("Which have you used?" showing only brands heard of) was narrowed
