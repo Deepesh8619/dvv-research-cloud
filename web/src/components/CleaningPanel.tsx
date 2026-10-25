@@ -65,6 +65,45 @@ function grouped(flags: Flag[]): Array<{ check: string; n: number }> {
   return Object.entries(out).map(([check, n]) => ({ check, n })).sort((a, b) => b.n - a.n)
 }
 
+/** Authenticity pill, signals in words, and total time against the median.
+ *  Exports carry no per-question times, so the strip is total vs. median. */
+function Authenticity({ ev }: { ev: CleaningEvidence }) {
+  const a = ev.authenticity
+  if (!a) return null
+  // The same score and band the list ranks by: 0 is no concern, 100 the most.
+  const tone = a.band === 'review first' ? 'bg-red-50 text-red-800'
+    : a.band === 'worth a look' ? 'bg-amber-50 text-amber-900' : 'bg-emerald-50 text-emerald-800'
+  const max = Math.max(ev.seconds ?? 0, ev.median_seconds ?? 0)
+  const pct = (v: number) => `${Math.max(2, Math.round((v / max) * 100))}%`
+  return (
+    <div className="space-y-2 rounded-md border border-slate-200 p-3">
+      <p className="flex flex-wrap items-center gap-2 text-sm">
+        <span className={`rounded-full px-2.5 py-0.5 font-semibold ${tone}`}>Concern {a.score} / 100</span>
+        <span className="text-slate-600">{a.band}</span>
+        <InfoTip id="cleaning_authenticity" />
+      </p>
+      {a.signals.length > 0 ? (
+        <ul className="list-disc space-y-0.5 pl-5 text-sm text-slate-700">
+          {a.signals.map((x, i) => (
+            <li key={`${x.key}-${i}`}><span className="font-medium">{x.label}</span> (+{x.weight}){x.detail ? ` — ${x.detail}` : ''}</li>))}
+        </ul>
+      ) : <p className="text-sm text-slate-600">No warning signs found.</p>}
+      {ev.seconds != null && ev.median_seconds != null && max > 0 && (
+        <div className="space-y-1 text-xs text-slate-600" role="img"
+          aria-label={`Took ${Math.round(ev.seconds / 60)} minutes against a median of ${Math.round(ev.median_seconds / 60)}`}>
+          <div className="flex items-center gap-2"><span className="w-14">This one</span>
+            <span className="h-2 rounded bg-primary-600" style={{ width: pct(ev.seconds) }} /></div>
+          <div className="flex items-center gap-2"><span className="w-14">Median</span>
+            <span className="h-2 rounded bg-slate-400" style={{ width: pct(ev.median_seconds) }} /></div>
+        </div>
+      )}
+      {(ev.paradata?.pasted.length ?? 0) > 0 && (
+        <p className="text-xs font-medium text-red-800">⚠ Pasted: {ev.paradata!.pasted.join(', ')}</p>
+      )}
+    </div>
+  )
+}
+
 function Evidence({ studyId, k, flags, decision, act, busy, onDecide }: {
   studyId: string
   k: string
@@ -102,6 +141,7 @@ function Evidence({ studyId, k, flags, decision, act, busy, onDecide }: {
         </p>
       )}
       <Err text={evErr} />
+      {ev && <Authenticity ev={ev} />}
       <ul className="space-y-3">
         {(ev?.items ?? flags.map((f) => ({ ...f, answers: [] }))).map((it, i) => (
           <li key={i} className="rounded-md border border-slate-200 p-3">

@@ -116,6 +116,13 @@ export interface StudyProfile {
   }
 }
 
+export interface CellProvenance {
+  value: number
+  label: string
+  column: string
+  steps: { title: string; detail: string }[]
+}
+
 export interface CrosstabsPayload {
   title: string
   weight: string | null
@@ -262,7 +269,20 @@ export type MethodRequest =
   | { method: 'van_westendorp'; prices: string[] }
   | { method: 'drivers'; outcome: string; predictors: string[] }
 
+export interface LifecycleStage {
+  key: string
+  label: string
+  state: 'done' | 'attention' | 'todo'
+  detail: string
+  tab: string
+}
+export interface LifecycleResponse {
+  stages: LifecycleStage[]
+  needs_you: { kind: string; title: string; detail: string; tab: string }[]
+}
+
 export const studiesApi = {
+  lifecycle: (id: string) => api.get<LifecycleResponse>(`/studies/${id}/lifecycle`),
   upload: async (file: File, clientName?: string, onProgress?: (pct: number) => void) => {
     const formData = new FormData()
     formData.append('file', file)
@@ -299,6 +319,9 @@ export const studiesApi = {
   crosstabs: async (id: string) => {
     return api.get<CrosstabsPayload>(`/studies/${id}/crosstabs`)
   },
+  /** The steps behind one table cell: base, question, cleaning, weight, data file. */
+  cellProvenance: async (id: string, tableId: string, row: number, col: number) =>
+    api.get<CellProvenance>(`/studies/${id}/tables/${tableId}/provenance`, { params: { row, col } }),
   methodInputs: async (id: string) => api.get<MethodInputs>(`/studies/${id}/methods`),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   runMethod: async (id: string, body: MethodRequest) => api.post<any>(`/studies/${id}/methods`, body),
@@ -1066,6 +1089,10 @@ export interface DryRunReport {
   questions_never_shown: string[]
   display_issues: Array<{ qid: string; kind: string; detail: string }>
   unenforced_routing: string[]
+  /** Logic X-ray data. `to` is "END" for the last question. */
+  transitions?: Array<{ from: string; to: string; n: number }>
+  paths?: Array<{ qids: string[]; n: number; disposition: string }>
+  exits?: Array<{ qid: string; disposition: string; n: number }>
 }
 
 /** What actually happened in the field. */
@@ -1763,6 +1790,13 @@ export interface CleaningEvidence {
   items: Array<{ check: string; detail: string; answers: Array<{ column: string; question: string; answer: string }> }>
   seconds: number | null
   median_seconds: number | null
+  paradata?: { pasted: string[]; speech: string[]; max_chars_per_key: number | null }
+  /** The same 0–100 concern score and band the triage list ranks by, with its reasons. */
+  authenticity?: {
+    score: number
+    band: 'review first' | 'worth a look' | 'fine'
+    signals: Array<{ key: string; label: string; weight: number; detail: string }>
+  }
 }
 
 export interface ImputationBody {

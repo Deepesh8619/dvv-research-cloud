@@ -49,6 +49,21 @@ describe('CleaningPanel', () => {
     expect(screen.getByText('Took 5 min · most took 12 min')).toBeTruthy()
   })
 
+  it('shows the same concern score as the list, its reasons, and the pasted question in words', async () => {
+    const api = await setup(2)
+    const base = api.evidence.getMockImplementation()
+    api.evidence.mockImplementation(async (s: string, k: string, f: unknown) => {
+      const r = await base(s, k, f)
+      return { data: { ...r.data, paradata: { pasted: ['Q15'], speech: [], max_chars_per_key: 40 },
+        authenticity: { score: 65, band: 'review first', signals: [{ key: 'pasted_answer', label: 'Pasted answer', weight: 35, detail: 'Pasted rather than typed: Q15' }, { key: 'too_fast_to_read', label: 'Faster than reading', weight: 30, detail: 'finished in 40s' }] } } }
+    })
+    render(<CleaningPanel studyId="s" role="analyst" />)
+    expect(await screen.findByText('Concern 65 / 100')).toBeTruthy()
+    expect(screen.getAllByText('review first').length).toBeGreaterThan(0)
+    expect(screen.getByText('Pasted answer')).toBeTruthy()
+    expect(screen.getByText('⚠ Pasted: Q15')).toBeTruthy()
+  })
+
   it('pre-fills the reason from the strongest flag and decides with K, then moves on', async () => {
     const api = await setup(2)
     render(<CleaningPanel studyId="s" role="analyst" />)

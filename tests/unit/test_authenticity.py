@@ -72,3 +72,35 @@ def test_the_score_adds_reasons_and_bands_them():
     both = score([pasted, fast, {"check": "pasted_answer", "detail": "Q27: pasted"}])
     assert both["score"] == 35 + 30 + 17 and both["band"] == "review first"
     assert score([{"check": "straightliner", "detail": "grid"}])["band"] == "fine"
+
+
+def test_the_panel_shows_the_same_score_the_list_ranks_by():
+    from src.engines.qc.authenticity import score, signals
+
+    flags = [{"check": "fraud_signal", "detail": "shared_connection"},
+             {"check": "fraud_signal", "detail": "copied open end"},
+             {"check": "straightliner", "detail": "SAT_ATTR"},
+             {"check": "too_fast_to_read", "detail": "finished in 0s"}]
+    panel = signals(flags)
+    assert (panel["score"], panel["band"]) == (score(flags)["score"], score(flags)["band"]) == (
+        70, "review first")
+    assert [x["weight"] for x in panel["signals"]] == [20, 10, 10, 30]
+    assert signals([]) == {"score": 0, "band": "fine", "signals": []}
+
+
+def test_a_near_duplicate_open_end_adds_one_duplicate_reason():
+    from src.engines.qc.authenticity import signals
+
+    assert signals([], near_duplicate_of="s9")["score"] == 30
+    already = [{"check": "duplicate", "detail": "same answers as s3"}]
+    assert len(signals(already, near_duplicate_of="s9")["signals"]) == 1
+
+
+def test_near_duplicate_partners_pairs_sessions_and_is_empty_without_an_index(monkeypatch):
+    import src.platform.vectors as vectors
+    from src.engines.qc.authenticity import near_duplicate_partners
+
+    monkeypatch.setattr(vectors, "near_duplicates", lambda db, sid: [("Q5:s1", "Q5:s2", 0.99)])
+    assert near_duplicate_partners(None, "x") == {"s1": "s2", "s2": "s1"}
+    monkeypatch.setattr(vectors, "near_duplicates", lambda db, sid: [])
+    assert near_duplicate_partners(None, "x") == {}
