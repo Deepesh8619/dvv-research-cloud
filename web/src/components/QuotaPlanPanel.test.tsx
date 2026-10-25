@@ -31,3 +31,20 @@ describe('QuotaPlanPanel', () => {
     expect(await screen.findByText('Saved: Women 200.')).toBeTruthy()
   })
 })
+
+describe('QuotaPlanPanel bands', () => {
+  it('asks a number question for a band instead of answers', async () => {
+    const age = { qid: 'S_AGE', text: 'What is your age?', type: 'numeric', options: [] } as never
+    render(<QuotaPlanPanel studyId="s1" questions={[age]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Quotas' }))
+    fireEvent.change(screen.getByLabelText('Completes needed'), { target: { value: '100' } })
+    fireEvent.click(screen.getByRole('button', { name: '+ Add quota' }))
+    fireEvent.change(screen.getByLabelText('quota question'), { target: { value: 'S_AGE' } })
+    fireEvent.change(screen.getByLabelText('band from'), { target: { value: '18' } })
+    fireEvent.change(screen.getByLabelText('band to'), { target: { value: '34' } })
+    fireEvent.change(screen.getByLabelText('quota share'), { target: { value: '40' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save quotas' }))
+    expect(vi.mocked(questionnaireApi.saveQuotaPlan).mock.calls.at(-1)?.[1].cells[0]).toMatchObject(
+      { qid: 'S_AGE', min: 18, max: 34, share_pct: 40 })
+  })
+})

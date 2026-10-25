@@ -21,6 +21,17 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-25 — quota bands on number questions (branch feat/numeric-quota-bands)
+
+The quota plan took single-choice answers only, so the most common quota of
+all — age bands — could not be written. A cell can now be a band of a number
+question (`min`/`max`, inclusive, either end open: "18–34", "55+"), stored as
+"not below 18 and not above 34" in the same condition language every other
+quota uses. Refused with the reason when it has no ends or starts above where
+it ends. The builder's Quotas card shows "from / to" for a number question.
+Checked: unit tests (17/18/34/35 against 18–34), the journey test opens a link
+with Women and 18–34 cells, web test.
+
 ## 2026-10-25 — an (i) wherever a feature needs explaining (branch feat/info-tips)
 
 User asked for an info icon wherever someone might not know what a feature
@@ -28,7 +39,7 @@ is: what it is, what it does, why, and how. `components/ui/InfoTip.tsx` is a
 small (i) that opens on hover, keyboard focus or tap (phones), closes on
 Escape, a click elsewhere or scroll, and is drawn above the page so scrolling
 lists and clipped cards cannot cut it off. Every text is in `help/help.ts`
-(What it is / Why / How), 41 entries, tested to have all three.
+(What it is / Why / How), 38 entries, tested to have all three.
 
 Placed on: the Data bar; Questionnaire checks (consent and notice, quote and
 each of its inputs, translations, follow-up probes, data vs questionnaire);

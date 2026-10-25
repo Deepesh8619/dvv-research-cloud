@@ -234,7 +234,7 @@ export const HELP = {
     title: 'Quota plan',
     what: 'The groups the sample must contain, as shares of the completes you need (e.g. Women 50% of 400).',
     why: 'Written once with the questionnaire, it is applied to every link opened afterwards.',
-    how: 'Enter completes, add a row per group: name, single-choice question, answer(s), share. Shares for one question must not exceed 100%.',
+    how: 'Enter completes, add a row per group: a name, a question, then its answer(s) — or for a number question like age, a band (18 to 34) — and the share. Shares for one question must not exceed 100%.',
   },
   ask_if: {
     title: 'Ask this question only if',

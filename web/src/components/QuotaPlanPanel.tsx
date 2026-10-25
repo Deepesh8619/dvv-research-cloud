@@ -11,7 +11,7 @@ import InfoTip from './ui/InfoTip'
 const input = 'h-8 rounded-md border border-slate-300 px-2 text-sm'
 
 export default function QuotaPlanPanel({ studyId, questions }: { studyId: string; questions: Question[] }) {
-  const choice = questions.filter((q) => q.type === 'single' || q.type === 'dropdown')
+  const choice = questions.filter((q) => q.type === 'single' || q.type === 'dropdown' || q.type === 'numeric')
   const [open, setOpen] = useState(false)
   const [completes, setCompletes] = useState('')
   const [cells, setCells] = useState<QuotaPlanCell[]>([])
@@ -68,7 +68,7 @@ export default function QuotaPlanPanel({ studyId, questions }: { studyId: string
                   <input className={`${input} w-32`} placeholder="Name, e.g. Women" aria-label="quota name" value={c.name}
                     onChange={(e) => set(i, { name: e.target.value })} />
                   <select className={`${input} min-w-0 flex-1`} aria-label="quota question" value={c.qid}
-                    onChange={(e) => set(i, { qid: e.target.value, codes: [] })}>
+                    onChange={(e) => set(i, { qid: e.target.value, codes: [], min: undefined, max: undefined })}>
                     <option value="">question…</option>
                     {choice.map((x) => <option key={x.qid} value={x.qid}>{x.qid} — {x.text.slice(0, 50)}</option>)}
                   </select>
@@ -79,7 +79,18 @@ export default function QuotaPlanPanel({ studyId, questions }: { studyId: string
                   <button type="button" aria-label="remove quota" className="ml-auto text-slate-400 hover:text-red-600"
                     onClick={() => setCells(cells.filter((_, j) => j !== i))}>✕</button>
                 </div>
-                {q && (
+                {q && q.type === 'numeric' && (
+                  <div className="flex items-center gap-2 text-xs text-slate-600">
+                    <span>from</span>
+                    <input className={`${input} w-20`} inputMode="decimal" aria-label="band from" placeholder="any"
+                      value={c.min ?? ''} onChange={(e) => set(i, { min: e.target.value === '' ? null : Number(e.target.value) })} />
+                    <span>to</span>
+                    <input className={`${input} w-20`} inputMode="decimal" aria-label="band to" placeholder="any"
+                      value={c.max ?? ''} onChange={(e) => set(i, { max: e.target.value === '' ? null : Number(e.target.value) })} />
+                    <span>(inclusive)</span>
+                  </div>
+                )}
+                {q && q.type !== 'numeric' && (
                   <div className="flex flex-wrap gap-1" role="group" aria-label="quota answers">
                     {q.options.map((o) => {
                       const on = c.codes.includes(o.code)
