@@ -1,5 +1,7 @@
 """Advanced methods against data whose answer is known."""
 
+import math
+
 import numpy as np
 import polars as pl
 import pytest
@@ -66,3 +68,31 @@ def test_relative_weights_split_the_explained_variance():
     with pytest.raises(ValueError, match="needed"):
         drivers(pl.DataFrame({"y": y[:10], "x1": x1[:10], "x2": x2[:10]}), DataMap(), "y",
                 ["x1", "x2"])
+
+
+def test_maxdiff_utilities_recover_the_order_the_respondents_chose_by():
+    """Simulated from known utilities: the logit puts the items back in order,
+    and the shares of preference sum to 100."""
+    import random
+
+    rng = random.Random(7)
+    truth = {1: 1.5, 2: 0.5, 3: 0.0, 4: -0.5, 5: -1.5}
+    data: dict[str, list] = {}
+    for n in (1, 2, 3, 4, 5):
+        data[f"MX_{n}best"], data[f"MX_{n}worst"], data[f"MD_Items_{n}"] = [], [], []
+    for _ in range(300):
+        for n in (1, 2, 3, 4, 5):
+            seen = rng.sample(list(truth), 4)
+            pick = lambda pool, s: rng.choices(  # noqa: E731
+                pool, [math.exp(s * truth[x]) for x in pool])[0]
+            best = pick(seen, 1)
+            worst = pick([x for x in seen if x != best], -1)
+            data[f"MX_{n}best"].append(best)
+            data[f"MX_{n}worst"].append(worst)
+            data[f"MD_Items_{n}"].append(" ".join(f"Item: {x}" for x in seen))
+    r = maxdiff_scores(pl.DataFrame(data), DataMap(), "MX")
+    assert r["model"] == "aggregate best-worst logit"
+    assert [row["item"] for row in r["items"]] == [1, 2, 3, 4, 5]
+    assert abs(sum(row["share"] for row in r["items"]) - 100) < 0.5
+    top = r["items"][0]["utility"] - r["items"][-1]["utility"]
+    assert 2.4 < top < 3.6  # the true spread is 3.0

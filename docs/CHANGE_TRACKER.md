@@ -21,6 +21,20 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-25 — MaxDiff utilities and shares of preference (branch feat/maxdiff-utilities)
+
+Advanced methods → MaxDiff gave only counting scores. When the file records the
+items each screen showed (Decipher `MD_Items_<n>`), it now also fits an
+aggregate best-worst logit (Newton steps on the concave likelihood, small ridge,
+numpy only): each item's utility, centred on the average item, and its share of
+preference, adding to 100%. The list is ordered by utility. On 300 simulated
+respondents it puts five items back in their true order with the true spread
+(test); 1,000 respondents × 12 screens × 20 items fit in 0.13 s. One model for
+the whole sample: Hierarchical-Bayes per-respondent utilities are still not
+attempted.
+
+---
+
 ## 2026-10-25 — founders can reword every (i) tip (branch feat/editable-help)
 
 The 39 info tips moved from `help.ts` into `web/src/help/help.json`, which the

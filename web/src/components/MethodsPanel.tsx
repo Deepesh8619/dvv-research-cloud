@@ -124,11 +124,18 @@ export default function MethodsPanel({ studyId }: { studyId: string }) {
 
       {result && method === 'maxdiff' && (
         <table className="mt-4 w-full max-w-3xl text-sm tabular-nums">
-          <caption className="mb-2 text-left text-xs text-slate-500">{result.n_respondents} respondents · score = (best − worst) {result.basis}</caption>
-          <thead className="text-left text-[11px] uppercase tracking-wider text-slate-500"><tr><th>Item</th><th>Best</th><th>Worst</th><th>Score</th><th /></tr></thead>
-          <tbody>{result.items.map((r: { item: number; label: string; best: number; worst: number; score: number | null }) => (
+          <caption className="mb-2 text-left text-xs text-slate-500">
+            {result.n_respondents} respondents · score = (best − worst) {result.basis}
+            {result.model && ' · utility and share of preference from an aggregate best-worst logit'}
+          </caption>
+          <thead className="text-left text-[11px] uppercase tracking-wider text-slate-500"><tr>
+            <th>Item</th><th>Best</th><th>Worst</th><th>Score</th>
+            {result.model && <><th>Utility</th><th>Share</th></>}<th /></tr></thead>
+          <tbody>{result.items.map((r: { item: number; label: string; best: number; worst: number; score: number | null; utility?: number | null; share?: number | null }) => (
             <tr key={r.item} className="border-t border-slate-100"><td className="py-1">{r.label}</td><td>{r.best}</td><td>{r.worst}</td>
-              <td>{r.score}</td><td><Bar pct={50 + (r.score ?? 0) * 50} /></td></tr>))}</tbody>
+              <td>{r.score}</td>
+              {result.model && <><td>{r.utility}</td><td>{r.share}%</td></>}
+              <td><Bar pct={50 + (r.score ?? 0) * 50} /></td></tr>))}</tbody>
         </table>
       )}
       {result && method === 'turf' && (

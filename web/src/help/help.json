@@ -85,9 +85,9 @@
   },
   "maxdiff": {
     "title": "MaxDiff",
-    "what": "Ranks items by importance from “most / least” choices: score = (times best − times worst) ÷ times shown.",
+    "what": "Ranks items by importance from “most / least” choices: a score (times best − times worst, per time shown) and, when the file records which items each screen showed, a utility and share of preference.",
     "why": "Forced trade-offs separate items that all score “very important” on a rating scale.",
-    "how": "Choose the exercise and Run. Scores run from −1 (always worst) to +1 (always best)."
+    "how": "Choose the exercise and Run. Scores run from −1 (always worst) to +1 (always best). Shares add to 100%: the chance each item is preferred over the others. One model for the whole sample, not per respondent."
   },
   "turf": {
     "title": "TURF",
