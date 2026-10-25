@@ -15,22 +15,27 @@ from src.platform import graph
 
 # What each routing edge says, from the question's point of view.
 _ROUTING = {
-    "shown_if": "Only shown depending on {}",
-    "terminates_on": "Ends the interview depending on {}",
-    "masked_by": "Answer options are hidden using {}",
+    "shown_if": "Shown only to some respondents, depending on the answer to {}",
+    "terminates_on": "Screens respondents out depending on the answer to {}",
+    "masked_by": "Offers each respondent only some options, based on their answer to {}",
     "piped_from": "Question text uses the answer to {}",
-    "derived_from": "Some options are filled in from {}",
+    "derived_from": "Some answers are worked out from {}",
 }
 
 
 def question_node(db: Session, study_id: str, stub: str) -> GraphNodeDB | None:
-    """The question node a table stub belongs to: Q3r1 and Q3 both find Q3."""
-    head = re.match(r"^(.*?\d+)", stub or "")
-    for ref in dict.fromkeys([stub, head.group(1) if head else stub]):
+    """The question node a table stub belongs to: Q3r1 and Q3 both find Q3, and
+    AWR_CONSIDERr1 finds AWR_CONSIDER (a multi-select's option column is
+    `<question>r<code>`, whatever the question id looks like)."""
+    for ref in dict.fromkeys([stub, _base_qid(stub)]):
         node = db.get(GraphNodeDB, graph.node_id(study_id, "question", ref))
         if node is not None:
             return node
     return None
+
+
+def _base_qid(stub: str) -> str:
+    return re.sub(r"r\d+$", "", stub or "")
 
 
 def _fmt(v) -> str:
@@ -83,7 +88,8 @@ def provenance(
         db.commit()
     elif survey is not None:
         stub = (table.get("stub") or "").upper()
-        q = next((q for q in survey.questions if q.qid.upper() == stub), None)
+        base = _base_qid(table.get("stub") or "").upper()
+        q = next((q for q in survey.questions if q.qid.upper() in (stub, base)), None)
         if q is not None:
             steps.append({"title": f"Question {q.qid}: {q.text}",
                           "detail": f"Type: {getattr(q.type, 'value', q.type)}."})
