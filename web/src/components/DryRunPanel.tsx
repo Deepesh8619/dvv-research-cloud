@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { DryRunReport, fieldingApi } from '../api/client'
+import LogicXray from './LogicXray'
 import InfoTip from './ui/InfoTip'
 
 /**
@@ -194,6 +195,8 @@ export default function DryRunPanel({
               nothing for a dry run to exercise.
             </p>
           )}
+
+          {report.transitions && report.transitions.length > 0 && <LogicXray report={report} />}
 
           <p className="text-xs text-slate-400">
             {report.qualify_rate !== undefined && (

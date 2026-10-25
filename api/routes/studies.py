@@ -259,6 +259,7 @@ async def upload_study(
         study_id = f"study_{uuid4().hex[:8]}"
         project_name = (client_name or "").strip() or file.filename.rsplit(".", 1)[0]
         study = create_study(db, study_id, client_name=project_name)
+        update_study_status(db, study_id, study.status, {"uploaded_by": user.name})
 
         # Stream to disk in chunks — never hold the whole upload in memory.
         # A large SPSS/CSV file loaded via file.read() would sit in RAM twice
@@ -675,6 +676,47 @@ def get_crosstabs(
     if getattr(study, "crosstabs_json", None):
         return json.loads(study.crosstabs_json)
     raise HTTPException(status_code=404, detail="No table data for this study")
+
+
+@router.get("/studies/{study_id}/tables/{table_id}/provenance")
+def get_cell_provenance(
+    study_id: str,
+    table_id: str,
+    row: int = Query(...),
+    col: int = Query(...),
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The thread behind one table cell: base, question, cleaning, weight, data file."""
+    from api.db import list_questionnaires_for_study
+    from api.routes.cleaning import _decisions
+    from src.core.survey_definition import SurveyDefinition
+    from src.engines.tabs.provenance import provenance
+
+    payload = get_crosstabs(study_id, db, user)
+    study = get_study(db, study_id)
+    table = next((t for t in payload["tables"] if t.get("id") == table_id), None)
+    if table is None:
+        raise HTTPException(status_code=404, detail="No such table in this study")
+    if not 0 <= row < len(table["rows"]) or not 0 <= col < len(table["columns"]):
+        raise HTTPException(status_code=404, detail="No such cell in this table")
+
+    removed = {k: d["reason_code"] or "other" for k, d in _decisions(db, study_id).items()
+               if d["decision"] == "remove"}
+    meta = study.study_metadata or {}
+    data_file = {"name": study.source_filename, "uploaded_at": study.created_at,
+                 "uploaded_by": meta.get("uploaded_by")}
+    run_dir = Path(study.excel_path).parent
+    for name in ("data_raw.parquet", "data.parquet"):  # raw = the file as uploaded
+        if (run_dir / name).exists():
+            import polars as pl
+
+            data_file["n_rows"] = pl.scan_parquet(run_dir / name).select(pl.len()).collect().item()
+            break
+    q = next(iter(list_questionnaires_for_study(db, study_id)), None)
+    survey = SurveyDefinition.from_json(q.definition_json) if q and q.definition_json else None
+    return provenance(db, study_id, payload, table, row, col,
+                      removed=removed, data_file=data_file, survey=survey)
 
 
 @router.get("/studies/{study_id}/findings")

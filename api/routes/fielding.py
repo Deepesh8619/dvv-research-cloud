@@ -32,6 +32,7 @@ import logging
 import os
 import re
 from concurrent.futures.process import BrokenProcessPool
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -487,6 +488,19 @@ def dry_run(
         f"[{study_id}] Dry run by {user.name}: {report.n_respondents} respondents, "
         f"{report.dispositions}, {len(report.never_fired)} condition(s) never fired"
     )
+    if not request.link_id:
+        # The project's lifecycle rail reads this: the Proof stage is the last
+        # dry run of the approved questionnaire. Best-effort, never fails the run.
+        try:
+            study = get_study(db, study_id)
+            study.study_metadata = {**(study.study_metadata or {}), "last_dry_run": {
+                "at": datetime.now(UTC).isoformat(), "n": report.n_respondents,
+                "impossible": len(report.impossible), "never_fired": len(report.never_fired),
+                "never_shown": len(report.questions_never_shown)}}
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception(f"[{study_id}] could not record the dry run")
     return {
         **report.to_dict(),
         "display_issues": display_warnings(survey),

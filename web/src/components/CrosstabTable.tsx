@@ -28,9 +28,12 @@ interface Props {
   table: TabTable
   minBase: number
   showBases: boolean
+  /** When given, each cell is a button that asks where its number came from. */
+  onCellClick?: (row: number, col: number) => void
+  selected?: { row: number; col: number } | null
 }
 
-export default function CrosstabTable({ table, minBase, showBases }: Props) {
+export default function CrosstabTable({ table, minBase, showBases, onCellClick, selected }: Props) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm border-collapse">
@@ -78,19 +81,38 @@ export default function CrosstabTable({ table, minBase, showBases }: Props) {
             >
               <td className="sticky left-0 bg-inherit py-2 pr-4 text-slate-800">{row.label}</td>
               {row.pct.map((pct, j) => (
-                <td key={j} className="text-center py-2 font-mono tabular-nums">
-                  <span
-                    title={
-                      row.sig[j]
-                        ? `Significantly higher than column(s) ${row.sig[j].split('').join(', ')} at 95% confidence`
-                        : undefined
-                    }
-                  >
-                    {pct.toFixed(1)}
-                    {row.sig[j] && (
-                      <sup className="text-emerald-600 font-bold ml-0.5 cursor-help">{row.sig[j]}</sup>
-                    )}
-                  </span>
+                <td
+                  key={j}
+                  className={`text-center py-2 font-mono tabular-nums ${selected?.row === i && selected.col === j ? 'bg-amber-100 ring-2 ring-inset ring-amber-500' : ''}`}
+                >
+                  {(() => {
+                    const value = (
+                      <span
+                        title={
+                          row.sig[j]
+                            ? `Significantly higher than column(s) ${row.sig[j].split('').join(', ')} at 95% confidence`
+                            : undefined
+                        }
+                      >
+                        {pct.toFixed(1)}
+                        {row.sig[j] && (
+                          <sup className="text-emerald-600 font-bold ml-0.5 cursor-help">{row.sig[j]}</sup>
+                        )}
+                      </span>
+                    )
+                    return onCellClick ? (
+                      <button
+                        type="button"
+                        onClick={() => onCellClick(i, j)}
+                        aria-label={`Where does ${pct.toFixed(1)}% for ${row.label}, ${table.columns[j].label} come from?`}
+                        className="rounded px-1 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                      >
+                        {value}
+                      </button>
+                    ) : (
+                      value
+                    )
+                  })()}
                 </td>
               ))}
             </tr>

@@ -197,6 +197,12 @@
     "why": "Shows who would be screened out, which questions nobody reaches, and dead ends — while it is still cheap to fix.",
     "how": "Run it after approving the questionnaire; read each warning and fix the logic in the questionnaire."
   },
+  "logic_xray": {
+    "title": "Logic X-ray",
+    "what": "Draws the questionnaire as a line of questions, with the paths simulated respondents took between them.",
+    "why": "Shows at a glance where people skip, where they drop out, and which questions nobody reaches.",
+    "how": "Select a question to see its share of respondents and where they go next."
+  },
   "fielded_data": {
     "title": "Fielded data",
     "what": "The respondent data in this project as fieldwork: who is in it and how each interview ended.",
@@ -238,5 +244,17 @@
     "what": "A condition that ends the interview for people outside the target.",
     "why": "Screeners keep the sample to the people the study is about.",
     "how": "Usually on the question itself: “What is your age? is less than 18”."
+  },
+  "thread": {
+    "title": "Study thread",
+    "what": "The trail behind one number in a table: its base, the question, cleaning, weighting and the data file.",
+    "why": "Anyone reading a figure can see exactly what it was computed from, so it can be checked instead of trusted.",
+    "how": "Click a number in a table. The trail opens on the right; press Escape to close it."
+  },
+  "lifecycle": {
+    "title": "Lifecycle rail",
+    "what": "Eight steps a study moves through, from the brief to the insight, each coloured by what is actually stored for this project.",
+    "why": "You see at a glance what is done, what needs you and what has not started, without opening every tab.",
+    "how": "Click a step to open it. A step marked \"needs you\" is also listed below the rail. Proof stays unstarted until dry-run results are kept."
   }
 }
