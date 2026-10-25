@@ -727,11 +727,15 @@ def get_findings(
 ):
     """Findings read off the computed tables, strongest first, each number cited
     to its table, column and base. (Authenticated, like the tables themselves.)"""
+    tables = get_crosstabs(study_id, db, user)["tables"]
+    return {"n_tables": len(tables), "findings": _findings(db, study_id, tables)}
+
+
+def _findings(db: Session, study_id: str, tables: list[dict]) -> list[dict]:
     from api.db import list_questionnaires_for_study
     from src.core.survey_definition import SurveyDefinition
     from src.engines.analysis.findings import findings
 
-    tables = get_crosstabs(study_id, db, user)["tables"]
     questions: dict[str, str] = {}
     screeners: set[str] = set()
     q = next(iter(list_questionnaires_for_study(db, study_id)), None)
@@ -739,7 +743,179 @@ def get_findings(
         survey = SurveyDefinition.from_json(q.definition_json)
         questions = {x.qid: x.text for x in survey.questions}
         screeners = {x.qid for x in survey.questions if x.terminate_if}
-    return {"n_tables": len(tables), "findings": findings(tables, questions, screeners)}
+    return findings(tables, questions, screeners)
+
+
+# --- Cited report: every sentence points at cells; code decides whether it stands ---
+
+_REWRITE_PROMPT = (
+    "Rewrite each survey finding as one clear sentence for a client. Keep every number "
+    "exactly as written and add none. Keep the meaning. Reply as JSON "
+    '{{"sentences": [{{"id": "...", "text": "..."}}]}}.\n\n{items}')
+_REWRITE_SCHEMA = {"type": "object", "properties": {"sentences": {"type": "array", "items": {
+    "type": "object", "properties": {"id": {"type": "string"}, "text": {"type": "string"}},
+    "required": ["id", "text"]}}}, "required": ["sentences"]}
+
+
+def _set_meta(db: Session, study_id: str, **fields) -> None:
+    study = get_study(db, study_id)
+    study.study_metadata = {**(study.study_metadata or {}), **fields}
+    db.commit()
+
+
+def _report_of(study) -> dict:
+    return (study.study_metadata or {}).get("report") or {"sentences": [], "drafted_at": None}
+
+
+def _sentence(sid: str, text: str, cites: list[dict], tables: list[dict], source: str) -> dict:
+    from src.engines.analysis.citations import check
+
+    return {"id": sid, "text": text, "cites": cites, **check(text, cites, tables), "source": source}
+
+
+@handler("report.draft")
+def _draft_report(payload: dict, db: Session) -> dict:
+    """Queue handler: the top findings as cited sentences, a private model's rewrite
+    kept only where the checker passes it against that finding's own cells."""
+    from src.engines.analysis.citations import check, to_cites
+
+    study_id = payload["study_id"]
+    job_id = payload.get("job_id")
+    try:
+        tables = get_crosstabs(study_id, db, None)["tables"]
+        top = [f for f in _findings(db, study_id, tables) if f["kind"] != "sample"][:12]
+        if not top:
+            raise ValueError("no findings")
+        base = [{"id": f"s{n}", "cites": to_cites(f["cites"], tables),
+                 "text": f["text"] + (f" {f['caution']}" if f.get("caution") else "")}
+                for n, f in enumerate(top, 1)]
+        rewrites: dict[str, str] = {}
+        try:  # no private model, or a bad answer: the findings' own texts stand
+            from src.ai import router
+
+            items = json.dumps([{"id": b["id"], "text": b["text"]} for b in base],
+                               ensure_ascii=False)
+            reply = router.run_private(_REWRITE_PROMPT.format(items=items), _REWRITE_SCHEMA)
+            rewrites = {str(i.get("id")): str(i.get("text", "")).strip()
+                        for i in reply.content.get("sentences") or []}
+        except Exception as exc:
+            logger.info(f"[{study_id}] report rewrite skipped: {exc}")
+        sentences = []
+        for b in base:
+            new = rewrites.get(b["id"])
+            if new and check(new, b["cites"], tables)["ok"]:
+                sentences.append(_sentence(b["id"], new, b["cites"], tables, "model"))
+            else:
+                sentences.append(_sentence(b["id"], b["text"], b["cites"], tables, "finding"))
+        _set_meta(db, study_id, report={"sentences": sentences,
+                                        "drafted_at": datetime.now().isoformat()},
+                  report_job={"state": "done", "job_id": job_id})
+    except Exception:  # recorded for the panel; never left "running"
+        logger.exception(f"[{study_id}] report draft failed")
+        db.rollback()
+        message = "The report could not be drafted. Check that the tables are computed."
+        _set_meta(db, study_id, report_job={"state": "failed", "job_id": job_id,
+                                            "error": message})
+        emit(db, study_id, "job.failed", {"kind": "report.draft", "error": message})
+        raise JobError(message) from None
+    emit(db, study_id, "job.done", {"kind": "report.draft"})
+    return {"sentences": len(sentences)}
+
+
+class SentenceBody(BaseModel):
+    text: str
+    cites: list[dict] | None = None
+
+
+@router.post("/studies/{study_id}/report/draft", status_code=202)
+def draft_report(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Draft the cited report in the background; poll GET /report. (Owner/Analyst)"""
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    if ((study.study_metadata or {}).get("report_job") or {}).get("state") == "running":
+        raise HTTPException(status_code=409, detail="A report is already being drafted")
+    get_crosstabs(study_id, db, user)  # 404 with a reason when there are no tables yet
+    _set_meta(db, study_id, report_job={"state": "running"})
+    job = enqueue(db, "report.draft", {"study_id": study_id},
+                  study_id=study_id, max_attempts=1, created_by=user.id)
+    db.refresh(study)
+    running = (study.study_metadata or {}).get("report_job") or {}
+    if running.get("state") == "running":  # the worker may already have finished it
+        _set_meta(db, study_id, report_job={**running, "job_id": job.id})
+    return {"state": "running"}
+
+
+@router.get("/studies/{study_id}/report")
+def get_report(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The cited report and any drafting in progress. (Authenticated)"""
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    return {**_report_of(study), "job": (study.study_metadata or {}).get("report_job")}
+
+
+def _save_sentence(db: Session, study_id: str, sid: str | None, body: SentenceBody) -> dict:
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    report = _report_of(study)
+    sentences = list(report["sentences"])
+    old = next((x for x in sentences if x["id"] == sid), None)
+    if sid and old is None:
+        raise HTTPException(status_code=404, detail="No such sentence in this report")
+    tables = get_crosstabs(study_id, db, None)["tables"]
+    cites = body.cites if body.cites is not None else (old["cites"] if old else [])
+    new = _sentence(sid or f"s_{uuid4().hex[:6]}", body.text.strip(), cites, tables, "person")
+    sentences = [new if x["id"] == new["id"] else x for x in sentences]
+    if old is None:
+        sentences.append(new)
+    _set_meta(db, study_id, report={**report, "sentences": sentences})
+    return new
+
+
+@router.put("/studies/{study_id}/report/sentences/{sid}")
+def edit_sentence(
+    study_id: str, sid: str, body: SentenceBody,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Replace a sentence and re-check it; a failed check is stored with its problems."""
+    return _save_sentence(db, study_id, sid, body)
+
+
+@router.post("/studies/{study_id}/report/sentences")
+def add_sentence(
+    study_id: str, body: SentenceBody,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    return _save_sentence(db, study_id, None, body)
+
+
+@router.delete("/studies/{study_id}/report/sentences/{sid}")
+def delete_sentence(
+    study_id: str, sid: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    report = _report_of(study)
+    if not any(x["id"] == sid for x in report["sentences"]):
+        raise HTTPException(status_code=404, detail="No such sentence in this report")
+    _set_meta(db, study_id, report={**report, "sentences": [
+        x for x in report["sentences"] if x["id"] != sid]})
+    return {"deleted": sid}
 
 
 def _run_artifacts(study, what: str) -> tuple[Path, Path]:

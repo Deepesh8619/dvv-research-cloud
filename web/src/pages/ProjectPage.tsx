@@ -9,6 +9,7 @@ import { Study, studiesApi, shareApi, ShareLink, questionnaireApi } from '../api
 import FieldworkCards from '../components/FieldworkCards'
 import LifecycleRail from '../components/LifecycleRail'
 import FindingsPanel from '../components/FindingsPanel'
+import ReportPanel from '../components/ReportPanel'
 import TablesPanel from '../components/TablesPanel'
 import TrackerPanel from '../components/TrackerPanel'
 import MethodsPanel from '../components/MethodsPanel'
@@ -565,6 +566,7 @@ function ReportsTab({ study }: { study: Study }) {
   ]
   return (
     <div className="space-y-6">
+      <ReportPanel studyId={study.id} />
       <FindingsPanel studyId={study.id} />
       <TablesPanel studyId={study.id} />
       <TrackerPanel study={study} />
