@@ -618,6 +618,37 @@ class ProjectChunkDB(Base):
     created_at = Column(String)
 
 
+# --- F2 ---
+class GraphNodeDB(Base):
+    """One thing in a study (question, variable, cell, sentence...) for lineage."""
+
+    __tablename__ = "graph_nodes"
+
+    id = Column(String, primary_key=True)  # f"{study_id}:{kind}:{ref}"
+    study_id = Column(String, index=True)
+    kind = Column(String)
+    ref = Column(String)
+    label = Column(String, default="")
+    props = Column(Text, default="{}")  # json
+    version = Column(Integer, default=1)
+    created_at = Column(String)
+    updated_at = Column(String)
+
+
+class GraphEdgeDB(Base):
+    """src depends on dst: `cell -computed_from-> variable`."""
+
+    __tablename__ = "graph_edges"
+
+    id = Column(String, primary_key=True)  # f"{src}|{kind}|{dst}"
+    study_id = Column(String, index=True)
+    src = Column(String, index=True)
+    dst = Column(String, index=True)
+    kind = Column(String)
+    props = Column(Text, default="{}")  # json
+    created_at = Column(String)
+
+
 def active_rules_for_profile(db, profile_slug: str) -> list[str]:
     """Ordered active rule texts for one profile — the prompt-ready rule set.
 
