@@ -191,6 +191,12 @@
     "why": "Shows who would be screened out, which questions nobody reaches, and dead ends — while it is still cheap to fix.",
     "how": "Run it after approving the questionnaire; read each warning and fix the logic in the questionnaire."
   },
+  "logic_xray": {
+    "title": "Logic X-ray",
+    "what": "Draws the questionnaire as a line of questions, with the paths simulated respondents took between them.",
+    "why": "Shows at a glance where people skip, where they drop out, and which questions nobody reaches.",
+    "how": "Select a question to see its share of respondents and where they go next."
+  },
   "fielded_data": {
     "title": "Fielded data",
     "what": "The respondent data in this project as fieldwork: who is in it and how each interview ended.",
