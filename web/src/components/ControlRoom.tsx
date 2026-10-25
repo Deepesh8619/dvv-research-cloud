@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { fieldingApi, type FieldingLink, type FieldReport, type QuotaCell, type SupplierRow } from '../api/client'
+import { pollRun } from '../lib/pollRun'
 import { useStudyEvents } from '../lib/useStudyEvents'
 import InfoTip from './ui/InfoTip'
 
@@ -42,6 +43,18 @@ export default function ControlRoom({ studyId, links }: { studyId: string; links
   const [error, setError] = useState(false)
   const [updatedAt, setUpdatedAt] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
+
+  const [closing, setClosing] = useState<'idle' | 'confirm' | 'running' | 'done' | 'failed'>('idle')
+  const closeFieldwork = async () => {
+    setClosing('running')
+    try {
+      const { data } = await fieldingApi.closeFieldwork(studyId)
+      const run = await pollRun(data.run_id, () => undefined)
+      setClosing(run.state === 'done' ? 'done' : 'failed')
+    } catch {
+      setClosing('failed')
+    }
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -147,6 +160,41 @@ export default function ControlRoom({ studyId, links }: { studyId: string; links
             </tbody>
           </table>
         </div>
+      </div>
+      <div className="mt-4 border-t border-slate-100 pt-3 text-sm">
+        {closing === 'idle' || closing === 'failed' ? (
+          <>
+            <button onClick={() => setClosing('confirm')}
+              className="rounded-md border border-slate-300 px-3 py-1.5 font-medium text-slate-800 hover:bg-slate-50">
+              Close fieldwork and build deliverables
+            </button>
+            <InfoTip id="field_close" />
+            {closing === 'failed' && (
+              <span role="alert" className="ml-3 text-red-600">
+                The deliverables could not be built. Check that there are completed interviews, then try again.
+              </span>
+            )}
+          </>
+        ) : closing === 'confirm' ? (
+          <div role="alertdialog" aria-label="Close fieldwork" className="rounded-md border border-amber-300 bg-amber-50 p-3">
+            <p className="text-slate-800">
+              This builds the data file, tables and decks from the interviews so far, replacing any earlier ones.
+              Interviewing is not stopped.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button onClick={closeFieldwork} className="rounded-md bg-primary-500 px-3 py-1.5 font-medium text-white hover:bg-primary-600">
+                Yes, build deliverables
+              </button>
+              <button onClick={() => setClosing('idle')} className="rounded-md border border-slate-300 px-3 py-1.5">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : closing === 'running' ? (
+          <p aria-live="polite" className="text-slate-600">Building the data file, tables and decks…</p>
+        ) : (
+          <p className="text-emerald-700">Deliverables are ready in the Tables tab.</p>
+        )}
       </div>
     </section>
   )

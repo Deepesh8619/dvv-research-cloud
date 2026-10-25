@@ -262,5 +262,17 @@
     "what": "Eight steps a study moves through, from the brief to the insight, each coloured by what is actually stored for this project.",
     "why": "You see at a glance what is done, what needs you and what has not started, without opening every tab.",
     "how": "Click a step to open it. A step marked \"needs you\" is also listed below the rail. Proof stays unstarted until dry-run results are kept."
+  },
+  "logic_certificate": {
+    "title": "Logic certificate",
+    "what": "A one-page PDF saying the approved questionnaire was checked by a senior researcher's rules and fielded against 1,000 made-up respondents.",
+    "why": "It is proof for the client that no question is unreachable and no rule is impossible before real people are paid for.",
+    "how": "Press Issue logic certificate. If it says Not issued, fix the questions it names and run it again."
+  },
+  "field_close": {
+    "title": "Close fieldwork",
+    "what": "Builds the data file, tables, report draft and decks from the completed interviews in one go.",
+    "why": "One step instead of five, and every deliverable is built from the same data.",
+    "how": "Press the button and confirm. It replaces earlier deliverables; interviewing is not stopped."
   }
 }
