@@ -94,3 +94,69 @@ def test_a_multi_select_finding_cites_the_checked_row_of_each_option_table():
                       {"table": "t2", "row": "Bru", "column": "Total"}], tables)
     assert cites == [{"table": "t1", "row": 0, "col": 0}, {"table": "t2", "row": 0, "col": 0}]
     assert check("Most chosen Nescafé 85%, then Bru 68%.", cites, tables)["ok"]
+
+
+def test_wilson_matches_reference_and_effective_base_sets_the_width():
+    from src.engines.tabs.intervals import interval
+    lo, hi = interval(50, 100)
+    assert (round(lo, 1), round(hi, 1)) == (40.4, 59.6)
+    assert interval(34, 100)[1] - interval(34, 100)[0] < interval(34, 40)[1] - interval(34, 40)[0]
+    assert interval(34, 0.5) is None and interval(34, 0) is None
+    assert interval(0, 50)[0] == 0 and 0 < interval(0, 50)[1] < 10
+    assert interval(100, 50)[1] == 100
+
+
+def _two(eff=100):
+    cols = [{"label": "Total", "letter": None, "base": 200.0, "unweighted_base": 200,
+             "effective_base": eff}]
+    t = {"id": "t1", "stub": "Q1", "title": "Brand", "columns": cols, "means": None, "rows": [
+        {"label": "A", "pct": [34.0], "sig": [""], "kind": "category"},
+        {"label": "B", "pct": [30.0], "sig": [""], "kind": "category"}]}
+    return t, [{"table": "t1", "row": 0, "col": 0}, {"table": "t1", "row": 1, "col": 0}]
+
+
+def test_ranking_two_numbers_that_do_not_differ_is_refused():
+    t, cites = _two()
+    r = check("A leads at 34%, ahead of B at 30%.", cites, [t])
+    assert not r["ok"]
+    assert "34% and 30% are not reliably different" in r["problems"][0]
+    assert check("A at 34% is close to B at 30%.", cites, [t])["ok"]
+    assert check("A at 34% is similar to B at 30%.", cites, [t])["ok"]
+    assert check("A at 34% is level with B at 30%.", cites, [t])["ok"]
+    # the same row in two banner columns, the first marked significantly above the second
+    t["columns"] = [{**t["columns"][0], "letter": "A"}, {**t["columns"][0], "letter": "B"}]
+    t["rows"][0].update(pct=[34.0, 30.0], sig=["B", ""])
+    both = [{"table": "t1", "row": 0, "col": 0}, {"table": "t1", "row": 0, "col": 1}]
+    assert check("A among Total leads at 34%, ahead of 30%.", both, [t])["ok"]
+    t["rows"][0]["sig"] = ["", ""]
+    assert not check("A among Total leads at 34%, ahead of 30%.", both, [t])["ok"]
+
+
+def test_ranking_clearly_apart_numbers_is_fine():
+    t, cites = _two(400)
+    t["rows"][1]["pct"] = [10.0]
+    assert check("A leads at 34%, ahead of B at 10%.", cites, [t])["ok"]
+
+
+def test_a_lead_that_is_not_a_tested_difference_is_worded_close():
+    from src.engines.analysis.findings import _lead
+    t, _ = _two()
+    f = _lead(t)
+    assert "close to" in f["text"] and "leads" not in f["text"]
+    assert check(f["text"], to_cites(f["cites"], [t]), [t])["ok"]
+    t["rows"][1]["pct"] = [5.0]
+    assert "leads" in _lead(t)["text"]
+
+
+def test_overlapping_intervals_are_not_the_test_the_difference_is():
+    """59% vs 26% of 34 people: the 95% intervals touch (42%), yet the shares
+    differ clearly (z = 2.2). Calling that 'level' was the bug."""
+    from src.engines.analysis.findings import _lead
+    from src.engines.tabs.intervals import differs, interval
+
+    assert interval(58.8, 34)[0] < interval(26.5, 34)[1] + 1  # intervals meet
+    assert differs(58.8, 26.5, 34) is True                  # same respondents
+    assert differs(34, 30, 100) is False and differs(34, 30, 100, 100) is False
+    t, _ = _two(34)
+    t["rows"][0]["pct"], t["rows"][1]["pct"] = [58.8], [26.5]
+    assert "leads at 59%, ahead of B at 26%" in _lead(t)["text"]
