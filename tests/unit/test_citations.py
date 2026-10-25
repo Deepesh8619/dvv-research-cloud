@@ -86,7 +86,8 @@ def test_a_multi_select_finding_cites_the_checked_row_of_each_option_table():
                 "columns": [{"label": "Total", "letter": "A", "base": 34, "unweighted_base": 34,
                              "effective_base": 34}],
                 "rows": [{"label": "Checked", "pct": [pct], "sig": [""], "kind": "category"},
-                         {"label": "Not checked", "pct": [100 - pct], "sig": [""], "kind": "category"}],
+                         {"label": "Not checked", "pct": [100 - pct], "sig": [""],
+                          "kind": "category"}],
                 "means": None, "mean_sig": None}
     tables = [option("t1", 85.3), option("t2", 67.6)]
     cites = to_cites([{"table": "t1", "row": "Nescafé", "column": "Total"},
