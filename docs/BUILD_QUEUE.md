@@ -188,7 +188,7 @@ Shared rules for every screen:
 - Accessibility: every control is reachable by keyboard and visibly focused, and colour is never the only signal (pair it with text or an icon).
 - Copy is in sentence case and says what happens. Errors say what to do.
 
-### R0: Lifecycle rail and "Needs you" (screen A)  · ui-builder · ready
+### R0: Lifecycle rail and "Needs you" (screen A)  · ui-builder · done (#168)
 **Backend:** `GET /api/studies/{id}/lifecycle` (signed in), from a new `src/engines/lifecycle.py: lifecycle(db, study) -> dict`. It returns `stages`: eight items in the order Brief, Questionnaire, Proof, Field, Verify, Data, Tables, Insight, each `{key, label, state: "done"|"attention"|"todo", detail, tab}`. It also returns `needs_you: [{kind, title, detail, tab}]`. Derive the states only from facts already stored; compute none of them:
 - **Questionnaire** is done when approved, attention when draft with flags.
 - **Proof** is done when the last dry run had nothing impossible or never-fired, if a result is stored. Otherwise it is todo.
@@ -201,7 +201,7 @@ Shared rules for every screen:
 **Web:** `web/src/components/LifecycleRail.tsx` sits under the project header in `ProjectPage.tsx`. It shows eight segments, each a button that opens its tab, with the state shown by both a top-border colour and a text mark (✓, "needs you", nothing). Below the rail, a "Needs you" list appears when non-empty. It refreshes on the `DATA_CHANGED` event.
 **Acceptance:** route tests on a study at three points (new, approved with a link, data processed) give the expected states; the component test shows the states and that a click opens the right tab.
 
-### X2: Logic X-ray (screen B)  · ui-builder · ready
+### X2: Logic X-ray (screen B)  · ui-builder · done (#166)
 **Web:** `web/src/components/LogicXray.tsx`, rendered in `DryRunPanel.tsx` under the existing results whenever a report has `transitions`.
 - **Layout, no library:** stations (questions) sit left to right in questionnaire order (`questions_never_shown` included). Each transition is a path. Adjacent stations are joined by a straight segment on the main line; a transition that skips stations is an arc above the line. TERMINATE and OVERQUOTA exits drop below the line to a labelled exit marker.
 - Stroke width is proportional to `n / n_respondents` (minimum 1.5 px). Unreachable stations are drawn dashed in the warning colour with the label "nobody reaches it".
@@ -210,7 +210,7 @@ Shared rules for every screen:
 - **Copy:** "Line thickness = share of simulated respondents. Dashed = nobody reaches it."
 **Acceptance:** a vitest test on a report fixture checks the station count, that an arc is drawn for a skip, an exit marker for a terminate and dashing for an unreachable question, and that selecting a station updates the panel.
 
-### T1: Study Thread (screen C)  · ui-builder · ready
+### T1: Study Thread (screen C)  · ui-builder · done (#167)
 **Backend:** `GET /api/studies/{id}/tables/{table_id}/provenance?row=<i>&col=<j>` (signed in), in `src/engines/tabs/provenance.py`. It finds the table in the study's processed tables (find where `crosstabs.json` / `deck_to_json` output is stored and read it the same way the Tables view does), and returns `{value, label, column, steps: [...]}`. Each step is `{title, detail}`, in this order, skipping a step when the fact is missing:
 1. The cell: value, row and column labels, weighted and unweighted base.
 2. The base: the column's filter text and the table's filter.
@@ -223,7 +223,7 @@ It writes a `cell` node with `computed_from` (to the question) through the graph
 **Web:** `web/src/components/StudyThread.tsx`, a drawer from the right. `CrosstabTable` gets an optional `onCellClick(row, col)`. The ProjectPage table view opens the drawer and highlights the cell. The steps are drawn as a vertical thread of knots, as in the mockup. Escape and a close button dismiss it, and focus returns to the cell.
 **Acceptance:** a route test on a processed fixture study returns the steps in order with the right base, and returns 404 for a bad table, row or column; the component tests check the knots render and that Escape closes the drawer.
 
-### A2: Authenticity score and session timeline (screen D)  · ui-builder · ready
+### A2: Authenticity score and session timeline (screen D)  · ui-builder · done (#169)
 **Backend:** `src/engines/qc/authenticity.py` already exists. Read it first, and extend it rather than writing a parallel one. The score is a sum of named signals, each `{key, label, weight, detail}`, built from:
 - the paradata evidence (A1);
 - speed against the median (`seconds` / `median_seconds`, which evidence already returns);
@@ -234,7 +234,7 @@ The score is `1 - min(1, Σ weights)`, with weights as module constants and a co
 **Web:** in `CleaningPanel.tsx`'s evidence panel, an "Authenticity 0.22" pill (text, plus colour by band), the signals listed in plain words, and a time-per-question bar strip when per-question times exist (find whether exports carry them; if they don't, show only total time against the median). Pasted questions are marked with text, not colour alone.
 **Acceptance:** unit tests check that a pasted, fast respondent scores lower than a typed, median-speed one, and that the signals are listed; the component test shows the pill and the signals.
 
-### C1: Control room (screen E)  · ui-builder · ready
+### C1: Control room (screen E)  · ui-builder · done (#170)
 **Web:** `web/src/lib/useStudyEvents.ts` is a hook that reads `GET /api/studies/{id}/events` by **fetch streaming** with the Authorization header the API client uses. It parses SSE frames, reconnects with `after=<last id>` when the stream closes, and backs off on errors (1 s, then 2, 4, up to 30 s). `web/src/components/ControlRoom.tsx` sits on the FieldingPage above the links. It shows:
 - quota gauges, from the link quota endpoints;
 - completes against the target;
@@ -247,12 +247,86 @@ It refreshes on any event and every 30 s regardless. "Updated N s ago" ticks.
 
 ## Wave 4: insight and learning
 
-- **R1** Citation checker: numbers in a sentence must match cited cells within
-  rounding; comparisons need a significance result. needs G1.
-- **R2** Cited report writer (screen F). needs R1.
-- **K1** Corrections for cleaning and table specs, as literal rules. needs F2.
-- **N1** Norms from past studies' matched questions. needs F3, G1.
-- **W1** `field_close` and `qa_certificate` workflows, end to end. needs F4, X2, R2.
+Shared rules are as in wave 3. Any model call goes through `src.ai.router.run_private`, and everything must work with no model at all.
+
+### R: Cited report (R1 checker + R2 writer, screen F)  · engine-builder + ui-builder · ready
+**Why:** a report sentence is the claim a client repeats. Every sentence must point at the cells it rests on, and code, not a model, decides whether it stands.
+
+**R1 checker:** `src/engines/analysis/citations.py: check(text, cites, tables) -> {"ok": bool, "problems": [str]}`. `cites` is a list of `{table, row, col}`, with row and col as indexes into `runner.table_to_dict` tables. The rules:
+1. Every number in the text must be the pct (±0.5) or a base of a cited cell, or the gap in points (±1) between two cited cells. Reuse the label-stripping from `findings.unverified_numbers`, so "18-34" in a label is not a claim.
+2. A comparison ("ahead of", "more than", "higher", "lower", "than", "leads", "vs", "versus", "outperform", "significant") needs at least two cited cells. "Significant" or "significantly" needs the sig letter: the higher cell's `sig` contains the other column's letter.
+3. A cited cell whose column has an unweighted base under 30 is a problem ("base under 30 — say it is indicative").
+4. Every problem is a plain sentence, saying what to change.
+
+**R2 report:** stored as `study_metadata["report"] = {"sentences": [{id, text, cites, ok, problems, source: "finding"|"model"|"person"}], "drafted_at"}`.
+- `POST /studies/{id}/report/draft` (202) enqueues the job `report.draft`, using the F4 queue and its `drain` in tests. It takes the top 12 findings (`analysis.findings`, which already carry citations). Each finding's own text is the sentence. When a private model is configured, the model may rewrite each one for a client (same numbers, plain register). The rewrite is kept only if `check` passes against the finding's cites; otherwise the finding's text is kept. With no model, the report is the findings' texts.
+- `GET /studies/{id}/report` returns the report.
+- `PUT /studies/{id}/report/sentences/{sid}` takes `{text, cites?}`. It re-checks and stores the sentence with `source: "person"`. A failed check is stored with its problems, never silently dropped.
+- `POST .../sentences` adds a sentence and `DELETE` removes one.
+
+**Web:** `ReportPanel.tsx` on the Reports tab, above Findings.
+- Each sentence shows numbered citation chips (`T12·c3`). Hovering or focusing a chip shows that cell's value and base.
+- A refused sentence is struck through, with its problems underneath. Click a sentence to edit it in place.
+- "Draft report" starts the job and polls it. "Add sentence" opens an editor with a table/row/column picker for the cites.
+
+**Deck:** `renderers/pptx.render_deck` adds a "Report" slide after the title slide, carrying the accepted sentences when a report exists. Each sentence's citations go into that slide's speaker notes.
+
+**Acceptance:**
+- checker unit tests: a correct sentence passes; a wrong number, an unsupported comparison, "significantly" without sig, and a low base each fail with their sentence;
+- the draft job with a fake model keeps a good rewrite and replaces a bad one with the finding text;
+- with no model, the draft is the finding texts;
+- a PUT re-check;
+- the deck has the Report slide, with notes;
+- component tests for chips, refused sentences and editing.
+
+### N1: Norms from past studies  · engine-builder · ready
+**Why:** "34% chose Brand A" means little alone. Across the agency's past studies the same question has a range.
+- `src/engines/analysis/norms.py: norms_for(db, study_id, table) -> dict | None`.
+- **Matching:** find other studies' tables whose question matches this one, using the `question` vectors in `project_chunks` (same embedding model; `src.platform.vectors` / numpy cosine at or above 0.90), whose row labels overlap with at least 80% (case-insensitive), and whose studies have processed tables.
+- **Result:** for each row label of this table, `{label, n_studies, min, median, max}` of the matched tables' Total column, plus `matched: [{study_id, title}]`. It needs at least 2 matched studies, otherwise it returns None. The label for that case is "Not enough past studies yet".
+- **Route:** `GET /studies/{id}/tables/{table_id}/norms`.
+- **Web:** in `StudyThread.tsx`, a "Compared with past studies" step: "Across 4 past studies: 18–31% (median 24%)" for the clicked row, or "Not enough past studies yet".
+- Studies only ever see norms from studies in the same deployment; this is one organisation per deployment, so there's nothing to filter.
+
+**Acceptance:** with three synthetic studies with indexed questions and tables, a 4th study's matching table gets the right range; a different question does not match; one past study gives None.
+
+### W1: The QA certificate and field-close workflows  · platform-builder · ready
+Read `src/platform/workflows.py` and `jobs.py` (wave 1, F4) first.
+
+**qa_certificate** (`src/workflows/qa_certificate.py`) is three steps: `qa.expert_checks` (the existing expert checks) → `qa.dry_run` (simulate n=1000, fixed seed, on the approved questionnaire) → `qa.certificate`.
+- The certificate step writes `STUDIES_DIR/{id}/logic_certificate.pdf` with PyMuPDF (already a dependency; no new one), one page:
+  - study title, questionnaire version and a sha256 of its definition_json;
+  - the date, and the respondents simulated;
+  - dispositions, plus counts of rules that never fired, impossible rules and unreachable questions (listing their qids);
+  - the expert-check notes;
+  - a verdict: **"Issued"** only with zero unreachable and zero impossible, otherwise **"Not issued — fix these first"** with the list.
+- It records `study_metadata["certificate"] = {issued, at, sha256, run_id}`.
+- **Routes:** `POST /studies/{id}/certificate` starts the workflow (202, returns run_id); `GET /workflow-runs/{run_id}` returns the run state and its steps' states; `GET /studies/{id}/certificate.pdf` downloads the PDF (404 until one exists).
+- **Web:** in `DryRunPanel.tsx`, an "Issue logic certificate" button. It shows progress through the three steps and then either "Issued — download" or the blockers.
+
+**field_close** (`src/workflows/field_close.py`) has these steps:
+1. build the data file, reusing the function behind `POST /studies/{id}/fielding/materialize` (find it in `api/routes/materialize.py`, and call the engine function, not the route);
+2. run the tab plan;
+3. `report.draft` when that job kind is registered;
+4. the deck.
+
+- **Route:** `POST /studies/{id}/workflows/field-close` (owner/analyst).
+- **Web:** no UI beyond a button on the control room, "Close fieldwork and build deliverables", behind a confirmation step written into the page.
+
+**Acceptance:**
+- the certificate workflow runs through `drain` on a synthetic approved survey and writes a PDF whose text (`fitz` `get_text`) contains "Issued";
+- a survey with an unreachable question writes "Not issued" and names it;
+- the run route shows the step states;
+- field_close runs end to end on the golden-path fixture and leaves tables and a deck.
+
+### K1: Cleaning decisions become suggestions  · engine-builder · ready
+**Why:** a reviewer who removes every "too fast to read" respondent on every study should not have to do it by hand again. The system learns that habit literally and asks, rather than deciding for them.
+- **Table** `cleaning_habits` in `api/db.py`: `check` (pk), `removed` (int), `kept` (int), `studies` (int), `updated_at`.
+- **Learning:** when a study's cleaning is locked (find the lock route in `api/routes/cleaning.py`), each flag check among that study's decided respondents adds its removed and kept counts and bumps `studies`. This happens once per lock; a re-lock of the same study must not double-count, so store `study_metadata["cleaning_habits_counted"] = true`.
+- **Suggesting:** `GET /cleaning/habits` lists the habits. In the cleaning summary (`GET /studies/{id}/cleaning`), add `suggestions: [{check, label, removed_rate, studies, keys: [...]}]` for checks with at least 10 decisions, a removal rate of at least 0.9, at least 2 studies, and undecided flagged respondents in this study.
+- **Web:** `CleaningPanel` shows each suggestion as a card: "On 3 past studies you removed 46 of 48 respondents flagged *too fast to read*. 9 here are flagged the same way." It offers "Review them" (which filters the list) and "Remove all 9". Remove all uses the existing review-first bulk path, recorded with reason "other" and a note naming the habit. Nothing is ever applied automatically.
+
+**Acceptance:** locking two synthetic studies builds the habit; a re-lock doesn't double-count; a third study gets the suggestion with the right keys; a habit under the thresholds suggests nothing; the component test shows the card, and "Remove all" calls the bulk decision with the note.
 
 ## Wave 5: further (see the blueprint's "Going further" section)
 
