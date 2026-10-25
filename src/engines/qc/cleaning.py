@@ -73,8 +73,10 @@ def collect_flags(
     skipped = dict(qc.checks_skipped)
     # Typing traces, AI-written text and reading time: the authenticity evidence.
     from src.engines.qc.authenticity import ai_text_flags, reading_speed_flags, typing_flags
+    from src.engines.qc.person_fit import person_fit_flags
 
-    for found in (typing_flags(df), ai_text_flags(df, datamap), reading_speed_flags(df, datamap)):
+    for found in (typing_flags(df), ai_text_flags(df, datamap), reading_speed_flags(df, datamap),
+                  person_fit_flags(df, datamap)):
         for i, items in found.items():
             for check, detail in items:
                 add(i, check, detail)
