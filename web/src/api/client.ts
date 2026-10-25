@@ -1785,6 +1785,13 @@ export interface CleaningEvidence {
   items: Array<{ check: string; detail: string; answers: Array<{ column: string; question: string; answer: string }> }>
   seconds: number | null
   median_seconds: number | null
+  paradata?: { pasted: string[]; speech: string[]; max_chars_per_key: number | null }
+  /** The same 0–100 concern score and band the triage list ranks by, with its reasons. */
+  authenticity?: {
+    score: number
+    band: 'review first' | 'worth a look' | 'fine'
+    signals: Array<{ key: string; label: string; weight: number; detail: string }>
+  }
 }
 
 export interface ImputationBody {

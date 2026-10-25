@@ -15,6 +15,7 @@ from typing import Any
 import polars as pl
 
 from src.core.models import DataMap
+from src.engines.qc.authenticity import signals
 from src.engines.qc.paradata import row_paradata
 from src.engines.qc.respondents import MIN_GRID_ITEMS, _find_duration_column, _grid_groups
 
@@ -49,7 +50,8 @@ def _columns_in(detail: str, columns: set[str]) -> list[str]:
     return [t for t in re.findall(r"[A-Za-z_][\w]*", detail) if t in columns][:3]
 
 
-def evidence(df: pl.DataFrame, datamap: DataMap, row: int, flags: list[dict]) -> dict:
+def evidence(df: pl.DataFrame, datamap: DataMap, row: int, flags: list[dict],
+             near_duplicate_of: str | None = None) -> dict:
     cols = set(df.columns)
     record = df.row(row, named=True)
     items = []
@@ -76,4 +78,5 @@ def evidence(df: pl.DataFrame, datamap: DataMap, row: int, flags: list[dict]) ->
            "median_seconds": float(median) if isinstance(median, int | float) else None}
     if (para := row_paradata(df, row)) is not None:
         out["paradata"] = para
+    out["authenticity"] = signals(flags, near_duplicate_of)
     return out
