@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from src.engines.tabs.intervals import differs
+
 # A multi-select comes out as one table per option: Q5r1, Q5r2, ...
 _OPTION_STUB = re.compile(r"^(?P<q>.+?)r\d+$")
 _CHECKED = {"checked", "selected", "yes", "mentioned"}
@@ -55,10 +57,17 @@ def _lead(t: dict) -> dict | None:
     if len(rows) < 2 or rows[0]["pct"][0] <= 0 or rows[0]["pct"][0] >= 99.5:
         return None
     top, nxt = rows[0], rows[1]
+    c = t["columns"][0]
+    n = c.get("effective_base") or c["unweighted_base"]
+    # Two answers of the same respondents: test the difference, not overlapping intervals.
+    level = differs(top["pct"][0], nxt["pct"][0], n) is False
+    verb = (f"is close to {nxt['label']} at {_pct(nxt['pct'][0])}" if level
+            else f"leads at {_pct(top['pct'][0])}, ahead of {nxt['label']} "
+                 f"at {_pct(nxt['pct'][0])}")
     return {
         "kind": "lead", "tables": [t["id"]],
-        "text": f"{_short(t['title'])}: {top['label']} leads at {_pct(top['pct'][0])}, "
-                f"ahead of {nxt['label']} at {_pct(nxt['pct'][0])}.",
+        "text": f"{_short(t['title'])}: {top['label']} "
+                + (f"at {_pct(top['pct'][0])} {verb}." if level else f"{verb}."),
         "strength": top["pct"][0],
         "cites": [_cite(t, r["label"], 0, r["pct"][0]) for r in (top, nxt)],
     }

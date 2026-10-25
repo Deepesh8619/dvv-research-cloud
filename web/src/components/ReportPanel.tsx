@@ -9,12 +9,23 @@ import InfoTip from './ui/InfoTip'
  * (not a model) decides whether it stands. A refused sentence stays, struck
  * through, with what to change underneath.
  */
+/** Wilson 95% interval in whole percents, on the effective base (mirrors src/engines/tabs/intervals.py). */
+export function wilson(pct: number, n: number): [number, number] | null {
+  if (!(n >= 1)) return null
+  const z = 1.959964, p = Math.min(Math.max(pct / 100, 0), 1), d = 1 + (z * z) / n
+  const centre = (p + (z * z) / (2 * n)) / d
+  const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d
+  return [Math.max(0, centre - half) * 100, Math.min(1, centre + half) * 100]
+}
+
 function cellText(tables: TabTable[], c: ReportCite) {
   const t = tables.find((x) => x.id === c.table)
   const col = t?.columns[c.col]
   const row = t?.rows[c.row]
   if (!t || !col || !row) return 'This cell no longer exists'
-  return `${row.label}, ${col.label}: ${row.pct[c.col].toFixed(0)}% · base ${col.unweighted_base}`
+  const iv = wilson(row.pct[c.col], col.effective_base || col.unweighted_base)
+  const range = iv ? ` (95% interval ${iv[0].toFixed(0)}%–${iv[1].toFixed(0)}%)` : ''
+  return `${row.label}, ${col.label}: ${row.pct[c.col].toFixed(0)}%${range} · base ${col.unweighted_base}`
 }
 
 const chipLabel = (c: ReportCite) => `${c.table.toUpperCase()}·r${c.row + 1}c${c.col + 1}`
