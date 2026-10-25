@@ -257,6 +257,12 @@
     "why": "Anyone reading a figure can see exactly what it was computed from, so it can be checked instead of trusted.",
     "how": "Click a number in a table. The trail opens on the right; press Escape to close it."
   },
+  "norms": {
+    "title": "Past-study norms",
+    "what": "The range this answer took in the agency's earlier studies that asked the same question with the same answer list.",
+    "why": "34% means little alone; against a past range of 18–31% it is clearly high.",
+    "how": "Shown in the thread for the clicked row. It needs at least two matching past studies."
+  },
   "lifecycle": {
     "title": "Lifecycle rail",
     "what": "Eight steps a study moves through, from the brief to the insight, each coloured by what is actually stored for this project.",

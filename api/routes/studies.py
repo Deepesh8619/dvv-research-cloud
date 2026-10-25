@@ -665,6 +665,11 @@ def get_crosstabs(
     study = get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
+    return load_crosstabs(study)
+
+
+def load_crosstabs(study) -> dict:
+    """A study's computed tables (404 if it has none yet). Shared with the norms engine."""
     if not study.excel_path:
         raise HTTPException(status_code=404, detail="Tables not yet computed")
 
@@ -717,6 +722,23 @@ def get_cell_provenance(
     survey = SurveyDefinition.from_json(q.definition_json) if q and q.definition_json else None
     return provenance(db, study_id, payload, table, row, col,
                       removed=removed, data_file=data_file, survey=survey)
+
+
+@router.get("/studies/{study_id}/tables/{table_id}/norms")
+def get_table_norms(
+    study_id: str,
+    table_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """How this table's rows compare with the same question in the agency's past studies."""
+    from src.engines.analysis.norms import NOT_ENOUGH, norms_for
+
+    table = next((t for t in get_crosstabs(study_id, db, user)["tables"]
+                  if t.get("id") == table_id), None)
+    if table is None:
+        raise HTTPException(status_code=404, detail="No such table in this study")
+    return norms_for(db, study_id, table) or {"rows": [], "matched": [], "label": NOT_ENOUGH}
 
 
 @router.get("/studies/{study_id}/findings")

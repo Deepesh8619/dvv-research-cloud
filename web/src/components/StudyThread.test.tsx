@@ -9,6 +9,10 @@ vi.mock('../api/client', () => ({
               { title: 'The base', detail: 'No table filter.' },
               { title: 'Weight', detail: 'Weighted by wt.' }],
     } }),
+    norms: vi.fn().mockResolvedValue({ data: {
+      rows: [{ label: 'Price', n_studies: 4, min: 18, median: 24, max: 31 }],
+      matched: [1, 2, 3, 4].map((i) => ({ study_id: `p${i}`, title: `P${i}` })),
+    } }),
   },
 }))
 
@@ -18,7 +22,8 @@ describe('StudyThread', () => {
   it('draws one knot per step, in order', async () => {
     render(<StudyThread studyId="s1" tableId="t1" row={0} col={0} onClose={() => {}} />)
     const knots = await screen.findAllByTestId('knot')
-    expect(knots.map((k) => k.querySelector('b')?.textContent)).toEqual(['The cell', 'The base', 'Weight'])
+    expect(knots.map((k) => k.querySelector('b')?.textContent)).toEqual(['The cell', 'The base', 'Weight', 'Compared with past studies'])
+    expect(screen.getByText('Across 4 past studies: 18%–31% (median 24%)')).toBeTruthy()
     expect(screen.getByText('Why 64.0%')).toBeTruthy()
   })
 
