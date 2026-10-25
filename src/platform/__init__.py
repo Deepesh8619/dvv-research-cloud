@@ -1,1 +1,1 @@
-"""DVV platform layer: jobs, workflows, graph, vectors, events."""
+"""DVV platform layer: durable jobs and workflows, the study graph, vector search."""
