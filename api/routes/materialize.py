@@ -114,7 +114,8 @@ def publish_deck(db: Session, study, run_dir, datamap) -> None:
             qs = []  # no approved, readable questionnaire: findings go unnamed, not unpublished
         pptx_path = str(run_dir / f"{study_id}_fielded_deck.pptx")
         render_pptx(deck_run, pptx_path, questions={q.qid: q.text for q in qs},
-                    screeners={q.qid for q in qs if q.terminate_if}, narrate=False)
+                    screeners={q.qid for q in qs if q.terminate_if}, narrate=False,
+                    report=(study.study_metadata or {}).get("report"))
     update_study_paths(db, study_id, excel_path=excel_path, pptx_path=pptx_path,
                        datamap_json=datamap.to_json())
 

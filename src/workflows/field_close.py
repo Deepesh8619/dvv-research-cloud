@@ -42,7 +42,10 @@ def _tabs(payload: dict, db: Session) -> dict:
 @handler("field_close.report")
 def _report(payload: dict, db: Session) -> dict:
     fn = jobs.HANDLERS.get("report.draft")
-    return fn(payload, db) if fn else {"skipped": "no report writer is installed"}
+    if fn is None:
+        return {"skipped": "no report writer is installed"}
+    # report.draft is also a job of its own, called with the study at the top level.
+    return fn({"study_id": payload["inputs"]["study_id"], "job_id": payload.get("job_id")}, db)
 
 
 @handler("field_close.deck")
