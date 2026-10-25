@@ -43,6 +43,14 @@ from src.engines.questionnaire.derived import with_derived
 from src.engines.questionnaire.grid_masks import mask_code_map, mask_codes
 from src.engines.questionnaire.write_ins import write_in_name, write_ins
 
+#: Disposition name, and the label a path ends on, per status.
+_STATUS_NAME = {
+    STATUS_COMPLETE: ("complete", "END"),
+    STATUS_TERMINATE: ("terminate", "TERMINATE"),
+    STATUS_OVERQUOTA: ("overquota", "OVERQUOTA"),
+}
+MAX_PATHS = 50
+
 DEFAULT_RESPONDENTS = 500
 MAX_RESPONDENTS = 5000
 
@@ -83,6 +91,10 @@ class DryRunReport:
     never_fired: list[str] = field(default_factory=list)
     impossible: list[dict[str, str]] = field(default_factory=list)
     questions_never_shown: list[str] = field(default_factory=list)
+    #: Path data for the Logic X-ray, plain lists/dicts so the report pickles.
+    transitions: list[dict[str, Any]] = field(default_factory=list)
+    paths: list[dict[str, Any]] = field(default_factory=list)
+    exits: list[dict[str, Any]] = field(default_factory=list)
     # (answers, disposition) per respondent, only when `collect` is set. The dry
     # run walks the survey's real conditions — bases, masks, screen-outs,
     # quotas — so this is the one place a test dataset can come from without a
@@ -105,6 +117,9 @@ class DryRunReport:
             "never_fired": self.never_fired,
             "impossible": self.impossible,
             "questions_never_shown": self.questions_never_shown,
+            "transitions": self.transitions,
+            "paths": self.paths,
+            "exits": self.exits,
         }
 
 
@@ -298,10 +313,12 @@ def simulate(
     }
     shown_at_least_once: set[str] = set()
     dispositions: Counter = Counter()
+    path_counts: Counter = Counter()  # (qids..., status) -> n
 
     for respondent in range(1, n + 1):
         answers: dict[str, Any] = {}
         status = STATUS_COMPLETE
+        shown: list[str] = []
         # Most of a panel is on-target and passes every screener. Each of the
         # rest is aimed at ONE screen-out and fails exactly that one: answering
         # the rest at random, they all fell at the first screener and the tenth
@@ -335,6 +352,7 @@ def simulate(
             if qid in bases:
                 bases[qid].fired += 1
             shown_at_least_once.add(qid)
+            shown.append(qid)
 
             allowed = _mask_allowed_codes(question, answers, by_qid)
             if qid in masks:
@@ -391,6 +409,7 @@ def simulate(
                 if counts[cell.id] >= cell.limit and quotas[cell.id].filled_at is None:
                     quotas[cell.id].filled_at = respondent
         dispositions[status] += 1
+        path_counts[(tuple(shown), status)] += 1
         if collect:
             report.respondents.append((dict(answers), status))
     report.conditions = [
@@ -410,6 +429,27 @@ def simulate(
         if qid in by_qid
         and by_qid[qid].type != QuestionType.INFO
         and qid not in shown_at_least_once
+    ]
+    transitions: Counter = Counter()
+    exits: Counter = Counter()
+    for (qids, status), k in path_counts.items():
+        name, end = _STATUS_NAME.get(status, ("other", "END"))
+        for a, b in zip(qids, [*qids[1:], end], strict=False):
+            transitions[(a, b)] += k
+        if qids and status != STATUS_COMPLETE:
+            exits[(qids[-1], name)] += k
+    report.transitions = [
+        {"from": a, "to": b, "n": k}
+        for (a, b), k in sorted(transitions.items(), key=lambda t: (-t[1], t[0]))
+    ]
+    top = sorted(path_counts.items(), key=lambda t: (-t[1], t[0][0]))[:MAX_PATHS]
+    report.paths = [
+        {"qids": list(q), "n": k, "disposition": _STATUS_NAME.get(st, ("other",))[0]}
+        for (q, st), k in top
+    ]
+    report.exits = [
+        {"qid": q, "disposition": d, "n": k}
+        for (q, d), k in sorted(exits.items(), key=lambda t: (-t[1], t[0]))
     ]
     report.dispositions = {
         "complete": dispositions[STATUS_COMPLETE],
