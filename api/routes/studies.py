@@ -9,7 +9,6 @@ from uuid import uuid4
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -53,6 +52,8 @@ from api.models import (
 )
 from src.engines.analysis.quality import data_quality
 from src.orchestration.orchestrator import StudyOrchestrator
+from src.platform.events import emit
+from src.platform.jobs import JobError, enqueue, handler
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -928,19 +929,18 @@ def _set_coding_job(db: Session, study_id: str, job: dict) -> None:
     db.commit()
 
 
-def _run_coding(bind, study_id: str, parquet: Path, datamap: Path, variables: list[str]) -> None:
-    """Background: code the chosen open questions and merge them into coding.json."""
-    import json
-
+@handler("coding.run")
+def _run_coding(payload: dict, db: Session) -> dict:
+    """Queue handler: code the chosen open questions and merge them into coding.json."""
     import polars as pl
-    from sqlalchemy.orm import sessionmaker
 
     from api.db import set_study_artifacts
     from src.core.models import DataMap
     from src.engines.coding.runner import code_open_ends
     from src.engines.qc.discrepancy import completes_only
 
-    db = sessionmaker(bind=bind)()
+    study_id, variables = payload["study_id"], payload["variables"]
+    parquet, datamap = Path(payload["parquet"]), Path(payload["datamap"])
     try:
         dm = DataMap.from_json(datamap.read_text())
         df, _fielded = completes_only(pl.read_parquet(parquet), dm)
@@ -953,13 +953,18 @@ def _run_coding(bind, study_id: str, parquet: Path, datamap: Path, variables: li
         set_study_artifacts(db, study_id, coding_json=text)
         _set_coding_job(db, study_id, {"state": "done", "variables": variables,
                                        "coded": sorted(blocks), "failed": failed,
+                                       "job_id": payload.get("job_id"),
                                        "finished_at": datetime.now().isoformat()})
-    except Exception as exc:  # recorded for the page; never left "running"
-        logger.error(f"[{study_id}] on-demand coding failed: {exc}")
+    except Exception:  # recorded for the page; never left "running"
+        logger.exception(f"[{study_id}] on-demand coding failed")
+        db.rollback()
+        message = "Coding stopped before it finished. It has been logged."
         _set_coding_job(db, study_id, {"state": "failed", "variables": variables,
-                                       "error": "Coding stopped: " + str(exc)[:200]})
-    finally:
-        db.close()
+                                       "job_id": payload.get("job_id"), "error": message})
+        emit(db, study_id, "job.failed", {"kind": "coding.run", "error": message})
+        raise JobError(message) from None
+    emit(db, study_id, "job.done", {"kind": "coding.run", "coded": sorted(blocks)})
+    return {"coded": sorted(blocks), "failed": failed}
 
 
 class CodingRunRequest(BaseModel):
@@ -997,7 +1002,6 @@ def coding_status(
 def run_coding(
     study_id: str,
     body: CodingRunRequest,
-    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
 ):
@@ -1027,7 +1031,14 @@ def run_coding(
     _set_coding_job(db, study_id, {"state": "running", "variables": variables,
                                    "started_at": datetime.now().isoformat(),
                                    "started_by": user.name})
-    background.add_task(_run_coding, db.get_bind(), study_id, parquet, datamap, variables)
+    job = enqueue(db, "coding.run",
+                  {"study_id": study_id, "parquet": str(parquet), "datamap": str(datamap),
+                   "variables": variables},
+                  study_id=study_id, max_attempts=1, created_by=user.id)
+    db.refresh(study)
+    running = (study.study_metadata or {}).get("coding_job") or {}
+    if running.get("state") == "running":  # the worker may already have finished it
+        _set_coding_job(db, study_id, {**running, "job_id": job.id})
     return {"state": "running", "variables": variables}
 
 

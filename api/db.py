@@ -688,6 +688,19 @@ class WorkflowRunDB(Base):
     error = Column(Text, nullable=True)
 
 
+# --- F4 ---
+class EventDB(Base):
+    """One thing that happened in a study; the live stream reads these in seq order."""
+
+    __tablename__ = "events"
+
+    seq = Column(Integer, primary_key=True, autoincrement=True)
+    study_id = Column(String, index=True)
+    kind = Column(String)
+    data = Column(Text, default="{}")  # json
+    created_at = Column(String)
+
+
 def active_rules_for_profile(db, profile_slug: str) -> list[str]:
     """Ordered active rule texts for one profile — the prompt-ready rule set.
 
