@@ -949,6 +949,10 @@ export const questionnaireApi = {
 
   questions: async (studyId: string) =>
     api.get<QuestionsListResponse>(`/studies/${studyId}/questionnaire/questions`),
+  /** The solver's proof for the questionnaire as it stands, draft or approved. */
+  logic: async (studyId: string) =>
+    api.get<{ proof: { unreachable: Array<{ qid: string; why: string }>; not_provable: Array<{ qid: string; reason: string }>; always_screened_out?: string[] } | null }>(
+      `/studies/${studyId}/questionnaire/logic`),
 
   question: async (studyId: string, qid: string) =>
     api.get<Question>(`/studies/${studyId}/questionnaire/questions/${qid}`),

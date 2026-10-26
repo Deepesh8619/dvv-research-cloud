@@ -14,6 +14,7 @@ import ReportPanel from '../components/ReportPanel'
 import TablesPanel from '../components/TablesPanel'
 import TrackerPanel from '../components/TrackerPanel'
 import MethodsPanel from '../components/MethodsPanel'
+import LogicMap from '../components/LogicMap'
 import VariablesPanel from '../components/VariablesPanel'
 import NoticePanel from '../components/NoticePanel'
 import ProjectDataBar, { DATA_CHANGED } from '../components/ProjectDataBar'
@@ -62,7 +63,7 @@ const STAGE_PROGRESS: Record<string, number> = {
 // instrument the client signed off. That second comparison is the one a DP shop
 // is paid for, and burying it under generic data QC misrepresented which of the
 // two matters.
-const TABS = ['Overview', 'Questionnaire checks', 'Variables', 'Reports', 'Cleaning', 'Open ends', 'Activity'] as const
+const TABS = ['Overview', 'Questionnaire checks', 'Logic map', 'Variables', 'Reports', 'Cleaning', 'Open ends', 'Activity'] as const
 // The full variable list, hidden ones included, is for the people who build and
 // check the data — not for client reviewers.
 const STAFF_ONLY_TABS: ReadonlyArray<string> = ['Variables']
@@ -323,6 +324,7 @@ export default function ProjectPage() {
       ))}
       {tab === 'Open ends' && (noData ? <NoDataState /> : <OpenEndsPanel studyId={study.id} />)}
       {tab === 'Activity' && <ActivityTab study={study} />}
+      {tab === 'Logic map' && <LogicMap studyId={study.id} canWrite={hasWriteRole(user?.role)} />}
       {tab === 'Variables' && isStaff && <VariablesPanel studyId={study.id} />}
 
       {/* Share modal */}
