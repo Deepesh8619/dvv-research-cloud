@@ -251,3 +251,40 @@ describe('re-typing a question as a rating grid', () => {
     spy.mockRestore()
   })
 })
+
+describe('leaving a question out, deleting it, and its routing text', () => {
+  it('puts a TERMINATE sentence beside the screen-out, not under "show this question if"', () => {
+    renderDetail(question({ validation: { routing_verbatim: 'TERMINATE IF Bar & Grill IS NEVER' } }))
+    const blocks = screen.getAllByText('TERMINATE IF Bar & Grill IS NEVER')
+    expect(blocks).toHaveLength(1)
+  })
+
+  it('switches a question out of the link and shows who depends on it when refused', async () => {
+    const { questionnaireApi } = await import('../api/client')
+    const spy = vi.spyOn(questionnaireApi, 'setInLink').mockRejectedValueOnce({ response: { data: { detail: {
+      error: "Q1 can't be left out of the link while other questions use its answer", referenced_by: ['Q3'] } } } })
+    const user = userEvent.setup()
+    renderDetail()
+    await user.click(screen.getByLabelText('Ask this in the link'))
+    expect(spy).toHaveBeenCalledWith('study_1', 'Q1', false)
+    expect(await screen.findByText(/use its answer: Q3\. Change their routing first\./)).toBeTruthy()
+    spy.mockRestore()
+  })
+
+  it('deletes only after the second step', async () => {
+    const { questionnaireApi } = await import('../api/client')
+    const spy = vi.spyOn(questionnaireApi, 'deleteQuestion').mockResolvedValue({ data: {} } as never)
+    const onDeleted = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <QuestionDetail studyId="study_1" q={question()} priorQids={['Q1']} canWrite canCorrect={false}
+        profile={null} onSaved={() => {}} onApproved={() => {}} onSplit={() => {}} onDeleted={onDeleted} />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Delete question' }))
+    expect(spy).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Yes, delete' }))
+    expect(spy).toHaveBeenCalledWith('study_1', 'Q1')
+    expect(onDeleted).toHaveBeenCalled()
+    spy.mockRestore()
+  })
+})

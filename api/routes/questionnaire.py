@@ -831,7 +831,7 @@ def questionnaire_logic(
     if payload is None:
         raise HTTPException(status_code=404, detail="This questionnaire has not been read yet")
     try:
-        proof = prove(SurveyDefinition.from_json(payload))
+        proof = prove(SurveyDefinition.from_json(payload).for_link())
     except Exception:
         # The map still draws from the questions; it just cannot say what is proved.
         logger.exception(f"[{study_id}] logic proof failed")
@@ -1115,6 +1115,74 @@ def add_question(
     update_questionnaire_status(db, questionnaire.id, "in_review")
     approved = set(questionnaire.approved_qids or [])
     return _question_payload(question, approved)
+
+
+class InLinkRequest(BaseModel):
+    in_link: bool
+
+
+@router.put("/studies/{study_id}/questionnaire/questions/{qid}/in-link")
+def set_in_link(
+    study_id: str,
+    qid: str,
+    body: InLinkRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Ask this question in the link, or keep it in the questionnaire but never show
+    it to respondents. (Owner/Analyst)
+
+    Switching a question off is refused while another question's routing, mask,
+    pipe or derived rule uses its answer: those would silently stop working."""
+    questionnaire = _latest_questionnaire(db, study_id)
+    survey = _load_definition(db, questionnaire)
+    if qid not in survey:
+        raise HTTPException(status_code=404, detail=f"Question {qid} not found")
+    if not body.in_link:
+        users = sorted(_dependents(survey, qid))
+        if users:
+            raise HTTPException(status_code=422, detail={
+                "error": f"{qid} can't be left out of the link while other questions "
+                         "use its answer",
+                "referenced_by": users,
+            })
+    validation = dict(survey[qid].validation or {})
+    if body.in_link:
+        validation.pop("not_in_link", None)
+    else:
+        validation["not_in_link"] = True
+    survey[qid].validation = validation or None
+    _save_definition(db, questionnaire, survey)
+    update_questionnaire_status(db, questionnaire.id, "in_review")
+    from api.db import record_audit
+
+    record_audit(db, entity="question", entity_id=qid,
+                 action="in_link" if body.in_link else "not_in_link", actor_id=user.id,
+                 study_id=study_id,
+                 summary=f"{qid} {'asked in' if body.in_link else 'left out of'} the link")
+    db.commit()
+    return _question_payload(survey[qid], set(questionnaire.approved_qids or []))
+
+
+def _dependents(survey: SurveyDefinition, qid: str) -> set[str]:
+    """Questions whose routing, masks, pipes or derived codes read `qid`'s answer."""
+    out: set[str] = set()
+    for q in survey.questions:
+        if q.qid == qid:
+            continue
+        refs: set[str] = set()
+        for expr in (q.show_if, q.terminate_if):
+            if expr is not None:
+                refs |= expr.referenced_qids()
+        tech = (q.validation or {}).get("techniques") or {}
+        refs |= {m.get(k) for m in tech.get("masks") or [] for k in ("source_qid", "exclude_qid")}
+        refs |= {p.get("source_qid") for p in tech.get("pipes") or []}
+        for o in q.options or []:
+            if o.derive_if is not None:
+                refs |= o.derive_if.referenced_qids()
+        if qid in refs or qid.upper() in {str(r).upper() for r in refs if r}:
+            out.add(q.qid)
+    return out
 
 
 @router.delete("/studies/{study_id}/questionnaire/questions/{qid}")
@@ -1501,7 +1569,7 @@ def questionnaire_datamap(
     from src.engines.questionnaire.derived import has_rule, is_coded_hidden, rule_text
 
     questionnaire = _latest_questionnaire(db, study_id)
-    survey = _load_definition(db, questionnaire)
+    survey = _load_definition(db, questionnaire).for_link()
     datamap, _frame = materialize_fielding(survey, [], {}, ALL_STATUSES)
     by_qid = {q.qid: q for q in survey.questions}
 

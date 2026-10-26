@@ -414,6 +414,8 @@ export interface Expression {
   values?: unknown[] | null
   children?: Expression[] | null
   verbatim_text?: string | null
+  /** One row of a grid: "S8 row Bar & Grill is Never". */
+  row?: number | null
 }
 
 export interface QuestionOption {
@@ -1011,6 +1013,9 @@ export const questionnaireApi = {
   addQuestion: async (studyId: string, question: QuestionCreate) =>
     api.post<Question>(`/studies/${studyId}/questionnaire/questions`, question),
 
+  /** Ask a question in the link, or keep it in the questionnaire but never show it. */
+  setInLink: async (studyId: string, qid: string, inLink: boolean) =>
+    api.put<Question>(`/studies/${studyId}/questionnaire/questions/${qid}/in-link`, { in_link: inLink }),
   deleteQuestion: async (studyId: string, qid: string) =>
     api.delete<{ deleted: string; n_questions: number }>(
       `/studies/${studyId}/questionnaire/questions/${qid}`,

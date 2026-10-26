@@ -286,7 +286,7 @@ def _preflight(db: Session, study_id: str) -> dict:
     payload = _read_definition_json(db, current)
     if payload is None:
         raise HTTPException(status_code=409, detail="The questionnaire is still being read")
-    survey = SurveyDefinition.from_json(payload)
+    survey = SurveyDefinition.from_json(payload).for_link()
     try:
         return run_heavy_detached(
             db, preflight, survey, approved is not None, _BLOCKING_FLAGS,
@@ -353,7 +353,10 @@ def create_link(
     if payload is None:
         # Approved but no persisted definition is a server fault, not user error.
         raise HTTPException(status_code=500, detail="Approved questionnaire has no definition")
-    survey = SurveyDefinition.from_json(payload)
+    # The pinned snapshot is the link's questionnaire: questions switched off for
+    # the link are not in it, so nothing downstream can ask them.
+    survey = SurveyDefinition.from_json(payload).for_link()
+    payload = survey.to_json()
 
     theme = body.theme if body else None
     if theme is not None:
@@ -490,7 +493,7 @@ def dry_run(
             raise HTTPException(
                 status_code=500, detail="Approved questionnaire has no definition"
             )
-        survey = SurveyDefinition.from_json(payload)
+        survey = SurveyDefinition.from_json(payload).for_link()
         cells = []
 
     report = run_heavy_detached(db, simulate, survey, cells, n=request.n, seed=request.seed)

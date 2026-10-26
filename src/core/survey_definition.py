@@ -582,6 +582,20 @@ class SurveyDefinition:
                 seen.add(q.qid)
         return ordered
 
+    def for_link(self) -> SurveyDefinition:
+        """The questionnaire as respondents meet it: questions a reviewer switched
+        off for the link (validation["not_in_link"]) are left out, from the
+        question list and from every block. The link, the dry run, the solver
+        and the planned data map all read this, so they agree on what is asked."""
+        hidden = {q.qid for q in self.questions if (q.validation or {}).get("not_in_link")}
+        if not hidden:
+            return self
+        data = json.loads(self.to_json())
+        data["questions"] = [q for q in data["questions"] if q["qid"] not in hidden]
+        for block in data.get("blocks", []):
+            block["question_ids"] = [x for x in block["question_ids"] if x not in hidden]
+        return SurveyDefinition.from_json(json.dumps(data))
+
     def validate(self) -> list[str]:
         """Human-readable problems; empty list means valid."""
         problems: list[str] = []
