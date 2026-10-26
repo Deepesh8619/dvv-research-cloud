@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { TableSkeleton } from '../components/Skeleton'
+import { PasteOptionsBox } from '../components/builder/PasteOptionsBox'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import OptionCondition from '../components/OptionCondition'
 import { flagInfo } from '../components/questionnaireFlags'
@@ -313,6 +314,10 @@ interface DetailState {
   options: QuestionOption[]
   // Constant-sum rows (one box per item) and the total they must reach.
   rows: QuestionOption[]
+  /** A grid's answer scale, e.g. 1 Past 30 days … 6 Never. */
+  cols: QuestionOption[]
+  /** Shuffle a grid's rows for each respondent ("RANDOMIZE ROWS"). */
+  randomize: boolean
   sumTotal: number
   showIf: FlatRouting
   terminateIf: FlatRouting
@@ -335,6 +340,51 @@ function fromCandidate(q: Question): DetailState {
   return { ...buildDetailState(q), carried: { rows: q.rows ?? null, cols: q.cols ?? null, validation } }
 }
 
+/** A grid's rows or columns: code + label each, add, remove, or paste a whole list.
+ *  Rows are re-coded 1..n (order is the code); a scale keeps the codes typed. */
+function GridList({ label, items, canWrite, onChange, renumber = false }: {
+  label: string
+  items: QuestionOption[]
+  canWrite: boolean
+  onChange: (items: QuestionOption[]) => void
+  renumber?: boolean
+}) {
+  const recode = (list: QuestionOption[]) => (renumber ? list.map((o, i) => ({ ...o, code: i + 1 })) : list)
+  const next = () => items.reduce((m, o) => Math.max(m, o.code), 0) + 1
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
+        {canWrite && (
+          <PasteOptionsBox onApply={(pasted) => onChange(recode([
+            ...items, ...pasted.map((o, i) => ({ code: renumber ? 0 : next() + i, label: o.label }))]))} />
+        )}
+      </div>
+      <div className="space-y-1.5">
+        {items.map((o, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input type="number" value={o.code} disabled={!canWrite || renumber} aria-label={`${label} code ${i + 1}`}
+              onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, code: Number(e.target.value) } : x)))}
+              className="h-8 w-16 rounded-md border border-slate-300 px-2 text-sm disabled:bg-slate-50" />
+            <input value={o.label} disabled={!canWrite} aria-label={`${label} label ${i + 1}`}
+              onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+              className="h-8 flex-1 rounded-md border border-slate-300 px-2 text-sm disabled:bg-slate-50" />
+            {canWrite && (
+              <button type="button" aria-label={`remove ${o.label || 'item'}`} className="px-1 text-slate-400 hover:text-red-600"
+                onClick={() => onChange(recode(items.filter((_, j) => j !== i)))}>✕</button>
+            )}
+          </div>
+        ))}
+        {items.length === 0 && <p className="text-sm text-amber-700">None yet — a grid needs at least one.</p>}
+      </div>
+      {canWrite && (
+        <button type="button" className="mt-2 text-xs font-medium text-primary-500 hover:text-primary-600"
+          onClick={() => onChange(recode([...items, { code: next(), label: '' }]))}>+ Add</button>
+      )}
+    </div>
+  )
+}
+
 function buildDetailState(q: Question): DetailState {
   const sum = q.validation?.sum
   return {
@@ -342,6 +392,8 @@ function buildDetailState(q: Question): DetailState {
     type: isConstantSumQuestion(q) ? 'constant_sum' : q.type,
     options: q.options.map((o) => ({ ...o })),
     rows: (q.rows ?? []).map((o) => ({ ...o })),
+    cols: (q.cols ?? []).map((o) => ({ ...o })),
+    randomize: !!q.randomize_options,
     sumTotal: typeof sum === 'number' ? sum : 100,
     showIf: toFlatRouting(q.show_if),
     terminateIf: toFlatRouting(q.terminate_if),
@@ -648,6 +700,7 @@ export function QuestionDetail({
   const keepsOptions = state.type === 'info' || state.type === 'numeric'
 
   const isConstantSum = state.type === 'constant_sum'
+  const isGrid = state.type === 'grid_single' || state.type === 'grid_multi'
 
   const setOption = (i: number, patch: Partial<QuestionOption>) =>
     set('options', state.options.map((o, idx) => (idx === i ? { ...o, ...patch } : o)))
@@ -694,6 +747,13 @@ export function QuestionDetail({
       if (state.carried.rows !== undefined) patch.rows = state.carried.rows
       if (state.carried.cols !== undefined) patch.cols = state.carried.cols
       if (Object.keys(state.carried.validation ?? {}).length) patch.validation = state.carried.validation
+    }
+    if (isGrid) {
+      // What is on screen wins over anything carried in: a question re-typed as
+      // a grid here (one answer → rating grid) has no rows until the reviewer adds them.
+      patch.rows = state.rows.map((r) => ({ code: r.code, label: r.label }))
+      patch.cols = state.cols.map((c) => ({ code: c.code, label: c.label }))
+      patch.randomize_options = state.randomize
     }
     if (isConstantSum) {
       patch.rows = state.rows.map((r) => ({ code: r.code, label: r.label }))
@@ -1041,6 +1101,19 @@ export function QuestionDetail({
 
       {/* Constant sum: one line per item, plus the total they must reach.
           Saved as numeric + rows + validation.sum — see handleSave. */}
+      {isGrid && (
+        <div className="space-y-4 rounded-md border border-slate-200 p-3" data-testid="grid-editor">
+          <GridList label="Rows — the things rated (one answer each)" items={state.rows} canWrite={canWrite}
+            renumber onChange={(rows) => set('rows', rows)} />
+          <GridList label="Columns — the answer scale" items={state.cols} canWrite={canWrite}
+            onChange={(cols) => set('cols', cols)} />
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={state.randomize} disabled={!canWrite}
+              onChange={(e) => set('randomize', e.target.checked)} />
+            Shuffle the rows for each respondent
+          </label>
+        </div>
+      )}
       {isConstantSum && (
         <div>
           <span className="text-xs font-medium uppercase tracking-wide text-slate-500 block mb-2">
