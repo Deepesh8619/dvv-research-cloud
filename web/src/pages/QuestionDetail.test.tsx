@@ -214,3 +214,40 @@ describe('saving a hidden variable', () => {
     spy.mockRestore()
   })
 })
+
+describe('re-typing a question as a rating grid', () => {
+  it('shows rows and columns to fill in, and saves them with the shuffle setting', async () => {
+    const { questionnaireApi } = await import('../api/client')
+    const calls: Array<Record<string, unknown>> = []
+    const spy = vi.spyOn(questionnaireApi, 'update').mockImplementation(async (_s, _q, patch) => {
+      calls.push(patch as Record<string, unknown>)
+      return { data: question() } as never
+    })
+    const user = userEvent.setup()
+    // S8 as the parser read it: one answer whose single option holds every column.
+    renderDetail(question({ qid: 'S8', type: 'single', text: 'When did you last dine in at each?',
+      options: [{ code: 1, label: 'Past 30 days | 1-3 months ago' }] }))
+    await user.selectOptions(screen.getByDisplayValue('One answer'), 'grid_single')
+    const grid = screen.getByTestId('grid-editor')
+    expect(grid.textContent).toContain('None yet')
+
+    const adds = screen.getAllByRole('button', { name: '+ Add' })
+    await user.click(adds[0])
+    await user.type(screen.getByLabelText(/Rows .* label 1/), 'Pizza')
+    await user.click(adds[0])
+    await user.type(screen.getByLabelText(/Rows .* label 2/), 'Steakhouse')
+    await user.click(adds[1])
+    await user.type(screen.getByLabelText(/Columns .* label 1/), 'Past 30 days')
+    await user.click(adds[1])
+    await user.type(screen.getByLabelText(/Columns .* label 2/), 'Never')
+    await user.click(screen.getByLabelText('Shuffle the rows for each respondent'))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(calls[0].type).toBe('grid_single')
+    expect(calls[0].rows).toEqual([{ code: 1, label: 'Pizza' }, { code: 2, label: 'Steakhouse' }])
+    expect(calls[0].cols).toEqual([{ code: 1, label: 'Past 30 days' }, { code: 2, label: 'Never' }])
+    expect(calls[0].randomize_options).toBe(true)
+    expect(calls[0].options).toEqual([])  // the wrong single option does not survive as an answer
+    spy.mockRestore()
+  })
+})
