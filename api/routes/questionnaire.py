@@ -815,6 +815,31 @@ def update_questionnaire_settings(
     return _status_response(questionnaire, survey)
 
 
+@router.get("/studies/{study_id}/questionnaire/logic")
+def questionnaire_logic(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The solver's proof for the questionnaire as it stands now, draft or approved:
+    which questions anyone can reach, and why the others can't. Feeds the logic map,
+    so the routing can be checked straight after upload, before any dry run."""
+    from src.engines.questionnaire.logic_proof import prove
+
+    questionnaire = _latest_questionnaire(db, study_id)
+    payload = _read_definition_json(db, questionnaire)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="This questionnaire has not been read yet")
+    try:
+        proof = prove(SurveyDefinition.from_json(payload))
+    except Exception:
+        # The map still draws from the questions; it just cannot say what is proved.
+        logger.exception(f"[{study_id}] logic proof failed")
+        return {"proof": None}
+    proof.pop("examples", None)
+    return {"proof": proof}
+
+
 @router.get("/studies/{study_id}/questionnaire/questions")
 def list_questions(
     study_id: str,
