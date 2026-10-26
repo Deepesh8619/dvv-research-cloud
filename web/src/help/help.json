@@ -310,5 +310,11 @@
     "what": "Every question in order, with a line from each question to the ones that depend on it: shown only if, screen-outs, answer lists carried over (masks) and piped text.",
     "why": "Routing mistakes are invisible in a document and expensive in field. Here they are visible straight after upload, and the solver says which questions nobody can ever reach, and why.",
     "how": "Select a question to read its conditions in words. To add one, select the question it depends on, choose “Connect a condition from here”, pick a later question and tick the answers. Saving puts the questionnaire back in review."
+  },
+  "in_link": {
+    "title": "Ask this in the link",
+    "what": "Whether respondents are asked this question. Switched off, it stays in the questionnaire for the record but is left out of the link, the dry run, the solver and the data file.",
+    "why": "Documents carry notes, programmer instructions and questions a client dropped late. Leaving them out keeps the link true to what will be fielded without losing the document's wording.",
+    "how": "Untick it. If another question's routing, answer list or piping uses this answer, it is refused and names those questions: change them first. Changing it puts the questionnaire back in review; new links pick it up, links already live keep what they were made with."
   }
 }

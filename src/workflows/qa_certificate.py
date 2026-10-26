@@ -31,7 +31,10 @@ def _approved(db: Session, study_id: str) -> str:
     payload = _read_definition_json(db, approved) if approved else None
     if not payload:
         raise JobError("This study has no approved questionnaire to check.")
-    return payload
+    # Certify what the link asks: questions switched off for the link are out.
+    from src.core.survey_definition import SurveyDefinition
+
+    return SurveyDefinition.from_json(payload).for_link().to_json()
 
 
 @handler("qa.expert_checks")

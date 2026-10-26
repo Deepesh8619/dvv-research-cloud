@@ -15,6 +15,7 @@ import { useAuth } from '../auth/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { TableSkeleton } from '../components/Skeleton'
 import { PasteOptionsBox } from '../components/builder/PasteOptionsBox'
+import InfoTip from '../components/ui/InfoTip'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
 import OptionCondition from '../components/OptionCondition'
 import { flagInfo } from '../components/questionnaireFlags'
@@ -281,6 +282,11 @@ function QuestionRow({
         {q.approved && (
           <span className="text-[11px] text-emerald-600 shrink-0" title="Approved">
             ✓ approved
+          </span>
+        )}
+        {(q.validation as { not_in_link?: boolean } | null)?.not_in_link && (
+          <span className="shrink-0 rounded bg-slate-100 px-1.5 text-[11px] text-slate-600" title="Kept in the questionnaire, not asked in the link">
+            not in link
           </span>
         )}
       </div>
@@ -628,6 +634,7 @@ export function QuestionDetail({
   onSaved,
   onApproved,
   onSplit,
+  onDeleted,
   onRequestOptionsFrom,
   renderedDoc,
   nextLocation,
@@ -643,6 +650,8 @@ export function QuestionDetail({
   canCorrect: boolean
   profile?: { slug?: string; label?: string } | null
   onSaved: (updated: Question) => void
+  /** The question was deleted: reload the list and leave the editor. */
+  onDeleted?: () => void
   onApproved: (qid: string, clearedFlags?: string[]) => void
   /** After a successful split: reload the list and select the first copy. */
   onSplit: (qids: string[]) => void
@@ -676,6 +685,9 @@ export function QuestionDetail({
   // PATCH; it only enriches the verbatim panel below.
   const routingVerbatim =
     typeof q.validation?.routing_verbatim === 'string' ? q.validation.routing_verbatim : null
+  // The document's routing sentence is ONE string; it belongs beside the block it
+  // describes, not under both (a TERMINATE rule shown as "Show this question if").
+  const routingIsScreenOut = !!routingVerbatim && /\b(terminat|screen[ -]?out|disqualif|close (the )?interview)/i.test(routingVerbatim)
   const [saving, setSaving] = useState(false)
   const [approving, setApproving] = useState(false)
   const [problems, setProblems] = useState<string[]>([])
@@ -1179,7 +1191,7 @@ export function QuestionDetail({
         label="Show this question if"
         emptyText="No condition — everyone sees this question."
         flat={state.showIf}
-        verbatim={state.showIfVerbatim ?? routingVerbatim}
+        verbatim={state.showIfVerbatim ?? (routingIsScreenOut ? null : routingVerbatim)}
         priorQids={priorQids.filter((qid) => qid !== q.qid)}
         questions={allQuestions}
         canWrite={canWrite}
@@ -1189,7 +1201,7 @@ export function QuestionDetail({
         label="Terminate / screen out if"
         emptyText="No screen-out — nobody is disqualified here."
         flat={state.terminateIf}
-        verbatim={state.terminateIfVerbatim ?? routingVerbatim}
+        verbatim={state.terminateIfVerbatim ?? (routingIsScreenOut ? routingVerbatim : null)}
         priorQids={priorQids}
         questions={allQuestions}
         canWrite={canWrite}
@@ -1235,9 +1247,89 @@ export function QuestionDetail({
                 ? openBlockingFlag ? 'Re-approve (clears flags)' : 'Approved'
                 : 'Approve'}
           </button>
+          <span className="ml-auto flex flex-wrap items-center gap-3">
+            <InLinkToggle studyId={studyId} q={q} onChanged={onSaved} />
+            {onDeleted && <DeleteQuestion studyId={studyId} qid={q.qid} onDeleted={onDeleted} />}
+          </span>
         </div>
       )}
     </div>
+  )
+}
+
+type ApiProblem = { response?: { data?: { detail?: string | { error?: string; referenced_by?: string[] } } } }
+function problemText(e: unknown, fallback: string): string {
+  const d = (e as ApiProblem)?.response?.data?.detail
+  if (typeof d === 'string') return d
+  if (d?.referenced_by?.length) return `${d.error ?? fallback}: ${d.referenced_by.join(', ')}. Change their routing first.`
+  return d?.error ?? fallback
+}
+
+/** Ask this question in the link, or keep it in the questionnaire but never show it. */
+function InLinkToggle({ studyId, q, onChanged }: { studyId: string; q: Question; onChanged: (q: Question) => void }) {
+  const inLink = !(q.validation as { not_in_link?: boolean } | null)?.not_in_link
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const flip = async () => {
+    setBusy(true)
+    setErr(null)
+    try {
+      const res = await questionnaireApi.setInLink(studyId, q.qid, !inLink)
+      onChanged(res.data)
+    } catch (e) {
+      setErr(problemText(e, 'Could not change this'))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <span className="flex flex-col items-end">
+      <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input type="checkbox" checked={inLink} disabled={busy} onChange={flip} />
+        Ask this in the link<InfoTip id="in_link" align="right" />
+      </label>
+      {err && <span className="max-w-xs text-right text-xs text-red-700">{err}</span>}
+    </span>
+  )
+}
+
+/** Delete, with a second explicit step; refused (with names) while others route on it. */
+function DeleteQuestion({ studyId, qid, onDeleted }: { studyId: string; qid: string; onDeleted: () => void }) {
+  const [asking, setAsking] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const remove = async () => {
+    setBusy(true)
+    setErr(null)
+    try {
+      await questionnaireApi.deleteQuestion(studyId, qid)
+      onDeleted()
+    } catch (e) {
+      setErr(problemText(e, 'Could not delete this question'))
+      setAsking(false)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <span className="flex flex-col items-end">
+      {asking ? (
+        <span className="flex items-center gap-2 text-sm" role="group" aria-label="Confirm deletion">
+          Delete {qid} from the questionnaire?
+          <button type="button" disabled={busy} onClick={remove}
+            className="rounded-md bg-red-600 px-3 py-1.5 font-medium text-white hover:bg-red-700 disabled:opacity-50">
+            Yes, delete
+          </button>
+          <button type="button" className="text-slate-600 underline" onClick={() => setAsking(false)}>Cancel</button>
+        </span>
+      ) : (
+        <button type="button" onClick={() => setAsking(true)}
+          className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50">
+          Delete question
+        </button>
+      )}
+      {err && <span className="max-w-xs text-right text-xs text-red-700">{err}</span>}
+    </span>
   )
 }
 
@@ -1952,6 +2044,7 @@ export default function QuestionnairePage() {
                   onSaved={onQuestionSaved}
                   onApproved={onQuestionApproved}
                   onSplit={onQuestionSplit}
+                  onDeleted={async () => { setSelectedQid(null); await loadQuestions() }}
                   onRequestOptionsFrom={() => setOptionsFromNonce((n) => n + 1)}
                   renderedDoc={rendered.doc}
                   nextLocation={nextLocation}

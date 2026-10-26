@@ -89,12 +89,18 @@ function emptyLeaf(): Expression {
 }
 
 /** What a condition may refer to, in the researcher's words. */
-export type RoutingQuestion = Pick<Question, 'qid' | 'text' | 'type' | 'options'>
+export type RoutingQuestion = Pick<Question, 'qid' | 'text' | 'type' | 'options'> & Partial<Pick<Question, 'rows' | 'cols'>>
+
+const isGrid = (q?: RoutingQuestion) => q?.type === 'grid_single' || q?.type === 'grid_multi'
+/** The answers a condition picks from: a grid's scale, otherwise the options. */
+const answersOf = (q: RoutingQuestion) => (isGrid(q) ? q.cols ?? [] : q.options)
 
 const CHOICE = new Set(['single', 'dropdown'])
 // Verbs that fit the question: a single choice "is", a multi-select "includes",
 // a number "is more than". Anything else keeps the generic list.
 function verbsFor(type: string | undefined): Array<{ value: ExprOp; label: string }> {
+  if (type === 'grid_single') return [{ value: 'eq', label: 'is' }, { value: 'ne', label: 'is not' }, { value: 'in', label: 'is any of' }]
+  if (type === 'grid_multi') return [{ value: 'selected', label: 'includes' }]
   if (type && CHOICE.has(type)) return [{ value: 'eq', label: 'is' }, { value: 'ne', label: 'is not' }, { value: 'in', label: 'is any of' }]
   if (type === 'multi') return [{ value: 'selected', label: 'includes' }]
   if (type === 'numeric') return [{ value: 'eq', label: 'is' }, { value: 'gt', label: 'is more than' }, { value: 'lt', label: 'is less than' }]
@@ -105,10 +111,15 @@ function verbsFor(type: string | undefined): Array<{ value: ExprOp; label: strin
 export function describeCondition(c: Expression, questions: RoutingQuestion[]): string {
   const q = questions.find((x) => x.qid === c.qid)
   if (!q) return ''
-  const label = (v: unknown) => q.options.find((o) => o.code === v)?.label ?? String(v ?? '')
+  const label = (v: unknown) => answersOf(q).find((o) => o.code === v)?.label ?? String(v ?? '')
   const verb = verbsFor(q.type).find((o) => o.value === c.op)?.label ?? c.op
   const what = c.op === 'in' ? (c.values ?? []).map(label).join(' or ') : label(c.value)
-  return `${q.text.length > 70 ? q.text.slice(0, 69) + '…' : q.text} ${verb} ${what || '…'}`
+  const text = q.text.length > 70 ? q.text.slice(0, 69) + '…' : q.text
+  if (isGrid(q)) {
+    const row = (q.rows ?? []).find((r) => r.code === c.row)?.label ?? (c.row != null ? `row ${c.row}` : 'a row')
+    return `${q.qid} — ${row} ${verb} ${what || '…'}`
+  }
+  return `${text} ${verb} ${what || '…'}`
 }
 
 interface Props {
@@ -211,20 +222,29 @@ export default function RoutingEditor({ label, flat, onChange, qidOptions, disab
             const q = known?.find((x) => x.qid === cond.qid)
             if (known && (!cond.qid || q)) {
               const verbs = verbsFor(q?.type)
-              const choices = q && q.options.length > 0 && q.type !== 'numeric'
+              const answers = q ? answersOf(q) : []
+              const choices = q && answers.length > 0 && q.type !== 'numeric'
               return (
                 <div key={i} className="flex flex-wrap items-center gap-2 rounded-md bg-slate-50 p-2">
                   <select value={cond.qid ?? ''} disabled={disabled} aria-label="condition question"
                     className="h-8 max-w-full rounded-md border border-slate-300 px-2 text-sm"
                     onChange={(e) => {
                       const next = known.find((x) => x.qid === e.target.value)
-                      setCondition(i, { qid: e.target.value, op: verbsFor(next?.type)[0].value, value: '', values: undefined })
+                      setCondition(i, { qid: e.target.value, op: verbsFor(next?.type)[0].value, value: '', values: undefined, row: undefined })
                     }}>
                     <option value="">pick a question…</option>
                     {known.map((x) => (
                       <option key={x.qid} value={x.qid}>{x.qid} — {x.text.length > 60 ? x.text.slice(0, 59) + '…' : x.text}</option>
                     ))}
                   </select>
+                  {q && isGrid(q) && (
+                    <select value={cond.row == null ? '' : String(cond.row)} disabled={disabled} aria-label="condition row"
+                      className="h-8 max-w-xs rounded-md border border-slate-300 px-2 text-sm"
+                      onChange={(e) => setCondition(i, { row: e.target.value === '' ? undefined : Number(e.target.value) })}>
+                      <option value="">pick a row…</option>
+                      {(q.rows ?? []).map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
+                    </select>
+                  )}
                   {q && (
                     <select value={cond.op} disabled={disabled} aria-label="condition operator"
                       className="h-8 rounded-md border border-slate-300 px-2 text-sm"
@@ -238,7 +258,7 @@ export default function RoutingEditor({ label, flat, onChange, qidOptions, disab
                   )}
                   {q && choices && usesValues && (
                     <span className="flex flex-wrap gap-1" role="group" aria-label="condition answers">
-                      {q.options.map((o) => {
+                      {answers.map((o) => {
                         const on = (cond.values ?? []).includes(o.code)
                         return (
                           <button key={o.code} type="button" disabled={disabled} aria-pressed={on}
@@ -255,7 +275,7 @@ export default function RoutingEditor({ label, flat, onChange, qidOptions, disab
                       className="h-8 max-w-xs rounded-md border border-slate-300 px-2 text-sm"
                       onChange={(e) => setCondition(i, { value: coerce(e.target.value) })}>
                       <option value="">pick an answer…</option>
-                      {q.options.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+                      {answers.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
                     </select>
                   )}
                   {q && !choices && (
