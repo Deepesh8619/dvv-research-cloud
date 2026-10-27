@@ -182,3 +182,15 @@ def check_file(
         h.update(block)
     found = ledger.was_issued(db, study_id, h.hexdigest())
     return {"issued": found is not None, **(found or {"at": None, "name": None})}
+
+
+@router.get("/admin/ai-usage")
+def ai_usage(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.FOUNDER)),
+):
+    """AI model usage and its estimated cost, per day and for the month. (Owner/Founder)"""
+    from src.platform.usage import summary
+
+    return summary(db, days=max(1, min(days, 366)))

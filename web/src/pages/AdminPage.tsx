@@ -1,6 +1,7 @@
 import { useSearchParams } from 'react-router-dom'
 import ActivityPage from './ActivityPage'
 import WordingPage from './WordingPage'
+import AiUsagePanel from '../components/AiUsagePanel'
 import { useEffect, useState } from 'react'
 import { authApi, User } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -210,6 +211,7 @@ export default function AdminPage() {
     ...(user?.role === 'owner' ? [{ key: 'team', label: 'Team' }] : []),
     { key: 'wording', label: 'Wording' },
     { key: 'activity', label: 'Activity' },
+    { key: 'usage', label: 'AI usage' },
   ]
   const tab = tabs.find((t) => t.key === params.get('tab'))?.key ?? tabs[0].key
   return (
@@ -226,6 +228,7 @@ export default function AdminPage() {
       {tab === 'team' && <TeamAdmin />}
       {tab === 'wording' && <WordingPage />}
       {tab === 'activity' && <ActivityPage />}
+      {tab === 'usage' && <AiUsagePanel />}
     </div>
   )
 }
