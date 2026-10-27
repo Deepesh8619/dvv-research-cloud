@@ -1835,12 +1835,23 @@ export interface CopilotProposal {
   diff?: Array<{ field: string; before: string; after: string }>
 }
 
+/** A table as the engines computed it — shown as is, never retyped by a model. */
+export interface CopilotTable {
+  title: string
+  header: string[]
+  rows: string[][]
+  truncated?: boolean
+  significance_tested?: boolean
+}
+
 export interface CopilotReply {
   reply: string
   proposals: CopilotProposal[]
   tools_used: string[]
   answered_by: string
   conversation_id?: string | null
+  tables?: CopilotTable[]
+  significance_tested?: boolean
 }
 
 export interface CopilotConversationSummary {
@@ -1856,6 +1867,7 @@ export interface CopilotConversation extends CopilotConversationSummary {
     content: string
     proposals: CopilotProposal[]
     tools_used: string[]
+    tables?: CopilotTable[]
     answered_by?: string | null
     created_at: string
   }>

@@ -719,6 +719,11 @@ class CopilotResponse(BaseModel):
     tools_used: list[str] = Field(default_factory=list)
     answered_by: str
     conversation_id: str | None = None
+    #: Tables as the engines computed them ({title, header, rows, truncated,
+    #: significance_tested}), shown under the reply, never retyped by the model.
+    tables: list[dict] = Field(default_factory=list)
+    #: Whether any lookup in this answer ran a significance test.
+    significance_tested: bool = False
     #: What a lookup refused, in the server's own words ("no question q_gender…"),
     #: so an answer that went nowhere can be traced to the call that failed.
     tool_errors: list[str] = Field(default_factory=list)
@@ -731,6 +736,7 @@ class CopilotStoredMessage(BaseModel):
     #: was checked against the project as it stood then.
     proposals: list[CopilotProposal] = Field(default_factory=list)
     tools_used: list[str] = Field(default_factory=list)
+    tables: list[dict] = Field(default_factory=list)
     answered_by: str | None = None
     created_at: str
 

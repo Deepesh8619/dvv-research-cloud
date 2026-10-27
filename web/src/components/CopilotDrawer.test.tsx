@@ -232,4 +232,26 @@ describe('CopilotDrawer', () => {
     expect(await screen.findByText('1=Daily; 2=Sometimes; 3=No')).toBeTruthy()
     expect(screen.getByText('1=Yes; 2=No')).toBeTruthy()
   })
+
+  it('shows a table exactly as the engine computed it, under the reply', async () => {
+    const { copilotApi } = await import('../api/client')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(copilotApi.ask as any).mockResolvedValue({
+      data: {
+        reply: 'Men are more often very satisfied.', proposals: [], tools_used: ['ask_data'],
+        answered_by: 'Bedrock',
+        tables: [{ title: 'Q4', header: ['Q4', 'Man (A)', 'Woman (B)'],
+                   rows: [['Very satisfied', '36.4% B', '18.2%']], significance_tested: true }],
+      },
+    })
+    render(
+      <MemoryRouter initialEntries={['/projects/s1/fielding']}>
+        <CopilotDrawer open onClose={() => {}} />
+      </MemoryRouter>,
+    )
+    fireEvent.change(screen.getByPlaceholderText('Ask about any project…'), { target: { value: 'Q4 by gender' } })
+    fireEvent.click(screen.getByText('Ask'))
+    expect(await screen.findByText('36.4% B')).toBeTruthy()
+    expect(screen.getByText(/letters mark significant differences/)).toBeTruthy()
+  })
 })

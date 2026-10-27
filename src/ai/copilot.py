@@ -18,6 +18,7 @@ import re
 from collections.abc import Callable
 from datetime import date
 
+from src.ai.copilot_tables import claims_significance
 from src.ai.known_failures import block_for
 from src.ai.navigator import _compatible_chat, _run_agent_loop
 from src.ai.router import BackendUnavailable, ModelOutputError
@@ -76,6 +77,10 @@ Rules:
   the cells ARE the answer and a sentence about their direction is not. Keep it
   to the columns that were asked for; say how many rows there are if you show
   only some.
+- Tables ask_data returns are shown to the user under your reply exactly as computed.
+  Do not retype them; say what they show in a sentence or two.
+- Say a difference is (or is not) "significant" only when a tool ran the test
+  (`significance_tested` true). Otherwise say it has not been tested.
 - Asked for a table or a crosstab, call ask_data and report its cells. If it
   returns no rows, say what it did return rather than describing a table you do
   not have.
@@ -239,6 +244,17 @@ _UNGROUNDED = (
     "Worth retrying — if it keeps happening the model backend is not able to call "
     "tools, which is a server setting rather than anything about your study."
 )
+_UNTESTED = (
+    "Your answer says something is (or is not) statistically significant, but no tool in "
+    "this answer ran a significance test. Answer again without that claim: report the "
+    "figures and say the difference has not been tested, or call ask_data for a crosstab "
+    "that tests it."
+)
+_UNTESTED_NOTE = (
+    "\n\n_No significance test was run for this answer, so any statement above about "
+    "significance is unverified._"
+)
+
 _RETRY = (
     "Your {tool} call was refused: {error}\n"
     "That error lists the real questions, options or ids. Call {tool} again now with "
@@ -311,6 +327,22 @@ def run_copilot(
             # A card refused and never retried: seen on Bedrock, the model read
             # an error listing the real questions and passed the list to the
             # user. Once, it is handed the error back and told to correct it.
+            # "No statistically significant difference" with no test behind it
+            # reads exactly like a finding. Seen on Bedrock; held to it here.
+            if claims_significance(reply) and not any(r.get("significance_tested")
+                                                      for r in results):
+                checked, more = _run_agent_loop(
+                    chat, label, message, "", execute,
+                    [*(history or []), {"role": "assistant", "content": reply},
+                     {"role": "user", "content": _UNTESTED}],
+                    timeout, None, None, system_prompt=prompt,
+                    max_turns=MAX_TURNS, known_tools=TOOL_NAMES,
+                )
+                results = results + more
+                reply = checked or reply
+                if claims_significance(reply) and not any(r.get("significance_tested")
+                                                          for r in results):
+                    reply += _UNTESTED_NOTE
             if refused := _unretried_refusal(results):
                 tool, error = refused
                 more_reply, more = _run_agent_loop(
