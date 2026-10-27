@@ -657,7 +657,9 @@ def copilot(
         [c.model_dump() for c in unique], answered_by)
     return CopilotResponse(reply=reply, proposals=unique,
                            tools_used=[r.get("tool", "") for r in results],
-                           answered_by=answered_by, conversation_id=conversation.id)
+                           answered_by=answered_by, conversation_id=conversation.id,
+                           tool_errors=[f"{r.get('tool')}: {r['error']}" for r in results
+                                        if r.get("success") is False and r.get("error")])
 
 
 @router.get("/copilot/conversations", response_model=list[CopilotConversationSummary])

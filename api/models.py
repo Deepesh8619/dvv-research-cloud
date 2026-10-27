@@ -710,6 +710,9 @@ class CopilotResponse(BaseModel):
     tools_used: list[str] = Field(default_factory=list)
     answered_by: str
     conversation_id: str | None = None
+    #: What a lookup refused, in the server's own words ("no question q_gender…"),
+    #: so an answer that went nowhere can be traced to the call that failed.
+    tool_errors: list[str] = Field(default_factory=list)
 
 
 class CopilotStoredMessage(BaseModel):
