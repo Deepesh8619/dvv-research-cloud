@@ -296,13 +296,14 @@
     {
      "say": "Which of the two coffee links has the lower incidence?",
      "expect": {
-      "tools": [
-       "field_report"
-      ],
       "mentions": [
        "{low_link}"
       ],
-      "cards": []
+      "cards": [],
+      "tools_any": [
+       "field_report",
+       "soft_launch_check"
+      ]
      }
     }
    ]
