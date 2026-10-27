@@ -135,6 +135,40 @@ class ChatMessageDB(Base):
     created_at = Column(String)
 
 
+class CopilotConversationDB(Base):
+    """One copilot conversation. Private to the user who had it."""
+
+    __tablename__ = "copilot_conversations"
+
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, index=True)
+    study_id = Column(String, nullable=True)  # the project in view when it started
+    title = Column(String)
+    created_at = Column(String)
+    updated_at = Column(String, index=True)
+
+
+class CopilotMessageDB(Base):
+    """One turn of a copilot conversation.
+
+    Keeps what was SAID and what was looked up (tool names and arguments), not
+    what the lookups returned: figures go stale, so a follow-up looks them up
+    again rather than quoting yesterday's incidence.
+    """
+
+    __tablename__ = "copilot_messages"
+
+    id = Column(String, primary_key=True, index=True)
+    conversation_id = Column(String, index=True)
+    seq = Column(Integer)  # order within the conversation
+    role = Column(String)  # "user" or "assistant"
+    content = Column(Text)
+    lookups = Column(JSON, default=None)  # [{tool, args}]
+    proposals = Column(JSON, default=None)  # the cards, as shown
+    answered_by = Column(String, nullable=True)
+    created_at = Column(String)
+
+
 class QuestionnaireDB(Base):
     """Metadata + review state for one extracted questionnaire.
 
@@ -1173,6 +1207,88 @@ def revoke_share_link(db: Session, token: str) -> ShareLinkDB:
         db.commit()
         db.refresh(link)
     return link
+
+
+def get_copilot_conversation(
+    db: Session, conversation_id: str, user_id: str
+) -> CopilotConversationDB | None:
+    """A conversation, only when it belongs to this user."""
+    return (
+        db.query(CopilotConversationDB)
+        .filter(CopilotConversationDB.id == conversation_id,
+                CopilotConversationDB.user_id == user_id)
+        .first()
+    )
+
+
+def list_copilot_conversations(
+    db: Session, user_id: str, limit: int = 30
+) -> list[CopilotConversationDB]:
+    """This user's conversations, most recently used first."""
+    return (
+        db.query(CopilotConversationDB)
+        .filter(CopilotConversationDB.user_id == user_id)
+        .order_by(CopilotConversationDB.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def list_copilot_messages(db: Session, conversation_id: str) -> list[CopilotMessageDB]:
+    return (
+        db.query(CopilotMessageDB)
+        .filter(CopilotMessageDB.conversation_id == conversation_id)
+        .order_by(CopilotMessageDB.seq)
+        .all()
+    )
+
+
+def save_copilot_exchange(
+    db: Session,
+    conversation: CopilotConversationDB | None,
+    user_id: str,
+    study_id: str | None,
+    question: str,
+    reply: str,
+    lookups: list[dict],
+    proposals: list[dict],
+    answered_by: str,
+) -> CopilotConversationDB:
+    """Store one question and its answer, starting the conversation if needed."""
+    from uuid import uuid4
+
+    now = datetime.now().isoformat()
+    if conversation is None:
+        conversation = CopilotConversationDB(
+            id=f"conv_{uuid4().hex[:12]}", user_id=user_id, study_id=study_id,
+            title=" ".join(question.split())[:80], created_at=now, updated_at=now,
+        )
+        db.add(conversation)
+        seq = 0
+    else:
+        last = (
+            db.query(CopilotMessageDB.seq)
+            .filter(CopilotMessageDB.conversation_id == conversation.id)
+            .order_by(CopilotMessageDB.seq.desc())
+            .first()
+        )
+        seq = (last[0] + 1) if last else 0
+        conversation.updated_at = now
+    db.add(CopilotMessageDB(id=f"cmsg_{uuid4().hex[:12]}", conversation_id=conversation.id,
+                            seq=seq, role="user", content=question, created_at=now))
+    db.add(CopilotMessageDB(id=f"cmsg_{uuid4().hex[:12]}", conversation_id=conversation.id,
+                            seq=seq + 1, role="assistant", content=reply, lookups=lookups,
+                            proposals=proposals, answered_by=answered_by, created_at=now))
+    db.commit()
+    return conversation
+
+
+def delete_copilot_conversation(db: Session, conversation: CopilotConversationDB) -> None:
+    db.query(CopilotMessageDB).filter(
+        CopilotMessageDB.conversation_id == conversation.id
+    ).delete()
+    db.delete(conversation)
+    db.commit()
 
 
 def list_chat_messages(db: Session, study_id: str, limit: int = 50) -> list[ChatMessageDB]:

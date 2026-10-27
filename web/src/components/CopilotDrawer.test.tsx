@@ -19,7 +19,12 @@ const card = {
 }
 
 vi.mock('../api/client', () => ({
-  copilotApi: { ask: vi.fn(), confirm: vi.fn() },
+  copilotApi: {
+    ask: vi.fn(),
+    confirm: vi.fn(),
+    conversations: vi.fn().mockResolvedValue({ data: [] }),
+    conversation: vi.fn(),
+  },
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : null),
 }))
 
@@ -42,7 +47,55 @@ async function ask(reply: string, proposals = [card]) {
 }
 
 describe('CopilotDrawer', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+  })
+
+  it('reopens the last conversation, and its old cards cannot be confirmed', async () => {
+    const { copilotApi } = await import('../api/client')
+    localStorage.setItem('dvv.copilot.conversation', 'conv_1')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(copilotApi.conversation as any).mockResolvedValue({
+      data: {
+        id: 'conv_1', title: 'hold it', updated_at: '2026-10-27',
+        messages: [
+          { role: 'user', content: 'hold it at 50', proposals: [], tools_used: [], created_at: 'x' },
+          { role: 'assistant', content: 'Ready yesterday.', proposals: [card], tools_used: [],
+            answered_by: 'Bedrock', created_at: 'x' },
+        ],
+      },
+    })
+    render(
+      <MemoryRouter initialEntries={['/projects/s1/fielding']}>
+        <CopilotDrawer open onClose={() => {}} />
+      </MemoryRouter>,
+    )
+    await screen.findByText('Ready yesterday.')
+    expect(screen.queryByText('Confirm')).toBeNull()
+    expect(screen.getByText(/can no longer be confirmed/)).toBeTruthy()
+
+    // A follow-up continues the same conversation on the server.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(copilotApi.ask as any).mockResolvedValue({
+      data: { reply: 'Still held.', proposals: [], tools_used: [], answered_by: 'Bedrock',
+              conversation_id: 'conv_1' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('Ask about any project…'), {
+      target: { value: 'still?' },
+    })
+    fireEvent.click(screen.getByText('Ask'))
+    await screen.findByText('Still held.')
+    expect(copilotApi.ask).toHaveBeenCalledWith('still?', 's1', 'conv_1')
+  })
+
+  it('New chat starts over and forgets the conversation in this browser', async () => {
+    await ask('Ready.', [])
+    await screen.findByText('Ready.')
+    fireEvent.click(screen.getByText('New chat'))
+    expect(screen.queryByText('Ready.')).toBeNull()
+    expect(localStorage.getItem('dvv.copilot.conversation')).toBeNull()
+  })
 
   it('knows which project is in view, and ignores the new-project page', () => {
     expect(studyFromPath('/projects/s1/fielding')).toBe('s1')
@@ -53,7 +106,7 @@ describe('CopilotDrawer', () => {
   it('sends the project in view as context', async () => {
     const api = await ask('Ready.')
     await screen.findByText('Ready.')
-    expect(api.ask).toHaveBeenCalledWith('hold it at 50', [], 's1')
+    expect(api.ask).toHaveBeenCalledWith('hold it at 50', 's1', null)
   })
 
   it('confirming sends exactly the server-built request, then announces the change', async () => {

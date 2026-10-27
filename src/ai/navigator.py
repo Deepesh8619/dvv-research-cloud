@@ -698,6 +698,7 @@ def _run_agent_loop(
             messages.append(
                 {"role": "tool", "tool_call_id": call["id"], "content": _compact(result)}
             )
+            result["args"] = args  # after the model's copy: what was asked, for the record
 
     if not reply.strip():
         # The model spent every turn calling tools and never wrote an answer

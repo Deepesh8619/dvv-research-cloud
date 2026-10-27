@@ -1838,19 +1838,39 @@ export interface CopilotReply {
   proposals: CopilotProposal[]
   tools_used: string[]
   answered_by: string
+  conversation_id?: string | null
+}
+
+export interface CopilotConversationSummary {
+  id: string
+  title: string
+  study_id?: string | null
+  updated_at: string
+}
+
+export interface CopilotConversation extends CopilotConversationSummary {
+  messages: Array<{
+    role: 'user' | 'assistant'
+    content: string
+    proposals: CopilotProposal[]
+    tools_used: string[]
+    answered_by?: string | null
+    created_at: string
+  }>
 }
 
 export const copilotApi = {
-  ask: async (
-    message: string,
-    history: Array<{ role: 'user' | 'assistant'; content: string }>,
-    studyId?: string | null,
-  ) =>
+  // A stored conversation's history is the server's; only a new one starts here.
+  ask: async (message: string, studyId?: string | null, conversationId?: string | null) =>
     api.post<CopilotReply>('/copilot', {
       message,
-      history: history.slice(-12),
       ...(studyId ? { study_id: studyId } : {}),
+      ...(conversationId ? { conversation_id: conversationId } : {}),
     }),
+
+  conversations: async () => api.get<CopilotConversationSummary[]>('/copilot/conversations'),
+  conversation: async (id: string) => api.get<CopilotConversation>(`/copilot/conversations/${id}`),
+  remove: async (id: string) => api.delete(`/copilot/conversations/${id}`),
 
   // Only the server-built request is sent; the path is relative to the API base.
   confirm: async (card: CopilotProposal) =>
