@@ -555,3 +555,14 @@ def test_who_was_asked_names_the_option_not_its_code(client, monkeypatch):  # no
     test_client.post("/api/copilot", json={"message": "who is asked Q3?"})
     (result,) = _tool_results(seen)
     assert "(Yes)" in result["explanation"]
+
+
+def test_a_refused_lookup_is_reported_in_the_response(client, monkeypatch):  # noqa: F811
+    """An answer that went nowhere can be traced to the call that failed."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    _script(monkeypatch, ("tool", "study_overview", {"study_id": "nope"}), ("text", "No."))
+    resp = test_client.post("/api/copilot", json={"message": "how is nope?"}).json()
+    (error,) = resp["tool_errors"]
+    assert error.startswith("study_overview: no project with id 'nope'")

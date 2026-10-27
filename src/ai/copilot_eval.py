@@ -145,6 +145,7 @@ def score_case(case: dict, responses: list[dict], facts: dict[str, str]) -> dict
         "answered_by": [r.get("answered_by") for r in responses],
         "replies": [r.get("reply", "") for r in responses],
         "tools_used": [r.get("tools_used", []) for r in responses],
+        "tool_errors": [r.get("tool_errors", []) for r in responses],
     }
 
 

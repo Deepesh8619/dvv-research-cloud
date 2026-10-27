@@ -226,6 +226,12 @@ def main() -> int:
     parser.add_argument("--out", help="where to write the JSON report")
     parser.add_argument("--baseline", help="an earlier report to compare against")
     args = parser.parse_args()
+    if args.baseline and not Path(args.baseline).is_file():
+        # Checked before the run, not after it: an upgrade recreates the
+        # container and takes /tmp with it, and the run's own report was lost
+        # to this error once.
+        print(f"No baseline at {args.baseline}; run without --baseline.")
+        return 2
 
     from src.ai.copilot import TOOL_NAMES
 
@@ -274,6 +280,12 @@ def main() -> int:
             print(f"{mark}  {case['id']:<34} {result['seconds']}")
             for failure in result["failures"]:
                 print(f"        - {failure}")
+            if not result["passed"]:
+                for tools, reply, errors in zip(result["tools_used"], result["replies"],
+                                                result["tool_errors"], strict=False):
+                    print(f"        tools {tools}: {' '.join(reply.split())[:300]}")
+                    for error in errors:
+                        print(f"        refused  {error[:300]}")
     finally:
         server.terminate()
         server.wait(timeout=20)
@@ -284,14 +296,14 @@ def main() -> int:
           f"answered by {summary['answered_by']}")
     for category, tally in summary["by_category"].items():
         print(f"  {category:<14} {tally}")
+    out = Path(args.out or f"copilot-eval-{datetime.now():%Y%m%d-%H%M}.json")
+    out.write_text(json.dumps({"summary": summary, "results": results}, indent=2))
     if args.baseline:
         earlier = json.loads(Path(args.baseline).read_text())["results"]
         before = {r["id"]: r["passed"] for r in earlier}
         for r in results:
             if r["id"] in before and before[r["id"]] != r["passed"]:
                 print(f"  {'fixed' if r['passed'] else 'BROKE'}: {r['id']}")
-    out = Path(args.out or f"copilot-eval-{datetime.now():%Y%m%d-%H%M}.json")
-    out.write_text(json.dumps({"summary": summary, "results": results}, indent=2))
     print(f"Report: {out}")
     return 0
 
