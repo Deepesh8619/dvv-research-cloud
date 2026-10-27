@@ -1501,6 +1501,27 @@ def question_agent(
     return {"suggestions": suggestions, "error": error}
 
 
+def clean_split(survey: SurveyDefinition, approved: set[str]) -> tuple[list[str], list[dict]]:
+    """(clean qids not yet approved, flagged ones not yet approved with their flags).
+
+    ANY flag holds a question, not only blocking ones: a flag is the system
+    asking a person to look — "Empty options", "Study instruction applies".
+    Skipping only blocking flags bulk-approved a question with no answers,
+    which then reached a test link with nothing to fill in.
+    """
+    clean: list[str] = []
+    blocked: list[dict] = []
+    for q in survey.questions:
+        if q.qid in approved:
+            continue
+        held = sorted(q.flags) + (["NOTHING_TO_ANSWER"] if has_nothing_to_answer(q) else [])
+        if held:
+            blocked.append({"qid": q.qid, "flags": held})
+        else:
+            clean.append(q.qid)
+    return clean, blocked
+
+
 @router.post("/studies/{study_id}/questionnaire/questions/approve-clean")
 def approve_clean(
     study_id: str,
@@ -1524,22 +1545,8 @@ def approve_clean(
     questionnaire = _latest_questionnaire(db, study_id)
     survey = _load_definition(db, questionnaire)
     approved = set(questionnaire.approved_qids or [])
-
-    newly_approved: list[str] = []
-    still_blocked: list[dict] = []
-    for q in survey.questions:
-        # ANY flag, not only blocking ones: a flag is the system asking a person
-        # to look — "Empty options", "Study instruction applies". Skipping only
-        # blocking flags bulk-approved a question with no answers, which then
-        # reached a test link with nothing to fill in.
-        held = sorted(q.flags) + (["NOTHING_TO_ANSWER"] if has_nothing_to_answer(q) else [])
-        if held:
-            if q.qid not in approved:
-                still_blocked.append({"qid": q.qid, "flags": held})
-            continue
-        if q.qid not in approved:
-            approved.add(q.qid)
-            newly_approved.append(q.qid)
+    newly_approved, still_blocked = clean_split(survey, approved)
+    approved |= set(newly_approved)
 
     if newly_approved:
         set_questionnaire_approved_qids(db, questionnaire.id, sorted(approved))
