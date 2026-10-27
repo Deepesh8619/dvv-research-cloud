@@ -13,6 +13,7 @@
 #   ./dvv fetch                                       download this client's backups from S3
 #   ./dvv check-ai                                    which AI model answers, and can it use tools
 #   ./dvv load-seed | load-cleanup                    set up / remove the go-live load test
+#   ./dvv db-reader                                   read-only database login (new password each run)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -182,6 +183,42 @@ case "${1:-}" in
   offsite)
     dc exec -T offsite bash /offsite.sh once
     ;;
+  db-reader)
+    # A login that can READ the data and nothing else, for DBeaver, Excel,
+    # Power BI or Python on a laptop, through an SSH tunnel. Running it again
+    # gives it a new password (the old one stops working). Not readable by it:
+    # users (password hashes) and share_links (tokens that open a study).
+    pw=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    dc exec -T db psql -q -v ON_ERROR_STOP=1 -U dvv -d dvv <<SQL
+DO \$\$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'dvv_reader') THEN
+    ALTER ROLE dvv_reader WITH LOGIN PASSWORD '${pw}';
+  ELSE
+    CREATE ROLE dvv_reader WITH LOGIN PASSWORD '${pw}';
+  END IF;
+END \$\$;
+ALTER ROLE dvv_reader SET default_transaction_read_only = on;
+GRANT CONNECT ON DATABASE dvv TO dvv_reader;
+GRANT USAGE ON SCHEMA public TO dvv_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO dvv_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE dvv IN SCHEMA public GRANT SELECT ON TABLES TO dvv_reader;
+REVOKE ALL ON TABLE users, share_links FROM dvv_reader;
+SQL
+    ip=$(curl -s --max-time 5 https://checkip.amazonaws.com || echo "<server-ip>")
+    cat <<EOT
+Read-only login ready. Shown once — save it in your password manager.
+
+  user      dvv_reader
+  password  ${pw}
+  database  dvv
+
+On your laptop, open the tunnel (leave it running):
+  ssh -i <your-lightsail-key.pem> -N -L 5433:127.0.0.1:${DB_LOCAL_PORT:-5432} ubuntu@${ip}
+then connect DBeaver / TablePlus / Power BI to host localhost, port 5433.
+(Or let DBeaver open the tunnel itself: SSH tab -> host ${ip}, user ubuntu, your key;
+ Main tab -> host localhost, port ${DB_LOCAL_PORT:-5432}.)
+EOT
+    ;;
   fetch)
     # The way back after losing the server: pull every copy S3 holds into
     # backups/, then ./dvv restore the newest pair.
@@ -192,6 +229,6 @@ case "${1:-}" in
     ls -1t backups/db-*.dump | head -3
     ;;
   *)
-    sed -n '2,15p' "$0"; exit 1
+    sed -n '2,16p' "$0"; exit 1
     ;;
 esac

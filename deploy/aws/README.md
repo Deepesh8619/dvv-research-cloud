@@ -124,3 +124,17 @@ On the server — prove a backup survives the server:
 
 Upgrade path when a client needs more: an EC2 server with an instance role and
 short-term Bedrock keys removes the long-lived keys entirely.
+
+## Looking at the database
+
+The database runs in the `db` container on the server and is **never exposed to
+the internet**: it listens on the server's own 127.0.0.1 only. Reach it through SSH.
+
+- Quick look, on the server: `docker compose exec db psql -U dvv dvv` (`\dt` lists tables).
+- From a laptop (DBeaver, TablePlus, Power BI, Python): run `./dvv db-reader` on the
+  server. It prints a read-only login (`dvv_reader`) and the SSH tunnel command. It
+  can read everything except `users` (password hashes) and `share_links` (tokens), and
+  can change nothing. Running it again replaces the password.
+- After the upgrade that adds the 127.0.0.1 port, apply it once with
+  `docker compose up -d db` (recreates the container; the data volume is kept).
+- Never open port 5432 in the Lightsail firewall.

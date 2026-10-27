@@ -40,6 +40,12 @@ services:
       POSTGRES_USER: dvv
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
       POSTGRES_DB: dvv
+    # Reachable from THIS server only (127.0.0.1), never from the internet, so
+    # an SSH tunnel can reach it: DBeaver / TablePlus / Power BI on a laptop,
+    # through `ssh -L`. Never publish it on 0.0.0.0, and never open 5432 in
+    # the Lightsail firewall — that would put client data on the open internet.
+    ports:
+      - "127.0.0.1:${DB_LOCAL_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
