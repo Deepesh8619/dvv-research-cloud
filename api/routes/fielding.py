@@ -93,6 +93,7 @@ from api.models import (
 )
 from api.routes.questionnaire import _read_definition_json
 from src.core.survey_definition import (
+    TEMPLATE_SLUGS,
     THEME_SLUGS,
     Expression,
     SurveyDefinition,
@@ -358,12 +359,13 @@ def create_link(
     survey = SurveyDefinition.from_json(payload).for_link()
     payload = survey.to_json()
 
-    theme = body.theme if body else None
-    if theme is not None:
-        if theme not in THEME_SLUGS:
-            raise HTTPException(status_code=422, detail=f"Unknown theme slug: {theme}")
-        survey.metadata["theme"] = theme
-        payload = survey.to_json()  # stamp into the pinned snapshot only
+    for key, allowed in (("theme", THEME_SLUGS), ("template", TEMPLATE_SLUGS)):
+        value = getattr(body, key) if body else None
+        if value is not None:
+            if value not in allowed:
+                raise HTTPException(status_code=422, detail=f"Unknown {key} slug: {value}")
+            survey.metadata[key] = value
+            payload = survey.to_json()  # stamp into the pinned snapshot only
 
     is_test = bool(body.test) if body else False
 
@@ -979,6 +981,7 @@ def enter_survey(token: str, request: Request, db: Session = Depends(get_db)):
         surveyjs_json=surveyjs_json,
         current_page=session.current_page or 0,
         theme=survey.metadata.get("theme"),
+        template=survey.metadata.get("template"),
         is_test=bool(link.is_test),
     )
 

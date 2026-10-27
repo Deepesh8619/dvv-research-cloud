@@ -19,6 +19,8 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import { registerRespondentControls } from '../components/respondent/controls'
 import { PROBE, askFollowUp } from '../components/respondent/probes'
 import { applySurveyTheme, gradientBar } from '../components/respondent/surveyLook'
+import { TemplateHeader, Transcript } from '../components/respondent/TemplateChrome'
+import { TEMPLATES, loadTemplateFont, templateCss, templateSlug } from '../components/respondent/templates'
 
 // Grid, rank and number questions are drawn by us — see controls.tsx.
 registerRespondentControls()
@@ -44,11 +46,16 @@ type Phase = 'loading' | 'welcome' | 'error' | 'closed' | 'paused' | 'running' |
 // on it. THEMES is the ONE source of truth, shared with the pickers.
 const DEFAULT_THEME = themeFor(null)
 
-function Centered({ theme, children }: { theme: Theme; children: React.ReactNode }) {
+function Centered({ theme, template = 'classic', children }: { theme: Theme; template?: string; children: React.ReactNode }) {
+  const look = TEMPLATES[template]
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: theme.wash }}>
-      <div className="w-full max-w-[640px] text-center bg-white rounded-2xl shadow-md border border-slate-200/80 overflow-hidden">
-        <div style={{ height: 4, background: gradientBar(theme) }} />
+    <div
+      className={`dvv-t-${template} min-h-screen flex items-center justify-center p-4`}
+      style={{ background: look.ground(theme), fontFamily: look.family }}
+    >
+      <style>{templateCss(theme)}</style>
+      <div className="dvv-centered w-full max-w-[640px] text-center bg-white rounded-2xl shadow-md border border-slate-200/80 overflow-hidden">
+        <div className="dvv-bar" style={{ height: 4, background: gradientBar(theme) }} />
         <div className="p-10 sm:p-12">{children}</div>
       </div>
     </div>
@@ -60,7 +67,7 @@ function Centered({ theme, children }: { theme: Theme; children: React.ReactNode
 function Emblem({ theme, children }: { theme: Theme; children: React.ReactNode }) {
   return (
     <div
-      className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl"
+      className="dvv-emblem mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl"
       style={{ background: `${theme.accent}14`, color: theme.accent, boxShadow: `inset 0 0 0 1px ${theme.accent}29` }}
     >
       {children}
@@ -152,6 +159,9 @@ export default function RespondentPage() {
   const [model, setModel] = useState<Model | null>(null)
   const [title, setTitle] = useState('')
   const [theme, setTheme] = useState<Theme>(DEFAULT_THEME)
+  const [template, setTemplate] = useState('classic')
+  // Clear template: the respondent's own larger-text switch.
+  const [big, setBig] = useState(false)
   // Where the respondent is, kept in state because SurveyJS mutates its model
   // in place: reading currentPageNo during render shows the page they were on
   // last time React happened to draw.
@@ -219,6 +229,8 @@ export default function RespondentPage() {
         setIsTest(!!res.data.is_test)
         isTestRef.current = !!res.data.is_test
         const surveyTheme = themeFor(res.data.theme)
+        const surveyTemplate = templateSlug(res.data.template)
+        loadTemplateFont(surveyTemplate)
         const survey = new Model(res.data.surveyjs_json)
         const pipeVariables = (res.data.surveyjs_json as { pipeVariables?: PipeVariable[] })
           .pipeVariables ?? []
@@ -263,6 +275,11 @@ export default function RespondentPage() {
           const done = Array.isArray(options.value) ? options.value.length : 0
           if (done > 0 && done < total) options.error = `Please rank all ${total} — ${total - done} left.`
         })
+        if (surveyTemplate === 'clear') {
+          for (const q of survey.getAllQuestions()) {
+            if (!q.requiredErrorText) q.requiredErrorText = 'Please answer before continuing.'
+          }
+        }
         setSections(Math.max(1, survey.visiblePages.length))
         // The parts the SCRIPT names — "Google Ads", "Meta Ads" — keyed by
         // page. Only blocks the document labelled; nothing else is a section.
@@ -323,6 +340,7 @@ export default function RespondentPage() {
         setModel(survey)
         setTitle(respondentTitle(survey.title))
         setTheme(surveyTheme)
+        setTemplate(surveyTemplate)
         setPhase('welcome')
       } catch {
         if (cancelled) return
@@ -381,6 +399,13 @@ export default function RespondentPage() {
     }
   }, [token])
 
+  // Chat reads bottom-up: the newest question sits under the transcript.
+  useEffect(() => {
+    if (template === 'chat' && phase === 'running') {
+      window.scrollTo({ top: document.body.scrollHeight })
+    }
+  }, [template, phase, position.qid])
+
   // Jump straight to a question: the server fills in every answer a
   // qualifying respondent would have given on the way there (screeners
   // passed, bases met), we push those onto the live model, then land on it.
@@ -414,7 +439,7 @@ export default function RespondentPage() {
 
   if (phase === 'error') {
     return (
-      <Centered theme={theme}>
+      <Centered theme={theme} template={template}>
         <h1 className="text-lg font-semibold text-slate-900 mb-2">Something went wrong</h1>
         <p className="text-slate-600">{error || 'Please try again later.'}</p>
       </Centered>
@@ -423,7 +448,7 @@ export default function RespondentPage() {
 
   if (phase === 'closed') {
     return (
-      <Centered theme={theme}>
+      <Centered theme={theme} template={template}>
         <h1 className="text-lg font-semibold text-slate-900 mb-2">Survey closed</h1>
         <p className="text-slate-600">
           This survey is no longer accepting responses. Thank you for your interest.
@@ -434,7 +459,7 @@ export default function RespondentPage() {
 
   if (phase === 'paused') {
     return (
-      <Centered theme={theme}>
+      <Centered theme={theme} template={template}>
         <h1 className="text-lg font-semibold text-slate-900 mb-2">Not accepting responses right now</h1>
         <p className="text-slate-600">
           This survey has paused while responses are reviewed. Please try your link again later.
@@ -448,7 +473,7 @@ export default function RespondentPage() {
     const questionCount = model?.getAllQuestions().filter((q) => !q.name.endsWith(PROBE) && q.getType() !== 'html').length ?? 0  // as the progress bar counts
     const minutes = Math.max(1, Math.ceil(questionCount / 4))
     return (
-      <Centered theme={theme}>
+      <Centered theme={theme} template={template}>
         <Emblem theme={theme}>
           <ClipboardIcon className="w-8 h-8" />
         </Emblem>
@@ -485,8 +510,8 @@ export default function RespondentPage() {
   if (phase === 'terminated') {
     // Calm, neutral screen-out — deliberately NOT the accent (never a red alarm).
     return (
-      <Centered theme={theme}>
-        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 ring-1 ring-inset ring-slate-200">
+      <Centered theme={theme} template={template}>
+        <div className="dvv-emblem mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 ring-1 ring-inset ring-slate-200">
           <InfoIcon className="w-8 h-8" />
         </div>
         <h1 className="text-xl font-semibold text-slate-900 mb-2">Not a match this time</h1>
@@ -501,7 +526,7 @@ export default function RespondentPage() {
 
   if (phase === 'complete') {
     return (
-      <Centered theme={theme}>
+      <Centered theme={theme} template={template}>
         <Emblem theme={theme}>
           <CircleCheckIcon className="w-8 h-8" />
         </Emblem>
@@ -526,7 +551,14 @@ export default function RespondentPage() {
   const segments = sections >= 2 && sections <= 8 ? sections : Math.min(5, Math.max(position.of, 1))
 
   return (
-    <div className="min-h-screen pb-32" style={{ background: theme.wash }}>
+    <div
+      className={`dvv-t-${template} min-h-screen pb-32`}
+      style={{
+        background: TEMPLATES[template].ground(theme),
+        fontFamily: TEMPLATES[template].family,
+        ['--dvv-fs' as string]: big ? '24px' : '20px',
+      }}
+    >
       <style>{`
         /* One surface: no panel inside a panel inside a card. */
         .dvv-survey .sd-root-modern, .dvv-survey .sd-container-modern,
@@ -644,6 +676,7 @@ export default function RespondentPage() {
           .dvv-progress__fill { transition: none; }
         }
       `}</style>
+      <style>{templateCss(theme)}</style>
 
       {isTest && (
         <div className="sticky top-0 z-30 bg-amber-100 border-b border-amber-300 px-4 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-amber-900">
@@ -662,7 +695,7 @@ export default function RespondentPage() {
             onChange={(e) => {
               if (e.target.value) void handleJump(e.target.value)
             }}
-            className="h-6 px-1.5 rounded border border-amber-300 bg-white text-xs text-amber-900"
+            className="h-6 max-w-[14rem] px-1.5 rounded border border-amber-300 bg-white text-xs text-amber-900"
             aria-label="Jump to question"
           >
             <option value="">{jumping ? 'Jumping…' : 'Jump to question…'}</option>
@@ -679,7 +712,22 @@ export default function RespondentPage() {
 
       {/* Progress first: how much is left is the single thing a respondent most
           wants to know, and the commonest reason they abandon. */}
-      <div className="sticky top-0 z-20 pt-3" style={{ background: theme.wash }}>
+      {template !== 'classic' && template !== 'pulse' ? (
+        <TemplateHeader
+          template={template}
+          theme={theme}
+          title={title}
+          section={section.label}
+          at={position.at}
+          of={position.of}
+          progress={progress}
+          segments={segments}
+          stars={(model?.getProgressInfo().answeredQuestionCount ?? 0) * 10}
+          big={big}
+          onBig={() => setBig((b) => !b)}
+        />
+      ) : (
+      <div className="sticky top-0 z-20 pt-3" style={{ background: TEMPLATES[template].ground(theme) }}>
         {/* Segments, not one hairline: a finished chunk reads as a milestone,
             which is what keeps someone going through a long questionnaire. The
             script's own sections when it has several, otherwise five steps. */}
@@ -712,8 +760,10 @@ export default function RespondentPage() {
           </span>
         </div>
       </div>
+      )}
 
-      <div className="dvv-survey max-w-[640px] mx-auto px-4 sm:px-0 pt-2">
+      <div className={`dvv-survey max-w-[640px] mx-auto ${template === 'brand' ? '' : 'px-4 sm:px-0 pt-2'}`}>
+        {template === 'chat' && model && <Transcript model={model} qid={position.qid} accent={theme.accent} />}
         {/* Said ONCE, on arriving. The two arms of a comparison run back to
             back, and a respondent carried from one to the other with nothing
             said answers the second as if it were more of the first. Repeating
@@ -728,7 +778,14 @@ export default function RespondentPage() {
             <span className="text-sm font-semibold">{section.label}</span>
           </div>
         )}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/70 p-5 sm:p-8">
+        <div
+          className={`dvv-card bg-white ${template === 'classic' ? 'rounded-2xl shadow-sm border border-slate-200/70 p-5 sm:p-8' : 'p-5 sm:p-8'}`}
+        >
+          {template === 'ledger' && (
+            <p className="dvv-numeral mb-2 text-[44px] leading-none tabular-nums" style={{ color: theme.accent }}>
+              {String(position.at).padStart(2, '0')}
+            </p>
+          )}
           <QuestionSymbol name={symbols[position.qid]} accent={theme.accent} />
           {model && <Survey model={model} />}
         </div>

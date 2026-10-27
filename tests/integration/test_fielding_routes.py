@@ -1503,3 +1503,24 @@ def test_complete_and_terminate_emit_events_and_failure_does_not_block(client, m
     s3 = test_client.get(f"/api/r/{token}").json()["session_id"]
     r = test_client.post(f"/api/r/{token}/sessions/{s3}/complete")
     assert r.json()["complete"] is True
+
+
+def test_template_flows_from_settings_and_link_to_entry(client):
+    """The builder's template is the default; a link may pick its own; setting
+    the theme alone leaves the template where it was."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    settings = "/api/studies/study_f1/questionnaire/settings"
+
+    assert test_client.patch(settings, json={"template": "ledger"}).status_code == 200
+    assert test_client.patch(settings, json={"theme": "retail"}).json()["template"] == "ledger"
+    token = _create_link(test_client).json()["token"]
+    assert test_client.get(f"/api/r/{token}").json()["template"] == "ledger"
+
+    own = test_client.post("/api/studies/study_f1/fielding/links", json={"template": "chat"})
+    assert test_client.get(f"/api/r/{own.json()['token']}").json()["template"] == "chat"
+
+    assert test_client.patch(settings, json={"template": "neon"}).status_code == 422
+    bad = test_client.post("/api/studies/study_f1/fielding/links", json={"template": "neon"})
+    assert bad.status_code == 422

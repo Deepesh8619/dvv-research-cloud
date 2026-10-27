@@ -513,6 +513,7 @@ export interface QuestionnaireStatus {
   extraction_summary: Record<string, unknown>
   error_detail?: string | null
   theme?: string | null // respondent theme slug (T24); null when unset
+  template?: string | null // respondent link layout; null = Classic
   // Detected format profile (slug/label/confidence + the signals that fired);
   // null for authored questionnaires or before extraction ran.
   profile?: {
@@ -1025,8 +1026,8 @@ export const questionnaireApi = {
     api.put<{ order: string[] }>(`/studies/${studyId}/questionnaire/questions/order`, { qids }),
 
   // Survey-level presentation settings (T24). `theme` null clears it to default.
-  settings: async (studyId: string, theme: string | null) =>
-    api.patch<QuestionnaireStatus>(`/studies/${studyId}/questionnaire/settings`, { theme }),
+  settings: async (studyId: string, settings: { theme?: string | null; template?: string | null }) =>
+    api.patch<QuestionnaireStatus>(`/studies/${studyId}/questionnaire/settings`, settings),
 
   /** Re-run the current deterministic parsers on this question's own source
       text — no model call. 422, unchanged, if there is nothing better to find. */
@@ -1070,6 +1071,8 @@ export interface RespondentEntry {
   // Optional segment theme slug (e.g. "fmcg") from the pinned survey metadata,
   // or null. Client-side presentation hint only — maps to an accent palette.
   theme?: string | null
+  /** Link layout (templates.ts); null = Classic. */
+  template?: string | null
   // Set only on a terminal-at-entry outcome (duplicate-pid security = 30).
   status_code?: number | null
   redirect_url?: string | null
@@ -1368,10 +1371,12 @@ export const fieldingApi = {
     force = false,
     softLaunchLimit?: number | null,
     test = false,
+    template?: string | null,
   ) =>
     api.post<FieldingLink>(`/studies/${studyId}/fielding/links`, {
       ...(redirects ?? {}),
       ...(theme ? { theme } : {}),
+      ...(template ? { template } : {}),
       ...(softLaunchLimit ? { soft_launch_limit: softLaunchLimit } : {}),
       // Opening a link is refused while a condition can never be true. This is
       // the deliberate override, and the server logs who chose it.

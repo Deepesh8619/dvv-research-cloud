@@ -16,8 +16,10 @@ import { InputsForm, ModulePicker, TemplatePicker, useLibrary } from '../compone
 import ExpertChecks from '../components/ExpertChecks'
 import QuotaPlanPanel from '../components/QuotaPlanPanel'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
+import LinkTemplatePicker from '../components/TemplatePicker'
 import ThemeSelect from '../components/ThemeSelect'
 import { DEFAULT_THEME_SLUG } from '../api/themes'
+import { DEFAULT_TEMPLATE_SLUG } from '../components/respondent/templates'
 import { canWrite as hasWriteRole } from '../auth/roles'
 import { bucketInfo } from '../lib/buckets'
 import { ConnectionsPanel } from '../components/review/QuestionMap'
@@ -705,15 +707,15 @@ export default function SurveyBuilderPage() {
   // focus once, without refocusing every time the same question is reselected.
   const autoFocusRef = useRef<string | null>(null)
 
-  const handleThemeChange = async (slug: string) => {
+  const handleLookChange = async (settings: { theme?: string; template?: string }) => {
     if (!studyId) return
     setThemeMsg(null)
     try {
-      const res = await questionnaireApi.settings(studyId, slug)
+      const res = await questionnaireApi.settings(studyId, settings)
       setStatus(res.data)
-      setThemeMsg({ ok: true, text: 'Theme saved.' })
+      setThemeMsg({ ok: true, text: settings.template ? 'Template saved.' : 'Theme saved.' })
     } catch (err) {
-      setThemeMsg({ ok: false, text: errorMessage(err) || 'Could not save theme.' })
+      setThemeMsg({ ok: false, text: errorMessage(err) || 'Could not save.' })
     }
   }
 
@@ -1023,7 +1025,7 @@ export default function SurveyBuilderPage() {
             <ThemeSelect
               id="survey-theme"
               value={status.theme ?? DEFAULT_THEME_SLUG}
-              onChange={handleThemeChange}
+              onChange={(theme) => handleLookChange({ theme })}
               disabled={!canWrite}
             />
             <span className="text-xs text-slate-400">Default look for respondents.</span>
@@ -1035,6 +1037,14 @@ export default function SurveyBuilderPage() {
             <span className="text-xs text-slate-400">
               Alt+↑ / Alt+↓ or drag reorders the focused question.
             </span>
+            <div className="w-full max-w-4xl">
+              <LinkTemplatePicker
+                value={status.template ?? DEFAULT_TEMPLATE_SLUG}
+                onChange={(template) => handleLookChange({ template })}
+                theme={status.theme ?? DEFAULT_THEME_SLUG}
+                disabled={!canWrite}
+              />
+            </div>
           </div>
         )}
       </div>

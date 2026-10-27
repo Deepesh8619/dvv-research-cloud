@@ -18,6 +18,7 @@ import Preflight from '../components/review/Preflight'
 import SoftLaunchPanel from '../components/SoftLaunchPanel'
 import { CardListSkeleton } from '../components/Skeleton'
 import RoutingEditor, { FlatRouting, fromFlatRouting, toFlatRouting } from '../components/RoutingEditor'
+import TemplatePicker from '../components/TemplatePicker'
 import ThemeSelect from '../components/ThemeSelect'
 import { ClockIcon } from '../components/Icons'
 import PageHeader from '../components/ui/PageHeader'
@@ -560,6 +561,8 @@ function CreatePanel({
   const [redirects, setRedirects] = useState<FieldingRedirects>({})
   // '' = inherit the survey's default theme (don't stamp an override on the link).
   const [theme, setTheme] = useState<string>('')
+  // '' = the survey's default template, as with the theme.
+  const [template, setTemplate] = useState<string>('')
   // On by default at 50: the expensive mistake is fielding 800 completes of a
   // script nobody checked, and opting IN to a safeguard is what nobody does at
   // 9pm on launch night.
@@ -580,9 +583,12 @@ function CreatePanel({
         theme || undefined,
         force,
         softLaunch ? softLaunchLimit : null,
+        false,
+        template || undefined,
       )
       setRedirects({})
       setTheme('')
+      setTemplate('')
       setShowRedirects(false)
       setBlocked(null)
       setChecking(false)
@@ -608,7 +614,7 @@ function CreatePanel({
     setError(null)
     setTestWarnings([])
     try {
-      const res = await fieldingApi.createLink(studyId, undefined, undefined, false, null, true)
+      const res = await fieldingApi.createLink(studyId, undefined, theme || undefined, false, null, true, template || undefined)
       setTestWarnings(res.data.preflight_failures ?? [])
       onCreated()
     } catch (err) {
@@ -714,6 +720,14 @@ function CreatePanel({
           inheritLabel="Survey default"
         />
         <span className="text-xs text-slate-400">Overrides the survey default for this link only.</span>
+      </div>
+
+      <div className="mt-3">
+        <p className="mb-1.5 text-xs text-slate-500">
+          Link template{' '}
+          <span className="text-slate-400">— the layout respondents see. A test link uses it too, so open one to try it.</span>
+        </p>
+        <TemplatePicker value={template} onChange={setTemplate} theme={theme} inheritLabel="Survey default" />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
