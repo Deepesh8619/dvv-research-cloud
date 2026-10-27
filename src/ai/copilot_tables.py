@@ -18,10 +18,19 @@ from typing import Any
 
 MAX_ROWS = 40
 
-#: A sentence making a claim only a test can support: "statistically",
-#: "significant(ly)", "significance", "p < 0.05".
+#: A sentence making a claim only a test can support. Statistical wording only:
+#: "significant" on its own is everyday English — a soft-launch reply's "no
+#: significant issues" was flagged as a significance claim on Bedrock.
 SIGNIFICANCE_CLAIM = re.compile(
-    r"\bstatistical(?:ly)?\b|\bsignifican(?:t|tly|ce)\b|\bp\s*[<=>]\s*0?\.\d", re.IGNORECASE
+    r"\bstatistical(?:ly)?\b"
+    r"|\bsignificantly\b"
+    r"|\bsignificant(?:\s+\w+){0,2}?\s+(?:differences?|differ|gaps?|associations?|associated"
+    r"|correlat\w*|effects?|changes?|increases?|decreases?|drops?|rises?|higher|lower|more"
+    r"|less|greater|smaller|between|vs\.?|versus|at\s+(?:the\s+)?\d+|level)\b"
+    r"|\b(?:is|are|was|were|not|isn.t|aren.t|wasn.t|weren.t)\s+significant\b"
+    r"|\bsignificance\s+(?:test|level|letters?)\b"
+    r"|\bp\s*[<=>]\s*0?\.\d",
+    re.IGNORECASE,
 )
 
 
@@ -115,6 +124,13 @@ def _demo() -> None:
     assert not claims_significance("Whether the difference is significant has not been tested.")
     assert not claims_significance("I can't say if it is statistically significant.")
     assert claims_significance("Men score higher. The gap is significant at 95%.")
+    assert claims_significance("Women are significantly less satisfied.")
+    assert claims_significance("There is a significant difference between A and B.")
+    assert claims_significance("The difference is not significant.")
+    assert claims_significance("Satisfaction differs (p < 0.05).")
+    # Everyday English, not a statistical claim (seen on Bedrock).
+    assert not claims_significance("The check found no significant issues with the data.")
+    assert not claims_significance("A significant number of people were screened out at Q1.")
 
 
 if __name__ == "__main__":
