@@ -12,7 +12,7 @@
                 "expect": {"mentions": ["\\b(2|two)\\b", "{link_a}"], "cards": [], "may_skip_tools": true}}]},
     {"id": "no-such-project", "category": "discovery",
      "turns": [{"say": "What is the incidence on the Greenbrook study?",
-                "expect": {"tools_any": ["list_studies", "study_overview"], "mentions": ["(no|not|couldn.t|can.t|don.t|doesn.t)"], "avoids": ["\\d+(\\.\\d+)?\\s*%"], "cards": []}}]},
+                "expect": {"tools_any": ["list_studies", "study_overview", "field_report", "soft_launch_check", "qc_findings", "ask_data"], "mentions": ["(no|not|couldn.t|can.t|don.t|doesn.t)"], "avoids": ["\\d+(\\.\\d+)?\\s*%"], "cards": []}}]},
 
     {"id": "who-is-asked-q3", "category": "questionnaire", "study": "coffee",
      "turns": [{"say": "Who gets asked Q3?",

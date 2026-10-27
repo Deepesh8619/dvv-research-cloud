@@ -107,3 +107,10 @@ def test_every_backend_failing_is_still_a_clean_error():
          patch.dict("os.environ", {"BEDROCK_API_KEY": "x"}), \
          pytest.raises(Exception, match="no model could answer"):
         run_copilot("hi", [], lambda n, a: {}, "D", "owner")
+
+
+def test_the_prompt_forbids_substituting_another_action():
+    """Asked to delete a project, Bedrock prepared close and load cards instead."""
+    from src.ai.copilot import SYSTEM_PROMPT
+
+    assert "NEVER prepare a different action in its place" in SYSTEM_PROMPT
