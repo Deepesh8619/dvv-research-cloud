@@ -74,6 +74,18 @@ _MAX_VERBATIMS = 8  # enough to show a pattern, small enough to read in a side p
 _HISTORY_TURNS = 12  # earlier messages sent back to the model with a new question
 
 
+#: Words people use for an answer the questionnaire words differently. Gender
+#: is the commonest quota there is, and "Female" for an option labelled
+#: "Woman" was refused on Bedrock.
+_SAME_ANSWER = {"female": "woman", "females": "woman", "women": "woman",
+                "male": "man", "males": "man", "men": "man"}
+
+
+def _answer_key(label: object) -> str:
+    text = " ".join(str(label).strip().lower().split())
+    return _SAME_ANSWER.get(text, text)
+
+
 class _ToolError(Exception):
     """A tool can't run for a reason worth telling the model (and the user)."""
 
@@ -504,8 +516,14 @@ def make_executor(db: Session, user: UserDB):
         listable = [x for x in pinned.questions
                     if x.type in (QuestionType.SINGLE, QuestionType.MULTI) and x.options]
         q = next((x for x in listable if x.qid == qid), None)
-        given_labels = {str(g).strip().lower() for g in args.get("codes") or []
+        given_labels = {_answer_key(g) for g in args.get("codes") or []
                         if not str(g).strip().lstrip("-").isdigit()}
+        if q is not None and not given_labels <= {_answer_key(o.label) for o in q.options}:
+            # A real question, but not the one these answers belong to (Bedrock
+            # put "Female" on "Do you drink coffee?"): look for the one that is.
+            named, q = q, None
+        else:
+            named = None
         if q is None and given_labels:
             # Seen on Bedrock: the model guessed `q_gender`, was handed the real
             # list, and relayed it to the user instead of calling again. The
@@ -513,10 +531,12 @@ def make_executor(db: Session, user: UserDB):
             # offers it; the card then says which question, so the person
             # confirming sees the choice that was made.
             owners = [x for x in listable
-                      if given_labels <= {o.label.strip().lower() for o in x.options}]
+                      if given_labels <= {_answer_key(o.label) for o in x.options}]
             if len(owners) == 1:
                 q = owners[0]
                 qid = q.qid
+        if q is None and named is not None:
+            q = named  # nothing better: refused below with this question's options
         if q is None:
             # Every question a quota can use, with its options: the model picks
             # the right one and calls again, rather than asking the user for an
@@ -528,15 +548,15 @@ def make_executor(db: Session, user: UserDB):
             raise _ToolError(f"{qid!r} is not a question a quota can use on link {ln.id}. "
                              f"Call again with one of: {choices}")
         labels = {o.code: o.label for o in q.options}
-        by_label = {o.label.strip().lower(): o.code for o in q.options}
+        by_label = {_answer_key(o.label): o.code for o in q.options}
         codes, unknown = set(), []
         for given in args.get("codes") or []:
             # An option number, or its label: "Woman" is what people say.
             text = str(given).strip()
             if text.lstrip("-").isdigit() and int(text) in labels:
                 codes.add(int(text))
-            elif text.lower() in by_label:
-                codes.add(by_label[text.lower()])
+            elif _answer_key(text) in by_label:
+                codes.add(by_label[_answer_key(text)])
             else:
                 unknown.append(given)
         codes = sorted(codes)

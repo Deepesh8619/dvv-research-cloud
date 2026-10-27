@@ -509,8 +509,14 @@ def test_deleting_a_conversation_removes_its_messages(client, monkeypatch):  # n
 
 
 def _tool_results(seen) -> list[dict]:
-    return [json.loads(m["content"].split("…(truncated)")[0])
-            for m in seen[-1] if m["role"] == "tool"]
+    """The tool results of the last model call that had any (a retry after a
+    refused card starts a fresh exchange, with none of its own)."""
+    for messages in reversed(seen):
+        found = [json.loads(m["content"].split("…(truncated)")[0])
+                 for m in messages if m["role"] == "tool"]
+        if found:
+            return found
+    return []
 
 
 def test_a_quota_takes_labels_and_a_wrong_qid_lists_the_real_ones(client, monkeypatch):  # noqa: F811
@@ -608,3 +614,47 @@ def test_a_label_two_questions_share_is_not_guessed(client, monkeypatch):  # noq
     assert resp["proposals"] == []
     (result,) = _tool_results(seen)
     assert "Call again with one of" in result["error"]
+
+
+def test_a_refused_card_is_retried_once_with_its_error(client, monkeypatch):  # noqa: F811
+    """Seen on Bedrock: refused, it relayed the error's list to the user. It is
+    now handed the error back once and told to correct the call."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = _open_link(test_client)
+    base = {"study_id": "study_f1", "link_id": link["id"], "limit": 10}
+    seen = _script(monkeypatch,
+                   ("tool", "propose_add_quota", {**base, "qid": "q_x", "codes": [1]}),
+                   ("text", "Those are the questions you can use: Q2 ..."),
+                   ("tool", "propose_add_quota", {**base, "qid": "Q2", "codes": [1]}),
+                   ("text", "Ready to confirm."))
+    resp = test_client.post("/api/copilot", json={"message": "cap coffee drinkers at 10"}).json()
+    assert [c["kind"] for c in resp["proposals"]] == ["quota"]
+    assert resp["reply"] == "Ready to confirm."
+    retry = next(m["content"] for m in seen[2] if m["role"] == "user" and "refused" in m["content"])
+    assert "Call propose_add_quota again" in retry
+
+
+def test_female_means_woman_even_on_the_wrong_question(client, monkeypatch):  # noqa: F811
+    """Bedrock put "Female" on Q1 ("Do you drink coffee?") for an option labelled
+    "Woman" on another question."""
+    from src.core.survey_definition import Option, Question, QuestionType
+    from tests.integration.test_fielding_routes import _sample_survey
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    survey = _sample_survey("study_f1")
+    survey.questions.append(Question(qid="S2", text="How do you describe yourself?",
+                                     type=QuestionType.SINGLE,
+                                     options=[Option(code=1, label="Man"),
+                                              Option(code=2, label="Woman")]))
+    survey.blocks[0].question_ids.append("S2")
+    _make_questionnaire(sf, survey=survey)
+    link = _open_link(test_client)
+    _script(monkeypatch,
+            ("tool", "propose_add_quota", {"study_id": "study_f1", "link_id": link["id"],
+                                           "qid": "Q2", "codes": ["Female"], "limit": 10}),
+            ("text", "Ready to confirm."))
+    (card,) = test_client.post("/api/copilot", json={"message": "max 10 women"}).json()["proposals"]
+    assert card["body"]["cells"][0]["condition"] == {"op": "eq", "qid": "S2", "value": 2}

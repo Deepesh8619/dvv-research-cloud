@@ -140,8 +140,10 @@ TOOLS = [
     _fn("propose_open_link", "Prepare opening a fielding link for the approved "
         "questionnaire, held at soft_launch_limit completes (default 50).",
         {**_STUDY, "soft_launch_limit": {"type": "integer"}}, ["study_id"]),
-    _fn("propose_set_hold", "Prepare holding a live link at `limit` completes, or releasing "
-        "it to full sample with limit 0.", {**_LINK, "limit": {"type": "integer"}},
+    _fn("propose_set_hold", "Prepare holding a WHOLE live link at `limit` completes, or "
+        "releasing it to full sample with limit 0. To cap one group of respondents "
+        "(women, people aware of a brand) use propose_add_quota instead.",
+        {**_LINK, "limit": {"type": "integer"}},
         ["study_id", "link_id", "limit"]),
     _fn("propose_close_link", "Prepare closing a fielding link to new respondents.",
         _LINK, ["study_id", "link_id"]),
@@ -196,6 +198,24 @@ _UNGROUNDED = (
     "Worth retrying — if it keeps happening the model backend is not able to call "
     "tools, which is a server setting rather than anything about your study."
 )
+_RETRY = (
+    "Your {tool} call was refused: {error}\n"
+    "That error lists the real questions, options or ids. Call {tool} again now with "
+    "corrected arguments taken from it. Only if it shows the request cannot be done at "
+    "all, say so plainly — do not ask the user for an id or option you were just given."
+)
+
+
+def _unretried_refusal(results: list[dict]) -> tuple[str, str] | None:
+    """(tool, error) of a refused card with no successful call of the same tool."""
+    done = {r.get("tool") for r in results if r.get("success") is not False}
+    for r in results:
+        tool = str(r.get("tool") or "")
+        if tool.startswith("propose_") and r.get("success") is False and tool not in done:
+            return tool, str(r.get("error") or "")
+    return None
+
+
 #: A reply carrying a number or an id is making a claim about the data. A
 #: greeting or a "what can you do" answer carries neither, which is what keeps
 #: the check off the messages that legitimately need no lookup.
@@ -247,6 +267,19 @@ def run_copilot(
                 if not results and _asserts_data(reply, today):
                     # Twice asked, twice invented. Say so rather than pass it on.
                     return _UNGROUNDED, [], label
+            # A card refused and never retried: seen on Bedrock, the model read
+            # an error listing the real questions and passed the list to the
+            # user. Once, it is handed the error back and told to correct it.
+            if refused := _unretried_refusal(results):
+                tool, error = refused
+                more_reply, more = _run_agent_loop(
+                    chat, label, message, "", execute,
+                    [*(history or []), {"role": "assistant", "content": reply},
+                     {"role": "user", "content": _RETRY.format(tool=tool, error=error[:800])}],
+                    timeout, None, None, system_prompt=prompt,
+                    max_turns=MAX_TURNS, known_tools=TOOL_NAMES,
+                )
+                reply, results = more_reply or reply, results + more
             return reply, results, label
         except (BackendUnavailable, ModelOutputError) as exc:
             failures.append(f"{label}: {exc}")
