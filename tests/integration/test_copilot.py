@@ -523,7 +523,7 @@ def test_a_quota_takes_labels_and_a_wrong_qid_lists_the_real_ones(client, monkey
     link = _open_link(test_client)
     base = {"study_id": "study_f1", "link_id": link["id"], "limit": 10}
     seen = _script(monkeypatch,
-                   ("tool", "propose_add_quota", {**base, "qid": "q_drinks", "codes": ["Yes"]}),
+                   ("tool", "propose_add_quota", {**base, "qid": "q_drinks", "codes": [1]}),
                    ("tool", "propose_add_quota", {**base, "qid": "Q2", "codes": ["yes"]}),
                    ("text", "Ready to confirm."))
     resp = test_client.post("/api/copilot", json={"message": "cap coffee drinkers at 10"}).json()
@@ -566,3 +566,45 @@ def test_a_refused_lookup_is_reported_in_the_response(client, monkeypatch):  # n
     resp = test_client.post("/api/copilot", json={"message": "how is nope?"}).json()
     (error,) = resp["tool_errors"]
     assert error.startswith("study_overview: no project with id 'nope'")
+
+
+def test_a_guessed_qid_is_resolved_by_the_answer_it_names(client, monkeypatch):  # noqa: F811
+    """Bedrock called propose_add_quota(qid="q_gender", codes=["Woman"]) and, told
+    the real questions, relayed the list instead of calling again. The label
+    names one question, so the card is built on it — and says which."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = _open_link(test_client)
+    _script(monkeypatch,
+            ("tool", "propose_add_quota", {"study_id": "study_f1", "link_id": link["id"],
+                                           "qid": "q_drinks_coffee", "codes": ["No"],
+                                           "limit": 5}),
+            ("text", "Ready to confirm."))
+    (card,) = test_client.post("/api/copilot", json={"message": "cap non-drinkers at 5"}
+                               ).json()["proposals"]
+    assert card["body"]["cells"][0]["condition"] == {"op": "eq", "qid": "Q2", "value": 2}
+    assert 'Q2 ("Do you drink coffee?") is No' in card["detail"]
+
+
+def test_a_label_two_questions_share_is_not_guessed(client, monkeypatch):  # noqa: F811
+    from src.core.survey_definition import Option, Question, QuestionType
+    from tests.integration.test_fielding_routes import _sample_survey
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    survey = _sample_survey("study_f1")
+    survey.questions.append(Question(qid="Q4", text="Do you drink tea?", type=QuestionType.SINGLE,
+                                     options=[Option(code=1, label="Yes"),
+                                              Option(code=2, label="No")]))
+    survey.blocks[0].question_ids.append("Q4")
+    _make_questionnaire(sf, survey=survey)
+    link = _open_link(test_client)
+    seen = _script(monkeypatch,
+                   ("tool", "propose_add_quota", {"study_id": "study_f1", "link_id": link["id"],
+                                                  "qid": "q_x", "codes": ["Yes"], "limit": 5}),
+                   ("text", "Which question?"))
+    resp = test_client.post("/api/copilot", json={"message": "cap the yeses at 5"}).json()
+    assert resp["proposals"] == []
+    (result,) = _tool_results(seen)
+    assert "Call again with one of" in result["error"]

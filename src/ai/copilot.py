@@ -155,8 +155,8 @@ TOOLS = [
         _STUDY, ["study_id"]),
     _fn("propose_add_quota", "Prepare a quota cell on an open link: completes where "
         "question `qid` is answered with one of `codes` (option numbers or their "
-        "labels) stop at `limit`. If unsure of the qid, call it anyway: the error lists "
-        "every question a quota can use.",
+        "labels) stop at `limit`. Pass the answer labels as people say them (\"Woman\", "
+        "\"Alpha\"): when only one question offers them, it is found for you.",
         {**_LINK, "name": {"type": "string"}, "qid": {"type": "string"},
          "codes": {"type": "array", "items": {"type": "string"}},
          "limit": {"type": "integer"}},

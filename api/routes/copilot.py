@@ -504,6 +504,19 @@ def make_executor(db: Session, user: UserDB):
         listable = [x for x in pinned.questions
                     if x.type in (QuestionType.SINGLE, QuestionType.MULTI) and x.options]
         q = next((x for x in listable if x.qid == qid), None)
+        given_labels = {str(g).strip().lower() for g in args.get("codes") or []
+                        if not str(g).strip().lstrip("-").isdigit()}
+        if q is None and given_labels:
+            # Seen on Bedrock: the model guessed `q_gender`, was handed the real
+            # list, and relayed it to the user instead of calling again. The
+            # answer it named ("Woman") picks out the question when exactly one
+            # offers it; the card then says which question, so the person
+            # confirming sees the choice that was made.
+            owners = [x for x in listable
+                      if given_labels <= {o.label.strip().lower() for o in x.options}]
+            if len(owners) == 1:
+                q = owners[0]
+                qid = q.qid
         if q is None:
             # Every question a quota can use, with its options: the model picks
             # the right one and calls again, rather than asking the user for an
@@ -544,8 +557,8 @@ def make_executor(db: Session, user: UserDB):
         name = str(args.get("name") or "").strip()[:60] or words[:60]
         return propose(
             "quota", f"Add quota \"{name}\" to link {ln.id}: {limit} completes",
-            f"Counts completes where {qid} is {words}; once {limit} are in, new "
-            "respondents who match are turned away. Others keep coming.",
+            f"Counts completes where {qid} (\"{q.text[:80]}\") is {words}; once {limit} "
+            "are in, new respondents who match are turned away. Others keep coming.",
             "POST", f"/studies/{s.id}/fielding/links/{ln.id}/quotas",
             {"cells": [{"name": name, "condition": condition, "limit": limit}]})
 
