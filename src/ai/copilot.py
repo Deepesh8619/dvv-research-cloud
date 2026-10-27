@@ -64,6 +64,8 @@ Rules:
   differences between groups — report what a tool returned, or say it has not been
   computed. Arithmetic you do in a sentence looks exactly like arithmetic the tables
   did, and nobody reading the answer can tell which one they got.
+- "When will we finish", "how many more starts do we need", pace and ETA questions: call
+  field_projection and report its figures with their basis and warnings.
 - What happened on a link — incidence, screen-outs, completes, drop-off — comes from
   field_report or soft_launch_check, never dry_run. dry_run's respondents are made up;
   if you cite it, call its figures simulated and keep them apart from the field ones.
@@ -146,6 +148,9 @@ TOOLS = [
         "drop-off, interview length.", _LINK, ["study_id", "link_id"]),
     _fn("soft_launch_check", "Run QC + field report on everything a link has captured.",
         _LINK, ["study_id", "link_id"]),
+    _fn("field_projection", "When a link will reach its hold, target and each quota at the "
+        "current pace (completes per day, recent days preferred), and how many more starts "
+        "that takes. Also completes per day.", _LINK, ["study_id", "link_id"]),
     _fn("dry_run", "Test the SCRIPT's logic with made-up respondents: which conditions never "
         "fire or are impossible, which questions nobody can reach. Says nothing about what "
         "happened on a link — use field_report for that.",

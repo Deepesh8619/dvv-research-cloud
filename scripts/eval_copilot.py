@@ -158,12 +158,16 @@ def seed() -> None:
                           definition_path=None, approved_qids=["T1"], created_at=now,
                           updated_at=now))
     s.commit()
+    from datetime import timedelta
+
     for label in ("A", "B"):
         link = create_fielding_link(s, "coffee", "q_coffee", 1, coffee.to_json(), USER)
         if label == "A":
             link.soft_launch_limit = 50
+            link.target_completes = 60  # something to project towards
         s.commit()
-        for p in people(label):
+        crowd = people(label)
+        for i, p in enumerate(crowd):
             ses = create_respondent_session(s, link.id)
             upsert_respondent_answer(s, ses.id, "S1", p["age"])
             if p["age"] >= 18:
@@ -176,7 +180,20 @@ def seed() -> None:
                 upsert_respondent_answer(s, ses.id, "Q4", p["sat"])
                 upsert_respondent_answer(s, ses.id, "Q5", p["nps"])
             set_respondent_session_status(s, ses.id, 10 if p["complete"] else 20)
+            # Spread over the past week, one every five hours, so the field has a pace.
+            began = datetime.now() - timedelta(hours=5 * (len(crowd) - i))
+            ses.started_at = began.isoformat()
+            ses.completed_at = (began + timedelta(minutes=11)).isoformat()
+            s.commit()
         print(f"{label}={link.id}")
+
+
+def date_pattern(iso: str) -> str:
+    """A date as a reply may write it: 2026-11-10, 10 November, Nov 10th."""
+    d = datetime.fromisoformat(iso)
+    month = f"(?:{d.strftime('%B')}|{d.strftime('%b')})"
+    day = rf"{d.day}(?:st|nd|rd|th)?"
+    return rf"{re.escape(iso)}|\b{day}\s+{month}\b|\b{month}\.?\s+{day}\b"
 
 
 def facts(h: dict, links: dict[str, str]) -> tuple[dict, dict]:
@@ -192,6 +209,11 @@ def facts(h: dict, links: dict[str, str]) -> tuple[dict, dict]:
         report = report.json()
         incidence[label] = report["incidence_pct"]
         regex[f"incidence_{label.lower()}"] = number_pattern(report["incidence_pct"])
+    projected = httpx.get(f"{BASE}/studies/coffee/fielding/links/{links['A']}/projection",
+                          headers=h, timeout=120).json()
+    (target,) = [g for g in projected["goals"] if g["name"] == "target"]
+    regex["eta_a"] = date_pattern(target["eta"]) if target["eta"] else "(?!)"
+    regex["starts_needed_a"] = number_pattern(target["starts_needed"] or 0)
     low = min(incidence, key=incidence.get)
     regex["low_link"] = re.escape(links[low])
     completes = sum(p["complete"] for label in "AB" for p in people(label))

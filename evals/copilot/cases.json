@@ -364,6 +364,26 @@
    ]
   },
   {
+   "id": "projection-a",
+   "category": "fielding",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "At the current pace, when will {link_a} reach its target, and how many more starts do we need?",
+     "expect": {
+      "tools": [
+       "field_projection"
+      ],
+      "mentions": [
+       "{eta_a}",
+       "{starts_needed_a}"
+      ],
+      "cards": []
+     }
+    }
+   ]
+  },
+  {
    "id": "table-q4",
    "category": "data",
    "study": "coffee",
