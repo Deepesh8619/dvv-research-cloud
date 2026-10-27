@@ -29,8 +29,6 @@ from api.models import ChatMessage, ChatRequest, ChatResponse, ChatToolCall
 from src.ai.navigator import (
     navigate_basic,
     navigate_bedrock,
-    navigate_cerebras,
-    navigate_groq,
 )
 from src.ai.router import BackendUnavailable, ModelOutputError
 from src.ai.specialists import specialist_for_intent
@@ -566,16 +564,11 @@ def chat_with_study(
         if m.id != user_msg.id and m.content
     ]
 
-    # Open-source models only, in order: Bedrock (in-region), Groq, Cerebras —
-    # the same model family everywhere, so a quota or outage changes who
-    # answers, not the quality — then the local single-shot model, which keeps
+    # Bedrock (in-region), then the local single-shot model, which keeps
     # answering with no API at all when the bundle runs the local-ai profile.
+    # Never a free tier: the tools hand the model this client's data.
     reply, tool_results, failures = None, [], []
-    for label, navigate in (
-        ("Bedrock", navigate_bedrock),
-        ("Groq", navigate_groq),
-        ("Cerebras", navigate_cerebras),
-    ):
+    for label, navigate in (("Bedrock", navigate_bedrock),):
         try:
             reply, tool_results = navigate(
                 request.message, context, executor, history=history, intent=intent

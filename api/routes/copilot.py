@@ -32,7 +32,13 @@ from api.heavy import plain_sessions, run_heavy_detached
 from api.models import ChatRequest, CopilotProposal, CopilotRequest, CopilotResponse
 from src.ai.copilot import run_copilot
 from src.ai.router import BackendUnavailable
-from src.core.survey_definition import Expression
+from src.core.survey_definition import (
+    TEMPLATE_SLUGS,
+    THEME_SLUGS,
+    Expression,
+    QuestionType,
+    SurveyDefinition,
+)
 from src.engines.fielding.decisions import QuotaCell
 from src.engines.fielding.dryrun import simulate
 from src.engines.fielding.field_report import build_field_report
@@ -305,7 +311,6 @@ def make_executor(db: Session, user: UserDB):
     def field_report(args):
         _s, ln = link(args)
         sessions = list_respondent_sessions(db, ln.id)
-        from src.core.survey_definition import SurveyDefinition
         pinned = SurveyDefinition.from_json(ln.survey_json)
         answers, cells = answers_by_session(db, ln.id), _cells(db, ln.id)
         report = run_heavy_detached(db, build_field_report, pinned, plain_sessions(sessions),
@@ -319,7 +324,6 @@ def make_executor(db: Session, user: UserDB):
 
     def soft_launch_check(args):
         _s, ln = link(args)
-        from src.core.survey_definition import SurveyDefinition
         pinned = SurveyDefinition.from_json(ln.survey_json)
         sessions = plain_sessions(list_respondent_sessions(db, ln.id))
         answers, cells = answers_by_session(db, ln.id), _cells(db, ln.id)
@@ -426,6 +430,89 @@ def make_executor(db: Session, user: UserDB):
             "everything captured so far.",
             "POST", f"/studies/{s.id}/fielding/links/{ln.id}/materialize")
 
+    def propose_set_look(args):
+        from api.routes.questionnaire import _latest_questionnaire
+
+        s = study(args)
+        _latest_questionnaire(db, s.id)  # 404s into a tool error below when there is none
+        body, said = {}, []
+        for key, allowed in (("template", TEMPLATE_SLUGS), ("theme", THEME_SLUGS)):
+            value = str(args.get(key) or "").strip().lower()
+            if not value:
+                continue
+            if value not in allowed:
+                raise _ToolError(f"no {key} {value!r}; choose one of {', '.join(sorted(allowed))}")
+            body[key] = value
+            said.append(f"{key} {value}")
+        if not body:
+            raise _ToolError("name a template, a theme, or both")
+        return propose(
+            "look", f"Set {s.client_name or s.id}'s survey look: {' and '.join(said)}",
+            "Links opened from now on, test links included, use it. Links already "
+            "in the field keep the look their respondents started with.",
+            "PATCH", f"/studies/{s.id}/questionnaire/settings", body)
+
+    def propose_approve_clean(args):
+        from api.routes.questionnaire import (
+            _latest_questionnaire,
+            _load_definition,
+            clean_split,
+        )
+
+        s = study(args)
+        questionnaire = _latest_questionnaire(db, s.id)
+        clean, blocked = clean_split(_load_definition(db, questionnaire),
+                                     set(questionnaire.approved_qids or []))
+        if not clean:
+            raise _ToolError(
+                "no clean question is waiting: "
+                + (f"{len(blocked)} flagged ones need a person" if blocked
+                   else "every question is already approved"))
+        shown = ", ".join(clean[:12]) + (f" and {len(clean) - 12} more" if len(clean) > 12 else "")
+        return propose(
+            "approve_clean", f"Approve {len(clean)} clean questions in {s.client_name or s.id}",
+            f"Approves {shown}. "
+            + (f"{len(blocked)} flagged questions stay for a person to look at."
+               if blocked else "Nothing is flagged."),
+            "POST", f"/studies/{s.id}/questionnaire/questions/approve-clean")
+
+    def propose_add_quota(args):
+        s, ln = link(args)
+        if ln.status != "open":
+            raise _ToolError(f"link {ln.id} is {ln.status}; quotas go on an open link")
+        pinned = SurveyDefinition.from_json(ln.survey_json)
+        qid = str(args.get("qid") or "")
+        q = next((x for x in pinned.questions if x.qid == qid), None)
+        if q is None:
+            raise _ToolError(f"link {ln.id} asks no question {qid!r}")
+        if q.type not in (QuestionType.SINGLE, QuestionType.MULTI) or not q.options:
+            raise _ToolError(f"{qid} is not a pick-from-a-list question; quota on one that is")
+        labels = {o.code: o.label for o in q.options}
+        try:
+            codes = sorted({int(c) for c in args.get("codes") or []})
+        except (TypeError, ValueError) as exc:
+            raise _ToolError("codes must be the option numbers") from exc
+        unknown = [c for c in codes if c not in labels]
+        if not codes or unknown:
+            raise _ToolError(f"{qid}'s codes are {sorted(labels)}; got {unknown or 'none'}")
+        limit = int(args.get("limit") or 0)
+        if limit < 1:
+            raise _ToolError("a quota needs a limit of at least 1 complete")
+        if q.type == QuestionType.MULTI:
+            leaves = [{"op": "selected", "qid": qid, "value": c} for c in codes]
+            condition = leaves[0] if len(leaves) == 1 else {"op": "or", "children": leaves}
+        else:
+            condition = ({"op": "eq", "qid": qid, "value": codes[0]} if len(codes) == 1
+                         else {"op": "in", "qid": qid, "values": codes})
+        words = " or ".join(labels[c] for c in codes)
+        name = str(args.get("name") or "").strip()[:60] or words[:60]
+        return propose(
+            "quota", f"Add quota \"{name}\" to link {ln.id}: {limit} completes",
+            f"Counts completes where {qid} is {words}; once {limit} are in, new "
+            "respondents who match are turned away. Others keep coming.",
+            "POST", f"/studies/{s.id}/fielding/links/{ln.id}/quotas",
+            {"cells": [{"name": name, "condition": condition, "limit": limit}]})
+
     tools = {
         "list_studies": list_studies_tool,
         "study_overview": study_overview,
@@ -447,6 +534,9 @@ def make_executor(db: Session, user: UserDB):
         "propose_set_hold": propose_set_hold,
         "propose_close_link": propose_close_link,
         "propose_materialize": propose_materialize,
+        "propose_set_look": propose_set_look,
+        "propose_approve_clean": propose_approve_clean,
+        "propose_add_quota": propose_add_quota,
     }
 
     def execute(name: str, args: dict) -> dict:
@@ -457,6 +547,8 @@ def make_executor(db: Session, user: UserDB):
             return {"success": True, **tool(args or {})}
         except _ToolError as exc:
             return {"success": False, "error": str(exc)}
+        except HTTPException as exc:  # e.g. no questionnaire yet
+            return {"success": False, "error": str(exc.detail)}
         except Exception:  # noqa: BLE001 - the model gets a sentence, the log gets the trace
             logger.exception(f"copilot tool {name} failed")
             return {"success": False, "error": f"{name} failed on the server"}

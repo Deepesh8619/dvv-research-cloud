@@ -35,7 +35,7 @@ def _script(monkeypatch, *turns):
              "function": {"name": name, "arguments": json.dumps(args)}}]}}]}
 
     monkeypatch.setattr("src.ai.copilot._compatible_chat", fake_chat)
-    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    monkeypatch.setenv("BEDROCK_API_KEY", "bk")
     return seen
 
 
@@ -204,7 +204,7 @@ def test_screen_outs_carry_the_rule_that_fired(client, monkeypatch):  # noqa: F8
 
 
 def test_a_provider_failing_mid_answer_does_not_duplicate_cards(client, monkeypatch):  # noqa: F811
-    """Groq prepares a card, then dies; Cerebras redoes the answer. One card, not two."""
+    """Bedrock prepares a card, then dies; the local model redoes the answer. One card."""
     test_client, sf, _ = client
     _make_study(sf)
     _make_questionnaire(sf)
@@ -217,7 +217,7 @@ def test_a_provider_failing_mid_answer_does_not_duplicate_cards(client, monkeypa
     def flaky(url, key_env, model, label, messages, timeout, with_tools=True,
               tools_subset=None, tools_schema=None):
         calls["n"] += 1
-        if label == "Groq" and calls["n"] == 2:
+        if label == "Bedrock" and calls["n"] == 2:
             raise BackendUnavailable("429 mid-answer")
         if not any(m["role"] == "tool" for m in messages):
             return {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [
@@ -226,11 +226,81 @@ def test_a_provider_failing_mid_answer_does_not_duplicate_cards(client, monkeypa
         return {"choices": [{"message": {"role": "assistant", "content": "Ready to confirm."}}]}
 
     monkeypatch.setattr("src.ai.copilot._compatible_chat", flaky)
+    monkeypatch.setenv("BEDROCK_API_KEY", "bk")
+    resp = test_client.post("/api/copilot", json={"message": "close it"}).json()
+    assert resp["answered_by"] == "local model"
+    assert len(resp["proposals"]) == 1
+
+
+def test_client_data_never_goes_to_a_free_tier(monkeypatch):
+    """Groq and Cerebras keys on the server change nothing: Bedrock or local only."""
+    from src.ai.copilot import _providers
+
     monkeypatch.setenv("GROQ_API_KEY", "gk")
     monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
-    resp = test_client.post("/api/copilot", json={"message": "close it"}).json()
-    assert resp["answered_by"] == "Cerebras"
-    assert len(resp["proposals"]) == 1
+    monkeypatch.setenv("BEDROCK_API_KEY", "bk")
+    assert [label for label, *_ in _providers()] == ["Bedrock", "local model"]
+    for _label, url, *_ in _providers():
+        assert "groq" not in url and "cerebras" not in url
+
+
+def _confirm(test_client, card):
+    return test_client.request(card["method"], f"/api{card['path']}", json=card["body"])
+
+
+def test_the_look_card_sets_the_default_for_new_links(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    _script(monkeypatch,
+            ("tool", "propose_set_look",
+             {"study_id": "study_f1", "template": "Ledger", "theme": "neon"}),
+            ("tool", "propose_set_look", {"study_id": "study_f1", "template": "ledger"}),
+            ("text", "Ready to confirm."))
+    (card,) = test_client.post("/api/copilot", json={"message": "use ledger"}).json()["proposals"]
+    assert card["body"] == {"template": "ledger"}  # the bad theme made no card at all
+    assert _confirm(test_client, card).status_code == 200
+    token = _open_link(test_client)["token"]
+    assert test_client.get(f"/api/r/{token}").json()["template"] == "ledger"
+
+
+def test_the_approve_card_names_what_confirm_approves(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf, status="in_review")
+    from api.db import set_questionnaire_approved_qids
+
+    db = sf()
+    set_questionnaire_approved_qids(db, "quest_f1", [])
+    db.close()
+    _script(monkeypatch, ("tool", "propose_approve_clean", {"study_id": "study_f1"}),
+            ("text", "Ready."))
+    resp = test_client.post("/api/copilot", json={"message": "approve the clean ones"}).json()
+    (card,) = resp["proposals"]
+    n = int(card["title"].split()[1])
+    assert n > 0
+    assert _confirm(test_client, card).json()["n_newly_approved"] == n
+
+
+def test_the_quota_card_checks_codes_against_the_link(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = _open_link(test_client)
+    seen = _script(monkeypatch,
+                   ("tool", "propose_add_quota", {"study_id": "study_f1", "link_id": link["id"],
+                                                  "qid": "Q2", "codes": [99], "limit": 10}),
+                   ("tool", "propose_add_quota", {"study_id": "study_f1", "link_id": link["id"],
+                                                  "qid": "Q2", "codes": [1], "limit": 10}),
+                   ("text", "Ready."))
+    resp = test_client.post("/api/copilot", json={"message": "cap Q2 code 1 at 10"}).json()
+    errors = [json.loads(m["content"].split("…(truncated)")[0])
+              for m in seen[-1] if m["role"] == "tool"]
+    assert errors[0]["success"] is False and "99" in errors[0]["error"]
+    (card,) = resp["proposals"]
+    assert card["body"]["cells"][0]["condition"]["qid"] == "Q2"
+    cells = _confirm(test_client, card).json()["cells"]
+    assert [(c["limit"], c["count"]) for c in cells] == [(10, 0)]
 
 
 def _complete(test_client, token, brand):

@@ -28,7 +28,7 @@ def _model(*turns):
 
 def _call(chat, message="what is the incidence?", execute=None):
     with patch("src.ai.copilot._compatible_chat", chat), \
-         patch.dict("os.environ", {"GROQ_API_KEY": "x"}):
+         patch.dict("os.environ", {"BEDROCK_API_KEY": "x"}):
         return run_copilot(
             message, [], execute or (lambda name, args: {"projects": []}), "D", "owner"
         )
@@ -104,6 +104,6 @@ def test_every_backend_failing_is_still_a_clean_error():
         raise BackendUnavailable("no key")
 
     with patch("src.ai.copilot._compatible_chat", dead), \
-         patch.dict("os.environ", {"GROQ_API_KEY": "x"}), \
+         patch.dict("os.environ", {"BEDROCK_API_KEY": "x"}), \
          pytest.raises(Exception, match="no model could answer"):
         run_copilot("hi", [], lambda n, a: {}, "D", "owner")
