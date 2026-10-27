@@ -85,3 +85,25 @@ def test_a_changed_finding_reindexes(client, monkeypatch):  # noqa: F811
     texts = [m["text"] for m in _search(test_client, monkeypatch, "base short")["matches"]]
     assert any("short by two" in t for t in texts)
     assert not any("under 18" in t for t in texts)
+
+
+def test_a_lesson_from_another_project_in_the_same_format_is_found(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _project_with_history(sf)
+    db = sf()
+    try:
+        db.add(CorrectionDB(id="corr_other", study_id="study_older", profile_slug="acme_fmt",
+                            question_id="B4", author_id="u1", status="applied",
+                            instruction="Brand image grids put statements in the columns",
+                            created_at="2026-09-01"))
+        db.add(CorrectionDB(id="corr_foreign", study_id="study_x", profile_slug="other_fmt",
+                            author_id="u1", status="applied",
+                            instruction="Brand image grids are transposed in this format",
+                            created_at="2026-09-01"))
+        db.commit()
+    finally:
+        db.close()
+    hits = _search(test_client, monkeypatch, "brand image grids statements columns")["matches"]
+    texts = {m["cite"]: m["text"] for m in hits}
+    assert "on project study_older" in texts["lesson:correction-corr_other"]
+    assert "lesson:correction-corr_foreign" not in texts  # another format's lesson stays out

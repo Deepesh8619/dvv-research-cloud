@@ -165,9 +165,19 @@ def context_chunks(db, study_id: str, profile_slug: str | None) -> list[dict[str
             text = f"Taught rule for {profile_slug}: {rule.rule_text}{how}"
             chunks.append({"kind": "lesson", "ref": f"rule-{rule.id}",
                            "text": text[:MAX_CHUNK_CHARS]})
-    for c in db.query(CorrectionDB).filter(CorrectionDB.study_id == study_id):
+    # This project's corrections, and those made on any other project whose
+    # documents share its format: how the team read this client's grids last
+    # time is a lesson for this time. One deployment serves one organisation,
+    # so these never cross to another client's team.
+    from sqlalchemy import or_
+
+    scope = [CorrectionDB.study_id == study_id]
+    if profile_slug:
+        scope.append(CorrectionDB.profile_slug == profile_slug)
+    for c in db.query(CorrectionDB).filter(or_(*scope)):
         about = f" about {c.question_id}" if c.question_id else ""
-        text = f"Correction{about} ({c.status}): {c.instruction}"
+        elsewhere = f" on project {c.study_id}" if c.study_id != study_id else ""
+        text = f"Correction{about}{elsewhere} ({c.status}): {c.instruction}"
         chunks.append({"kind": "lesson", "ref": f"correction-{c.id}",
                        "text": text[:MAX_CHUNK_CHARS]})
     return chunks
@@ -315,6 +325,11 @@ def search(
             .all()
         )
 
+    # Trade terms ("NPS", "unaided awareness") expanded into questionnaire words.
+    from src.engines.rag.glossary import expand
+
+    asked = text
+    text = expand(text)
     [vector], model = embed([text], kind="query")
     rows = load()
     wrong_maker = bool(rows) and rows[0].model != model
@@ -340,7 +355,7 @@ def search(
 
     # Hybrid: the vector store's nearest pieces, BM25 over every piece, and an
     # exact question code, fused by reciprocal rank (src/engines/rag/hybrid.py).
-    from src.engines.rag.hybrid import bm25, codes_in, fuse
+    from src.engines.rag.hybrid import rank
 
     rows = [r for r in rows if r.model == model]
     by_id = {r.id: r for r in rows}
@@ -348,9 +363,8 @@ def search(
                                   model=model)
     meaning = {row.id: score for score, row in scored if score > 0}
     ids = list(by_id)
-    words = dict(zip(ids, bm25(text, [by_id[i].text for i in ids]), strict=True))
-    named = codes_in(text, [by_id[i].ref for i in ids])
-    code = {i for i in ids if by_id[i].ref in named}
+    ranked = rank(text, ids, [by_id[i].text for i in ids], [by_id[i].ref for i in ids],
+                  meaning, k, codes_from=asked)
     return {
         "model": model,
         "matches": [
@@ -358,6 +372,6 @@ def search(
              "score": round(meaning.get(i, 0.0), 3), "rank": rank, "matched_by": how,
              # What an answer cites, so a reader can find the passage it rests on.
              "cite": f"{by_id[i].kind}:{by_id[i].ref}"}
-            for i, rank, how in fuse(ids, meaning, words, code, k)
+            for i, rank, how in ranked
         ],
     }

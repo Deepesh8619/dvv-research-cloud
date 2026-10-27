@@ -1,0 +1,550 @@
+{
+ "about": "Retrieval eval. A synthetic shampoo usage-and-attitude questionnaire, QC findings and taught lessons, and labelled searches as researchers type them. Scored by scripts/eval_retrieval.py: recall@1, recall@3 and MRR for meaning-only, words-only and hybrid ranking, on whichever embedder is available. Types: synonym (no word in common), code (a question code), words (shared words), typo, finding, lesson. Searches marked held_out were written after the glossary (src/engines/rag/glossary.py) was frozen; report them separately, never tune the glossary on them.",
+ "pieces": [
+  {
+   "ref": "S1",
+   "kind": "question",
+   "text": "S1. What is your age? Answers: Under 18; 18-24; 25-34; 35-44; 45-54; 55+"
+  },
+  {
+   "ref": "S2",
+   "kind": "question",
+   "text": "S2. How do you describe yourself? Answers: Man; Woman; Non-binary; Prefer not to say"
+  },
+  {
+   "ref": "S3",
+   "kind": "question",
+   "text": "S3. In which city do you currently live? Answers: Mumbai; Delhi; Bengaluru; Chennai; Kolkata; Other"
+  },
+  {
+   "ref": "S4",
+   "kind": "question",
+   "text": "S4. Do you or anyone in your household work in any of these industries? Answers: Market research; Advertising; Personal care manufacturing; None of these"
+  },
+  {
+   "ref": "S5",
+   "kind": "question",
+   "text": "S5. In the past month, which of these have you personally bought? Answers: Shampoo; Conditioner; Hair oil; Hair colour; None of these"
+  },
+  {
+   "ref": "Q1",
+   "kind": "question",
+   "text": "Q1. When you think of shampoo brands, which ones come to mind? Please list all you can think of."
+  },
+  {
+   "ref": "Q2",
+   "kind": "question",
+   "text": "Q2. Which of these shampoo brands have you heard of? Answers: Clinic Plus; Dove; Head & Shoulders; Pantene; Sunsilk; TRESemmé"
+  },
+  {
+   "ref": "Q3",
+   "kind": "question",
+   "text": "Q3. Which of these brands would you consider buying next time? Answers: Clinic Plus; Dove; Head & Shoulders; Pantene; Sunsilk; TRESemmé"
+  },
+  {
+   "ref": "Q4",
+   "kind": "question",
+   "text": "Q4. Which brand of shampoo do you use most often? Answers: Clinic Plus; Dove; Head & Shoulders; Pantene; Sunsilk; TRESemmé; Other"
+  },
+  {
+   "ref": "Q5",
+   "kind": "question",
+   "text": "Q5. How long have you been using this brand? Answers: Less than 6 months; 6-12 months; 1-3 years; More than 3 years"
+  },
+  {
+   "ref": "Q6",
+   "kind": "question",
+   "text": "Q6. How often do you wash your hair with shampoo? Answers: Every day; 4-6 times a week; 2-3 times a week; Once a week; Less often"
+  },
+  {
+   "ref": "Q7",
+   "kind": "question",
+   "text": "Q7. Where do you usually buy your shampoo? Answers: Local kirana store; Supermarket; Pharmacy; Online marketplace; Salon"
+  },
+  {
+   "ref": "Q8",
+   "kind": "question",
+   "text": "Q8. Which pack size do you usually buy? Answers: Sachet; 80 ml bottle; 180 ml bottle; 340 ml bottle; 650 ml or larger"
+  },
+  {
+   "ref": "Q9",
+   "kind": "question",
+   "text": "Q9. Roughly how much did you pay for your last bottle of shampoo, in rupees?"
+  },
+  {
+   "ref": "Q10",
+   "kind": "question",
+   "text": "Q10. At what price would this shampoo start to seem too expensive to consider buying?"
+  },
+  {
+   "ref": "Q11",
+   "kind": "question",
+   "text": "Q11. At what price would it seem so cheap that you would doubt its quality?"
+  },
+  {
+   "ref": "Q12",
+   "kind": "question",
+   "text": "Q12. How would you describe your hair type? Answers: Straight; Wavy; Curly; Coily"
+  },
+  {
+   "ref": "Q13",
+   "kind": "question",
+   "text": "Q13. Which hair problems do you face? Answers: Dandruff; Hair fall; Frizz; Dryness; Oily scalp; Split ends; None"
+  },
+  {
+   "ref": "Q14",
+   "kind": "question",
+   "text": "Q14. Which hair problem bothers you the most?"
+  },
+  {
+   "ref": "Q15",
+   "kind": "question",
+   "text": "Q15. How satisfied are you with your current shampoo on each of the following? Rows: Cleansing; Fragrance; Softness; Dandruff control; Value for money. Scale: Very dissatisfied to Very satisfied"
+  },
+  {
+   "ref": "Q16",
+   "kind": "question",
+   "text": "Q16. How likely are you to recommend your current shampoo brand to a friend or colleague? 0 = Not at all likely, 10 = Extremely likely"
+  },
+  {
+   "ref": "Q17",
+   "kind": "question",
+   "text": "Q17. Why did you give that score? Please explain in your own words."
+  },
+  {
+   "ref": "Q18",
+   "kind": "question",
+   "text": "Q18. How important is each of these when choosing a shampoo? Rows: Natural ingredients; Price; Fragrance; Brand reputation; Doctor recommended. Scale: Not at all important to Extremely important"
+  },
+  {
+   "ref": "Q19",
+   "kind": "question",
+   "text": "Q19. Do you prefer shampoos that are free from sulphates and parabens? Answers: Yes, always; Sometimes; No; Don't know what these are"
+  },
+  {
+   "ref": "Q20",
+   "kind": "question",
+   "text": "Q20. Have you switched shampoo brands in the past year? Answers: Yes; No"
+  },
+  {
+   "ref": "Q21",
+   "kind": "question",
+   "text": "Q21. What made you switch from your previous brand?"
+  },
+  {
+   "ref": "Q22",
+   "kind": "question",
+   "text": "Q22. Where have you seen or heard about shampoo brands recently? Answers: TV advertisement; Instagram or YouTube; Influencer; Store display; Friends or family"
+  },
+  {
+   "ref": "Q23",
+   "kind": "question",
+   "text": "Q23. Have you ever bought a shampoo because of a discount or a free gift? Answers: Yes, often; Occasionally; Never"
+  },
+  {
+   "ref": "Q24",
+   "kind": "question",
+   "text": "Q24. Please rank these new shampoo ideas from most to least appealing. Items: Onion oil anti-hairfall; Rice water shine; Charcoal deep clean; Ayurvedic herbal"
+  },
+  {
+   "ref": "Q25",
+   "kind": "question",
+   "text": "Q25. Thinking of the Rice water shine shampoo, how likely would you be to buy it at Rs 199? Answers: Definitely would buy; Probably would buy; Might or might not; Probably not; Definitely not"
+  },
+  {
+   "ref": "Q26",
+   "kind": "question",
+   "text": "Q26. What, if anything, would stop you from buying it?"
+  },
+  {
+   "ref": "Q27",
+   "kind": "question",
+   "text": "Q27. Do you use a conditioner after shampooing? Answers: Every time; Sometimes; Never"
+  },
+  {
+   "ref": "Q28",
+   "kind": "question",
+   "text": "Q28. Who in your household decides which shampoo is bought? Answers: Me; My spouse or partner; A parent; We decide together"
+  },
+  {
+   "ref": "D1",
+   "kind": "question",
+   "text": "D1. What is the highest level of education you have completed? Answers: School; Graduate; Postgraduate; Doctorate"
+  },
+  {
+   "ref": "D2",
+   "kind": "question",
+   "text": "D2. What is your monthly household income? Answers: Below Rs 25,000; Rs 25,000-50,000; Rs 50,000-1,00,000; Above Rs 1,00,000"
+  },
+  {
+   "ref": "D3",
+   "kind": "question",
+   "text": "D3. How many people live in your household, including you?"
+  },
+  {
+   "ref": "finding-1",
+   "kind": "finding",
+   "text": "QC finding on S1 (screen_out_leak, high): 4 respondents aged under 18 completed the survey — 4 rows"
+  },
+  {
+   "ref": "finding-2",
+   "kind": "finding",
+   "text": "QC finding on Q15 (straightlining, medium): 31 respondents gave the same answer on every row of the satisfaction grid — 31 rows"
+  },
+  {
+   "ref": "finding-3",
+   "kind": "finding",
+   "text": "QC finding on Q9 (out_of_range, low): last price paid above Rs 5,000 for a shampoo bottle — 2 rows"
+  },
+  {
+   "ref": "rule-r1",
+   "kind": "lesson",
+   "text": "Taught rule for hul_fmt: [SA] marks a single-choice question (in the document, \"[SA]\" -> single)"
+  },
+  {
+   "ref": "rule-r2",
+   "kind": "lesson",
+   "text": "Taught rule for hul_fmt: [ROTATE] means the options are shown in random order"
+  },
+  {
+   "ref": "correction-c1",
+   "kind": "lesson",
+   "text": "Correction about Q15 (resolved): the grid rows were read as five separate questions; they belong to one satisfaction grid"
+  }
+ ],
+ "queries": [
+  {
+   "q": "price sensitivity",
+   "expect": [
+    "Q10",
+    "Q11",
+    "Q9"
+   ],
+   "type": "synonym"
+  },
+  {
+   "q": "net promoter score",
+   "expect": [
+    "Q16"
+   ],
+   "type": "synonym"
+  },
+  {
+   "q": "brand loyalty or churn",
+   "expect": [
+    "Q20",
+    "Q21",
+    "Q5"
+   ],
+   "type": "synonym"
+  },
+  {
+   "q": "unaided awareness",
+   "expect": [
+    "Q1"
+   ],
+   "type": "synonym"
+  },
+  {
+   "q": "purchase channel",
+   "expect": [
+    "Q7"
+   ],
+   "type": "synonym"
+  },
+  {
+   "q": "concept test purchase intent",
+   "expect": [
+    "Q25"
+   ],
+   "type": "synonym"
+  },
+  {
+   "q": "barriers to trial for the new product",
+   "expect": [
+    "Q26"
+   ],
+   "type": "synonym"
+  },
+  {
+   "q": "who is the decision maker for the category",
+   "expect": [
+    "Q28"
+   ],
+   "type": "synonym"
+  },
+  {
+   "q": "socio-economic class",
+   "expect": [
+    "D2",
+    "D1"
+   ],
+   "type": "synonym"
+  },
+  {
+   "q": "media touchpoints",
+   "expect": [
+    "Q22"
+   ],
+   "type": "synonym"
+  },
+  {
+   "q": "promotion sensitivity",
+   "expect": [
+    "Q23"
+   ],
+   "type": "synonym"
+  },
+  {
+   "q": "occupation security screener",
+   "expect": [
+    "S4"
+   ],
+   "type": "synonym"
+  },
+  {
+   "q": "S3",
+   "expect": [
+    "S3"
+   ],
+   "type": "code"
+  },
+  {
+   "q": "what does Q14 ask",
+   "expect": [
+    "Q14"
+   ],
+   "type": "code"
+  },
+  {
+   "q": "show me d2",
+   "expect": [
+    "D2"
+   ],
+   "type": "code"
+  },
+  {
+   "q": "Q24 ranking",
+   "expect": [
+    "Q24"
+   ],
+   "type": "code"
+  },
+  {
+   "q": "dandruff",
+   "expect": [
+    "Q13",
+    "Q15"
+   ],
+   "type": "words"
+  },
+  {
+   "q": "pack size sachet",
+   "expect": [
+    "Q8"
+   ],
+   "type": "words"
+  },
+  {
+   "q": "sulphates and parabens",
+   "expect": [
+    "Q19"
+   ],
+   "type": "words"
+  },
+  {
+   "q": "how often do they wash their hair",
+   "expect": [
+    "Q6"
+   ],
+   "type": "words"
+  },
+  {
+   "q": "conditioner use",
+   "expect": [
+    "Q27"
+   ],
+   "type": "words"
+  },
+  {
+   "q": "hair type curly",
+   "expect": [
+    "Q12"
+   ],
+   "type": "words"
+  },
+  {
+   "q": "rice water shampoo",
+   "expect": [
+    "Q25",
+    "Q24"
+   ],
+   "type": "words"
+  },
+  {
+   "q": "shampo brands awarness",
+   "expect": [
+    "Q2",
+    "Q1"
+   ],
+   "type": "typo"
+  },
+  {
+   "q": "frizz and hairfall problms",
+   "expect": [
+    "Q13",
+    "Q14"
+   ],
+   "type": "typo"
+  },
+  {
+   "q": "househould size",
+   "expect": [
+    "D3"
+   ],
+   "type": "typo"
+  },
+  {
+   "q": "minors completing the survey",
+   "expect": [
+    "finding-1"
+   ],
+   "type": "finding"
+  },
+  {
+   "q": "straightliners on the satisfaction grid",
+   "expect": [
+    "finding-2",
+    "correction-c1"
+   ],
+   "type": "finding"
+  },
+  {
+   "q": "implausible prices",
+   "expect": [
+    "finding-3"
+   ],
+   "type": "finding"
+  },
+  {
+   "q": "how do we read SA in this client's documents",
+   "expect": [
+    "rule-r1"
+   ],
+   "type": "lesson"
+  },
+  {
+   "q": "randomise the answer order",
+   "expect": [
+    "rule-r2"
+   ],
+   "type": "lesson"
+  },
+  {
+   "q": "grid split into separate questions",
+   "expect": [
+    "correction-c1"
+   ],
+   "type": "lesson"
+  },
+  {
+   "q": "which question measures recommendation likelihood",
+   "expect": [
+    "Q16"
+   ],
+   "type": "synonym",
+   "held_out": true
+  },
+  {
+   "q": "first brand mentioned without prompting",
+   "expect": [
+    "Q1"
+   ],
+   "type": "synonym",
+   "held_out": true
+  },
+  {
+   "q": "where respondents shop for the category",
+   "expect": [
+    "Q7"
+   ],
+   "type": "synonym",
+   "held_out": true
+  },
+  {
+   "q": "SEC classification questions",
+   "expect": [
+    "D2",
+    "D1"
+   ],
+   "type": "synonym",
+   "held_out": true
+  },
+  {
+   "q": "reasons for rejecting the new concept",
+   "expect": [
+    "Q26"
+   ],
+   "type": "synonym",
+   "held_out": true
+  },
+  {
+   "q": "did they leave their old brand",
+   "expect": [
+    "Q20",
+    "Q21"
+   ],
+   "type": "synonym",
+   "held_out": true
+  },
+  {
+   "q": "how many members in the family",
+   "expect": [
+    "D3"
+   ],
+   "type": "synonym",
+   "held_out": true
+  },
+  {
+   "q": "usage occasions per week",
+   "expect": [
+    "Q6"
+   ],
+   "type": "synonym",
+   "held_out": true
+  },
+  {
+   "q": "ad exposure",
+   "expect": [
+    "Q22"
+   ],
+   "type": "synonym",
+   "held_out": true
+  },
+  {
+   "q": "are they in a sensitive industry",
+   "expect": [
+    "S4"
+   ],
+   "type": "synonym",
+   "held_out": true
+  },
+  {
+   "q": "pricing ladder too cheap question",
+   "expect": [
+    "Q11",
+    "Q10"
+   ],
+   "type": "words",
+   "held_out": true
+  },
+  {
+   "q": "respondents answering too uniformly on the grid",
+   "expect": [
+    "finding-2"
+   ],
+   "type": "finding",
+   "held_out": true
+  }
+ ]
+}
