@@ -70,8 +70,9 @@ def problems(cases: list[dict], tool_names: frozenset[str]) -> list[str]:
 
 
 def number_pattern(value: float | int) -> str:
-    """A figure as a model may fairly write it: 61.5 as "61.5" or "62"."""
-    shown = {f"{value:.1f}".rstrip("0").rstrip("."), str(round(value))}
+    """A figure as a model may fairly write it: 59.0909 as "59.09", "59.1" or "59"."""
+    shown = {f"{value:.{d}f}".rstrip("0").rstrip(".") if d else str(round(value))
+             for d in (0, 1, 2)}
     alternatives = "|".join(re.escape(s) for s in sorted(shown, key=len, reverse=True))
     return rf"(?<![\d.])(?:{alternatives})(?!\.?\d)"
 

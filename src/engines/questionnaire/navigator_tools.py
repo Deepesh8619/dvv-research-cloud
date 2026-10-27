@@ -115,7 +115,7 @@ def get_question_details(
     return result
 
 
-def _describe_expression(expr: Expression) -> str:
+def _describe_expression(expr: Expression, survey: SurveyDefinition | None = None) -> str:
     """Plain-English description of a structured routing Expression.
 
     Used only as a fallback/cross-check when no ``verbatim_text`` was captured —
@@ -125,19 +125,27 @@ def _describe_expression(expr: Expression) -> str:
     op = expr.op
     if op in ("and", "or"):
         joiner = " AND " if op == "and" else " OR "
-        parts = [_describe_expression(c) for c in expr.children or []]
+        parts = [_describe_expression(c, survey) for c in expr.children or []]
         return "(" + joiner.join(parts) + ")" if parts else "(no condition)"
     if op == "not":
-        parts = [_describe_expression(c) for c in expr.children or []]
+        parts = [_describe_expression(c, survey) for c in expr.children or []]
         inner = parts[0] if parts else "the condition"
         return f"NOT ({inner})"
 
     template = _OP_PHRASING.get(op)
     if template is None:
         return f"a {op} condition on {expr.qid or 'a prior question'}"
-    return "the respondent " + template.format(
+    said = "the respondent " + template.format(
         value=expr.value, values=expr.values, qid=expr.qid or "a prior question"
     )
+    # "selected option 1 in Q2" left the reader to guess that 1 is Alpha, and a
+    # model reporting it said "option 1" — the code, not what anyone answered.
+    if survey is not None and expr.qid in survey:
+        labels = {o.code: o.label for o in survey[expr.qid].options}
+        named = [labels[v] for v in (expr.values or [expr.value]) if v in labels]
+        if named:
+            said += f" ({', '.join(named)})"
+    return said
 
 
 def _verbatim_from_expression(expr: Expression) -> str | None:
@@ -194,7 +202,7 @@ def explain_question_base(
         }
 
     verbatim = _verbatim_from_expression(show_if)
-    structured = _describe_expression(show_if)
+    structured = _describe_expression(show_if, survey)
     if verbatim:
         explanation = f"Asked only of respondents where: {verbatim}"
     else:

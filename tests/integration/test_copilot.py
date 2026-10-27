@@ -506,3 +506,52 @@ def test_deleting_a_conversation_removes_its_messages(client, monkeypatch):  # n
         assert db.query(CopilotMessageDB).filter_by(conversation_id=conv).count() == 0
     finally:
         db.close()
+
+
+def _tool_results(seen) -> list[dict]:
+    return [json.loads(m["content"].split("…(truncated)")[0])
+            for m in seen[-1] if m["role"] == "tool"]
+
+
+def test_a_quota_takes_labels_and_a_wrong_qid_lists_the_real_ones(client, monkeypatch):  # noqa: F811
+    """Seen on Bedrock: the model guessed `q_gender`, got "no such question", and
+    asked the user. The error now carries every usable question, and a label
+    ("Yes") is accepted for its code."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = _open_link(test_client)
+    base = {"study_id": "study_f1", "link_id": link["id"], "limit": 10}
+    seen = _script(monkeypatch,
+                   ("tool", "propose_add_quota", {**base, "qid": "q_drinks", "codes": ["Yes"]}),
+                   ("tool", "propose_add_quota", {**base, "qid": "Q2", "codes": ["yes"]}),
+                   ("text", "Ready to confirm."))
+    resp = test_client.post("/api/copilot", json={"message": "cap coffee drinkers at 10"}).json()
+    first, _ = _tool_results(seen)
+    assert first["success"] is False
+    assert 'Q2 "Do you drink coffee?" [1=Yes, 2=No]' in first["error"]
+    (card,) = resp["proposals"]
+    assert card["body"]["cells"][0]["condition"] == {"op": "eq", "qid": "Q2", "value": 1}
+
+
+def test_an_unknown_project_error_names_the_real_ones(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    seen = _script(monkeypatch, ("tool", "study_overview", {"study_id": "greenbrook"}),
+                   ("text", "There is no Greenbrook project."))
+    test_client.post("/api/copilot", json={"message": "incidence on Greenbrook?"})
+    (result,) = _tool_results(seen)
+    assert "study_f1 (Test)" in result["error"]
+
+
+def test_who_was_asked_names_the_option_not_its_code(client, monkeypatch):  # noqa: F811
+    """"selected option 1 in Q2" became "option 1" in the answer; say "Yes"."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    seen = _script(monkeypatch, ("tool", "who_was_asked", {"study_id": "study_f1", "qid": "Q3"}),
+                   ("text", "Coffee drinkers."))
+    test_client.post("/api/copilot", json={"message": "who is asked Q3?"})
+    (result,) = _tool_results(seen)
+    assert "(Yes)" in result["explanation"]

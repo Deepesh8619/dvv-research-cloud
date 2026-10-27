@@ -38,6 +38,11 @@ Rules:
   study_overview (or the page context below).
 - You cannot change anything yourself. To act, call a propose_* tool: it prepares a
   card the user must confirm. Never say an action is done — say it is ready to confirm.
+- If no tool does what was asked (deleting a project, renaming one, editing a question),
+  say plainly that you cannot do that here. NEVER prepare a different action in its place
+  — not as a "first step", not as a workaround.
+- When a tool call fails, read its error: it lists the real ids and options. Fix the call
+  and make it again in this reply. Do not ask the user for an id or code you can look up.
 - Before proposing to release a held link, run soft_launch_check and report what it
   found. If it found errors, recommend fixing the script before releasing.
 - If a check could not run, say so plainly. "Nothing found" and "could not look" differ.
@@ -149,10 +154,11 @@ TOOLS = [
         "approved and carries no flag. Flagged questions are left for a person.",
         _STUDY, ["study_id"]),
     _fn("propose_add_quota", "Prepare a quota cell on an open link: completes where "
-        "question `qid` is answered with one of `codes` stop at `limit`. Use "
-        "question_details first for the real option codes.",
+        "question `qid` is answered with one of `codes` (option numbers or their "
+        "labels) stop at `limit`. If unsure of the qid, call it anyway: the error lists "
+        "every question a quota can use.",
         {**_LINK, "name": {"type": "string"}, "qid": {"type": "string"},
-         "codes": {"type": "array", "items": {"type": "integer"}},
+         "codes": {"type": "array", "items": {"type": "string"}},
          "limit": {"type": "integer"}},
         ["study_id", "link_id", "qid", "codes", "limit"]),
     _fn("propose_materialize", "Prepare loading a link's completes into the project's "

@@ -59,3 +59,12 @@ def test_a_case_fails_when_the_conversation_stops_early():
     result = score_case(case, [{"error": "HTTP 503"}], {})
     assert not result["passed"]
     assert "conversation stopped early" in result["failures"]
+
+
+def test_two_decimals_count_as_the_same_figure():
+    """Bedrock wrote 59.09% for 13/22; the scorer used to accept only 59 or 59.1."""
+    import re
+
+    pattern = number_pattern(100 * 13 / 22)
+    assert all(re.search(pattern, f"{s}%") for s in ("59.09", "59.1", "59"))
+    assert not re.search(pattern, "59.5%")

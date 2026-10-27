@@ -119,7 +119,12 @@ def make_executor(db: Session, user: UserDB):
     def study(args: dict):
         found = get_study(db, str(args.get("study_id") or ""))
         if not found:
-            raise _ToolError(f"no project with id {args.get('study_id')!r} — use list_studies")
+            # The real ids, so the model can correct itself (or say the project
+            # does not exist) in this reply instead of guessing again.
+            rows, _total = list_studies(db, limit=30)
+            known = "; ".join(f"{r.id} ({r.client_name})" for r in rows) or "none"
+            raise _ToolError(f"no project with id {args.get('study_id')!r}. "
+                             f"The projects are: {known}")
         return found
 
     def link(args: dict):
@@ -496,19 +501,36 @@ def make_executor(db: Session, user: UserDB):
             raise _ToolError(f"link {ln.id} is {ln.status}; quotas go on an open link")
         pinned = SurveyDefinition.from_json(ln.survey_json)
         qid = str(args.get("qid") or "")
-        q = next((x for x in pinned.questions if x.qid == qid), None)
+        listable = [x for x in pinned.questions
+                    if x.type in (QuestionType.SINGLE, QuestionType.MULTI) and x.options]
+        q = next((x for x in listable if x.qid == qid), None)
         if q is None:
-            raise _ToolError(f"link {ln.id} asks no question {qid!r}")
-        if q.type not in (QuestionType.SINGLE, QuestionType.MULTI) or not q.options:
-            raise _ToolError(f"{qid} is not a pick-from-a-list question; quota on one that is")
+            # Every question a quota can use, with its options: the model picks
+            # the right one and calls again, rather than asking the user for an
+            # id it was never told.
+            def offered(x):
+                return ", ".join(f"{o.code}={o.label}" for o in x.options[:12])
+
+            choices = "; ".join(f'{x.qid} "{x.text[:60]}" [{offered(x)}]' for x in listable)
+            raise _ToolError(f"{qid!r} is not a question a quota can use on link {ln.id}. "
+                             f"Call again with one of: {choices}")
         labels = {o.code: o.label for o in q.options}
-        try:
-            codes = sorted({int(c) for c in args.get("codes") or []})
-        except (TypeError, ValueError) as exc:
-            raise _ToolError("codes must be the option numbers") from exc
-        unknown = [c for c in codes if c not in labels]
+        by_label = {o.label.strip().lower(): o.code for o in q.options}
+        codes, unknown = set(), []
+        for given in args.get("codes") or []:
+            # An option number, or its label: "Woman" is what people say.
+            text = str(given).strip()
+            if text.lstrip("-").isdigit() and int(text) in labels:
+                codes.add(int(text))
+            elif text.lower() in by_label:
+                codes.add(by_label[text.lower()])
+            else:
+                unknown.append(given)
+        codes = sorted(codes)
         if not codes or unknown:
-            raise _ToolError(f"{qid}'s codes are {sorted(labels)}; got {unknown or 'none'}")
+            raise _ToolError(f"{qid}'s options are "
+                             f"{', '.join(f'{c}={t}' for c, t in labels.items())}; "
+                             f"got {unknown or 'none'}")
         limit = int(args.get("limit") or 0)
         if limit < 1:
             raise _ToolError("a quota needs a limit of at least 1 complete")
