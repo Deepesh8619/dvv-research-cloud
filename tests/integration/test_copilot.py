@@ -658,3 +658,140 @@ def test_female_means_woman_even_on_the_wrong_question(client, monkeypatch):  # 
             ("text", "Ready to confirm."))
     (card,) = test_client.post("/api/copilot", json={"message": "max 10 women"}).json()["proposals"]
     assert card["body"]["cells"][0]["condition"] == {"op": "eq", "qid": "S2", "value": 2}
+
+
+# --- the questionnaire under review --------------------------------------------
+
+
+def _draft(sf, **meta):
+    """The sample questionnaire, in review, read from a document of a known format."""
+    from tests.integration.test_fielding_routes import _sample_survey
+
+    survey = _sample_survey("study_f1")
+    survey.metadata.update(meta)
+    for q in survey.questions:
+        q.source_text = f"{q.qid}. {q.text} [SA]"
+    _make_questionnaire(sf, status="in_review", survey=survey)
+    return survey
+
+
+def test_a_draft_question_can_be_read_and_the_open_one_is_known(client, monkeypatch):  # noqa: F811
+    """The copilot used to read approved questionnaires only — blind on the review page."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _draft(sf)
+    seen = _script(monkeypatch, ("tool", "question_details", {"study_id": "study_f1", "qid": "Q2"}),
+                   ("text", "It asks whether they drink coffee."))
+    test_client.post("/api/copilot", json={"message": "what does this question ask?",
+                                           "study_id": "study_f1", "focus_qid": "Q2"})
+    system = seen[0][0]["content"]
+    assert "question Q2 open" in system and "questionnaire is in_review" in system
+    (result,) = _tool_results(seen)
+    assert result["question"]["source_text"] == "Q2. Do you drink coffee? [SA]"
+
+
+def test_an_edit_card_shows_the_change_and_refuses_a_stale_confirm(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    _draft(sf)
+    _script(monkeypatch,
+            ("tool", "propose_edit_question",
+             {"study_id": "study_f1", "qid": "Q2",
+              "options": ["Yes, daily", "Yes, sometimes", "No"]}),
+            ("text", "Ready to confirm."))
+    (card,) = test_client.post("/api/copilot", json={"message": "split Yes"}).json()["proposals"]
+    assert card["diff"] == [{"field": "options", "before": "1=Yes; 2=No",
+                             "after": "1=Yes, daily; 2=Yes, sometimes; 3=No"}]
+    url = f"/api{card['path']}"
+
+    # Someone edits Q2 first: the card was prepared against the old question.
+    assert test_client.patch(url, json={"text": "Do you ever drink coffee?"}).status_code == 200
+    stale = test_client.request(card["method"], url, json=card["body"])
+    assert stale.status_code == 409
+
+
+def test_an_edit_that_would_break_the_questionnaire_makes_no_card(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    _draft(sf)
+    seen = _script(monkeypatch,
+                   ("tool", "propose_edit_question", {"study_id": "study_f1", "qid": "Q2",
+                                                      "type": "carousel"}),
+                   ("text", "Not a type."))
+    resp = test_client.post("/api/copilot", json={"message": "make Q2 a carousel"}).json()
+    assert resp["proposals"] == []
+    assert "no question type 'carousel'" in _tool_results(seen)[0]["error"]
+
+
+def test_a_question_others_read_cannot_be_deleted_or_left_out(client, monkeypatch):  # noqa: F811
+    """Q3 shows only to Q2 = 1, so Q2 cannot go."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _draft(sf)
+    seen = _script(monkeypatch,
+                   ("tool", "propose_delete_question", {"study_id": "study_f1", "qid": "Q2"}),
+                   ("tool", "propose_question_in_link", {"study_id": "study_f1", "qid": "Q2",
+                                                         "in_link": False}),
+                   ("tool", "propose_delete_question", {"study_id": "study_f1", "qid": "Q3"}),
+                   ("text", "Ready."))
+    resp = test_client.post("/api/copilot", json={"message": "drop Q2"}).json()
+    delete_q2, leave_q2, _ = _tool_results(seen)
+    assert "Q3 read its answer" in delete_q2["error"]
+    assert "Q3 read its answer" in leave_q2["error"]
+    (card,) = resp["proposals"]
+    assert (card["method"], card["path"]) == (
+        "DELETE", "/studies/study_f1/questionnaire/questions/Q3")
+    assert test_client.request(card["method"], f"/api{card['path']}").status_code in (200, 204)
+
+
+def test_teaching_the_parser_names_what_it_touches_and_takes_effect(client, monkeypatch):  # noqa: F811
+    from api.db import ProfileRuleDB
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    _draft(sf, profile={"slug": "acme_fmt"})
+    _script(monkeypatch,
+            ("tool", "propose_teach_reading", {"study_id": "study_f1", "kind": "type_signal",
+                                               "pattern": "[SA]", "value": "single"}),
+            ("text", "Ready to confirm."))
+    resp = test_client.post("/api/copilot", json={"message": "[SA] means single"}).json()
+    (card,) = resp["proposals"]
+    assert card["title"] == 'Teach the acme_fmt format: "[SA]" marks a single question'
+    assert card["detail"].startswith("3 question(s) in this document contain it (Q1, Q2, Q3)")
+    assert test_client.post(f"/api{card['path']}", json=card["body"]).status_code == 200
+    db = sf()
+    try:
+        rule = db.query(ProfileRuleDB).filter_by(profile_slug="acme_fmt").one()
+        assert (rule.pattern_kind, rule.pattern_value) == ("type_signal", "single")
+    finally:
+        db.close()
+
+
+def test_teaching_is_refused_without_a_format_or_for_an_analyst(client, monkeypatch):  # noqa: F811
+    test_client, sf, state = client
+    _make_study(sf)
+    _draft(sf)  # no detected format
+    args = {"study_id": "study_f1", "kind": "type_signal", "pattern": "[SA]", "value": "single"}
+    seen = _script(monkeypatch, ("tool", "propose_teach_reading", args), ("text", "No."))
+    test_client.post("/api/copilot", json={"message": "teach [SA]"})
+    assert "no detected document format" in _tool_results(seen)[0]["error"]
+
+    state["role"] = "analyst"
+    seen = _script(monkeypatch, ("tool", "propose_teach_reading", args), ("text", "No."))
+    test_client.post("/api/copilot", json={"message": "teach [SA]"})
+    assert "owners and founders" in _tool_results(seen)[0]["error"]
+
+
+def test_a_misnamed_kind_is_worked_out_from_what_it_means(client, monkeypatch):  # noqa: F811
+    """Seen on a model: kind "[SA]", then "option_tag", for "[SA] means single choice"."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _draft(sf, profile={"slug": "acme_fmt"})
+    _script(monkeypatch,
+            ("tool", "propose_teach_reading", {"study_id": "study_f1", "kind": "option_tag",
+                                               "pattern": "[SA]", "value": "Single choice"}),
+            ("text", "Ready."))
+    resp = test_client.post("/api/copilot", json={"message": "[SA] is single"}).json()
+    (card,) = resp["proposals"]
+    assert card["body"]["pattern_kind"] == "type_signal"
+    assert card["body"]["pattern_value"] == "single"

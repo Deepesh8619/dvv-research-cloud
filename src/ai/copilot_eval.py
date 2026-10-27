@@ -20,7 +20,8 @@ from typing import Any
 
 CARD_KINDS = frozenset({
     "open_link", "hold", "release", "close", "materialize", "reextract",
-    "look", "approve_clean", "quota",
+    "look", "approve_clean", "quota", "edit_question", "reread", "in_link",
+    "approve_question", "delete_question", "teach",
 })
 EXPECT_KEYS = frozenset({
     "tools", "tools_any", "no_tools", "cards", "cards_allowed", "card_mentions",

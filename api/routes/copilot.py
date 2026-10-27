@@ -153,12 +153,31 @@ def make_executor(db: Session, user: UserDB):
             raise _ToolError(f"project {s.id} has no approved questionnaire yet")
         return approved
 
+    def current(args: dict):
+        """(study, questionnaire row, definition) — the questionnaire as it stands
+        NOW, draft or approved: what the review page shows. Respondents see a
+        link's pinned copy; editing and teaching work on this one."""
+        from api.routes.questionnaire import _latest_questionnaire, _load_definition
+
+        s = study(args)
+        row = _latest_questionnaire(db, s.id)
+        return s, row, _load_definition(db, row)
+
+    def question(args: dict):
+        s, row, definition = current(args)
+        # Models name it either way; a small one wrote `question_id`.
+        qid = str(args.get("qid") or args.get("question_id") or "")
+        if qid not in definition:
+            known = ", ".join(q.qid for q in definition.questions[:80])
+            raise _ToolError(f"no question {qid!r} in {s.id}. Its questions are: {known}")
+        return s, row, definition, definition[qid]
+
     def propose(kind: str, title: str, detail: str, method: str, path: str,
-                body: dict | None = None) -> dict:
+                body: dict | None = None, diff: list[dict] | None = None) -> dict:
         if not can_act:
             raise _ToolError(f"a {user.role} can't do this; an owner or analyst can")
         card = CopilotProposal(id=uuid4().hex[:8], kind=kind, title=title, detail=detail,
-                               method=method, path=path, body=body or {})
+                               method=method, path=path, body=body or {}, diff=diff or [])
         proposals.append(card)
         return {"proposed": True, "card": title,
                 "note": "Not done yet: the user must press Confirm on the card."}
@@ -251,7 +270,7 @@ def make_executor(db: Session, user: UserDB):
         than from anything it composed. Many questionnaires have no overview;
         that is normal and says nothing about the study.
         """
-        definition = survey(args)
+        _s, _row, definition = current(args)
         brief = (definition.metadata or {}).get("study_overview")
         understood = (definition.metadata or {}).get("study_understanding")
         if not brief and not understood and not (definition.metadata or {}).get("qa"):
@@ -293,7 +312,7 @@ def make_executor(db: Session, user: UserDB):
         project's indexed vectors answer that; the two lists are kept apart so
         the model can tell an exact hit from a near one.
         """
-        definition = survey(args)
+        _s, _row, definition = current(args)
         study_id, query = args["study_id"], str(args.get("query", ""))
         result = search_questionnaire(definition, study_id, query)
         try:
@@ -582,13 +601,208 @@ def make_executor(db: Session, user: UserDB):
             "POST", f"/studies/{s.id}/fielding/links/{ln.id}/quotas",
             {"cells": [{"name": name, "condition": condition, "limit": limit}]})
 
+    # --- the questionnaire under review: read how it was read, change it, teach --
+
+    def reading_conventions(args):
+        """The document's format, what has been taught about it, and what can be."""
+        from api.db import ProfileRuleDB
+        from api.routes.corrections import _profile_slug
+        from src.engines.questionnaire.learned import _ALLOWED_VALUES, PATTERN_KINDS
+
+        _s, row, _definition = current(args)
+        slug = _profile_slug(row)
+        taught = [] if not slug else [
+            {"kind": r.pattern_kind, "pattern": r.pattern, "value": r.pattern_value}
+            for r in db.query(ProfileRuleDB).filter(
+                ProfileRuleDB.profile_slug == slug, ProfileRuleDB.active.is_(True),
+                ProfileRuleDB.pattern_kind.isnot(None))]
+        return {
+            "format": slug,
+            "taught": taught,
+            "kinds": {k: sorted(_ALLOWED_VALUES[k]) if k in _ALLOWED_VALUES else "no value"
+                      for k in sorted(PATTERN_KINDS)},
+            "note": None if slug else "This questionnaire has no detected document format, "
+                    "so there is nothing to teach; edit its questions instead.",
+        }
+
+    def propose_edit_question(args):
+        import copy
+
+        from api.models import QuestionUpdateRequest
+        from api.routes.questionnaire import _apply_update, question_fingerprint
+
+        s, _row, definition, q = question(args)
+        body: dict = {}
+        text = str(args.get("text") or args.get("new_text") or "").strip()
+        if text:
+            body["text"] = text
+        if args.get("type"):
+            kind = str(args["type"]).strip().lower()
+            if kind not in {t.value for t in QuestionType}:
+                raise _ToolError(f"no question type {kind!r}; types are "
+                                 f"{', '.join(t.value for t in QuestionType)}")
+            body["type"] = kind
+        if args.get("options"):
+            options = []
+            for i, o in enumerate(args["options"]):
+                if isinstance(o, dict) and str(o.get("label") or "").strip():
+                    options.append({"code": int(o.get("code") or i + 1),
+                                    "label": str(o["label"]).strip()})
+                elif str(o).strip():
+                    options.append({"code": i + 1, "label": str(o).strip()})
+            body["options"] = options
+        for flag in ("required", "randomize_options"):
+            if isinstance(args.get(flag), bool):
+                body[flag] = args[flag]
+        if not body:
+            raise _ToolError("name what to change: text, type, options, required or "
+                             "randomize_options")
+
+        # Tried on a copy first, through the endpoint's own code, so a card that
+        # would be refused on Confirm is never shown.
+        trial = copy.deepcopy(definition)
+        before = trial.validate()
+        try:
+            _apply_update(trial[q.qid], QuestionUpdateRequest(**body))
+        except (ValueError, KeyError, TypeError) as exc:
+            raise _ToolError(f"that change is not valid: {exc}") from exc
+        if new := [p for p in trial.validate() if p not in before]:
+            raise _ToolError("that change would break the questionnaire: " + "; ".join(new))
+
+        def shown(field: str, question) -> str:
+            value = getattr(question, field)
+            if field == "options":
+                return "; ".join(f"{o.code}={o.label}" for o in value or []) or "(none)"
+            return getattr(value, "value", value) if value is not None else "(none)"
+
+        diff = [{"field": field, "before": str(shown(field, q)),
+                 "after": str(shown(field, trial[q.qid]))} for field in body]
+        body["base_fingerprint"] = question_fingerprint(q)
+        return propose(
+            "edit_question", f"Change {q.qid}: {', '.join(d['field'] for d in diff)}",
+            f"Saved to the questionnaire under review; {q.qid} goes back to review. If anyone "
+            f"changes {q.qid} before you confirm, this card is refused.",
+            "PATCH", f"/studies/{s.id}/questionnaire/questions/{q.qid}", body, diff)
+
+    def propose_reread_question(args):
+        s, _row, _definition, q = question(args)
+        if not q.source_text:
+            raise _ToolError(f"{q.qid} has no source text from a document to read again")
+        return propose(
+            "reread", f"Read {q.qid} again from the document",
+            f"Re-reads {q.qid} from its source text with today's parsers and everything "
+            "taught about this format. No AI model is used; a reading that is not better "
+            "is not kept.",
+            "POST", f"/studies/{s.id}/questionnaire/questions/{q.qid}/reread")
+
+    def _refuse_if_used(definition, qid: str, doing: str) -> None:
+        from api.routes.questionnaire import _dependents
+
+        if used_by := sorted(_dependents(definition, qid)):
+            raise _ToolError(f"cannot {doing} {qid}: {', '.join(used_by)} read its answer "
+                             "(routing, masks, pipes). Change those first.")
+
+    def propose_question_in_link(args):
+        s, _row, definition, q = question(args)
+        in_link = bool(args.get("in_link"))
+        if not in_link:
+            _refuse_if_used(definition, q.qid, "leave out")
+        return propose(
+            "in_link", f"{'Ask' if in_link else 'Leave out'} {q.qid} in the survey link",
+            ("Respondents will be asked it again in links opened from now on."
+             if in_link else
+             "It stays in the questionnaire and the datamap, but links opened from now on "
+             "do not ask it. Links already in the field keep their own copy."),
+            "PUT", f"/studies/{s.id}/questionnaire/questions/{q.qid}/in-link",
+            {"in_link": in_link})
+
+    def propose_approve_question(args):
+        s, row, _definition, q = question(args)
+        if q.qid in set(row.approved_qids or []):
+            raise _ToolError(f"{q.qid} is already approved")
+        flags = sorted(q.flags or [])
+        return propose(
+            "approve_question", f"Approve {q.qid}",
+            "Marks it checked by a person" + (f", clearing its flags ({', '.join(flags)})"
+                                              if flags else "") + ".",
+            "POST", f"/studies/{s.id}/questionnaire/questions/{q.qid}/approve")
+
+    def propose_delete_question(args):
+        s, _row, definition, q = question(args)
+        _refuse_if_used(definition, q.qid, "delete")
+        return propose(
+            "delete_question", f"Delete {q.qid} from the questionnaire",
+            f"Removes \"{q.text[:120]}\" from the questionnaire under review. To keep it in "
+            "the data but not ask it, leave it out of the link instead.",
+            "DELETE", f"/studies/{s.id}/questionnaire/questions/{q.qid}")
+
+    _MEANING = {
+        "type_signal": "marks a {value} question",
+        "field_alias": "labels the {value} field",
+        "option_tag": "marks an option as {value}",
+        "randomize_signal": "means the options are shuffled",
+        "screen_out_range": "introduces a range screen-out",
+        "hidden_variable": "marks a computed variable that is never asked",
+    }
+
+    #: How people name a question type, in the words the parser uses.
+    _TYPE_WORDS = {"single choice": "single", "single-choice": "single", "single select": "single",
+                   "multiple choice": "multi", "multi-choice": "multi", "multiple": "multi",
+                   "multi select": "multi", "open": "open_text", "open end": "open_text",
+                   "open-ended": "open_text", "grid": "grid_single", "ranking": "rank"}
+
+    def _kind_for(kind: str, value: str) -> str:
+        """The pattern kind, worked out from the value when the model named it wrong.
+
+        Seen on a model: `kind="[SA]"`, then `kind="option_tag"` with value
+        "single". The value can only belong to one kind, so it decides.
+        """
+        from src.engines.questionnaire.learned import _ALLOWED_VALUES, PATTERN_KINDS
+
+        if kind in PATTERN_KINDS and value in _ALLOWED_VALUES.get(kind, {value}):
+            return kind
+        owners = [k for k, allowed in _ALLOWED_VALUES.items() if value in allowed]
+        return owners[0] if len(owners) == 1 else kind
+
+    def propose_teach_reading(args):
+        from api.auth import UserRole as Role
+        from api.routes.corrections import _CORRECTION_ROLES, _profile_slug
+        from src.engines.questionnaire.learned import validate_pattern
+
+        s, row, definition = current(args)
+        if Role(user.role) not in _CORRECTION_ROLES:
+            raise _ToolError("teaching the parser is for owners and founders")
+        slug = _profile_slug(row)
+        if not slug:
+            raise _ToolError("this questionnaire has no detected document format, so there "
+                             "is nothing to teach; edit its questions instead")
+        pattern = str(args.get("pattern") or "").strip()
+        value = " ".join(str(args.get("value") or "").strip().lower().split())
+        value = _TYPE_WORDS.get(value, value)
+        kind = _kind_for(str(args.get("kind") or "").strip().lower(), value)
+        if problem := validate_pattern(kind, pattern, value):
+            raise _ToolError(problem)
+        needle = pattern.strip("[]").strip().lower()
+        hits = [x.qid for x in definition.questions
+                if needle in (x.source_text or x.text or "").lower()]
+        meaning = _MEANING[kind].format(value=value)
+        return propose(
+            "teach", f"Teach the {slug} format: \"{pattern}\" {meaning}",
+            f"{len(hits)} question(s) in this document contain it"
+            + (f" ({', '.join(hits[:12])}{'…' if len(hits) > 12 else ''})" if hits else "")
+            + ". Confirm re-reads this questionnaire with it now; later documents in this "
+              "format are read the same way. It can be switched off in the format's rules.",
+            "POST", f"/profiles/{slug}/rules",
+            {"pattern_kind": kind, "pattern": pattern, "pattern_value": value or None,
+             "scope": "profile", "study_id": s.id})
+
     tools = {
         "list_studies": list_studies_tool,
         "study_overview": study_overview,
         "find_question": find_question,
-        "question_details": lambda a: get_question_details(survey(a), a["study_id"],
+        "question_details": lambda a: get_question_details(current(a)[2], a["study_id"],
                                                            str(a.get("qid", ""))),
-        "who_was_asked": lambda a: explain_question_base(survey(a), a["study_id"],
+        "who_was_asked": lambda a: explain_question_base(current(a)[2], a["study_id"],
                                                          str(a.get("qid", ""))),
         "search_verbatims": search_verbatims,
         "qc_findings": qc_findings,
@@ -606,6 +820,13 @@ def make_executor(db: Session, user: UserDB):
         "propose_set_look": propose_set_look,
         "propose_approve_clean": propose_approve_clean,
         "propose_add_quota": propose_add_quota,
+        "reading_conventions": reading_conventions,
+        "propose_edit_question": propose_edit_question,
+        "propose_reread_question": propose_reread_question,
+        "propose_question_in_link": propose_question_in_link,
+        "propose_approve_question": propose_approve_question,
+        "propose_delete_question": propose_delete_question,
+        "propose_teach_reading": propose_teach_reading,
     }
 
     def execute(name: str, args: dict) -> dict:
@@ -664,6 +885,11 @@ def copilot(
     page = ""
     if body.study_id and (current := get_study(db, body.study_id)):
         page = f"The user is looking at project {current.id} ({current.client_name})."
+        if qs := list_questionnaires_for_study(db, current.id):
+            page += f" Its questionnaire is {qs[0].status}."
+        if body.focus_qid:
+            page += (f" They have question {body.focus_qid} open on the questionnaire page; "
+                     "'this question' means it.")
         links = list_fielding_links_for_study(db, current.id)
         if links:  # the real IDs, so a model never has to guess one
             page += " Its fielding links: " + "; ".join(

@@ -288,6 +288,11 @@ class QuestionUpdateRequest(BaseModel):
     # can also carry `techniques` (masks, pipes) that an unrelated edit must not
     # wipe. Explicit null clears the whole dict, same as every other field here.
     validation: dict | None = None
+    # The question as the editor last saw it (`question_fingerprint`). When
+    # sent and the question has changed since, the edit is refused (409): a
+    # copilot card prepared against yesterday's wording must not overwrite
+    # today's.
+    base_fingerprint: str | None = None
 
     # "Clear this field" (explicit null) vs. "leave unchanged" (omitted) are
     # distinguished by the route via `model_fields_set`, since both surface here
@@ -689,6 +694,8 @@ class CopilotRequest(BaseModel):
     study_id: str | None = None
     #: Continue this conversation; omitted starts a new one.
     conversation_id: str | None = None
+    #: The question open on the questionnaire page, if any — context, not a permission.
+    focus_qid: str | None = Field(default=None, max_length=64)
 
 
 class CopilotProposal(BaseModel):
@@ -699,9 +706,11 @@ class CopilotProposal(BaseModel):
     kind: str
     title: str
     detail: str
-    method: Literal["POST", "PATCH"]
+    method: Literal["POST", "PATCH", "PUT", "DELETE"]
     path: str
     body: dict = Field(default_factory=dict)
+    #: What changes, field by field ({field, before, after}), written by the server.
+    diff: list[dict] = Field(default_factory=list)
 
 
 class CopilotResponse(BaseModel):

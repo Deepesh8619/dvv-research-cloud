@@ -2,7 +2,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import CopilotDrawer, { studyFromPath } from './CopilotDrawer'
+import { act } from 'react'
+import type { CopilotProposal } from '../api/client'
+import CopilotDrawer, { askCopilot, focusQuestion, studyFromPath } from './CopilotDrawer'
 
 /**
  * Nothing changes until a person confirms — and then only the request the
@@ -28,7 +30,7 @@ vi.mock('../api/client', () => ({
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : null),
 }))
 
-async function ask(reply: string, proposals = [card]) {
+async function ask(reply: string, proposals: CopilotProposal[] = [card]) {
   const { copilotApi } = await import('../api/client')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(copilotApi.ask as any).mockResolvedValue({
@@ -86,7 +88,7 @@ describe('CopilotDrawer', () => {
     })
     fireEvent.click(screen.getByText('Ask'))
     await screen.findByText('Still held.')
-    expect(copilotApi.ask).toHaveBeenCalledWith('still?', 's1', 'conv_1')
+    expect(copilotApi.ask).toHaveBeenCalledWith('still?', 's1', 'conv_1', null)
   })
 
   it('New chat starts over and forgets the conversation in this browser', async () => {
@@ -106,7 +108,7 @@ describe('CopilotDrawer', () => {
   it('sends the project in view as context', async () => {
     const api = await ask('Ready.')
     await screen.findByText('Ready.')
-    expect(api.ask).toHaveBeenCalledWith('hold it at 50', 's1', null)
+    expect(api.ask).toHaveBeenCalledWith('hold it at 50', 's1', null, null)
   })
 
   it('confirming sends exactly the server-built request, then announces the change', async () => {
@@ -196,5 +198,38 @@ describe('CopilotDrawer', () => {
     await ask('| Brand | Starts | Completes | Terminates |\n|---|---|---|---|\n| Alpha | 90 | 60 | 30 |')
     await screen.findByText('Alpha')
     expect(document.querySelectorAll('span[aria-hidden]').length).toBe(0)
+  })
+
+  it('sends the question open on the questionnaire page, only for that project', async () => {
+    const { copilotApi } = await import('../api/client')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(copilotApi.ask as any).mockResolvedValue({
+      data: { reply: 'It asks about coffee.', proposals: [], tools_used: [], answered_by: 'Bedrock' },
+    })
+    render(
+      <MemoryRouter initialEntries={['/projects/s1/questionnaire']}>
+        <CopilotDrawer open onClose={() => {}} />
+      </MemoryRouter>,
+    )
+    act(() => focusQuestion('s1', 'S3'))
+    act(() => askCopilot('About S3: '))
+    const box = screen.getByPlaceholderText('Ask about any project…') as HTMLInputElement
+    expect(box.value).toBe('About S3: ')
+    fireEvent.change(box, { target: { value: 'About S3: what does it ask?' } })
+    fireEvent.click(screen.getByText('Ask'))
+    await screen.findByText('It asks about coffee.')
+    expect(copilotApi.ask).toHaveBeenCalledWith('About S3: what does it ask?', 's1', null, 'S3')
+
+    act(() => focusQuestion('other', 'Q9')) // another project's question is not this one
+    expect(screen.queryByText(/· Q9/)).toBeNull()
+  })
+
+  it('an edit card shows before and after', async () => {
+    await ask('Ready to confirm.', [{
+      ...card, kind: 'edit_question', title: 'Change Q2: options', method: 'PATCH' as const,
+      diff: [{ field: 'options', before: '1=Yes; 2=No', after: '1=Daily; 2=Sometimes; 3=No' }],
+    }])
+    expect(await screen.findByText('1=Daily; 2=Sometimes; 3=No')).toBeTruthy()
+    expect(screen.getByText('1=Yes; 2=No')).toBeTruthy()
   })
 })

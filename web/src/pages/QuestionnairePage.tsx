@@ -41,6 +41,7 @@ import QAPanel from '../components/review/QAPanel'
 import { useLabel } from '../labels/LabelContext'
 import { BucketBar, ConnectionsPanel, IssuesPanel, ProgressRing } from '../components/review/QuestionMap'
 import { bucketInfo } from '../lib/buckets'
+import { askCopilot, focusQuestion } from '../components/CopilotDrawer'
 import { isConstantSumQuestion, TYPE_CHOICES, typeHint, typeLabel } from '../labels/questionTypes'
 import { canCorrect as hasCorrectRole, canWrite as hasWriteRole } from '../auth/roles'
 import { DocChartIcon } from '../components/Icons'
@@ -1474,6 +1475,22 @@ export default function QuestionnairePage() {
     loadStatus()
   }, [loadStatus])
 
+  // The copilot knows which question is open, and a confirmed card (an edit,
+  // a re-read, something taught) shows here without a reload.
+  useEffect(() => {
+    if (!studyId) return
+    focusQuestion(studyId, selectedQid)
+    return () => focusQuestion(studyId, null)
+  }, [studyId, selectedQid])
+  useEffect(() => {
+    const refresh = () => {
+      void loadStatus()
+      void loadQuestions()
+    }
+    window.addEventListener('dvv:changed', refresh)
+    return () => window.removeEventListener('dvv:changed', refresh)
+  }, [loadStatus, loadQuestions])
+
   // Poll while processing (mirrors ProjectPage's setInterval-until-terminal
   // pattern). Stop as soon as status leaves "processing"; then load questions.
   useEffect(() => {
@@ -2022,6 +2039,16 @@ export default function QuestionnairePage() {
             <div className="col-span-3 bg-white rounded-xl border border-slate-200 shadow-sm p-6">
               {selected ? (
                 <div key={selected.qid} className="dvv-rise">
+                <div className="mb-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => askCopilot(`About ${selected.qid}: `)}
+                    className="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                    title="Ask about this question, change it, or teach how this kind of question is read"
+                  >
+                    Ask Copilot about {selected.qid}
+                  </button>
+                </div>
                 <ConnectionsPanel
                   studyId={studyId!}
                   question={selected}

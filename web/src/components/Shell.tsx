@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink, useNavigate, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import CopilotDrawer from './CopilotDrawer'
@@ -45,6 +45,11 @@ export default function Shell() {
   const [query, setQuery] = useState('')
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showCopilot, setShowCopilot] = useState(false)
+  useEffect(() => {
+    const open = () => setShowCopilot(true)
+    window.addEventListener('dvv:copilot-open', open)
+    return () => window.removeEventListener('dvv:copilot-open', open)
+  }, [])
   const [showNav, setShowNav] = useState(false)  // the drawer, below md only
 
   const onSearch = (e: React.FormEvent) => {

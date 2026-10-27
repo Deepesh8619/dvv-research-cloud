@@ -135,8 +135,13 @@ def seed() -> None:
                  options=[Option(code=1, label="Leaf"), Option(code=2, label="Cup")]),
         Question(qid="T4", text="Rate these teas.", type=QuestionType.SINGLE, options=[]),
     ]
-    tea = SurveyDefinition(study_id="tea", title="Tea habits", source="authored",
-                           status="in_review", version=1,
+    # Read from a document of a known format, so the review cases have source
+    # text to explain and a format to teach: "[SA]" marks single choice.
+    for q in tea_qs:
+        q.source_text = f"{q.qid}. {q.text} [SA] " + " ".join(
+            f"{o.code}. {o.label}" for o in q.options)
+    tea = SurveyDefinition(study_id="tea", title="Tea habits", source="extracted",
+                           status="in_review", version=1, metadata={"profile": {"slug": "tea_fmt"}},
                            blocks=[Block(block_id="B", question_ids=[q.qid for q in tea_qs])],
                            questions=tea_qs)
     s.add(UserDB(id="u", email=USER, name="Eval Runner", role="owner", is_active=True,
@@ -202,6 +207,7 @@ def ask(h: dict, case: dict, regex: dict, literal: dict) -> list[dict]:
     for turn in case["turns"]:
         say = fill_text(turn["say"], regex, literal)
         body = {"message": say, **({"study_id": case["study"]} if case.get("study") else {}),
+                **({"focus_qid": case["focus"]} if case.get("focus") else {}),
                 **({"conversation_id": conversation} if conversation else {})}
         started = time.perf_counter()
         try:

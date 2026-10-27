@@ -14,6 +14,19 @@ import { CopilotConversationSummary, CopilotProposal, copilotApi, errorMessage }
 
 type CardState = 'pending' | 'working' | 'done' | 'dismissed' | 'failed' | 'expired'
 
+/**
+ * Other pages talk to the copilot through two window events, so none of them
+ * has to know where the drawer lives:
+ *   dvv:copilot-open    {prefill?}       open it, optionally with a question typed
+ *   dvv:question-focus  {studyId, qid}   the question open on the questionnaire page
+ */
+export function askCopilot(prefill?: string) {
+  window.dispatchEvent(new CustomEvent('dvv:copilot-open', { detail: { prefill } }))
+}
+export function focusQuestion(studyId: string, qid: string | null) {
+  window.dispatchEvent(new CustomEvent('dvv:question-focus', { detail: { studyId, qid } }))
+}
+
 /** The conversation to reopen, per browser. A convenience: losing it loses nothing. */
 const LAST_KEY = 'dvv.copilot.conversation'
 function remembered(): string | null {
@@ -200,7 +213,20 @@ function Card({
   return (
     <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm">
       <p className="font-medium text-slate-900">{card.title}</p>
-      <p className="text-slate-600 mt-0.5">{card.detail}</p>
+      {card.diff && card.diff.length > 0 && (
+        <table className="mt-2 w-full text-xs">
+          <tbody>
+            {card.diff.map((d) => (
+              <tr key={d.field} className="align-top border-t border-amber-200/70">
+                <td className="py-1 pr-2 font-medium text-slate-500">{d.field}</td>
+                <td className="py-1 pr-2 text-slate-500 line-through decoration-slate-300">{d.before}</td>
+                <td className="py-1 text-slate-900">{d.after}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="text-slate-600 mt-1">{card.detail}</p>
       {state === 'pending' && (
         <div className="flex gap-2 mt-2.5">
           <button
@@ -244,6 +270,23 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
   const [cardError, setCardError] = useState<Record<string, string>>({})
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [earlier, setEarlier] = useState<CopilotConversationSummary[]>([])
+  const [focus, setFocus] = useState<{ studyId: string; qid: string | null } | null>(null)
+  // Only the question open in THIS project counts.
+  const focusQid = focus && focus.studyId === studyId ? focus.qid : null
+
+  useEffect(() => {
+    const onFocus = (e: Event) => setFocus((e as CustomEvent).detail)
+    const onOpen = (e: Event) => {
+      const prefill = (e as CustomEvent).detail?.prefill
+      if (prefill) setInput(prefill)
+    }
+    window.addEventListener('dvv:question-focus', onFocus)
+    window.addEventListener('dvv:copilot-open', onOpen)
+    return () => {
+      window.removeEventListener('dvv:question-focus', onFocus)
+      window.removeEventListener('dvv:copilot-open', onOpen)
+    }
+  }, [])
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -306,7 +349,7 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
     setBusy(true)
     setError(null)
     try {
-      const res = await copilotApi.ask(message, studyId, conversationId)
+      const res = await copilotApi.ask(message, studyId, conversationId, focusQid)
       if (res.data.conversation_id && res.data.conversation_id !== conversationId) {
         setConversationId(res.data.conversation_id)
         remember(res.data.conversation_id)
@@ -348,7 +391,7 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
         <div>
           <p className="font-semibold text-slate-900">Copilot</p>
           <p className="text-xs text-slate-500">
-            {studyId ? `Looking at ${studyId}. ` : ''}Open-source models. It prepares actions;
+            {studyId ? `Looking at ${studyId}${focusQid ? ` · ${focusQid}` : ''}. ` : ''}Open-source models. It prepares actions;
             nothing changes until you confirm.
           </p>
         </div>
