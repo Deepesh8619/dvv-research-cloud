@@ -564,6 +564,36 @@ def field_report(
     return {**report.to_dict(), "link_id": link_id, "run_by": user.name}
 
 
+def link_projection(db: Session, link) -> dict:
+    """The projection for one link: its sessions, target, hold and quota cells."""
+    from types import SimpleNamespace
+
+    from api.db import list_quota_cells
+    from api.heavy import plain_sessions
+    from src.engines.fielding.projection import project
+
+    cells = [SimpleNamespace(name=c.name, limit=c.cell_limit, count=c.count)
+             for c in list_quota_cells(db, link.id)]
+    return project(plain_sessions(list_respondent_sessions(db, link.id)),
+                   target=link.target_completes, hold=link.soft_launch_limit,
+                   quota_cells=cells).to_dict()
+
+
+@router.get("/studies/{study_id}/fielding/links/{link_id}/projection")
+def field_projection(
+    study_id: str,
+    link_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """When this link reaches its hold, target and quotas at the current pace,
+    and how many more starts that takes. (Owner/Analyst)"""
+    link = get_fielding_link(db, link_id)
+    if not link or link.study_id != study_id:
+        raise HTTPException(status_code=404, detail="Fielding link not found")
+    return {**link_projection(db, link), "link_id": link_id}
+
+
 @router.get("/studies/{study_id}/fielding/links/{link_id}/soft-launch-check")
 def soft_launch_check(
     study_id: str,

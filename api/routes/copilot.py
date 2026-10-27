@@ -388,6 +388,19 @@ def make_executor(db: Session, user: UserDB):
                 "screened_out_at": _screen_outs(
                     pinned, result["field_report"].get("terminates_by_question", []))}
 
+    def field_projection(args):
+        from api.routes.materialize import link_projection
+
+        _s, ln = link(args)
+        p = link_projection(db, ln)
+        daily = {"title": f"Link {ln.id}, per day", "header": ["Day", "Starts", "Completes"],
+                 "rows": [[d["day"], str(d["starts"]), str(d["completes"])] for d in p["daily"]],
+                 "truncated": False, "significance_tested": False}
+        return {**p, "tables": [daily] if p["daily"] else [],
+                "note": "Computed from the link's sessions. Report the rate with its basis, "
+                        "each goal's remaining completes, finish date and starts needed, "
+                        "and every warning. Do not recompute or adjust any figure."}
+
     def dry_run(args):
         n = max(50, min(int(args.get("n") or 500), 5000))
         report = run_heavy_detached(db, simulate, survey(args), [], n=n, seed=20260915).to_dict()
@@ -821,6 +834,7 @@ def make_executor(db: Session, user: UserDB):
         "field_report": field_report,
         "soft_launch_check": soft_launch_check,
         "dry_run": dry_run,
+        "field_projection": field_projection,
         "ask_data": ask_data,
         "propose_open_link": propose_open_link,
         "propose_set_hold": propose_set_hold,
