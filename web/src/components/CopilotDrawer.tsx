@@ -1,7 +1,13 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 
-import { CopilotConversationSummary, CopilotProposal, copilotApi, errorMessage } from '../api/client'
+import {
+  CopilotConversationSummary,
+  CopilotProposal,
+  CopilotTable,
+  copilotApi,
+  errorMessage,
+} from '../api/client'
 
 /**
  * The copilot: ask anything about the platform; it prepares actions as cards.
@@ -49,6 +55,7 @@ interface Turn {
   role: 'user' | 'assistant'
   content: string
   cards?: CopilotProposal[]
+  tables?: CopilotTable[]
   answeredBy?: string
 }
 
@@ -304,6 +311,7 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
             role: m.role,
             content: m.content,
             cards: m.proposals,
+            tables: m.tables,
             answeredBy: m.answered_by ?? undefined,
           }
         }),
@@ -360,6 +368,7 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
           role: 'assistant',
           content: res.data.reply,
           cards: res.data.proposals,
+          tables: res.data.tables,
           answeredBy: res.data.answered_by,
         },
       ])
@@ -469,6 +478,16 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
                   onConfirm={() => confirm(card)}
                   onDismiss={() => setCardState((s) => ({ ...s, [card.id]: 'dismissed' }))}
                 />
+              ))}
+              {turn.tables?.map((t, ti) => (
+                <div key={ti} className="mt-2" data-testid="copilot-table">
+                  <DataTable rows={[t.header, ...t.rows]} />
+                  <p className="mt-0.5 text-[10px] text-slate-400">
+                    As computed by the tables engine
+                    {t.significance_tested ? '; letters mark significant differences' : '; no significance test'}
+                    {t.truncated ? `; first ${t.rows.length} rows` : ''}.
+                  </p>
+                </div>
               ))}
               {turn.answeredBy && (
                 <p className="text-[10px] text-slate-400 mt-1">answered by {turn.answeredBy}</p>

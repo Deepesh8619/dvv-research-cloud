@@ -811,3 +811,72 @@ def test_a_dry_run_says_its_respondents_are_made_up(client, monkeypatch):  # noq
     assert "simulated_dispositions" in result and "dispositions" not in result
     system = seen[0][0]["content"]
     assert "never dry_run" in system
+
+
+# --- tables as computed, significance held to a test ---------------------------
+
+_CROSSTAB = {"success": True, "tool": "show_table", "table": {
+    "title": "Q4 Satisfaction",
+    "columns": [{"label": "Total", "letter": "", "base": 22.0},
+                {"label": "Man", "letter": "A", "base": 11.0},
+                {"label": "Woman", "letter": "B", "base": 11.0}],
+    "rows": [{"label": "Very satisfied", "pct": [27.3, 36.4, 18.2], "sig": ["", "B", ""]}],
+    "means": None, "mean_sig": None}}
+
+
+def _navigator_returns(monkeypatch, *results):
+    """The study navigator behind ask_data, answering with these tool results."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("api.routes.chat.chat_with_study", lambda *a, **k: SimpleNamespace(
+        message=SimpleNamespace(content="Here is the table."), tool_results=list(results)))
+
+
+def test_a_crosstab_reaches_the_user_as_computed(client, monkeypatch):  # noqa: F811
+    """A crosstab arrives under `table` and used to be dropped: the user got a
+    sentence about it, and the model chose its own numbers."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    _navigator_returns(monkeypatch, _CROSSTAB)
+    _script(monkeypatch, ("tool", "ask_data", {"study_id": "study_f1", "question": "Q4 by gender"}),
+            ("text", "Men are more often very satisfied; the gap is significant (A vs B)."))
+    resp = test_client.post("/api/copilot", json={"message": "Q4 by gender"}).json()
+    (table,) = resp["tables"]
+    assert table["header"] == ["Q4 Satisfaction", "Total", "Man (A)", "Woman (B)"]
+    assert table["rows"][1] == ["Very satisfied", "27.3%", "36.4% B", "18.2%"]
+    assert resp["significance_tested"] is True
+    assert "unverified" not in resp["reply"]  # a test ran: the claim stands
+
+    conv = test_client.get(f"/api/copilot/conversations/{resp['conversation_id']}").json()
+    assert conv["messages"][1]["tables"] == resp["tables"]
+
+
+def test_a_significance_claim_with_no_test_is_sent_back_then_marked(client, monkeypatch):  # noqa: F811
+    """Seen on Bedrock: "no statistically significant difference" from means alone."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    _navigator_returns(monkeypatch, {"success": True, "columns": ["S2", "mean"],
+                                     "rows": [{"S2": "Man", "mean": 3.5}]})
+    seen = _script(monkeypatch,
+                   ("tool", "ask_data", {"study_id": "study_f1", "question": "Q4 means"}),
+                   ("text", "There is no statistically significant difference."),
+                   ("text", "There is no statistically significant difference."))
+    resp = test_client.post("/api/copilot", json={"message": "do men and women differ?"}).json()
+    assert resp["significance_tested"] is False
+    assert any("no tool in this answer ran a significance test" in (m.get("content") or "")
+               for m in seen[-1])
+    assert resp["reply"].endswith("any statement above about significance is unverified._")
+
+
+def test_saying_it_was_not_tested_is_not_a_claim(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    _navigator_returns(monkeypatch, {"success": True, "columns": ["S2", "mean"],
+                                     "rows": [{"S2": "Man", "mean": 3.5}]})
+    _script(monkeypatch, ("tool", "ask_data", {"study_id": "study_f1", "question": "means"}),
+            ("text", "Men average 3.5. Whether the difference is significant has not been tested."))
+    resp = test_client.post("/api/copilot", json={"message": "do men and women differ?"}).json()
+    assert "unverified" not in resp["reply"]

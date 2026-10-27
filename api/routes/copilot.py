@@ -44,6 +44,7 @@ from api.models import (
     CopilotStoredMessage,
 )
 from src.ai.copilot import run_copilot
+from src.ai.copilot_tables import tables_in
 from src.ai.router import BackendUnavailable
 from src.core.survey_definition import (
     TEMPLATE_SLUGS,
@@ -402,11 +403,6 @@ def make_executor(db: Session, user: UserDB):
             **{k: report[k] for k in ("never_fired", "impossible", "questions_never_shown")},
         }
 
-    #: Cells sent back to the model for one table. Enough to read a crossbreak
-    #: and small enough that a long table does not crowd out everything else in
-    #: the turn.
-    _MAX_TABLE_ROWS = 40
-
     def ask_data(args):
         s = study(args)
         try:
@@ -421,18 +417,17 @@ def make_executor(db: Session, user: UserDB):
         # "awareness is higher among 18-34s than 35+" with the cells discarded.
         # The model then said so, correctly and uselessly: "the tool returned
         # the direction only, no cell counts or percentages."
-        tables = [
-            {
-                "columns": result.get("columns"),
-                "rows": (result.get("rows") or [])[:_MAX_TABLE_ROWS],
-                "row_count": result.get("row_count"),
-                "truncated": bool(result.get("truncated"))
-                or len(result.get("rows") or []) > _MAX_TABLE_ROWS,
-            }
-            for result in (answer.tool_results or [])
-            if result.get("columns") and result.get("rows")
-        ]
-        return {"answer": answer.message.content, "tables": tables}
+        # Every shape the navigator returns — a crosstab with significance
+        # letters arrives under `table`, and was dropped here until it wasn't.
+        tables = [t for result in (answer.tool_results or []) for t in tables_in(result)]
+        return {
+            "answer": answer.message.content,
+            "tables": tables,
+            # Whether a test ran, so "significant" in a reply can be held to it.
+            "significance_tested": any(t["significance_tested"] for t in tables),
+            "note": "These tables are shown to the user under your reply exactly as "
+                    "computed. Do not retype their cells; say what they show.",
+        }
 
     # --- action tools: proposals only -----------------------------------------
 
@@ -921,12 +916,16 @@ def copilot(
     unique = list({(c.method, c.path, json.dumps(c.body, sort_keys=True)): c
                    for c in proposals}.values())
     lookups = [{"tool": r.get("tool", ""), "args": r.get("args") or {}} for r in results]
+    tables = [t for r in results if r.get("success") is not False
+              for t in r.get("tables") or [] if isinstance(t, dict) and "header" in t]
     conversation = save_copilot_exchange(
         db, conversation, user.id, body.study_id, body.message, reply, lookups,
-        [c.model_dump() for c in unique], answered_by)
+        [c.model_dump() for c in unique], answered_by, tables)
     return CopilotResponse(reply=reply, proposals=unique,
                            tools_used=[r.get("tool", "") for r in results],
                            answered_by=answered_by, conversation_id=conversation.id,
+                           tables=tables,
+                           significance_tested=any(r.get("significance_tested") for r in results),
                            tool_errors=[f"{r.get('tool')}: {r['error']}" for r in results
                                         if r.get("success") is False and r.get("error")])
 
@@ -962,6 +961,7 @@ def copilot_conversation(
             role=m.role, content=m.content or "",
             proposals=[CopilotProposal(**p) for p in m.proposals or []],
             tools_used=[x.get("tool", "") for x in m.lookups or []],
+            tables=m.tables or [],
             answered_by=m.answered_by, created_at=m.created_at,
         ) for m in list_copilot_messages(db, c.id)],
     )

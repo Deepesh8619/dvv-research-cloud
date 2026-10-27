@@ -1,5 +1,5 @@
 {
- "about": "Copilot eval set. Synthetic projects only; `focus` is the question open on the questionnaire page (scripts/eval_copilot.py seeds them). {name} in a message is replaced with a seeded id; in a pattern, with the figure the platform's own report gives. Checks: tools (all must run), tools_any (one must), no_tools, cards (exact kinds), cards_allowed (no others), card_mentions, mentions, avoids (regex, case-insensitive). Every turn also fails if it states figures without a lookup, unless may_skip_tools.",
+ "about": "Copilot eval set. Synthetic projects only; `focus` is the question open on the questionnaire page (scripts/eval_copilot.py seeds them). {name} in a message is replaced with a seeded id; in a pattern, with the figure the platform's own report gives. Checks: table_mentions (the tables shown under the reply), tools (all must run), tools_any (one must), no_tools, cards (exact kinds), cards_allowed (no others), card_mentions, mentions, avoids (regex, case-insensitive). Every turn also fails if it states figures without a lookup, unless may_skip_tools.",
  "cases": [
   {
    "id": "list-projects",
@@ -374,9 +374,8 @@
       "tools": [
        "ask_data"
       ],
-      "mentions": [
-       "very (dis)?satisfied",
-       "\\d+(\\.\\d+)?\\s*%|\\|\\s*\\d"
+      "table_mentions": [
+       "very (dis)?satisfied"
       ],
       "avoids": [
        "no rows|not available|could not"
@@ -397,9 +396,9 @@
       "tools": [
        "ask_data"
       ],
-      "mentions": [
-       "man|men",
-       "woman|women"
+      "table_mentions": [
+       "\\bman\\b|\\bmen\\b|\\bmale\\b",
+       "woman|women|female"
       ],
       "cards": []
      }

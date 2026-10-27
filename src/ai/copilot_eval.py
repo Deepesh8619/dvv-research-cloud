@@ -18,6 +18,8 @@ import statistics
 from pathlib import Path
 from typing import Any
 
+from src.ai.copilot_tables import claims_significance
+
 CARD_KINDS = frozenset({
     "open_link", "hold", "release", "close", "materialize", "reextract",
     "look", "approve_clean", "quota", "edit_question", "reread", "in_link",
@@ -25,7 +27,7 @@ CARD_KINDS = frozenset({
 })
 EXPECT_KEYS = frozenset({
     "tools", "tools_any", "no_tools", "cards", "cards_allowed", "card_mentions",
-    "mentions", "avoids", "may_skip_tools",
+    "mentions", "avoids", "may_skip_tools", "table_mentions",
 })
 _PLACEHOLDER = re.compile(r"\{([a-z_0-9]+)\}")
 
@@ -61,7 +63,7 @@ def problems(cases: list[dict], tool_names: frozenset[str]) -> list[str]:
                 for kind in expect.get(key, []):
                     if kind not in CARD_KINDS:
                         found.append(f"{cid}: no card kind {kind!r}")
-            for key in ("mentions", "avoids", "card_mentions"):
+            for key in ("mentions", "avoids", "card_mentions", "table_mentions"):
                 for pattern in expect.get(key, []):
                     try:
                         re.compile(_PLACEHOLDER.sub("0", pattern))
@@ -121,6 +123,14 @@ def score_turn(expect: dict, response: dict, facts: dict[str, str]) -> list[str]
     for pattern in expect.get("card_mentions", []):
         if not _has(fill(pattern, facts), titles):
             failures.append(f"no card says {pattern!r}")
+    shown = " ".join(" ".join([*t.get("header", []), *(c for r in t.get("rows", []) for c in r)])
+                     for t in response.get("tables") or [])
+    for pattern in expect.get("table_mentions", []):
+        if not _has(fill(pattern, facts), shown):
+            failures.append(f"no table shows {pattern!r}")
+    # Every case: "significant" either way needs a test behind it.
+    if claims_significance(reply) and not response.get("significance_tested"):
+        failures.append("claimed significance that no tool tested")
     for pattern in expect.get("mentions", []):
         if not _has(fill(pattern, facts), reply):
             failures.append(f"reply does not say {pattern!r}")

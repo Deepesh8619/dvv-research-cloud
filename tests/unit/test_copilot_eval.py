@@ -76,3 +76,13 @@ def test_a_card_is_read_whole_including_its_diff():
             "diff": [{"field": "options", "before": "(none)", "after": "1=Poor; 5=Excellent"}]}
     response = {"reply": "Ready.", "tools_used": ["propose_edit_question"], "proposals": [card]}
     assert score_turn({"card_mentions": ["excellent"]}, response, {}) == []
+
+
+def test_tables_are_scored_and_untested_significance_fails():
+    table = {"header": ["Q4", "Man", "Woman"], "rows": [["Very satisfied", "36%", "18%"]]}
+    shown = {"reply": "See the table.", "tools_used": ["ask_data"], "proposals": [],
+             "tables": [table], "significance_tested": False}
+    assert score_turn({"table_mentions": ["very satisfied"]}, shown, {}) == []
+    claimed = {**shown, "reply": "There is no statistically significant difference."}
+    assert "claimed significance that no tool tested" in score_turn({}, claimed, {})
+    assert score_turn({}, {**claimed, "significance_tested": True}, {}) == []
