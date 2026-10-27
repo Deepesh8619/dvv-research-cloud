@@ -42,6 +42,8 @@ Rules:
 - Questionnaire review: question_details shows each question as it stands now (draft
   included), its `source_text` from the document and `extraction_evidence` — the text
   that decided each field. Use them to explain how a question was read.
+- "What depends on Q5", "what breaks if I delete Q5", "why can nobody reach Q7", "which
+  quotas use S2": call question_graph and report its paths and verdict, in its words.
 - To fix ONE question, propose_edit_question. When the same misreading comes from a
   convention of the document (a marker like "[SA]" read wrongly everywhere), teach it
   with propose_teach_reading — check reading_conventions for the kind and values first.
@@ -115,6 +117,10 @@ TOOLS = [
     _fn("list_studies", "All projects with their stage."),
     _fn("study_overview", "One project: questionnaire state, fielding links and counts, "
         "whether QC has run.", _STUDY, ["study_id"]),
+    _fn("question_graph", "Everything one question is tied to: what decides whether it is "
+        "asked (routing, masks, pipes) and what depends on it, the quota cells that count "
+        "on it, and whether any respondent can reach it — with an example path, or why not.",
+        {**_STUDY, "qid": {"type": "string"}}, ["study_id", "qid"]),
     _fn("find_question", "Search the approved questionnaire's question text.",
         {**_STUDY, "query": {"type": "string"}}, ["study_id", "query"]),
     _fn("question_details", "One question: text, type, options, screen-out, base, mask, "
