@@ -389,8 +389,18 @@ def make_executor(db: Session, user: UserDB):
     def dry_run(args):
         n = max(50, min(int(args.get("n") or 500), 5000))
         report = run_heavy_detached(db, simulate, survey(args), [], n=n, seed=20260915).to_dict()
-        return {k: report[k] for k in ("n_respondents", "passed", "dispositions",
-                                       "never_fired", "impossible", "questions_never_shown")}
+        # Named for what they are. Asked "why is incidence low on this link?",
+        # a model read these counts as the link's and reported "40% answered No"
+        # where the real link had 33%: simulated figures passed off as field ones.
+        return {
+            "about": "SIMULATED respondents made up to test the script's logic. Not anyone "
+                     "who took a link: never report these counts or percentages as field "
+                     "results. What happened on a link comes from field_report.",
+            "simulated_respondents": report["n_respondents"],
+            "logic_passed": report["passed"],
+            "simulated_dispositions": report["dispositions"],
+            **{k: report[k] for k in ("never_fired", "impossible", "questions_never_shown")},
+        }
 
     #: Cells sent back to the model for one table. Enough to read a crossbreak
     #: and small enough that a long table does not crowd out everything else in
