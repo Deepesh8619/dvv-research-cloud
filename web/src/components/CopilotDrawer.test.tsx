@@ -26,6 +26,8 @@ vi.mock('../api/client', () => ({
     confirm: vi.fn(),
     conversations: vi.fn().mockResolvedValue({ data: [] }),
     conversation: vi.fn(),
+    chart: vi.fn().mockResolvedValue({ data: new Blob(['png'], { type: 'image/png' }) }),
+    excel: vi.fn().mockResolvedValue({ data: new Blob(['xlsx']) }),
   },
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : null),
 }))
@@ -253,5 +255,31 @@ describe('CopilotDrawer', () => {
     fireEvent.click(screen.getByText('Ask'))
     expect(await screen.findByText('36.4% B')).toBeTruthy()
     expect(screen.getByText(/letters mark significant differences/)).toBeTruthy()
+  })
+
+  it('draws a chart and offers the table as Excel and CSV', async () => {
+    const { copilotApi } = await import('../api/client')
+    URL.createObjectURL = vi.fn(() => 'blob:chart')
+    URL.revokeObjectURL = vi.fn()
+    const table = { title: 'Q4', header: ['Q4', 'Total'], rows: [['Very satisfied', '27.3%']] }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(copilotApi.ask as any).mockResolvedValue({
+      data: {
+        reply: 'Here it is.', proposals: [], tools_used: ['ask_data'], answered_by: 'Bedrock',
+        tables: [table], charts: [{ study_id: 's1', filename: 'a.png', title: 'Q4 chart' }],
+      },
+    })
+    render(
+      <MemoryRouter initialEntries={['/projects/s1']}>
+        <CopilotDrawer open onClose={() => {}} />
+      </MemoryRouter>,
+    )
+    fireEvent.change(screen.getByPlaceholderText('Ask about any project…'), { target: { value: 'chart Q4' } })
+    fireEvent.click(screen.getByText('Ask'))
+    expect(await screen.findByAltText('Q4 chart')).toBeTruthy()
+    expect(copilotApi.chart).toHaveBeenCalledWith({ study_id: 's1', filename: 'a.png', title: 'Q4 chart' })
+    fireEvent.click(screen.getByText('Excel'))
+    await vi.waitFor(() => expect(copilotApi.excel).toHaveBeenCalledWith([table]))
+    expect(screen.getByText('CSV')).toBeTruthy()
   })
 })

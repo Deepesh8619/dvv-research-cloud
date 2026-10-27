@@ -1,5 +1,5 @@
 {
- "about": "Copilot eval set. Synthetic projects only; `focus` is the question open on the questionnaire page (scripts/eval_copilot.py seeds them). {name} in a message is replaced with a seeded id; in a pattern, with the figure the platform's own report gives. Checks: table_mentions (the tables shown under the reply), tools (all must run), tools_any (one must), no_tools, cards (exact kinds), cards_allowed (no others), card_mentions, mentions, avoids (regex, case-insensitive). Every turn also fails if it states figures without a lookup, unless may_skip_tools.",
+ "about": "Copilot eval set. Synthetic projects only; `focus` is the question open on the questionnaire page (scripts/eval_copilot.py seeds them). {name} in a message is replaced with a seeded id; in a pattern, with the figure the platform's own report gives. Checks: has_chart (a chart was drawn), table_mentions (the tables shown under the reply), tools (all must run), tools_any (one must), no_tools, cards (exact kinds), cards_allowed (no others), card_mentions, mentions, avoids (regex, case-insensitive). Every turn also fails if it states figures without a lookup, unless may_skip_tools.",
  "cases": [
   {
    "id": "list-projects",
@@ -419,6 +419,23 @@
       "mentions": [
        "{beta_aware_pct_a}"
       ],
+      "cards": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "chart-q4",
+   "category": "data",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "Make a bar chart of Q4 satisfaction.",
+     "expect": {
+      "tools": [
+       "ask_data"
+      ],
+      "has_chart": true,
       "cards": []
      }
     }

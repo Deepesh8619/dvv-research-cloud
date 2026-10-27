@@ -92,10 +92,31 @@ def _query(result: dict) -> dict:
             "significance_tested": False}
 
 
+def _pivot(result: dict) -> dict:
+    columns = [str(c) for c in result.get("columns") or []]
+    rows = [[_cell(r.get("row"))] + [_cell(r.get(c)) for c in columns]
+            for r in result.get("rows") or [] if isinstance(r, dict)]
+    label = str(result.get("rows_variable") or "")
+    title = f"{result.get('aggfunc', 'count')} by {label} and {result.get('columns_variable', '')}"
+    return {"title": title, "header": [label] + columns, "rows": rows[:MAX_ROWS],
+            "truncated": len(rows) > MAX_ROWS, "significance_tested": False}
+
+
+def charts_in(result: dict) -> list[dict]:
+    """A chart the navigator drew: where it is served from, never the image."""
+    if isinstance(result, dict) and result.get("chart_filename") and result.get("study_id"):
+        return [{"study_id": str(result["study_id"]), "filename": str(result["chart_filename"]),
+                 "title": str(result.get("title") or "Chart"),
+                 "chart_type": str(result.get("chart_type") or "bar")}]
+    return []
+
+
 def tables_in(result: dict) -> list[dict]:
     """Every table one navigator tool result holds, in the one plain shape."""
     if not isinstance(result, dict):
         return []
+    if result.get("rows_variable") is not None:  # a pivot: the row label lives in "row"
+        return [_pivot(result)]
     if isinstance(result.get("table"), dict):
         return [_crosstab(result["table"])]
     if isinstance(result.get("tables"), list):
@@ -119,6 +140,11 @@ def _demo() -> None:
     assert t["significance_tested"] is True
     (q,) = tables_in({"columns": ["S2", "n"], "rows": [{"S2": 1, "n": 11}]})
     assert q["rows"] == [["1", "11"]] and q["significance_tested"] is False
+    (pv,) = tables_in({"rows_variable": "S2", "columns_variable": "Q1", "aggfunc": "count",
+                       "columns": ["1", "2"], "rows": [{"row": "Man", "1": 5, "2": 2}]})
+    assert pv["header"] == ["S2", "1", "2"] and pv["rows"] == [["Man", "5", "2"]]
+    (c,) = charts_in({"chart_filename": "a.png", "study_id": "s1", "title": "Q4"})
+    assert c == {"study_id": "s1", "filename": "a.png", "title": "Q4", "chart_type": "bar"}
     assert claims_significance("No statistically significant difference")
     assert not claims_significance("Women are less satisfied (3.0 vs 3.5).")
     assert not claims_significance("Whether the difference is significant has not been tested.")

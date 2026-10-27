@@ -880,3 +880,41 @@ def test_saying_it_was_not_tested_is_not_a_claim(client, monkeypatch):  # noqa: 
             ("text", "Men average 3.5. Whether the difference is significant has not been tested."))
     resp = test_client.post("/api/copilot", json={"message": "do men and women differ?"}).json()
     assert "unverified" not in resp["reply"]
+
+
+def test_a_chart_reaches_the_user_with_its_table(client, monkeypatch):  # noqa: F811
+    """The data assistant drew charts the copilot never passed on."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    chart = {"success": True, "tool": "generate_chart", "chart_filename": "abc.png",
+             "study_id": "study_f1", "title": "Q4 Satisfaction", "chart_type": "bar",
+             "table": _CROSSTAB["table"]}
+    _navigator_returns(monkeypatch, chart)
+    _script(monkeypatch, ("tool", "ask_data", {"study_id": "study_f1", "question": "chart Q4"}),
+            ("text", "Here is the chart."))
+    resp = test_client.post("/api/copilot", json={"message": "chart Q4 by gender"}).json()
+    assert resp["charts"] == [{"study_id": "study_f1", "filename": "abc.png",
+                               "title": "Q4 Satisfaction", "chart_type": "bar"}]
+    assert resp["tables"][0]["header"][0] == "Q4 Satisfaction"
+    conv = test_client.get(f"/api/copilot/conversations/{resp['conversation_id']}").json()
+    assert conv["messages"][1]["charts"] == resp["charts"]
+
+
+def test_tables_download_as_an_excel_workbook(client):  # noqa: F811
+    import io
+
+    from openpyxl import load_workbook
+
+    test_client, _sf, _ = client
+    resp = test_client.post("/api/copilot/export.xlsx", json={"tables": [
+        {"title": "Q4: Satisfaction / gender", "header": ["Q4", "Man (A)", "Woman (B)"],
+         "rows": [["Base", "11", "11"], ["Very satisfied", "36.4% B", "18.2%"]]},
+        {"title": "Q4: Satisfaction / gender", "header": ["x"], "rows": [["1"]]}]})
+    assert resp.status_code == 200
+    book = load_workbook(io.BytesIO(resp.content))
+    first, second = book.worksheets
+    assert first.title == "Q4  Satisfaction   gender"  # Excel forbids : and /
+    assert second.title != first.title
+    assert [c.value for c in first[2]] == ["Base", 11.0, 11.0]  # numbers stay numbers
+    assert first["B3"].value == "36.4% B"  # a cell with a sig letter stays text

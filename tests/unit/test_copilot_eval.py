@@ -86,3 +86,10 @@ def test_tables_are_scored_and_untested_significance_fails():
     claimed = {**shown, "reply": "There is no statistically significant difference."}
     assert "claimed significance that no tool tested" in score_turn({}, claimed, {})
     assert score_turn({}, {**claimed, "significance_tested": True}, {}) == []
+
+
+def test_a_chart_case_needs_a_chart():
+    answer = {"reply": "Here.", "tools_used": ["ask_data"], "proposals": [], "charts": []}
+    assert "no chart was drawn" in score_turn({"has_chart": True}, answer, {})
+    drawn = {**answer, "charts": [{"filename": "a.png"}]}
+    assert score_turn({"has_chart": True}, drawn, {}) == []

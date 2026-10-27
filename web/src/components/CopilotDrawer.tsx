@@ -2,12 +2,14 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 
 import {
+  CopilotChart,
   CopilotConversationSummary,
   CopilotProposal,
   CopilotTable,
   copilotApi,
   errorMessage,
 } from '../api/client'
+import { downloadBlob, rowsToCSV } from '../lib/exportUtils'
 
 /**
  * The copilot: ask anything about the platform; it prepares actions as cards.
@@ -56,7 +58,85 @@ interface Turn {
   content: string
   cards?: CopilotProposal[]
   tables?: CopilotTable[]
+  charts?: CopilotChart[]
   answeredBy?: string
+}
+
+const fileName = (title: string, ext: string) =>
+  `${(title || 'table').replace(/[^\w\- ]+/g, ' ').trim().slice(0, 60) || 'table'}.${ext}`
+
+/** A chart image fetched with the user's login, with a PNG download. */
+function ChartImage({ chart }: { chart: CopilotChart }) {
+  const [blob, setBlob] = useState<Blob | null>(null)
+  const [url, setUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let live = true
+    let made: string | null = null
+    copilotApi
+      .chart(chart)
+      .then((res) => {
+        if (!live) return
+        made = URL.createObjectURL(res.data)
+        setBlob(res.data)
+        setUrl(made)
+      })
+      .catch(() => live && setFailed(true))
+    return () => {
+      live = false
+      if (made) URL.revokeObjectURL(made)
+    }
+  }, [chart])
+  return (
+    <figure className="mt-2 overflow-hidden rounded-md border border-slate-200" data-testid="copilot-chart">
+      {failed && <p className="p-3 text-xs text-red-600">Couldn't load the chart.</p>}
+      {!failed && !url && <p className="p-3 text-xs text-slate-500">Loading chart…</p>}
+      {url && <img src={url} alt={chart.title} className="w-full" />}
+      <figcaption className="flex items-center justify-between border-t border-slate-100 px-2 py-1 text-[11px] text-slate-500">
+        <span className="truncate">{chart.title}</span>
+        {blob && (
+          <button type="button" className="font-medium text-primary-600 hover:underline"
+            onClick={() => downloadBlob(fileName(chart.title, 'png'), blob, 'image/png')}>
+            PNG
+          </button>
+        )}
+      </figcaption>
+    </figure>
+  )
+}
+
+/** Downloads for one answer's tables: each as CSV, all together as one Excel workbook. */
+function TableDownloads({ tables }: { tables: CopilotTable[] }) {
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const excel = async () => {
+    setBusy(true)
+    setFailed(false)
+    try {
+      const res = await copilotApi.excel(tables)
+      downloadBlob(fileName(tables.length === 1 ? tables[0].title : 'copilot tables', 'xlsx'), res.data,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    } catch {
+      setFailed(true)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+      <button type="button" onClick={excel} disabled={busy}
+        className="font-medium text-primary-600 hover:underline disabled:opacity-50">
+        {busy ? 'Preparing…' : tables.length > 1 ? `Excel (${tables.length} tables)` : 'Excel'}
+      </button>
+      {tables.map((t, i) => (
+        <button key={i} type="button" className="font-medium text-primary-600 hover:underline"
+          onClick={() => downloadBlob(fileName(t.title, 'csv'), rowsToCSV(t.header, t.rows), 'text/csv')}>
+          CSV{tables.length > 1 ? ` ${i + 1}` : ''}
+        </button>
+      ))}
+      {failed && <span className="text-red-600">Excel download failed.</span>}
+    </div>
+  )
 }
 
 /** The project in view, from the URL — context for the copilot, not a permission. */
@@ -312,6 +392,7 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
             content: m.content,
             cards: m.proposals,
             tables: m.tables,
+            charts: m.charts,
             answeredBy: m.answered_by ?? undefined,
           }
         }),
@@ -369,6 +450,7 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
           content: res.data.reply,
           cards: res.data.proposals,
           tables: res.data.tables,
+          charts: res.data.charts,
           answeredBy: res.data.answered_by,
         },
       ])
@@ -489,6 +571,8 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
                   </p>
                 </div>
               ))}
+              {turn.tables && turn.tables.length > 0 && <TableDownloads tables={turn.tables} />}
+              {turn.charts?.map((c) => <ChartImage key={c.filename} chart={c} />)}
               {turn.answeredBy && (
                 <p className="text-[10px] text-slate-400 mt-1">answered by {turn.answeredBy}</p>
               )}

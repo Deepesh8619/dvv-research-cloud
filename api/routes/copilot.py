@@ -12,6 +12,7 @@ import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.auth import UserRole, get_current_user
@@ -44,7 +45,7 @@ from api.models import (
     CopilotStoredMessage,
 )
 from src.ai.copilot import run_copilot
-from src.ai.copilot_tables import tables_in
+from src.ai.copilot_tables import charts_in, tables_in
 from src.ai.router import BackendUnavailable
 from src.core.survey_definition import (
     TEMPLATE_SLUGS,
@@ -420,13 +421,16 @@ def make_executor(db: Session, user: UserDB):
         # Every shape the navigator returns — a crosstab with significance
         # letters arrives under `table`, and was dropped here until it wasn't.
         tables = [t for result in (answer.tool_results or []) for t in tables_in(result)]
+        charts = [c for result in (answer.tool_results or []) for c in charts_in(result)]
         return {
             "answer": answer.message.content,
             "tables": tables,
+            "charts": charts,
             # Whether a test ran, so "significant" in a reply can be held to it.
             "significance_tested": any(t["significance_tested"] for t in tables),
-            "note": "These tables are shown to the user under your reply exactly as "
-                    "computed. Do not retype their cells; say what they show.",
+            "note": "These tables and charts are shown to the user under your reply exactly "
+                    "as computed, with downloads. Do not retype their cells; say what they "
+                    "show.",
         }
 
     # --- action tools: proposals only -----------------------------------------
@@ -924,13 +928,15 @@ def copilot(
     lookups = [{"tool": r.get("tool", ""), "args": r.get("args") or {}} for r in results]
     tables = [t for r in results if r.get("success") is not False
               for t in r.get("tables") or [] if isinstance(t, dict) and "header" in t]
+    charts = [c for r in results if r.get("success") is not False
+              for c in r.get("charts") or [] if isinstance(c, dict) and "filename" in c]
     conversation = save_copilot_exchange(
         db, conversation, user.id, body.study_id, body.message, reply, lookups,
-        [c.model_dump() for c in unique], answered_by, tables)
+        [c.model_dump() for c in unique], answered_by, tables, charts)
     return CopilotResponse(reply=reply, proposals=unique,
                            tools_used=[r.get("tool", "") for r in results],
                            answered_by=answered_by, conversation_id=conversation.id,
-                           tables=tables,
+                           tables=tables, charts=charts,
                            significance_tested=any(r.get("significance_tested") for r in results),
                            tool_errors=[f"{r.get('tool')}: {r['error']}" for r in results
                                         if r.get("success") is False and r.get("error")])
@@ -968,6 +974,7 @@ def copilot_conversation(
             proposals=[CopilotProposal(**p) for p in m.proposals or []],
             tools_used=[x.get("tool", "") for x in m.lookups or []],
             tables=m.tables or [],
+            charts=m.charts or [],
             answered_by=m.answered_by, created_at=m.created_at,
         ) for m in list_copilot_messages(db, c.id)],
     )
@@ -980,3 +987,58 @@ def delete_conversation(
     user: UserDB = Depends(get_current_user),
 ):
     delete_copilot_conversation(db, _own(db, conversation_id, user))
+
+
+class _ExportTable(BaseModel):
+    title: str = Field(default="Table", max_length=200)
+    header: list[str] = Field(max_length=60)
+    rows: list[list[str]] = Field(max_length=2000)
+
+
+class _ExportRequest(BaseModel):
+    tables: list[_ExportTable] = Field(min_length=1, max_length=20)
+
+
+@router.post("/copilot/export.xlsx")
+def export_tables(body: _ExportRequest, user: UserDB = Depends(get_current_user)):
+    """The tables a copilot answer showed, as one Excel workbook, a sheet each.
+
+    Built from exactly what the user was shown — no data is read here — so it
+    cannot reach anything the answer did not already put on their screen.
+    """
+    import io
+    import re
+
+    from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    book = Workbook()
+    book.remove(book.active)
+    used: set[str] = set()
+    for i, table in enumerate(body.tables, start=1):
+        # Excel sheet names: 31 characters, none of : \ / ? * [ ], unique.
+        name = re.sub(r"[:\\/?*\[\]]", " ", table.title).strip()[:28] or f"Table {i}"
+        while name in used:
+            name = f"{name[:25]} {i}"
+        used.add(name)
+        sheet = book.create_sheet(name)
+        sheet.append(table.header)
+        for cell in sheet[1]:
+            cell.font = Font(bold=True)
+        for row in table.rows:
+            sheet.append([_number_or_text(v) for v in row])
+    out = io.BytesIO()
+    book.save(out)
+    out.seek(0)
+    return StreamingResponse(
+        out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="copilot-tables.xlsx"'})
+
+
+def _number_or_text(value: str):
+    """A cell as Excel should hold it: 27.3 stays a number; "36.4% B" stays text."""
+    try:
+        return float(value)
+    except ValueError:
+        return value

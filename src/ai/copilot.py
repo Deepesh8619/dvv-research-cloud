@@ -77,8 +77,9 @@ Rules:
   the cells ARE the answer and a sentence about their direction is not. Keep it
   to the columns that were asked for; say how many rows there are if you show
   only some.
-- Tables ask_data returns are shown to the user under your reply exactly as computed.
-  Do not retype them; say what they show in a sentence or two.
+- Tables and charts ask_data returns are shown to the user under your reply exactly as
+  computed, with CSV, Excel and PNG downloads. Do not retype them; say what they show in
+  a sentence or two. For a chart, ask ask_data for one ("a bar chart of Q4 by gender").
 - Say a difference is (or is not) "significant" only when a tool ran the test
   (`significance_tested` true). Otherwise say it has not been tested.
 - Asked for a table or a crosstab, call ask_data and report its cells. If it

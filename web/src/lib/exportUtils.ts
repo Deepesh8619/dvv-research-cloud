@@ -17,6 +17,15 @@ export function toCSV(columns: string[], rows: Record<string, unknown>[]): strin
   return lines.join('\n')
 }
 
+/** A table given as a header and rows of cells, as CSV (header names may repeat). */
+export function rowsToCSV(header: string[], rows: string[][]): string {
+  const escape = (value: unknown): string => {
+    const s = value == null ? '' : String(value)
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  return [header, ...rows].map((r) => r.map(escape).join(',')).join('\n')
+}
+
 export function toMarkdownTable(columns: string[], rows: (string | number)[][]): string {
   const escape = (v: unknown) => String(v ?? '').replace(/\|/g, '\\|')
   const header = `| ${columns.map(escape).join(' | ')} |`

@@ -23,7 +23,6 @@ import ProbesPanel from '../components/ProbesPanel'
 import QuotePanel from '../components/QuotePanel'
 import TranslationsPanel from '../components/TranslationsPanel'
 import { useAuth } from '../auth/AuthContext'
-import ChatBot from '../components/ChatBot'
 import { CheckIcon, DocChartIcon, DownloadIcon, LinkIcon } from '../components/Icons'
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatusPill from '../components/StatusPill'
@@ -55,8 +54,8 @@ const STAGE_PROGRESS: Record<string, number> = {
 
 // Crosstabs no longer auto-display as a nav tab — the Overview tab's Data
 // Profile card is the default view instead. Crosstabs stay fully available
-// on demand via the chat navigator's show_table tool (rendered inline in
-// ChatBot), and CrosstabTable/studiesApi.crosstabs remain wired for that.
+// on demand through the Copilot (ask_data -> show_table, drawn under the
+// reply), and CrosstabTable/studiesApi.crosstabs remain wired for that.
 // "Questionnaire checks" is its own tab, not a card on Overview. The QC panel
 // below it validates a data file on its OWN terms — speeders, empty columns,
 // straightliners — which says nothing about whether the data matches the
@@ -177,15 +176,6 @@ export default function ProjectPage() {
       setReprocessing(false)
     }
   }
-
-  const handleNavigate = useCallback((targetTab: string) => {
-    // tableId (crosstab selection) is no longer routed through a Tables tab —
-    // the chat navigator renders the requested crosstab inline via show_table,
-    // so navigate_to only needs to switch between the remaining tabs now.
-    if (TABS.includes(targetTab as Tab)) {
-      setTab(targetTab as Tab)
-    }
-  }, [])
 
   if (loading) return <LoadingSpinner />
   if (!study) {
@@ -385,12 +375,6 @@ export default function ProjectPage() {
           </div>
         </div>
       )}
-      {/* ChatBot — project-scoped AI assistant */}
-      <ChatBot
-        studyId={id!}
-        clientName={study.client_name}
-        onNavigate={handleNavigate}
-      />
     </div>
   )
 }
