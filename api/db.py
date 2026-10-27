@@ -166,6 +166,7 @@ class CopilotMessageDB(Base):
     lookups = Column(JSON, default=None)  # [{tool, args}]
     proposals = Column(JSON, default=None)  # the cards, as shown
     tables = Column(JSON, default=None)  # tables as computed, shown under the reply
+    charts = Column(JSON, default=None)  # charts drawn for the reply (where they are served)
     answered_by = Column(String, nullable=True)
     created_at = Column(String)
 
@@ -956,6 +957,7 @@ def _ensure_new_columns():
         "copilot_messages": {
             # Tables shown under a reply, added after conversations first shipped.
             "tables": "JSON",
+            "charts": "JSON",
         },
         "respondent_sessions": {
             "pid": "VARCHAR",
@@ -1279,6 +1281,7 @@ def save_copilot_exchange(
     proposals: list[dict],
     answered_by: str,
     tables: list[dict] | None = None,
+    charts: list[dict] | None = None,
 ) -> CopilotConversationDB:
     """Store one question and its answer, starting the conversation if needed."""
     from uuid import uuid4
@@ -1305,6 +1308,7 @@ def save_copilot_exchange(
     db.add(CopilotMessageDB(id=f"cmsg_{uuid4().hex[:12]}", conversation_id=conversation.id,
                             seq=seq + 1, role="assistant", content=reply, lookups=lookups,
                             proposals=proposals, answered_by=answered_by, tables=tables or None,
+                            charts=charts or None,
                             created_at=now))
     db.commit()
     return conversation

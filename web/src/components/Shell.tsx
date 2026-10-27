@@ -198,6 +198,21 @@ export default function Shell() {
       </aside>
 
       <CopilotDrawer open={showCopilot} onClose={() => setShowCopilot(false)} />
+      {/* One assistant, on every screen: the same Copilot the top bar opens. */}
+      {!showCopilot && (
+        <button
+          type="button"
+          onClick={() => setShowCopilot(true)}
+          aria-label="Open Copilot"
+          title="Copilot — ask, chart, change, teach"
+          className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.6-.8L3 21l1.9-5.4A8.4 8.4 0 1 1 21 11.5z" />
+          </svg>
+        </button>
+      )}
 
       {/* Content */}
       <main className="md:pl-56 pt-14">

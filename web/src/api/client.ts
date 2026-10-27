@@ -1844,6 +1844,14 @@ export interface CopilotTable {
   significance_tested?: boolean
 }
 
+/** A chart the data navigator drew, served from the study's chart route. */
+export interface CopilotChart {
+  study_id: string
+  filename: string
+  title: string
+  chart_type?: string
+}
+
 export interface CopilotReply {
   reply: string
   proposals: CopilotProposal[]
@@ -1851,6 +1859,7 @@ export interface CopilotReply {
   answered_by: string
   conversation_id?: string | null
   tables?: CopilotTable[]
+  charts?: CopilotChart[]
   significance_tested?: boolean
 }
 
@@ -1868,6 +1877,7 @@ export interface CopilotConversation extends CopilotConversationSummary {
     proposals: CopilotProposal[]
     tools_used: string[]
     tables?: CopilotTable[]
+    charts?: CopilotChart[]
     answered_by?: string | null
     created_at: string
   }>
@@ -1891,6 +1901,20 @@ export const copilotApi = {
   conversations: async () => api.get<CopilotConversationSummary[]>('/copilot/conversations'),
   conversation: async (id: string) => api.get<CopilotConversation>(`/copilot/conversations/${id}`),
   remove: async (id: string) => api.delete(`/copilot/conversations/${id}`),
+
+  /** Tables as one Excel workbook, built from exactly what the answer showed. */
+  excel: async (tables: CopilotTable[]) =>
+    api.post<Blob>(
+      '/copilot/export.xlsx',
+      { tables: tables.map(({ title, header, rows }) => ({ title, header, rows })) },
+      { responseType: 'blob' },
+    ),
+
+  /** A chart image, fetched with the user's login (a plain <img src> cannot send it). */
+  chart: async (c: CopilotChart) =>
+    api.get<Blob>(`/studies/${encodeURIComponent(c.study_id)}/charts/${encodeURIComponent(c.filename)}`, {
+      responseType: 'blob',
+    }),
 
   // Only the server-built request is sent; the path is relative to the API base.
   confirm: async (card: CopilotProposal) =>

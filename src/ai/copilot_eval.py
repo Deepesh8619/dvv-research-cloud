@@ -27,7 +27,7 @@ CARD_KINDS = frozenset({
 })
 EXPECT_KEYS = frozenset({
     "tools", "tools_any", "no_tools", "cards", "cards_allowed", "card_mentions",
-    "mentions", "avoids", "may_skip_tools", "table_mentions",
+    "mentions", "avoids", "may_skip_tools", "table_mentions", "has_chart",
 })
 _PLACEHOLDER = re.compile(r"\{([a-z_0-9]+)\}")
 
@@ -128,6 +128,8 @@ def score_turn(expect: dict, response: dict, facts: dict[str, str]) -> list[str]
     for pattern in expect.get("table_mentions", []):
         if not _has(fill(pattern, facts), shown):
             failures.append(f"no table shows {pattern!r}")
+    if expect.get("has_chart") and not response.get("charts"):
+        failures.append("no chart was drawn")
     # Every case: "significant" either way needs a test behind it.
     if claims_significance(reply) and not response.get("significance_tested"):
         failures.append("claimed significance that no tool tested")

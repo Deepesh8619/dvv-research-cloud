@@ -722,6 +722,9 @@ class CopilotResponse(BaseModel):
     #: Tables as the engines computed them ({title, header, rows, truncated,
     #: significance_tested}), shown under the reply, never retyped by the model.
     tables: list[dict] = Field(default_factory=list)
+    #: Charts the data navigator drew ({study_id, filename, title, chart_type});
+    #: the image is fetched from the study's chart route, with the user's login.
+    charts: list[dict] = Field(default_factory=list)
     #: Whether any lookup in this answer ran a significance test.
     significance_tested: bool = False
     #: What a lookup refused, in the server's own words ("no question q_gender…"),
@@ -737,6 +740,7 @@ class CopilotStoredMessage(BaseModel):
     proposals: list[CopilotProposal] = Field(default_factory=list)
     tools_used: list[str] = Field(default_factory=list)
     tables: list[dict] = Field(default_factory=list)
+    charts: list[dict] = Field(default_factory=list)
     answered_by: str | None = None
     created_at: str
 
