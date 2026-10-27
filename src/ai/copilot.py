@@ -42,6 +42,9 @@ Rules:
 - Questionnaire review: question_details shows each question as it stands now (draft
   included), its `source_text` from the document and `extraction_evidence` — the text
   that decided each field. Use them to explain how a question was read.
+- For an open question about a project ("anything about pricing?", "what has QC flagged
+  on age?", "how do we read this client's grids?"), call search_project and cite each
+  hit you rely on in brackets exactly as given, e.g. [question:Q5] or [finding:finding-2].
 - "What depends on Q5", "what breaks if I delete Q5", "why can nobody reach Q7", "which
   quotas use S2": call question_graph and report its paths and verdict, in its words.
 - To fix ONE question, propose_edit_question. When the same misreading comes from a
@@ -117,6 +120,10 @@ TOOLS = [
     _fn("list_studies", "All projects with their stage."),
     _fn("study_overview", "One project: questionnaire state, fielding links and counts, "
         "whether QC has run.", _STUDY, ["study_id"]),
+    _fn("search_project", "Search everything this project knows at once — its questions and "
+        "brief, QC findings on its data, lessons taught about its documents — by meaning, "
+        "words and question codes. Each hit has a `cite` to quote in brackets.",
+        {**_STUDY, "query": {"type": "string"}}, ["study_id", "query"]),
     _fn("question_graph", "Everything one question is tied to: what decides whether it is "
         "asked (routing, masks, pipes) and what depends on it, the quota cells that count "
         "on it, and whether any respondent can reach it — with an example path, or why not.",

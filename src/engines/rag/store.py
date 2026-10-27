@@ -36,6 +36,9 @@ MAX_CHUNK_CHARS = 2000  # a question with a long answer list, not a document
 SURVEY_KINDS = ("question", "brief")
 #: What one respondent typed. Added as it arrives, never rewritten.
 VERBATIM = "verbatim"
+#: What the project has learned about itself: QC findings on its data, and the
+#: lessons taught about reading its documents. Rebuilt whole when they change.
+CONTEXT_KINDS = ("finding", "lesson")
 #: New verbatims embedded per call. A 2,000-complete study with five open-ends
 #: is 10,000 of them, and one API request must not sit there embedding all of
 #: them — the caller is told how many are left and asks again.
@@ -133,6 +136,68 @@ def ensure_index(db, study_id: str, survey: Any, force: bool = False) -> dict:
     db.commit()
     logger.info("[%s] indexed %d chunks with %s", study_id, len(chunks), model)
     return {"indexed": len(chunks), "model": model, "rebuilt": True}
+
+
+def context_chunks(db, study_id: str, profile_slug: str | None) -> list[dict[str, str]]:
+    """The project's QC findings and the lessons taught about its documents."""
+    import json as _json
+
+    from api.db import CorrectionDB, ProfileRuleDB, get_study
+
+    chunks: list[dict[str, str]] = []
+    study = get_study(db, study_id)
+    if study is not None and study.crosscheck_json:
+        try:
+            findings = _json.loads(study.crosscheck_json).get("findings") or []
+        except (TypeError, ValueError):
+            findings = []
+        for n, f in enumerate(findings, start=1):
+            text = (f"QC finding on {f.get('qid') or 'the data'} ({f.get('kind', '')}, "
+                    f"{f.get('severity', '')}): {f.get('detail', '')}"
+                    + (f" — {f['n_rows']} rows" if f.get("n_rows") else ""))
+            chunks.append({"kind": "finding", "ref": f"finding-{n}",
+                           "text": text[:MAX_CHUNK_CHARS]})
+    if profile_slug:  # lessons about this document format, from every project that taught them
+        for rule in db.query(ProfileRuleDB).filter(ProfileRuleDB.profile_slug == profile_slug,
+                                                   ProfileRuleDB.active.is_(True)):
+            means = rule.pattern_value or rule.pattern_kind
+            how = f" (in the document, \"{rule.pattern}\" -> {means})" if rule.pattern else ""
+            text = f"Taught rule for {profile_slug}: {rule.rule_text}{how}"
+            chunks.append({"kind": "lesson", "ref": f"rule-{rule.id}",
+                           "text": text[:MAX_CHUNK_CHARS]})
+    for c in db.query(CorrectionDB).filter(CorrectionDB.study_id == study_id):
+        about = f" about {c.question_id}" if c.question_id else ""
+        text = f"Correction{about} ({c.status}): {c.instruction}"
+        chunks.append({"kind": "lesson", "ref": f"correction-{c.id}",
+                       "text": text[:MAX_CHUNK_CHARS]})
+    return chunks
+
+
+def ensure_context_index(db, study_id: str, profile_slug: str | None) -> dict:
+    """Index the project's findings and lessons, or leave them if current."""
+    from api.db import ProjectChunkDB
+
+    chunks = context_chunks(db, study_id, profile_slug)
+    print_ = fingerprint(chunks)
+    existing = (db.query(ProjectChunkDB).filter(ProjectChunkDB.study_id == study_id)
+                .filter(ProjectChunkDB.kind.in_(CONTEXT_KINDS)).all())
+    if existing and all(r.fingerprint == print_ for r in existing) and len(existing) == len(chunks):
+        return {"indexed": len(existing), "rebuilt": False}
+    for row in existing:
+        db.delete(row)
+    if not chunks:
+        db.commit()
+        return {"indexed": 0, "rebuilt": True}
+    vectors, model = embed([c["text"] for c in chunks])
+    now = datetime.now(UTC).isoformat()
+    store = get_store(db)
+    for chunk, vector in zip(chunks, vectors, strict=True):
+        store.write(db, ProjectChunkDB(
+            id=f"{study_id}:{chunk['kind']}:{chunk['ref']}", study_id=study_id,
+            kind=chunk["kind"], ref=chunk["ref"], text=chunk["text"], model=model,
+            fingerprint=print_, created_at=now), vector)
+    db.commit()
+    return {"indexed": len(chunks), "rebuilt": True}
 
 
 def ensure_verbatim_index(db, study_id: str, survey: Any, force: bool = False) -> dict:
@@ -273,12 +338,26 @@ def search(
                 "note": f"Index was built by {rows[0].model} and cannot be searched "
                         f"with {model}; re-index this project."}
 
-    scored = get_store(db).search(db, study_id, vector, kinds=kinds, k=k, model=model)
+    # Hybrid: the vector store's nearest pieces, BM25 over every piece, and an
+    # exact question code, fused by reciprocal rank (src/engines/rag/hybrid.py).
+    from src.engines.rag.hybrid import bm25, codes_in, fuse
+
+    rows = [r for r in rows if r.model == model]
+    by_id = {r.id: r for r in rows}
+    scored = get_store(db).search(db, study_id, vector, kinds=kinds, k=max(k * 4, 20),
+                                  model=model)
+    meaning = {row.id: score for score, row in scored if score > 0}
+    ids = list(by_id)
+    words = dict(zip(ids, bm25(text, [by_id[i].text for i in ids]), strict=True))
+    named = codes_in(text, [by_id[i].ref for i in ids])
+    code = {i for i in ids if by_id[i].ref in named}
     return {
         "model": model,
         "matches": [
-            {"kind": row.kind, "ref": row.ref, "text": row.text, "score": round(score, 3)}
-            for score, row in scored
-            if score > 0
+            {"kind": by_id[i].kind, "ref": by_id[i].ref, "text": by_id[i].text,
+             "score": round(meaning.get(i, 0.0), 3), "rank": rank, "matched_by": how,
+             # What an answer cites, so a reader can find the passage it rests on.
+             "cite": f"{by_id[i].kind}:{by_id[i].ref}"}
+            for i, rank, how in fuse(ids, meaning, words, code, k)
         ],
     }
