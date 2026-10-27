@@ -68,3 +68,11 @@ def test_two_decimals_count_as_the_same_figure():
     pattern = number_pattern(100 * 13 / 22)
     assert all(re.search(pattern, f"{s}%") for s in ("59.09", "59.1", "59"))
     assert not re.search(pattern, "59.5%")
+
+
+def test_a_card_is_read_whole_including_its_diff():
+    """Bedrock's T4 card had the new scale in its diff; the scorer only read the title."""
+    card = {"kind": "edit_question", "title": "Change T4: options", "detail": "…",
+            "diff": [{"field": "options", "before": "(none)", "after": "1=Poor; 5=Excellent"}]}
+    response = {"reply": "Ready.", "tools_used": ["propose_edit_question"], "proposals": [card]}
+    assert score_turn({"card_mentions": ["excellent"]}, response, {}) == []

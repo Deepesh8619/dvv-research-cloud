@@ -113,8 +113,11 @@ def score_turn(expect: dict, response: dict, facts: dict[str, str]) -> list[str]
         failures.append(f"cards {kinds}, expected {expect['cards']}")
     if "cards_allowed" in expect and set(kinds) - set(expect["cards_allowed"]):
         failures.append(f"cards {kinds}, only {expect['cards_allowed']} allowed")
-    titles = " ".join(f"{c.get('title', '')} {c.get('detail', '')}"
-                      for c in response.get("proposals", []))
+    # Everything a card shows: an edit's new options live in its diff, not its title.
+    titles = " ".join(
+        f"{c.get('title', '')} {c.get('detail', '')} "
+        + " ".join(f"{d.get('field')} {d.get('after')}" for d in c.get("diff") or [])
+        for c in response.get("proposals", []))
     for pattern in expect.get("card_mentions", []):
         if not _has(fill(pattern, facts), titles):
             failures.append(f"no card says {pattern!r}")
