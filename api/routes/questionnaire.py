@@ -59,6 +59,7 @@ from api.models import (
 )
 from src.ai.router import friendly_backend_error
 from src.core.survey_definition import (
+    TEMPLATE_SLUGS,
     THEME_SLUGS,
     Block,
     Expression,
@@ -305,6 +306,7 @@ def _status_response(
         # cause (missing key, circuit-breaker abort) instead of a bare 'error'.
         error_detail=questionnaire.error_detail if questionnaire.status == "error" else None,
         theme=metadata.get("theme"),
+        template=metadata.get("template"),
         profile=metadata.get("profile"),
         study_understanding=metadata.get("study_understanding"),
         qa=metadata.get("qa"),
@@ -803,14 +805,18 @@ def update_questionnaire_settings(
     Writes `metadata["theme"]` into the questionnaire's own definition, so every
     link opened afterwards inherits it as the default (a link may still override
     at creation). An explicit null clears it. 422 on an unknown slug."""
-    if request.theme is not None and request.theme not in THEME_SLUGS:
-        raise HTTPException(status_code=422, detail=f"Unknown theme slug: {request.theme}")
     questionnaire = _latest_questionnaire(db, study_id)
     survey = _load_definition(db, questionnaire)
-    if request.theme is None:
-        survey.metadata.pop("theme", None)
-    else:
-        survey.metadata["theme"] = request.theme
+    for key, allowed in (("theme", THEME_SLUGS), ("template", TEMPLATE_SLUGS)):
+        if key not in request.model_fields_set:
+            continue
+        value = getattr(request, key)
+        if value is None:
+            survey.metadata.pop(key, None)
+        elif value not in allowed:
+            raise HTTPException(status_code=422, detail=f"Unknown {key} slug: {value}")
+        else:
+            survey.metadata[key] = value
     _save_definition(db, questionnaire, survey)
     return _status_response(questionnaire, survey)
 

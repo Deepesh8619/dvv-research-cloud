@@ -230,6 +230,7 @@ class QuestionnaireStatusResponse(BaseModel):
     # Respondent theme slug from metadata (T24); None when unset. Lets the builder
     # show the currently-selected theme.
     theme: str | None = None
+    template: str | None = None
     # Detected questionnaire format profile: {slug, label, confidence, signals}.
     # Set once extraction ran; None for authored/blank questionnaires. Lets the
     # review UI show which client convention was recognized.
@@ -252,9 +253,11 @@ class QuestionnaireStatusResponse(BaseModel):
 class QuestionnaireSettingsRequest(BaseModel):
     """Survey-level presentation settings (T24). Currently only the respondent
     theme slug; validated against THEME_SLUGS by the route. Explicit null clears
-    it back to the default."""
+    it back to the default. `template` is the link layout (TEMPLATE_SLUGS); a
+    field left out of the body is left as it is."""
 
     theme: str | None = None
+    template: str | None = None
 
 
 class QuestionUpdateRequest(BaseModel):
@@ -400,6 +403,7 @@ class RespondentEntryResponse(BaseModel):
     # Optional segment theme slug from the pinned survey's metadata (e.g. "fmcg"),
     # or None. Purely a client-side presentation hint for accent palettes.
     theme: str | None = None
+    template: str | None = None
     # Set only on a terminal-at-entry outcome (T10 duplicate-pid security = 30).
     # `redirect_url` is the substituted vendor URL, or None to use built-in screens.
     status_code: int | None = None
@@ -485,9 +489,10 @@ class FieldingLinkCreateRequest(FieldingRedirectsRequest):
     """Create-a-link body: redirect templates plus an optional respondent `theme`
     slug (T24). The theme is stamped into the link's PINNED survey snapshot only;
     the questionnaire's own definition is left untouched (a link-level
-    presentation choice, not an instrument edit)."""
+    presentation choice, not an instrument edit). `template` works the same way."""
 
     theme: str | None = None
+    template: str | None = None
     # Open the link already held at this many completes (the soft launch). The
     # normal launch order is: open held at ~50, check the data, then release.
     soft_launch_limit: int | None = None

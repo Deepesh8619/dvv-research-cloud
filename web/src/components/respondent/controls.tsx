@@ -161,7 +161,7 @@ export function MatrixCarousel({ question }: { question: QuestionMatrixModel }) 
           aria-label={row.text}
           className={inline ? 'grid gap-2 sm:grid-flow-col sm:auto-cols-fr' : 'grid gap-2'}
         >
-          {columns.map((c) => {
+          {columns.map((c, i) => {
             const on = row.value == c.value
             return (
               <button
@@ -177,6 +177,7 @@ export function MatrixCarousel({ question }: { question: QuestionMatrixModel }) 
                   color: on ? '#fff' : '#1e293b',
                 }}
               >
+                {isFeelingScale(columns) && <Face at={i} of={columns.length} />}
                 {c.text}
               </button>
             )
@@ -204,6 +205,27 @@ export function MatrixCarousel({ question }: { question: QuestionMatrixModel }) 
         </button>
       </div>
     </div>
+  )
+}
+
+/** A short scale whose ends are feelings ("Very dissatisfied … Very satisfied"),
+ * not a list of brands that happens to have five columns. */
+export function isFeelingScale(columns: ItemValue[]): boolean {
+  if (columns.length < 3 || columns.length > 7) return false
+  const ends = `${columns[0].text} ${columns[columns.length - 1].text}`
+  return /satisf|agree|likel|good|bad|poor|excellent|happy|appeal/i.test(ends)
+}
+
+/** A face per point, frown to smile. Hidden unless a template shows it (Play). */
+function Face({ at, of }: { at: number; of: number }) {
+  const mouth = 15 + (at / Math.max(of - 1, 1) - 0.5) * 8
+  return (
+    <svg className="dvv-face" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="9" cy="9.5" r="0.6" fill="currentColor" />
+      <circle cx="15" cy="9.5" r="0.6" fill="currentColor" />
+      <path d={`M8 15 Q12 ${mouth} 16 15`} />
+    </svg>
   )
 }
 
@@ -263,7 +285,7 @@ function NumberScale({
           ['--wide' as string]: columns.length,
         }}
       >
-        {columns.map((c) => {
+        {columns.map((c, i) => {
           const on = value == c.value
           return (
             <button
@@ -280,6 +302,7 @@ function NumberScale({
                 color: on ? '#fff' : '#334155',
               }}
             >
+              {columns.length <= 7 && <Face at={i} of={columns.length} />}
               {String(c.value)}
             </button>
           )

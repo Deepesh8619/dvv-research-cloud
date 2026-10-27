@@ -28,6 +28,9 @@ SCHEMA_VERSION = "1.0"
 THEME_SLUGS = frozenset(
     {"fmcg", "healthcare", "bfsi", "auto", "telecom", "retail", "indigo", "slate"}
 )
+# Respondent-link templates: the layout a link is drawn in (`metadata["template"]`),
+# independent of the theme, which only recolours. Mirrors web templates.ts.
+TEMPLATE_SLUGS = frozenset({"classic", "pulse", "ledger", "chat", "brand", "play", "clear"})
 
 
 class QuestionType(StrEnum):
