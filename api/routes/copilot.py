@@ -903,7 +903,11 @@ def copilot(
                 + f", {fielding_link_counts(db, ln.id)['completes']} completes)"
                 for ln in links
             ) + "."
+    from src.platform import usage
+
+    tagged = usage.purpose.set("copilot")  # this request's model calls count as copilot
     try:
+        usage.count_question()
         reply, results, answered_by = run_copilot(
             body.message, history, execute,
             user=user.name or user.email, role=user.role, page=page)
@@ -911,6 +915,8 @@ def copilot(
         logger.warning(f"copilot: no backend ({exc})")
         raise HTTPException(status_code=503,
                             detail="The copilot can't reach an AI model right now.") from exc
+    finally:
+        usage.purpose.reset(tagged)
     # A provider that fails mid-answer is retried on the next one from the top,
     # which re-prepares the same cards: keep one card per distinct action.
     unique = list({(c.method, c.path, json.dumps(c.body, sort_keys=True)): c

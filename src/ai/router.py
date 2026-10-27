@@ -176,7 +176,12 @@ def http_json(request: urllib.request.Request, timeout: int) -> dict:
             with urllib.request.urlopen(
                 request, timeout=timeout, context=_ssl_context()
             ) as response:
-                return json.loads(response.read())
+                body = json.loads(response.read())
+            # Every model call passes here, so this is where usage is counted.
+            from src.platform.usage import record
+
+            record(request.full_url, request.data, body)
+            return body
         except urllib.error.HTTPError as exc:
             try:
                 detail = json.loads(exc.read()).get("error", {}).get("message", "")

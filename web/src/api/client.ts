@@ -1965,3 +1965,26 @@ export const cleaningApi = {
   lock: async (id: string) => api.post(`/studies/${id}/cleaning/lock`),
   unlock: async (id: string, note: string) => api.post(`/studies/${id}/cleaning/unlock`, { note }),
 }
+
+/** AI model usage per day, counted from what the models report (src/platform/usage.py). */
+export interface AiUsageDay {
+  day: string
+  copilot_questions: number
+  calls: number
+  input_tokens: number
+  output_tokens: number
+  estimated_usd: number
+  copilot_usd: number
+  unpriced_calls: number
+}
+
+export interface AiUsage {
+  days: AiUsageDay[]
+  month: { month: string; copilot_questions: number; calls: number; estimated_usd: number }
+  prices_per_million: Record<string, { input: number; output: number }>
+  note: string
+}
+
+export const usageApi = {
+  get: async (days = 30) => api.get<AiUsage>('/admin/ai-usage', { params: { days } }),
+}

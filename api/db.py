@@ -764,6 +764,26 @@ class WorkflowRunDB(Base):
     error = Column(Text, nullable=True)
 
 
+class ModelUsageDB(Base):
+    """AI model usage per day, provider, model and purpose (src/platform/usage.py).
+
+    Counted from the token totals every model reply carries, so the Bedrock line
+    on the AWS bill can be explained in questions and documents, not guessed.
+    """
+
+    __tablename__ = "model_usage"
+
+    id = Column(String, primary_key=True)  # day|provider|model|purpose
+    day = Column(String, index=True)  # YYYY-MM-DD, UTC
+    provider = Column(String)  # bedrock | local | groq | cerebras | other
+    model = Column(String)
+    purpose = Column(String)  # copilot | other (extraction, data chat, …)
+    calls = Column(Integer, default=0)
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    questions = Column(Integer, default=0)  # copilot questions asked
+
+
 # --- F4 ---
 class EventDB(Base):
     """One thing that happened in a study; the live stream reads these in seq order."""
