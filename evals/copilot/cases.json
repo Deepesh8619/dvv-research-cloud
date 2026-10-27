@@ -145,6 +145,26 @@
    ]
   },
   {
+   "id": "search-cites",
+   "category": "questionnaire",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "Is there anything in the coffee project about recommending Alpha to friends? Cite where it is.",
+     "expect": {
+      "tools_any": [
+       "search_project",
+       "find_question"
+      ],
+      "mentions": [
+       "\\bQ5\\b"
+      ],
+      "cards": []
+     }
+    }
+   ]
+  },
+  {
    "id": "no-price-question",
    "category": "questionnaire",
    "study": "coffee",

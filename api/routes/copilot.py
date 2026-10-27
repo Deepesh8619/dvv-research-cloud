@@ -358,6 +358,32 @@ def make_executor(db: Session, user: UserDB):
             result["related_by_meaning_note"] = found["note"]
         return result
 
+    def search_project(args):
+        """One search over everything the project knows, each hit with a citation.
+
+        Questions and the study brief, QC findings on the data, and the lessons
+        taught about its documents — hybrid-ranked (meaning, words, codes).
+        Respondents' own words stay behind search_verbatims and its data rule.
+        """
+        from api.routes.corrections import _profile_slug
+        from src.engines.rag.store import CONTEXT_KINDS, SURVEY_KINDS, ensure_context_index
+
+        s, row, definition = current(args)
+        query = str(args.get("query", "")).strip()
+        ensure_context_index(db, s.id, _profile_slug(row))
+        found = rag_search(db, s.id, query, survey=definition,
+                           kinds=SURVEY_KINDS + CONTEXT_KINDS, k=8)
+        return {
+            "matches": [
+                {"cite": m["cite"], "kind": m["kind"], "text": m["text"][:400],
+                 "matched_by": m.get("matched_by", []),
+                 **(neighbours(definition, m["ref"]) if m["kind"] == "question" else {})}
+                for m in found["matches"]
+            ],
+            "note": found.get("note") or "Cite what you use in brackets, as given: "
+                    "[question:Q5], [finding:finding-2], [lesson:rule-…].",
+        }
+
     def question_graph(args):
         """Everything one question is tied to, from the study graph and the solver."""
         from src.engines.questionnaire.graph_sync import sync_questionnaire
@@ -909,6 +935,7 @@ def make_executor(db: Session, user: UserDB):
         "dry_run": dry_run,
         "field_projection": field_projection,
         "question_graph": question_graph,
+        "search_project": search_project,
         "ask_data": ask_data,
         "propose_open_link": propose_open_link,
         "propose_set_hold": propose_set_hold,
