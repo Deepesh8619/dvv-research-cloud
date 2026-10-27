@@ -773,7 +773,10 @@
       "mentions": [
        "\\bQ1\\b|coffee"
       ],
-      "cards": []
+      "cards": [],
+      "no_tools": [
+       "dry_run"
+      ]
      }
     }
    ]

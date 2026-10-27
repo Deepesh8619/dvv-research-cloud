@@ -795,3 +795,19 @@ def test_a_misnamed_kind_is_worked_out_from_what_it_means(client, monkeypatch): 
     (card,) = resp["proposals"]
     assert card["body"]["pattern_kind"] == "type_signal"
     assert card["body"]["pattern_value"] == "single"
+
+
+def test_a_dry_run_says_its_respondents_are_made_up(client, monkeypatch):  # noqa: F811
+    """Seen on Bedrock: asked why a link's incidence was low, it ran the
+    simulation and reported its "40% answered No" as the link's (33%)."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    seen = _script(monkeypatch, ("tool", "dry_run", {"study_id": "study_f1", "n": 100}),
+                   ("text", "The logic holds."))
+    test_client.post("/api/copilot", json={"message": "is the logic sound?"})
+    (result,) = _tool_results(seen)
+    assert result["about"].startswith("SIMULATED respondents")
+    assert "simulated_dispositions" in result and "dispositions" not in result
+    system = seen[0][0]["content"]
+    assert "never dry_run" in system
