@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 
-import { CopilotProposal, copilotApi, errorMessage } from '../api/client'
+import { CopilotConversationSummary, CopilotProposal, copilotApi, errorMessage } from '../api/client'
 
 /**
  * The copilot: ask anything about the platform; it prepares actions as cards.
@@ -12,7 +12,25 @@ import { CopilotProposal, copilotApi, errorMessage } from '../api/client'
  * open page (the field monitor) refreshes instead of showing stale numbers.
  */
 
-type CardState = 'pending' | 'working' | 'done' | 'dismissed' | 'failed'
+type CardState = 'pending' | 'working' | 'done' | 'dismissed' | 'failed' | 'expired'
+
+/** The conversation to reopen, per browser. A convenience: losing it loses nothing. */
+const LAST_KEY = 'dvv.copilot.conversation'
+function remembered(): string | null {
+  try {
+    return localStorage.getItem(LAST_KEY)
+  } catch {
+    return null
+  }
+}
+function remember(id: string | null) {
+  try {
+    if (id) localStorage.setItem(LAST_KEY, id)
+    else localStorage.removeItem(LAST_KEY)
+  } catch {
+    /* private window: the conversation is still saved on the server */
+  }
+}
 
 interface Turn {
   role: 'user' | 'assistant'
@@ -205,6 +223,12 @@ function Card({
       {state === 'done' && <p className="text-xs text-emerald-700 mt-2 font-medium">Done.</p>}
       {state === 'dismissed' && <p className="text-xs text-slate-400 mt-2">Dismissed — nothing changed.</p>}
       {state === 'failed' && <p className="text-xs text-red-600 mt-2">{error || 'That did not work.'}</p>}
+      {state === 'expired' && (
+        <p className="text-xs text-slate-500 mt-2">
+          From an earlier session, so it can no longer be confirmed — the project may have changed
+          since. Ask again for a fresh card.
+        </p>
+      )}
     </div>
   )
 }
@@ -218,11 +242,58 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
   const [error, setError] = useState<string | null>(null)
   const [cardState, setCardState] = useState<Record<string, CardState>>({})
   const [cardError, setCardError] = useState<Record<string, string>>({})
+  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [earlier, setEarlier] = useState<CopilotConversationSummary[]>([])
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: 'end' })
   }, [turns, busy])
+
+  const load = async (id: string) => {
+    try {
+      const res = await copilotApi.conversation(id)
+      const expired: Record<string, CardState> = {}
+      setTurns(
+        res.data.messages.map((m) => {
+          for (const c of m.proposals) expired[c.id] = 'expired'
+          return {
+            role: m.role,
+            content: m.content,
+            cards: m.proposals,
+            answeredBy: m.answered_by ?? undefined,
+          }
+        }),
+      )
+      setCardState(expired)
+      setCardError({})
+      setConversationId(id)
+      remember(id)
+    } catch {
+      remember(null) // deleted, or not this user's: start fresh
+    }
+  }
+
+  // Opening the panel picks up where this browser left off.
+  useEffect(() => {
+    if (!open) return
+    const last = remembered()
+    if (last && !conversationId) void load(last)
+    copilotApi
+      .conversations()
+      .then((res) => setEarlier(res.data))
+      .catch(() => setEarlier([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  const startNew = () => {
+    setTurns([])
+    setCardState({})
+    setCardError({})
+    setError(null)
+    setConversationId(null)
+    remember(null)
+  }
 
   if (!open) return null
 
@@ -230,13 +301,16 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
     e.preventDefault()
     const message = input.trim()
     if (!message || busy) return
-    const history = turns.map(({ role, content }) => ({ role, content: content.slice(0, 3900) }))
     setTurns((t) => [...t, { role: 'user', content: message }])
     setInput('')
     setBusy(true)
     setError(null)
     try {
-      const res = await copilotApi.ask(message, history, studyId)
+      const res = await copilotApi.ask(message, studyId, conversationId)
+      if (res.data.conversation_id && res.data.conversation_id !== conversationId) {
+        setConversationId(res.data.conversation_id)
+        remember(res.data.conversation_id)
+      }
       setTurns((t) => [
         ...t,
         {
@@ -278,6 +352,30 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
             nothing changes until you confirm.
           </p>
         </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {earlier.length > 0 && (
+            <select
+              aria-label="Earlier conversations"
+              value=""
+              onChange={(e) => e.target.value && void load(e.target.value)}
+              className="h-7 max-w-[7.5rem] rounded border border-slate-200 px-1 text-xs text-slate-600"
+            >
+              <option value="">Earlier…</option>
+              {earlier.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.title}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={startNew}
+            disabled={busy || turns.length === 0}
+            className="h-7 rounded border border-slate-200 px-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+          >
+            New chat
+          </button>
         <button
           type="button"
           onClick={onClose}
@@ -286,6 +384,7 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
         >
           ×
         </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 text-sm">

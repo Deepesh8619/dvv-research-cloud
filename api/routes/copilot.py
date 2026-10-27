@@ -18,18 +18,31 @@ from api.auth import UserRole, get_current_user
 from api.db import (
     UserDB,
     answers_by_session,
+    delete_copilot_conversation,
     fielding_link_counts,
+    get_copilot_conversation,
     get_db,
     get_fielding_link,
     get_study,
+    list_copilot_conversations,
+    list_copilot_messages,
     list_fielding_links_for_study,
     list_questionnaires_for_study,
     list_quota_cells,
     list_respondent_sessions,
     list_studies,
+    save_copilot_exchange,
 )
 from api.heavy import plain_sessions, run_heavy_detached
-from api.models import ChatRequest, CopilotProposal, CopilotRequest, CopilotResponse
+from api.models import (
+    ChatRequest,
+    CopilotConversation,
+    CopilotConversationSummary,
+    CopilotProposal,
+    CopilotRequest,
+    CopilotResponse,
+    CopilotStoredMessage,
+)
 from src.ai.copilot import run_copilot
 from src.ai.router import BackendUnavailable
 from src.core.survey_definition import (
@@ -58,6 +71,7 @@ router = APIRouter()
 _CAN_ACT = {UserRole.OWNER, UserRole.ANALYST, UserRole.FOUNDER}
 _MAX_FINDINGS = 12  # keep each tool result inside the model's context budget
 _MAX_VERBATIMS = 8  # enough to show a pattern, small enough to read in a side panel
+_HISTORY_TURNS = 12  # earlier messages sent back to the model with a new question
 
 
 class _ToolError(Exception):
@@ -556,6 +570,25 @@ def make_executor(db: Session, user: UserDB):
     return execute, proposals
 
 
+def _lookups_note(lookups: list[dict] | None) -> str:
+    """What an earlier answer looked up, so a follow-up ("why?", "and the other
+    link?") knows which project and link it was about. Not the results: those
+    are looked up again, because they may have changed since."""
+    calls = [
+        f"{x.get('tool')}({', '.join(f'{k}={v}' for k, v in (x.get('args') or {}).items())})"
+        for x in lookups or [] if x.get("tool")
+    ]
+    return f"\n[Looked up for this answer: {'; '.join(calls)}]" if calls else ""
+
+
+def _history(db: Session, conversation_id: str) -> list[dict]:
+    rows = list_copilot_messages(db, conversation_id)[-_HISTORY_TURNS:]
+    return [{"role": m.role,
+             "content": (m.content or "")[:3900] + (_lookups_note(m.lookups)
+                                                    if m.role == "assistant" else "")}
+            for m in rows]
+
+
 @router.post("/copilot", response_model=CopilotResponse)
 def copilot(
     body: CopilotRequest,
@@ -563,7 +596,15 @@ def copilot(
     user: UserDB = Depends(get_current_user),
 ):
     """Ask the copilot anything about the platform. It may prepare actions,
-    never perform them."""
+    never perform them. Each exchange is saved to the user's conversation."""
+    conversation = None
+    if body.conversation_id:
+        conversation = get_copilot_conversation(db, body.conversation_id, user.id)
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="No such conversation")
+        history = _history(db, conversation.id)
+    else:
+        history = [t.model_dump() for t in body.history]
     execute, proposals = make_executor(db, user)
     page = ""
     if body.study_id and (current := get_study(db, body.study_id)):
@@ -578,7 +619,7 @@ def copilot(
             ) + "."
     try:
         reply, results, answered_by = run_copilot(
-            body.message, [t.model_dump() for t in body.history], execute,
+            body.message, history, execute,
             user=user.name or user.email, role=user.role, page=page)
     except BackendUnavailable as exc:
         logger.warning(f"copilot: no backend ({exc})")
@@ -588,6 +629,55 @@ def copilot(
     # which re-prepares the same cards: keep one card per distinct action.
     unique = list({(c.method, c.path, json.dumps(c.body, sort_keys=True)): c
                    for c in proposals}.values())
+    lookups = [{"tool": r.get("tool", ""), "args": r.get("args") or {}} for r in results]
+    conversation = save_copilot_exchange(
+        db, conversation, user.id, body.study_id, body.message, reply, lookups,
+        [c.model_dump() for c in unique], answered_by)
     return CopilotResponse(reply=reply, proposals=unique,
                            tools_used=[r.get("tool", "") for r in results],
-                           answered_by=answered_by)
+                           answered_by=answered_by, conversation_id=conversation.id)
+
+
+@router.get("/copilot/conversations", response_model=list[CopilotConversationSummary])
+def copilot_conversations(
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The signed-in user's own conversations, most recent first."""
+    return [CopilotConversationSummary(id=c.id, title=c.title or "Conversation",
+                                       study_id=c.study_id, updated_at=c.updated_at)
+            for c in list_copilot_conversations(db, user.id)]
+
+
+def _own(db: Session, conversation_id: str, user: UserDB):
+    found = get_copilot_conversation(db, conversation_id, user.id)
+    if found is None:  # someone else's reads the same as none at all
+        raise HTTPException(status_code=404, detail="No such conversation")
+    return found
+
+
+@router.get("/copilot/conversations/{conversation_id}", response_model=CopilotConversation)
+def copilot_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    c = _own(db, conversation_id, user)
+    return CopilotConversation(
+        id=c.id, title=c.title or "Conversation", study_id=c.study_id, updated_at=c.updated_at,
+        messages=[CopilotStoredMessage(
+            role=m.role, content=m.content or "",
+            proposals=[CopilotProposal(**p) for p in m.proposals or []],
+            tools_used=[x.get("tool", "") for x in m.lookups or []],
+            answered_by=m.answered_by, created_at=m.created_at,
+        ) for m in list_copilot_messages(db, c.id)],
+    )
+
+
+@router.delete("/copilot/conversations/{conversation_id}", status_code=204)
+def delete_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    delete_copilot_conversation(db, _own(db, conversation_id, user))

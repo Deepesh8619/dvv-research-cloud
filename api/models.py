@@ -682,9 +682,13 @@ class CopilotTurn(BaseModel):
 
 class CopilotRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
+    #: Only read when there is no `conversation_id`; a stored conversation's
+    #: history comes from the server, never from the browser.
     history: list[CopilotTurn] = Field(default_factory=list, max_length=12)
     #: The project the user is looking at, if any — context, not a permission.
     study_id: str | None = None
+    #: Continue this conversation; omitted starts a new one.
+    conversation_id: str | None = None
 
 
 class CopilotProposal(BaseModel):
@@ -705,6 +709,29 @@ class CopilotResponse(BaseModel):
     proposals: list[CopilotProposal] = Field(default_factory=list)
     tools_used: list[str] = Field(default_factory=list)
     answered_by: str
+    conversation_id: str | None = None
+
+
+class CopilotStoredMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+    #: Cards as they were shown. Never confirmable again: what they would do
+    #: was checked against the project as it stood then.
+    proposals: list[CopilotProposal] = Field(default_factory=list)
+    tools_used: list[str] = Field(default_factory=list)
+    answered_by: str | None = None
+    created_at: str
+
+
+class CopilotConversationSummary(BaseModel):
+    id: str
+    title: str
+    study_id: str | None = None
+    updated_at: str
+
+
+class CopilotConversation(CopilotConversationSummary):
+    messages: list[CopilotStoredMessage] = Field(default_factory=list)
 
 
 class QuestionSplitItem(BaseModel):

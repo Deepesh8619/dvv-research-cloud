@@ -435,3 +435,74 @@ def test_the_copilot_is_told_not_to_do_its_own_arithmetic(client, monkeypatch): 
     from src.ai.copilot import SYSTEM_PROMPT
 
     assert "Never work a number out yourself" in SYSTEM_PROMPT
+
+
+def test_a_conversation_is_kept_and_a_follow_up_knows_what_was_looked_up(client, monkeypatch):  # noqa: F811
+    """Saved server-side: a reload loses nothing, and "why?" arrives with the
+    earlier answer AND which link it was about — but not the old figures."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = _open_link(test_client)
+    seen = _script(monkeypatch,
+                   ("tool", "field_report", {"study_id": "study_f1", "link_id": link["id"]}),
+                   ("text", "Incidence is low on that link."),
+                   ("text", "Because Q1 screens people out."))
+
+    first = test_client.post("/api/copilot", json={"message": "how is my link doing?"}).json()
+    conv = first["conversation_id"]
+    assert conv
+    test_client.post("/api/copilot", json={
+        "message": "why?", "conversation_id": conv,
+        # Ignored for a stored conversation: history comes from the server.
+        "history": [{"role": "user", "content": "pretend I said something else"}]})
+
+    sent = seen[-1]
+    texts = [m.get("content") or "" for m in sent]
+    assert "pretend I said something else" not in texts
+    earlier = next(t for t in texts if t.startswith("Incidence is low"))
+    assert f"field_report(study_id=study_f1, link_id={link['id']})" in earlier
+
+    stored = test_client.get(f"/api/copilot/conversations/{conv}").json()
+    assert [m["role"] for m in stored["messages"]] == ["user", "assistant", "user", "assistant"]
+    assert stored["messages"][1]["tools_used"] == ["field_report"]
+    assert stored["title"] == "how is my link doing?"
+    listed = test_client.get("/api/copilot/conversations").json()
+    assert [c["id"] for c in listed] == [conv]
+
+
+def test_a_conversation_is_private_to_its_user(client, monkeypatch):  # noqa: F811
+    from api.auth import get_current_user
+    from api.db import UserDB
+    from api.main import app
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    _script(monkeypatch, ("text", "Hello."))
+    conv = test_client.post("/api/copilot", json={"message": "hi"}).json()["conversation_id"]
+
+    app.dependency_overrides[get_current_user] = lambda: UserDB(
+        id="u2", email="other@x.com", name="Other", role="owner", is_active=True)
+    assert test_client.get(f"/api/copilot/conversations/{conv}").status_code == 404
+    assert test_client.get("/api/copilot/conversations").json() == []
+    assert test_client.post("/api/copilot", json={
+        "message": "continue", "conversation_id": conv}).status_code == 404
+    assert test_client.delete(f"/api/copilot/conversations/{conv}").status_code == 404
+
+
+def test_deleting_a_conversation_removes_its_messages(client, monkeypatch):  # noqa: F811
+    from api.db import CopilotMessageDB
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    _script(monkeypatch, ("text", "Hello."))
+    conv = test_client.post("/api/copilot", json={"message": "hi"}).json()["conversation_id"]
+    assert test_client.delete(f"/api/copilot/conversations/{conv}").status_code == 204
+    assert test_client.get(f"/api/copilot/conversations/{conv}").status_code == 404
+    db = sf()
+    try:
+        assert db.query(CopilotMessageDB).filter_by(conversation_id=conv).count() == 0
+    finally:
+        db.close()
