@@ -1828,9 +1828,11 @@ export interface CopilotProposal {
   kind: string
   title: string
   detail: string
-  method: 'POST' | 'PATCH'
+  method: 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   path: string
   body: Record<string, unknown>
+  /** What changes, field by field, written by the server. */
+  diff?: Array<{ field: string; before: string; after: string }>
 }
 
 export interface CopilotReply {
@@ -1861,11 +1863,17 @@ export interface CopilotConversation extends CopilotConversationSummary {
 
 export const copilotApi = {
   // A stored conversation's history is the server's; only a new one starts here.
-  ask: async (message: string, studyId?: string | null, conversationId?: string | null) =>
+  ask: async (
+    message: string,
+    studyId?: string | null,
+    conversationId?: string | null,
+    focusQid?: string | null,
+  ) =>
     api.post<CopilotReply>('/copilot', {
       message,
       ...(studyId ? { study_id: studyId } : {}),
       ...(conversationId ? { conversation_id: conversationId } : {}),
+      ...(focusQid ? { focus_qid: focusQid } : {}),
     }),
 
   conversations: async () => api.get<CopilotConversationSummary[]>('/copilot/conversations'),

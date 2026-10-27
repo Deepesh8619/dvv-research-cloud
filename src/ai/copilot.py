@@ -38,6 +38,13 @@ Rules:
   study_overview (or the page context below).
 - You cannot change anything yourself. To act, call a propose_* tool: it prepares a
   card the user must confirm. Never say an action is done — say it is ready to confirm.
+- Questionnaire review: question_details shows each question as it stands now (draft
+  included), its `source_text` from the document and `extraction_evidence` — the text
+  that decided each field. Use them to explain how a question was read.
+- To fix ONE question, propose_edit_question. When the same misreading comes from a
+  convention of the document (a marker like "[SA]" read wrongly everywhere), teach it
+  with propose_teach_reading — check reading_conventions for the kind and values first.
+  Say which you chose and why: teaching changes every question with that marker.
 - If no tool does what was asked (deleting a project, renaming one, editing a question),
   say plainly that you cannot do that here. NEVER prepare a different action in its place
   — not as a "first step", not as a workaround.
@@ -163,6 +170,36 @@ TOOLS = [
          "codes": {"type": "array", "items": {"type": "string"}},
          "limit": {"type": "integer"}},
         ["study_id", "link_id", "qid", "codes", "limit"]),
+    _fn("reading_conventions", "How the questionnaire's document format is read: the "
+        "format, the conventions already taught, and the kinds that can be taught with "
+        "their allowed values.", _STUDY, ["study_id"]),
+    _fn("propose_edit_question", "Prepare changing one question in the questionnaire "
+        "under review: any of `text`, `type`, `options` (a list of labels in order, codes "
+        "are numbered 1..n), `required`, `randomize_options`. The card shows before and "
+        "after.",
+        {**_STUDY, "qid": {"type": "string"}, "text": {"type": "string"},
+         "type": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}},
+         "required": {"type": "boolean"}, "randomize_options": {"type": "boolean"}},
+        ["study_id", "qid"]),
+    _fn("propose_reread_question", "Prepare reading one question again from its source "
+        "text in the document, with today's parsers and what has been taught.",
+        {**_STUDY, "qid": {"type": "string"}}, ["study_id", "qid"]),
+    _fn("propose_question_in_link", "Prepare asking (in_link true) or not asking (false) a "
+        "question in survey links opened from now on. It stays in the questionnaire.",
+        {**_STUDY, "qid": {"type": "string"}, "in_link": {"type": "boolean"}},
+        ["study_id", "qid", "in_link"]),
+    _fn("propose_approve_question", "Prepare approving one question as checked by a person.",
+        {**_STUDY, "qid": {"type": "string"}}, ["study_id", "qid"]),
+    _fn("propose_delete_question", "Prepare deleting one question from the questionnaire "
+        "under review. Refused while other questions read its answer.",
+        {**_STUDY, "qid": {"type": "string"}}, ["study_id", "qid"]),
+    _fn("propose_teach_reading", "Prepare teaching the PARSER a convention of this "
+        "document's format, so every question using it is read correctly, now and in later "
+        "documents: `kind` (see reading_conventions), `pattern` = the literal text as it "
+        "appears in the document (e.g. \"[SA]\"), `value` = what it means (e.g. single).",
+        {**_STUDY, "kind": {"type": "string"}, "pattern": {"type": "string"},
+         "value": {"type": "string"}},
+        ["study_id", "kind", "pattern"]),
     _fn("propose_materialize", "Prepare loading a link's completes into the project's "
         "tables and delivery files.", _LINK, ["study_id", "link_id"]),
 ]

@@ -985,6 +985,15 @@ def _apply_update(question, request: QuestionUpdateRequest) -> None:
         )
 
 
+def question_fingerprint(question) -> str:
+    """A short hash of a question as it stands, to tell whether it has changed."""
+    import hashlib
+    import json
+
+    raw = json.dumps(question.to_dict(), sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
 @router.patch("/studies/{study_id}/questionnaire/questions/{qid}")
 def update_question(
     study_id: str,
@@ -1010,6 +1019,12 @@ def update_question(
     survey = _load_definition(db, questionnaire)
     if qid not in survey:
         raise HTTPException(status_code=404, detail=f"Question {qid} not found")
+    if request.base_fingerprint and request.base_fingerprint != question_fingerprint(survey[qid]):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{qid} has changed since this edit was prepared. Look at it again "
+                   "and ask for a fresh change.",
+        )
 
     problems_before = survey.validate()
     approved = set(questionnaire.approved_qids or [])
