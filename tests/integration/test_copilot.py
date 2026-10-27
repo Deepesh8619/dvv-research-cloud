@@ -918,3 +918,61 @@ def test_tables_download_as_an_excel_workbook(client):  # noqa: F811
     assert second.title != first.title
     assert [c.value for c in first[2]] == ["Base", 11.0, 11.0]  # numbers stay numbers
     assert first["B3"].value == "36.4% B"  # a cell with a sig letter stays text
+
+
+# --- GraphRAG -------------------------------------------------------------------
+
+
+def test_the_question_graph_walks_routing_quotas_and_the_solver(client, monkeypatch):  # noqa: F811
+    """Q3 is shown only to Q2 = 1 (the sample survey): Q2 decides Q3, a quota
+    counts on Q2, and the solver finds a path to Q3."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    link = _open_link(test_client)
+    test_client.post(f"/api/studies/study_f1/fielding/links/{link['id']}/quotas", json={"cells": [
+        {"name": "Drinkers", "condition": {"op": "eq", "qid": "Q2", "value": 1}, "limit": 50}]})
+    seen = _script(monkeypatch,
+                   ("tool", "question_graph", {"study_id": "study_f1", "qid": "Q2"}),
+                   ("tool", "question_graph", {"study_id": "study_f1", "qid": "Q3"}),
+                   ("text", "Q2 decides who sees Q3."))
+    test_client.post("/api/copilot", json={"message": "what depends on Q2?"})
+    q2, q3 = _tool_results(seen)
+    assert q2["affects"] == [{"qid": "Q3", "how": "decides who is shown it", "steps_away": 1,
+                              "text": "Which coffee brand?"}]
+    assert q2["quota_cells"] == [{"link_id": link["id"], "cell": "Drinkers", "limit": 50,
+                                  "count": 0}]
+    assert [d["qid"] for d in q3["depends_on"]] == ["Q2"]
+    assert q3["reachable"] is True and q3["example_path"]
+
+
+def test_the_question_graph_says_why_nobody_reaches_a_question(client, monkeypatch):  # noqa: F811
+    from src.core.survey_definition import Expression, Question, QuestionType
+    from tests.integration.test_fielding_routes import _sample_survey
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    survey = _sample_survey("study_f1")
+    survey.questions.append(Question(qid="Q4", text="Only for code 9?", type=QuestionType.OPEN_TEXT,
+                                     show_if=Expression(op="eq", qid="Q2", value=9)))
+    survey.blocks[0].question_ids.append("Q4")
+    _make_questionnaire(sf, status="in_review", survey=survey)
+    seen = _script(monkeypatch, ("tool", "question_graph", {"study_id": "study_f1", "qid": "Q4"}),
+                   ("text", "Nobody can reach Q4."))
+    test_client.post("/api/copilot", json={"message": "why can nobody reach Q4?"})
+    (q4,) = _tool_results(seen)
+    assert q4["reachable"] is False and q4["why_unreachable"]
+
+
+def test_a_question_found_by_meaning_brings_its_neighbours(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    seen = _script(monkeypatch,
+                   ("tool", "find_question", {"study_id": "study_f1", "query": "coffee brand"}),
+                   ("text", "Q3."))
+    test_client.post("/api/copilot", json={"message": "which question asks the brand?"})
+    (found,) = _tool_results(seen)
+    by_ref = {m["ref"]: m for m in found["related_by_meaning"]}
+    assert by_ref["Q3"]["depends_on"] == ["Q2"]
+    assert by_ref["Q2"]["decides"] == ["Q3"]

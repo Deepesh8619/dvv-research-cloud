@@ -229,6 +229,47 @@
    ]
   },
   {
+   "id": "graph-what-depends",
+   "category": "questionnaire",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "What would be affected if I deleted Q2?",
+     "expect": {
+      "tools_any": [
+       "question_graph"
+      ],
+      "mentions": [
+       "\\bQ3\\b"
+      ],
+      "cards": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "graph-reachable",
+   "category": "questionnaire",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "Can any respondent actually reach Q3, and what path gets them there?",
+     "expect": {
+      "tools": [
+       "question_graph"
+      ],
+      "mentions": [
+       "\\bQ2\\b|alpha"
+      ],
+      "avoids": [
+       "\\bno one\\b|\\bnobody\\b|unreachable"
+      ],
+      "cards": []
+     }
+    }
+   ]
+  },
+  {
    "id": "incidence-a",
    "category": "fielding",
    "study": "coffee",

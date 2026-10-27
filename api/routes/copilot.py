@@ -88,6 +88,30 @@ def _answer_key(label: object) -> str:
     return _SAME_ANSWER.get(text, text)
 
 
+#: How a graph edge reads to a researcher, from the depending question's side.
+_EDGE_WORDS = {
+    "shown_if": "decides who is shown it",
+    "terminates_on": "screens out on its answer",
+    "masked_by": "masks its options",
+    "piped_from": "pipes text into it",
+    "derived_from": "derives a code from it",
+}
+
+
+def neighbours(definition, qid: str) -> dict:
+    """One hop around a question, read from the questionnaire itself."""
+    from src.engines.questionnaire.graph_sync import _deps
+
+    if qid not in definition:
+        return {}
+    real = {q.qid.upper(): q.qid for q in definition.questions}  # masks store qids upper-cased
+    upstream = sorted({real[ref.upper()] for _kind, ref in _deps(definition[qid])
+                       if ref.upper() in real})
+    downstream = sorted({q.qid for q in definition.questions if q.qid != qid
+                         and qid.upper() in {ref.upper() for _k, ref in _deps(q)}})
+    return {k: v for k, v in (("depends_on", upstream), ("decides", downstream)) if v}
+
+
 class _ToolError(Exception):
     """A tool can't run for a reason worth telling the model (and the user)."""
 
@@ -323,12 +347,61 @@ def make_executor(db: Session, user: UserDB):
             logger.exception("[%s] semantic search failed", study_id)
             return result
         result["related_by_meaning"] = [
-            {"ref": m["ref"], "text": m["text"][:300], "score": m["score"]}
+            {"ref": m["ref"], "text": m["text"][:300], "score": m["score"],
+             # GraphRAG: a question found by meaning brings its neighbours —
+             # what decides who sees it and what its answer decides — so the
+             # answer can say "Q5, asked only of those aware of Alpha (Q2)".
+             **neighbours(definition, m["ref"])}
             for m in found["matches"]
         ]
         if found.get("note"):
             result["related_by_meaning_note"] = found["note"]
         return result
+
+    def question_graph(args):
+        """Everything one question is tied to, from the study graph and the solver."""
+        from src.engines.questionnaire.graph_sync import sync_questionnaire
+        from src.engines.questionnaire.logic_proof import prove
+        from src.platform import graph
+
+        s, _row, definition, q = question(args)
+        # The graph is written on approval only; refresh it from the questionnaire
+        # as it stands, so a draft or a later edit is what gets walked.
+        sync_questionnaire(db, s.id, definition)
+        db.commit()
+        node = graph.node_id(s.id, "question", q.qid)
+
+        def described(rows):
+            return [{"qid": r["ref"], "how": _EDGE_WORDS.get(r["via"], r["via"]),
+                     "steps_away": r["depth"], "text": (r["label"] or "")[:120]}
+                    for r in rows if r["kind"] == "question"]
+
+        depends_on = described(graph.lineage(db, s.id, node, max_depth=6))
+        affects = described(graph.impact(db, s.id, node, max_depth=6))
+        quotas = []
+        for ln in list_fielding_links_for_study(db, s.id):
+            for cell in list_quota_cells(db, ln.id):
+                refs = Expression.from_dict(json.loads(cell.condition_json)).referenced_qids()
+                if q.qid in refs:
+                    quotas.append({"link_id": ln.id, "cell": cell.name, "limit": cell.cell_limit,
+                                   "count": cell.count})
+        proof = run_heavy_detached(db, prove, definition)
+        why_not = next((u["why"] for u in proof["unreachable"] if u["qid"] == q.qid), None)
+        unproved = next((u["reason"] for u in proof["not_provable"] if u["qid"] == q.qid), None)
+        return {
+            "qid": q.qid,
+            "depends_on": depends_on,
+            "affects": affects,
+            "quota_cells": quotas,
+            "reachable": (False if why_not else None if unproved
+                          else True if q.qid in proof["examples"] else None),
+            "why_unreachable": why_not,
+            "example_path": proof["examples"].get(q.qid),
+            "not_provable": unproved,
+            "note": "depends_on: what decides whether and how it is asked; affects: what "
+                    "would change if it changed or went. example_path is one set of answers "
+                    "that reaches it, found by the logic solver.",
+        }
 
     def search_verbatims(args):
         """What respondents typed, searched by meaning.
@@ -835,6 +908,7 @@ def make_executor(db: Session, user: UserDB):
         "soft_launch_check": soft_launch_check,
         "dry_run": dry_run,
         "field_projection": field_projection,
+        "question_graph": question_graph,
         "ask_data": ask_data,
         "propose_open_link": propose_open_link,
         "propose_set_hold": propose_set_hold,
