@@ -1327,3 +1327,58 @@ def test_a_chart_comes_from_the_table_tool_itself(client, monkeypatch, tmp_path)
     assert chart["filename"].endswith(".png") and len(resp["tables"]) == 1
     got = test_client.get(f"/api/studies/s_wb/charts/{chart['filename']}")
     assert got.status_code == 200 and got.headers["content-type"] == "image/png"
+
+
+def test_every_answer_keeps_how_it_was_made_for_admin(client, monkeypatch, tmp_path):  # noqa: F811
+    """Phase 1 of the architecture: a wrong answer is explained from its trace,
+    not rebuilt on a laptop."""
+    test_client, sf, state = client
+    _data_study(sf, tmp_path)
+    _script(monkeypatch,
+            ("tool", "make_tables", {"study_id": "s_wb", "columns": ["AGE"]}),
+            ("tool", "data_variables", {"study_id": "s_wb"}),
+            ("text", "Which columns?"))
+    resp = test_client.post("/api/copilot",
+                            json={"message": "tables by age", "study_id": "s_wb"}).json()
+    (answer,) = test_client.get("/api/admin/copilot-answers?show=all").json()
+    trace = answer["trace"]
+    assert answer["question"] == "tables by age" and trace["page"] == "s_wb"
+    assert [s["tool"] for s in trace["steps"]][:2] == ["make_tables", "data_variables"]
+    refused, ok = trace["steps"][:2]
+    assert refused["ok"] is False and "plain number" in refused["error"] and ok["ok"]
+    assert trace["ms"] >= sum(s["ms"] for s in trace["steps"]) and ok["chars"] > 100
+    assert trace["model_calls"] == 0  # the scripted model reports no usage
+
+    errors = test_client.get("/api/admin/copilot-answers?show=errors").json()
+    assert [a["seq"] for a in errors] == [resp["seq"]]
+    assert test_client.get("/api/admin/copilot-answers?show=flagged").json() == []
+    assert test_client.get("/api/admin/copilot-answers?show=slow").json() == []
+    state["role"] = "analyst"
+    assert test_client.get("/api/admin/copilot-answers").status_code == 403
+
+
+def test_eval_runs_build_a_score_history(client):  # noqa: F811
+    from api.db import record_copilot_eval
+
+    test_client, sf, _ = client
+    db = sf()
+    record_copilot_eval(db, {"score": 93.9, "passed": 62, "cases": 66, "median_seconds": 1.0,
+                             "by_category": {"data": "5/8"}}, ["chart-q4"], "03731c1")
+    record_copilot_eval(db, {"score": 97.0, "passed": 64, "cases": 66}, [], "abc1234")
+    db.close()
+    latest, earlier = test_client.get("/api/admin/copilot-evals").json()
+    assert latest["score"] == 97.0 and latest["commit"] == "abc1234"
+    assert earlier["failed"] == ["chart-q4"] and earlier["by_category"] == {"data": "5/8"}
+
+
+def test_model_usage_is_tallied_per_request():
+    from src.platform import usage
+
+    mine = {"model_calls": 0, "tokens_in": 0, "tokens_out": 0}
+    token = usage.tally.set(mine)
+    try:
+        usage.record("https://bedrock-runtime.ap-south-1.amazonaws.com/x", b'{"model": "q"}',
+                     {"usage": {"prompt_tokens": 1200, "completion_tokens": 80}})
+    finally:
+        usage.tally.reset(token)
+    assert mine == {"model_calls": 1, "tokens_in": 1200, "tokens_out": 80}

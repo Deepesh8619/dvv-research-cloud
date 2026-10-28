@@ -1875,6 +1875,36 @@ export interface CopilotFeedbackMark {
   at?: string
 }
 
+/** How one Copilot answer was made: every tool step, time and tokens. */
+export interface CopilotTrace {
+  ms: number
+  model_calls: number
+  tokens_in: number
+  tokens_out: number
+  steps: Array<{ tool: string; ok: boolean; ms: number; chars: number; error?: string }>
+  page?: string | null
+  focus_qid?: string | null
+}
+
+/** One run of the Copilot eval (scripts/eval_copilot.py). */
+export interface CopilotEvalRun {
+  at: string
+  commit: string
+  score: number
+  passed: number
+  cases: number
+  median_seconds: number | null
+  by_category: Record<string, string>
+  failed: string[]
+}
+
+/** A recent Copilot answer, with the question behind it and how it was made (Admin). */
+export interface CopilotAnswerRecord extends FlaggedCopilotAnswer {
+  at: string
+  flagged: boolean
+  trace: CopilotTrace | null
+}
+
 /** An answer a user flagged as wrong, with the question behind it (Admin). */
 export interface FlaggedCopilotAnswer {
   conversation_id: string
@@ -1933,6 +1963,9 @@ export const copilotApi = {
   flag: async (id: string, seq: number, wrong: boolean, note = '') =>
     api.post(`/copilot/conversations/${id}/messages/${seq}/feedback`, { wrong, note }),
   flagged: async () => api.get<FlaggedCopilotAnswer[]>('/admin/copilot-feedback'),
+  answers: async (show: 'all' | 'flagged' | 'errors' | 'slow' = 'all') =>
+    api.get<CopilotAnswerRecord[]>('/admin/copilot-answers', { params: { show } }),
+  evals: async () => api.get<CopilotEvalRun[]>('/admin/copilot-evals'),
 
   /** Tables as one Excel workbook, built from exactly what the answer showed. */
   excel: async (tables: CopilotTable[]) =>

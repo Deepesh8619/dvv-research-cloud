@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 #: Set around a copilot request; everything else is counted as "other".
 purpose: ContextVar[str] = ContextVar("dvv_ai_purpose", default="other")
+#: Set by a caller that wants this request's own totals (the copilot's trace).
+tally: ContextVar[dict | None] = ContextVar("dvv_ai_tally", default=None)
 
 
 def _provider(url: str) -> str:
@@ -74,9 +76,14 @@ def record(url: str, request_body: bytes | None, reply: Any) -> None:
         model = ""
         if request_body:
             model = str(json.loads(request_body).get("model") or "")
+        tokens_in = int(used.get("prompt_tokens") or 0)
+        tokens_out = int(used.get("completion_tokens") or 0)
+        if (mine := tally.get()) is not None:
+            mine["model_calls"] += 1
+            mine["tokens_in"] += tokens_in
+            mine["tokens_out"] += tokens_out
         _bump(_provider(url), model or "unknown", purpose.get(), calls=1,
-              input_tokens=int(used.get("prompt_tokens") or 0),
-              output_tokens=int(used.get("completion_tokens") or 0))
+              input_tokens=tokens_in, output_tokens=tokens_out)
     except Exception:
         logger.exception("could not count model usage")
 

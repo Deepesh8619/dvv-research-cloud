@@ -15,6 +15,8 @@
 #   ./dvv load-seed | load-cleanup                    set up / remove the go-live load test
 #   ./dvv db-reader                                   read-only database login (new password each run)
 #   ./dvv embedder                                    switch on the search embedder (nomic-embed-text)
+#   ./dvv eval                                        run the Copilot eval now (score -> Admin)
+#   ./dvv eval-nightly on|off                         run it every night at 02:30 (~$0.10 a run)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -186,6 +188,25 @@ case "${1:-}" in
   offsite)
     dc exec -T offsite bash /offsite.sh once
     ;;
+  eval)
+    # Uses Bedrock (the real model) on synthetic projects in a throwaway
+    # database; only the score lands in this one. Logged for the nightly run.
+    mkdir -p logs
+    dc exec -T -e PYTHONPATH=/app app python scripts/eval_copilot.py \
+      --out "/tmp/copilot-eval-latest.json" 2>&1 | tee -a logs/copilot-eval.log
+    ;;
+  eval-nightly)
+    here=$(pwd)
+    line="30 2 * * * cd $here && ./dvv eval >/dev/null 2>&1  # dvv-copilot-eval"
+    current=$(crontab -l 2>/dev/null | grep -v 'dvv-copilot-eval' || true)
+    case "${2:-}" in
+      on)  printf '%s\n%s\n' "$current" "$line" | sed '/^$/d' | crontab -
+           echo "On: every night at 02:30 server time. Scores appear in Admin -> Copilot answers." ;;
+      off) printf '%s\n' "$current" | sed '/^$/d' | crontab -
+           echo "Off." ;;
+      *)   echo "usage: ./dvv eval-nightly on|off"; exit 1 ;;
+    esac
+    ;;
   embedder)
     # Turn on real search-by-meaning: Ollama with ONLY the embedding model,
     # memory-capped, then pull it and check it answers. Re-indexing is
@@ -251,6 +272,6 @@ EOT
     ls -1t backups/db-*.dump | head -3
     ;;
   *)
-    sed -n '2,17p' "$0"; exit 1
+    sed -n '2,19p' "$0"; exit 1
     ;;
 esac

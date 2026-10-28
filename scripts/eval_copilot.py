@@ -253,6 +253,8 @@ def main() -> int:
     parser.add_argument("--only", help="a category or a case id")
     parser.add_argument("--out", help="where to write the JSON report")
     parser.add_argument("--baseline", help="an earlier report to compare against")
+    parser.add_argument("--no-record", action="store_true",
+                        help="do not add this run to the score history in Admin")
     args = parser.parse_args()
     if args.baseline and not Path(args.baseline).is_file():
         # Checked before the run, not after it: an upgrade recreates the
@@ -333,6 +335,18 @@ def main() -> int:
             if r["id"] in before and before[r["id"]] != r["passed"]:
                 print(f"  {'fixed' if r['passed'] else 'BROKE'}: {r['id']}")
     print(f"Report: {out}")
+    if not args.no_record and not args.only:  # a partial run is not a score
+        try:
+            from api.db import SessionLocal, record_copilot_eval
+            from src.utils.build_info import build_commit
+
+            db = SessionLocal()
+            record_copilot_eval(db, summary, [r["id"] for r in results if not r["passed"]],
+                                build_commit())
+            db.close()
+            print("Added to the score history (Admin → Copilot answers).")
+        except Exception as exc:  # noqa: BLE001 - the run itself still counts
+            print(f"warning: score history not updated ({exc})")
     return 0
 
 

@@ -135,7 +135,7 @@ function WorkbookDownload({ file }: { file: CopilotChart }) {
 
 /**
  * "Wrong answer?" under a reply: an optional note, then it lands in Admin →
- * Copilot feedback, so the gaps reach the team as a list instead of a surprise.
+ * Copilot answers, so the gaps reach the team as a list instead of a surprise.
  */
 function FlagAnswer({ conversationId, seq, flagged, onChange }: {
   conversationId: string
