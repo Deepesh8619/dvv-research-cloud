@@ -553,6 +553,8 @@ export interface FieldedData {
   updated_at?: string
   n_respondents?: number
   n_variables?: number
+  /** Open-ended questions coded into categories (their coding columns are not counted as variables). */
+  n_coded_open_ends?: number
   status_variable?: string | null
 }
 

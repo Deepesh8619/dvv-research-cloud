@@ -92,6 +92,10 @@ Rules:
 - Asked for crosstabs or tables — one, several, or every question, by any columns,
   filtered, netted or weighted — call make_tables ONCE with the variable names. Use
   ask_data for questions in words that are not a table (an average, a count, a why).
+- Questions about the data's variables (are they all read, how many, which are open
+  text, what is S4, which is region) → data_variables. Questions about how DVV works,
+  what something on screen means or how to do a task in it → product_help. Answer from
+  what these return, never from general knowledge of other survey tools.
 - Never choose the columns yourself. If the user asked for tables "by" something
   without naming it, ask which — make_tables' refusals list the variables that work.
 - Asked for a table or a crosstab, report the cells make_tables returns. If it
@@ -177,6 +181,16 @@ TOOLS = [
         "data. Returns a written answer AND the cells behind it — use the cells "
         "when the question asked for a table, a crosstab or a breakdown.",
         {**_STUDY, "question": {"type": "string"}}, ["study_id", "question"]),
+    _fn("data_variables", "The variable list of a project's data: how many variables, "
+        "their types, whether every column of the data is identified, which columns of the "
+        "uploaded file did not reach the data and why, which open ends were coded. With "
+        "`query` (a name or words like 'region'), looks variables up: label, type, codes. "
+        "Use it before make_tables when you do not know a variable's name.",
+        {**_STUDY, "query": {"type": "string"}}, ["study_id"]),
+    _fn("product_help", "How DVV works — what a screen, tab, button or number means and how "
+        "to do something in the app (cleaning, soft launch, quotas, the Reports tab…). From the "
+        "app's own help text. Empty query lists every topic.",
+        {"query": {"type": "string"}}, []),
     _fn("make_tables", "Crosstabs from a project's collected data — any rows by any "
         "columns: 'every variable by age band', 'Q5 to Q9 by gender and region among women', "
         "'top 2 box of Q4 by generation, weighted'. Few tables are shown in the reply; many "

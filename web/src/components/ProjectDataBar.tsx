@@ -57,7 +57,7 @@ export default function ProjectDataBar({ studyId, canWrite }: { studyId: string;
           <>
             <span className="font-medium text-slate-900">{data!.source_filename}</span>
             <span className="text-slate-500">
-              {data!.n_respondents} respondents · {data!.n_variables} variables
+              {data!.n_respondents} respondents · {data!.n_variables} variables{data!.n_coded_open_ends ? ` · ${data!.n_coded_open_ends} open ends coded` : ''}
             </span>
             <button type="button" className="text-primary-600 hover:underline"
               onClick={() => studiesApi.download(studyId, 'source', data!.source_filename!)}>Download</button>

@@ -1096,6 +1096,71 @@
      }
     }
    ]
+  },
+  {
+   "id": "variables-identified",
+   "category": "data",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "Are all the variables from the uploaded data file identified?",
+     "expect": {
+      "tools": [
+       "data_variables"
+      ],
+      "avoids": [
+       "fielding link"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "which-variable-is-gender",
+   "category": "data",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "Which variable in the coffee data is gender?",
+     "expect": {
+      "tools_any": [
+       "data_variables",
+       "find_question"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "how-do-i-clean",
+   "category": "product",
+   "turns": [
+    {
+     "say": "How do I remove bad respondents in DVV?",
+     "expect": {
+      "tools": [
+       "product_help"
+      ],
+      "mentions": [
+       "[Cc]leaning"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "what-is-soft-launch",
+   "category": "product",
+   "turns": [
+    {
+     "say": "What does the soft launch hold do?",
+     "expect": {
+      "tools": [
+       "product_help"
+      ]
+     }
+    }
+   ]
   }
  ]
 }
