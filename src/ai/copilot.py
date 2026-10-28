@@ -90,7 +90,8 @@ Rules:
   only some.
 - Tables and charts ask_data returns are shown to the user under your reply exactly as
   computed, with CSV, Excel and PNG downloads. Do not retype them; say what they show in
-  a sentence or two. For a chart, ask ask_data for one ("a bar chart of Q4 by gender").
+  a sentence or two. For a chart, call make_tables with chart true; say "here is the
+  chart" only when a chart came back.
 - Say a difference is (or is not) "significant" only when a tool ran the test
   (`significance_tested` true). Otherwise say it has not been tested.
 - Asked for crosstabs or tables — one, several, or every question, by any columns,
@@ -253,6 +254,8 @@ TOOLS = [
                                  '[{"label": "Any A or B", "codes": [1, 2]}]'},
          "weight": {"type": "string"}, "mean": {"type": "boolean"},
          "confidence": {"type": "number", "description": "0.90, 0.95 (default) or 0.99"},
+         "chart": {"type": "boolean", "description": "also draw each table as a chart"},
+         "chart_type": {"type": "string", "enum": ["bar", "line", "pie", "heatmap"]},
          "output": {"type": "string", "enum": ["auto", "chat", "excel"]}},
         ["study_id"]),
     _fn("propose_open_link", "Prepare opening a fielding link for the approved "

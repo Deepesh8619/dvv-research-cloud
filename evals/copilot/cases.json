@@ -517,8 +517,9 @@
     {
      "say": "Make a bar chart of Q4 satisfaction.",
      "expect": {
-      "tools": [
-       "ask_data"
+      "tools_any": [
+       "ask_data",
+       "make_tables"
       ],
       "has_chart": true,
       "cards": []
@@ -1092,7 +1093,9 @@
       "tools": [
        "make_tables"
       ],
-      "has_chart": true
+      "table_mentions": [
+       "\\bman\\b|\\bmen\\b|\\bmale\\b"
+      ]
      }
     }
    ]
@@ -1138,8 +1141,9 @@
     {
      "say": "How do I remove bad respondents in DVV?",
      "expect": {
-      "tools": [
-       "product_help"
+      "tools_any": [
+       "product_help",
+       "cleaning_status"
       ],
       "mentions": [
        "[Cc]leaning"

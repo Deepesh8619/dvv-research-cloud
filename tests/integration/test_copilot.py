@@ -1294,3 +1294,36 @@ def test_a_screen_a_role_cannot_open_cannot_be_read_through_the_copilot(client, 
     costs, vendors = _tool_results(seen)
     assert costs["success"] is False and "cannot see the team" in costs["error"]
     assert vendors["success"] is False and "cannot open this screen" in vendors["error"]
+
+
+def test_gender_and_age_are_found_by_their_answers_when_the_wording_differs():
+    """Eval: gender asked as "How do you describe yourself?" was not found; the
+    model then crosstabbed by S1 (age)."""
+    from api.routes.chat import by_label
+    from src.core.models import DataMap, Variable, VarType
+
+    dm = DataMap([
+        Variable("S1", "What is your age?", VarType.NUMERIC, {}),
+        Variable("S2", "How do you describe yourself?", VarType.SINGLE, {1: "Man", 2: "Woman"}),
+        Variable("S3", "Which group?", VarType.SINGLE, {1: "18-34", 2: "35-54", 3: "55+"}),
+        Variable("Q1", "Do you drink coffee?", VarType.SINGLE, {1: "Yes", 2: "No"}),
+    ])
+    assert by_label(dm, "gender") == ["S2"]
+    assert by_label(dm, "age") == ["S1"]  # the label wins when it says it…
+    assert by_label(dm, "generation") == []
+    dm2 = DataMap([v for v in dm.variables if v.name != "S1"])
+    assert by_label(dm2, "age") == ["S3"]  # …the answers when it does not
+
+
+def test_a_chart_comes_from_the_table_tool_itself(client, monkeypatch, tmp_path):  # noqa: F811
+    """Eval: "a bar chart of Q4" drew nothing, and the reply said it had."""
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    _script(monkeypatch, ("tool", "make_tables", {"study_id": "s_wb", "rows": ["SAT"],
+                                                  "columns": ["gender"], "chart": True}),
+            ("text", "Here is the chart."))
+    resp = test_client.post("/api/copilot", json={"message": "bar chart of SAT by gender"}).json()
+    (chart,) = resp["charts"]
+    assert chart["filename"].endswith(".png") and len(resp["tables"]) == 1
+    got = test_client.get(f"/api/studies/s_wb/charts/{chart['filename']}")
+    assert got.status_code == 200 and got.headers["content-type"] == "image/png"

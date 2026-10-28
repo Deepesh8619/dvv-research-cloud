@@ -67,13 +67,32 @@ _SQL_DISALLOWED_RE = re.compile(
 )
 
 
+# ponytail: the banners people name most, recognised by their ANSWERS when the
+# question is worded otherwise ("How do you describe yourself?" is gender). Add
+# a line here when another common one goes unrecognised.
+_BY_ANSWERS = {
+    "gender": r"\b(male|female|man|woman|men|women)\b",
+    "sex": r"\b(male|female|man|woman|men|women)\b",
+    "age": r"\b\d{2}\s*(?:-|–|to)\s*\d{2}\b|\b\d{2}\s*\+",
+    "generation": r"\b(gen ?z|millennial|gen ?x|boomer)",
+    "region": r"\b(north|south|east|west|midwest|northeast|southwest)\b",
+}
+
+
 def by_label(datamap: DataMap, words: str) -> list[str]:
     """Variables whose label holds every word of `words` ("age", "gender",
-    "age break") — the model knows the question, not always the column name."""
+    "age break") — the model knows the question, not always the column name.
+    Failing that, a common banner is recognised by its answers (Man/Woman)."""
     terms = [w for w in re.findall(r"[a-z0-9]+", words.lower()) if len(w) > 2]
+    if not terms:
+        return []
+    hits = [v.name for v in datamap.variables
+            if all(re.search(rf"\b{re.escape(t)}", (v.label or "").lower()) for t in terms)]
+    if hits or len(terms) != 1 or terms[0] not in _BY_ANSWERS:
+        return hits
+    answers = re.compile(_BY_ANSWERS[terms[0]], re.I)
     return [v.name for v in datamap.variables
-            if terms and all(re.search(rf"\b{re.escape(t)}", (v.label or "").lower())
-                             for t in terms)] if terms else []
+            if v.values and sum(bool(answers.search(lab)) for lab in v.values.values()) >= 2]
 
 
 def _unknown(kind: str, names: list[str], datamap: DataMap) -> str:
