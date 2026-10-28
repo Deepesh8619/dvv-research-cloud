@@ -609,7 +609,8 @@ def make_executor(db: Session, user: UserDB):
             # Seen live: the model chose S4 (ZIP code) by itself and was told to
             # "use an age break". Name what it is, and what would work here.
             raise _ToolError("; ".join(what(x) for x in f) + " — no answer categories to make "
-                             f"columns from. Variables that work as columns here: {good_columns()}. "
+                             "columns from. Variables that work as columns here: "
+                             f"{good_columns()}. "
                              "If the user did not name the columns, ask them which.")
 
         # Rows: every question, or the names given — a grid's parent (Q5) brings its

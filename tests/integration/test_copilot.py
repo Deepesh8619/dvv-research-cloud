@@ -1073,7 +1073,8 @@ def _data_study(sf, tmp_path, study_id="s_wb"):
     pl.DataFrame({"AGEB": [1, 2] * 20, "AGE": list(range(20, 60)), "GEND": [1, 1, 2, 2] * 10,
                   "Q1": [1, 2, 2, 1] * 10, "Q5r1": [0, 1] * 20, "Q5r2": [1, 1, 0, 0] * 10,
                   "SAT": [1, 2, 3, 4, 5] * 8, "KIDS": [0, 0, 0, 1] * 10,
-                  "W": [1.0] * n, "Q7_1": ["good"] * n, "Q7_2": ["fine"] * n}).write_parquet(run / "data.parquet")
+                  "W": [1.0] * n, "Q7_1": ["good"] * n, "Q7_2": ["fine"] * n,
+                  }).write_parquet(run / "data.parquet")
     single = VarType.SINGLE
     (run / "datamap.json").write_text(DataMap([
         Variable("AGEB", "Age break", single, {1: "18-34", 2: "35+"}),
