@@ -16,12 +16,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from api.auth import UserRole, get_current_user
+from api.auth import UserRole, get_current_user, require_role
 from api.db import (
     UserDB,
     answers_by_session,
     delete_copilot_conversation,
     fielding_link_counts,
+    flag_copilot_answer,
     get_copilot_conversation,
     get_db,
     get_fielding_link,
@@ -29,6 +30,7 @@ from api.db import (
     list_copilot_conversations,
     list_copilot_messages,
     list_fielding_links_for_study,
+    list_flagged_copilot_answers,
     list_questionnaires_for_study,
     list_quota_cells,
     list_respondent_sessions,
@@ -40,6 +42,7 @@ from api.models import (
     ChatRequest,
     CopilotConversation,
     CopilotConversationSummary,
+    CopilotFeedback,
     CopilotProposal,
     CopilotRequest,
     CopilotResponse,
@@ -563,41 +566,113 @@ def make_executor(db: Session, user: UserDB):
             "note": note,
         }
 
-    def tables_workbook(args):
-        from api.routes.chat import _load_datamap, _study_dir, _unknown
-        from src.engines.tabs.runner import banner_workbook
+    def make_tables(args):
+        """Any set of tables: rows x columns, filtered, grouped, weighted — one tool
+        for the whole family instead of one tool per phrasing."""
+        from api.routes.chat import _load_datamap, _parse_filter, _study_dir, _unknown, by_label
+        from src.engines.tabs.crosstab import Net
+        from src.engines.tabs.runner import MAX_WORKBOOK_TABLES, tables_job
+        from src.engines.tabs.spec import TableSpec, TabPlan, auto_nets
+        from src.orchestration.orchestrator import auto_tab_plan
 
         s = study(args)
         d = _study_dir(s)
         dm = _load_datamap(d, s)
         if dm is None or not (d / "data.parquet").exists():
             raise _ToolError(f"{s.id} has no collected data to tabulate yet")
-        banner = [str(b) for b in args.get("banner") or []]
-        if not banner:
-            raise _ToolError("name the variable(s) to break every question by, e.g. an age band")
-        bad = [b for b in banner if b not in dm]
-        if bad:
-            raise _ToolError(_unknown("banner variable(s)", bad, dm))
-        flat = [b for b in banner if not dm[b].valid_codes()]
-        if flat:
-            raise _ToolError(f"{', '.join(flat)} has no answer categories (a plain number); "
+
+        def flat(names):  # a plain number (raw age) has no categories to make rows/columns of
+            return [n for n in names if not dm[n].valid_codes()]
+
+        def named(word: str) -> str | None:
+            """The variable meant: its name, or the ONE variable with categories
+            whose label says it ("gender"). Several candidates go back as a list."""
+            if word in dm:
+                return word
+            hits = [x for x in by_label(dm, word) if dm[x].valid_codes()]
+            return hits[0] if len(hits) == 1 else None
+
+        cols = [str(b) for b in args.get("columns") or []]
+        if bad := [b for b in cols if named(b) is None]:
+            raise _ToolError(_unknown("column variable(s)", bad, dm))
+        banner = list(dict.fromkeys(named(b) for b in cols))
+        if f := flat(banner):
+            raise _ToolError(f"{', '.join(f)} has no answer categories (a plain number); "
                              "use a banded version, such as an age break")
-        # Served by the chart route, which already checks the study and the path.
-        safe = "_".join(re.sub(r"\W", "", b) for b in banner)
-        filename = f"tables_by_{safe}_{uuid4().hex[:6]}.xlsx"
-        (d / "charts").mkdir(exist_ok=True)
-        title = "Every question by " + ", ".join(f"{b} ({dm[b].label[:40]})" for b in banner)
-        n = run_heavy_detached(db, banner_workbook, d / "data.parquet", dm, banner,
-                               d / "charts" / filename, title)
-        if not n:
-            raise _ToolError(f"{s.id} has no questions with answer categories to tabulate")
+
+        # Rows: every question, or the names given — a grid's parent (Q5) brings its
+        # rows (Q5r1, Q5r2…), so "Q5" works whichever way the data names them.
+        asked = [str(r) for r in args.get("rows") or []]
+        if not asked:
+            auto = auto_tab_plan(dm, limit=MAX_WORKBOOK_TABLES + len(banner))
+            stubs = [t.stub for t in (auto.tables if auto else [])]
+        else:
+            stubs, missing = [], []
+            for r in asked:
+                hit = [r] if r in dm else [
+                    v.name for v in dm.variables
+                    if v.question_ref == r
+                    or re.fullmatch(rf"{re.escape(r)}[_.]?[a-zA-Z]+\d+.*", v.name)]
+                if not hit and named(r):
+                    hit = [named(r)]
+                (stubs.extend(hit) if hit else missing.append(r))
+            if missing:
+                raise _ToolError(_unknown("row variable(s)", missing, dm))
+        stubs = [x for x in dict.fromkeys(stubs) if x not in banner]
+        skipped = flat(stubs)
+        stubs = [x for x in stubs if x not in skipped][:MAX_WORKBOOK_TABLES]
+        if not stubs:
+            raise _ToolError("none of those rows has answer categories to tabulate"
+                             + (f" ({', '.join(skipped)} are plain numbers)" if skipped else ""))
+
+        filter_, err = _parse_filter(args.get("filter"), dm)
+        if err:
+            raise _ToolError(err)
+        weight = args.get("weight") or None
+        if weight and weight not in dm:
+            raise _ToolError(_unknown("weight variable", [weight], dm))
+        try:
+            custom = [Net(label=str(n["label"]), codes=[int(c) for c in n["codes"]])
+                      for n in args.get("nets") or []]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise _ToolError('nets look like [{"label": "Any A or B", "codes": [1, 2]}]') from exc
+        mean = args.get("mean")
+
+        def table(stub):
+            codes = set(dm[stub].valid_codes())
+            nets = auto_nets(dm[stub]) + [n for n in custom if set(n.codes) <= codes]
+            return TableSpec(stub=stub, nets=nets, filter=filter_,
+                             mean=len(codes) >= 5 if mean is None else bool(mean))
+
+        title = ("Tables" if asked else "Every question") + (
+            " by " + ", ".join(f"{b} ({dm[b].label[:40]})" for b in banner) if banner else "")
+        plan = TabPlan(title=title, banner=banner, tables=[table(x) for x in stubs],
+                       weight=weight, confidence=float(args.get("confidence") or 0.95))
+        output = str(args.get("output") or "auto")
+        inline_max = 0 if output == "excel" else 5
+        filename = None
+        if output == "excel" or len(stubs) > inline_max:
+            # Served by the chart route, which already checks the study and the path.
+            safe = "_".join(re.sub(r"\W", "", b) for b in banner) or "total"
+            filename = f"tables_by_{safe}_{uuid4().hex[:6]}.xlsx"
+            (d / "charts").mkdir(exist_ok=True)
+        shown, n = run_heavy_detached(db, tables_job, d / "data.parquet", plan, dm,
+                                      d / "charts" / filename if filename else None, inline_max)
+        tables = [t for x in shown for t in tables_in({"table": x})]
         return {
-            "tables_written": n,
+            "tables_made": n,
+            "skipped_plain_numbers": skipped,
+            "tables": tables,
+            "significance_tested": any(t["significance_tested"] for t in tables) or (
+                filename is not None and len(banner) > 0),
             "charts": [{"study_id": s.id, "filename": filename, "title": title,
-                        "kind": "workbook"}],
-            "note": "The workbook is offered to the user as a download under your reply, one "
-                    "sheet per question with the banner as columns and significance letters. "
-                    "Say how many tables it holds and what the columns are; do not list them.",
+                        "kind": "workbook"}] if filename else [],
+            "note": ("The tables are shown under your reply exactly as computed" if tables else
+                     "The workbook is offered as a download under your reply, one sheet per "
+                     "table with significance letters") + ". Say how many tables and what the "
+                     "columns are; do not retype cells or list every table."
+                     + (f" Skipped (plain numbers, no categories): {', '.join(skipped)}."
+                        if skipped else ""),
         }
 
     # --- action tools: proposals only -----------------------------------------
@@ -992,7 +1067,7 @@ def make_executor(db: Session, user: UserDB):
         "question_graph": question_graph,
         "search_project": search_project,
         "ask_data": ask_data,
-        "tables_workbook": tables_workbook,
+        "make_tables": make_tables,
         "propose_open_link": propose_open_link,
         "propose_set_hold": propose_set_hold,
         "propose_close_link": propose_close_link,
@@ -1101,10 +1176,10 @@ def copilot(
               for t in r.get("tables") or [] if isinstance(t, dict) and "header" in t]
     charts = [c for r in results if r.get("success") is not False
               for c in r.get("charts") or [] if isinstance(c, dict) and "filename" in c]
-    conversation = save_copilot_exchange(
+    conversation, seq = save_copilot_exchange(
         db, conversation, user.id, body.study_id, body.message, reply, lookups,
         [c.model_dump() for c in unique], answered_by, tables, charts)
-    return CopilotResponse(reply=reply, proposals=unique,
+    return CopilotResponse(reply=reply, proposals=unique, seq=seq,
                            tools_used=[r.get("tool", "") for r in results],
                            answered_by=answered_by, conversation_id=conversation.id,
                            tables=tables, charts=charts,
@@ -1147,8 +1222,33 @@ def copilot_conversation(
             tables=m.tables or [],
             charts=m.charts or [],
             answered_by=m.answered_by, created_at=m.created_at,
+            seq=m.seq, feedback=m.feedback,
         ) for m in list_copilot_messages(db, c.id)],
     )
+
+
+@router.post("/copilot/conversations/{conversation_id}/messages/{seq}/feedback",
+             status_code=204)
+def flag_answer(
+    conversation_id: str,
+    seq: int,
+    body: CopilotFeedback,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """"This answer was wrong" — the gaps reach the team as a list, not by surprise."""
+    _own(db, conversation_id, user)
+    if not flag_copilot_answer(db, conversation_id, seq, body.wrong, body.note.strip()):
+        raise HTTPException(status_code=404, detail="No such answer")
+
+
+@router.get("/admin/copilot-feedback")
+def flagged_answers(
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.FOUNDER)),
+):
+    """Every answer flagged as wrong, with the question behind it. (Owner/Founder)"""
+    return list_flagged_copilot_answers(db)
 
 
 @router.delete("/copilot/conversations/{conversation_id}", status_code=204)

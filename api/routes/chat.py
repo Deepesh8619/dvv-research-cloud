@@ -67,6 +67,15 @@ _SQL_DISALLOWED_RE = re.compile(
 )
 
 
+def by_label(datamap: DataMap, words: str) -> list[str]:
+    """Variables whose label holds every word of `words` ("age", "gender",
+    "age break") — the model knows the question, not always the column name."""
+    terms = [w for w in re.findall(r"[a-z0-9]+", words.lower()) if len(w) > 2]
+    return [v.name for v in datamap.variables
+            if terms and all(re.search(rf"\b{re.escape(t)}", (v.label or "").lower())
+                             for t in terms)] if terms else []
+
+
 def _unknown(kind: str, names: list[str], datamap: DataMap) -> str:
     """'Unknown variable' plus the nearest real names, so the model can retry
     with one instead of telling the user "there was an issue"."""
@@ -75,10 +84,18 @@ def _unknown(kind: str, names: list[str], datamap: DataMap) -> str:
     near = sorted(
         {m for n in names for m in difflib.get_close_matches(n, known, n=3, cutoff=0.5)}
         # "Q4_satisfaction", "q4 by gender": a real name hiding inside the guess
-        | {lower[t] for n in names for t in re.split(r"[\W_]+", n.lower()) if t in lower})
-    hint = f" Closest variables: {', '.join(near)}." if near else (
+        | {lower[t] for n in names for t in re.split(r"[\W_]+", n.lower()) if t in lower}
+        | {m for n in names for m in by_label(datamap, n)[:8]})
+
+    def shown(name: str) -> str:
+        label = datamap[name].label
+        flat = "" if datamap[name].valid_codes() else ", a plain number"
+        return f"{name} ({label[:50]}{flat})" if label else name
+
+    hint = f" Closest variables: {', '.join(shown(n) for n in near)}." if near else (
         f" Variables look like: {', '.join(known[:8])}.")
     return f"Unknown {kind}: {', '.join(names)}.{hint}"
+
 
 def _run_sql(parquet_path: Path, sql: str, limit: int = 100) -> dict:
     """Run a read-only SELECT against the study's respondent data."""

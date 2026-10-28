@@ -2,6 +2,7 @@ import { useSearchParams } from 'react-router-dom'
 import ActivityPage from './ActivityPage'
 import WordingPage from './WordingPage'
 import AiUsagePanel from '../components/AiUsagePanel'
+import CopilotFeedbackPanel from '../components/CopilotFeedbackPanel'
 import { useEffect, useState } from 'react'
 import { authApi, User } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -212,6 +213,7 @@ export default function AdminPage() {
     { key: 'wording', label: 'Wording' },
     { key: 'activity', label: 'Activity' },
     { key: 'usage', label: 'AI usage' },
+    { key: 'feedback', label: 'Copilot feedback' },
   ]
   const tab = tabs.find((t) => t.key === params.get('tab'))?.key ?? tabs[0].key
   return (
@@ -229,6 +231,7 @@ export default function AdminPage() {
       {tab === 'wording' && <WordingPage />}
       {tab === 'activity' && <ActivityPage />}
       {tab === 'usage' && <AiUsagePanel />}
+      {tab === 'feedback' && <CopilotFeedbackPanel />}
     </div>
   )
 }
