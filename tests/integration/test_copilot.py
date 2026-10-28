@@ -1023,3 +1023,23 @@ def test_a_chart_that_was_not_drawn_is_reported_as_not_drawn(client, monkeypatch
     (result,) = _tool_results(seen)
     assert result["charts"] == []
     assert "NO CHART WAS DRAWN (Chart rendering failed: boom)" in result["note"]
+
+
+def test_a_failed_crosstab_comes_back_in_the_engines_words(client, monkeypatch):  # noqa: F811
+    """Seen live: "It seems there was an issue generating the crosstab"."""
+    from api.routes.chat import _unknown
+    from src.core.models import DataMap, Variable
+
+    datamap = DataMap([Variable(name="Q4"), Variable(name="S1")])
+    error = _unknown("variable", ["Q4_satisfaction"], datamap)
+    assert error == "Unknown variable: Q4_satisfaction. Closest variables: Q4."
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    _navigator_returns(monkeypatch, {"success": False, "error": error})
+    seen = _script(monkeypatch,
+                   ("tool", "ask_data", {"study_id": "study_f1", "question": "Q4 by gender"}),
+                   ("text", "Q4_satisfaction is not a variable."))
+    test_client.post("/api/copilot", json={"message": "crosstab Q4 by gender"})
+    (result,) = _tool_results(seen)
+    assert f"THE DATA ENGINE FAILED: {error}" in result["note"]
