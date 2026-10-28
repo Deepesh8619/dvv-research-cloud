@@ -453,8 +453,9 @@
     {
      "say": "Give me a table of Q4 satisfaction from the coffee data.",
      "expect": {
-      "tools": [
-       "ask_data"
+      "tools_any": [
+       "ask_data",
+       "make_tables"
       ],
       "table_mentions": [
        "very (dis)?satisfied"
@@ -475,8 +476,9 @@
     {
      "say": "Crosstab Q4 satisfaction by gender.",
      "expect": {
-      "tools": [
-       "ask_data"
+      "tools_any": [
+       "ask_data",
+       "make_tables"
       ],
       "table_mentions": [
        "\\bman\\b|\\bmen\\b|\\bmale\\b",
@@ -495,8 +497,9 @@
     {
      "say": "In the coffee tables, what percentage of completes have heard of Beta?",
      "expect": {
-      "tools": [
-       "ask_data"
+      "tools_any": [
+       "ask_data",
+       "make_tables"
       ],
       "mentions": [
        "{beta_aware_pct_a}"
@@ -532,7 +535,8 @@
      "say": "Is the difference in Q4 satisfaction between men and women statistically significant?",
      "expect": {
       "tools_any": [
-       "ask_data"
+       "ask_data",
+       "make_tables"
       ],
       "avoids": [
        "p\\s*[<=]\\s*0?\\.\\d",
@@ -1073,6 +1077,22 @@
        "T4"
       ],
       "may_skip_tools": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "every-question-by-gender",
+   "category": "data",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "Different crosstabs for every variable by gender.",
+     "expect": {
+      "tools": [
+       "make_tables"
+      ],
+      "has_chart": true
      }
     }
    ]

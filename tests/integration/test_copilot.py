@@ -1058,45 +1058,92 @@ def test_a_tool_failure_with_an_empty_message_still_counts(client, monkeypatch):
     assert "THE DATA ENGINE FAILED: show_table failed with no message" in result["note"]
 
 
-def test_every_question_by_age_band_comes_back_as_one_workbook(client, monkeypatch, tmp_path):  # noqa: F811
-    """Live ask: "different crosstables for every variable with age"."""
+def _data_study(sf, tmp_path, study_id="s_wb"):
+    """A study with collected data: an age break, raw age, gender, a grid, a scale."""
     from datetime import datetime
 
     import polars as pl
-    from openpyxl import load_workbook
 
     from api.db import StudyDB
     from src.core.models import DataMap, Variable, VarType
 
-    test_client, sf, _ = client
     run = tmp_path / "run"
     run.mkdir()
-    pl.DataFrame({"AGEB": [1, 2] * 20, "AGE": list(range(20, 60)), "Q1": [1, 2, 2, 1] * 10,
-                  "Q2": [1, 2, 3, 1] * 10}).write_parquet(run / "data.parquet")
+    n = 40
+    pl.DataFrame({"AGEB": [1, 2] * 20, "AGE": list(range(20, 60)), "GEND": [1, 1, 2, 2] * 10,
+                  "Q1": [1, 2, 2, 1] * 10, "Q5r1": [0, 1] * 20, "Q5r2": [1, 1, 0, 0] * 10,
+                  "SAT": [1, 2, 3, 4, 5] * 8, "KIDS": [0, 0, 0, 1] * 10,
+                  "W": [1.0] * n}).write_parquet(run / "data.parquet")
     single = VarType.SINGLE
     (run / "datamap.json").write_text(DataMap([
         Variable("AGEB", "Age break", single, {1: "18-34", 2: "35+"}),
         Variable("AGE", "What is your age?", single, {}),
+        Variable("GEND", "Please select your gender.", single, {1: "Male", 2: "Female"}),
         Variable("Q1", "Aware", single, {1: "Yes", 2: "No"}),
-        Variable("Q2", "Brand", single, {1: "A", 2: "B", 3: "C"})]).to_json())
+        Variable("Q5r1", "Where? Web", single, {0: "No", 1: "Yes"}, question_ref="Q5"),
+        Variable("Q5r2", "Where? Store", single, {0: "No", 1: "Yes"}, question_ref="Q5"),
+        Variable("SAT", "Satisfaction", single, {i: str(i) for i in range(1, 6)}),
+        Variable("KIDS", "Child(ren) age 5 or under", single, {0: "No", 1: "Yes"}),
+        Variable("W", "Weight", VarType.NUMERIC, {}),
+    ]).to_json())
     now = datetime.now().isoformat()
     db = sf()
-    db.add(StudyDB(id="s_wb", client_name="C", status="qc", created_at=now, updated_at=now,
+    db.add(StudyDB(id=study_id, client_name="C", status="qc", created_at=now, updated_at=now,
                    excel_path=str(run / "d.xlsx"), study_metadata={}, approval_chain={}))
     db.commit()
     db.close()
+
+
+def test_every_question_by_age_comes_back_as_one_workbook(client, monkeypatch, tmp_path):  # noqa: F811
+    """Live ask: "different crosstables for every variable with age"."""
+    from openpyxl import load_workbook
+
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
     seen = _script(monkeypatch,
-                   ("tool", "tables_workbook", {"study_id": "s_wb", "banner": ["AGE"]}),
-                   ("tool", "tables_workbook", {"study_id": "s_wb", "banner": ["AGEB"]}),
-                   ("text", "Two tables by age band."))
+                   ("tool", "make_tables", {"study_id": "s_wb", "columns": ["AGE"]}),
+                   ("tool", "make_tables", {"study_id": "s_wb", "columns": ["age break"]}),
+                   ("text", "Tables by age band."))
     resp = test_client.post("/api/copilot", json={"message": "every variable by age"}).json()
     raw_age, banded = _tool_results(seen)
-    assert "no answer categories" in raw_age["error"]  # raw age is refused, with the fix
-    assert banded["tables_written"] == 2  # Q1, Q2 — not the banner itself, not raw age
+    assert "no answer categories" in raw_age["error"]
+    assert banded["tables_made"] == 6  # GEND Q1 Q5r1 Q5r2 SAT KIDS — not the banner, AGE or W
+    assert banded["tables"] == []  # too many for the reply: a workbook instead
     (wb,) = resp["charts"]
-    assert wb["kind"] == "workbook"
+    assert wb["kind"] == "workbook" and "AGEB" in wb["title"]
     got = test_client.get(f"/api/studies/s_wb/charts/{wb['filename']}")
     assert got.status_code == 200 and "spreadsheetml" in got.headers["content-type"]
     out = tmp_path / "out.xlsx"
     out.write_bytes(got.content)
-    assert len(load_workbook(out).sheetnames) == 3  # summary + one sheet per question
+    assert len(load_workbook(out).sheetnames) == 7  # summary + one sheet per question
+
+
+def test_a_few_tables_come_back_in_the_reply_filtered_and_netted(client, monkeypatch, tmp_path):  # noqa: F811
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    seen = _script(monkeypatch,
+                   ("tool", "make_tables", {
+                       "study_id": "s_wb", "rows": ["Q5", "SAT"], "columns": ["gender"],
+                       "filter": {"AGEB": [1]},
+                       "nets": [{"label": "Any 4 or 5", "codes": [4, 5]}]}),
+                   ("text", "Three tables."))
+    resp = test_client.post("/api/copilot",
+                            json={"message": "Q5 and SAT by gender, under 35"}).json()
+    (made,) = _tool_results(seen)
+    assert made["tables_made"] == 3  # the grid parent Q5 brought Q5r1 and Q5r2
+    assert resp["charts"] == [] and len(resp["tables"]) == 3
+    sat = resp["tables"][2]
+    assert sat["header"][2:] == ["Male (A)", "Female (B)"]  # "gender" found by its label
+    assert any(r[0] == "Any 4 or 5" for r in sat["rows"])
+
+
+def test_an_ambiguous_word_lists_the_candidates_with_their_labels(client, monkeypatch, tmp_path):  # noqa: F811
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    seen = _script(monkeypatch,
+                   ("tool", "make_tables", {"study_id": "s_wb", "columns": ["age"]}),
+                   ("text", "Which age?"))
+    test_client.post("/api/copilot", json={"message": "every variable by age"})
+    (refused, *_) = _tool_results(seen)
+    assert "AGEB (Age break)" in refused["error"] and "KIDS (Child(ren)" in refused["error"]
+    assert "AGE (What is your age?, a plain number)" in refused["error"]
