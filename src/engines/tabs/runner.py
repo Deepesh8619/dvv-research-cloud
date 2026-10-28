@@ -108,3 +108,27 @@ def run_tab_plan(parquet_path: str | Path, plan: TabPlan, datamap: DataMap) -> D
         guardrails.append(guardrail)
 
     return DeckRun(plan=plan, results=results, guardrails=guardrails)
+
+
+# ponytail: one sheet per stub, capped; a 600-variable study is ~300 stubs.
+MAX_WORKBOOK_TABLES = 400
+
+
+def banner_workbook(parquet_path: str | Path, datamap: DataMap, banner: list[str],
+                    out_path: str | Path, title: str) -> int:
+    """Every question with categories, each broken by `banner`, as one .xlsx.
+
+    "Different crosstabs for every variable with age": too many tables for a chat
+    reply, so they go to a workbook the user downloads. Runs in the heavy pool.
+    Returns how many tables were written.
+    """
+    from src.orchestration.orchestrator import auto_tab_plan
+    from src.renderers.excel import render_deck
+
+    plan = auto_tab_plan(datamap, title=title, limit=MAX_WORKBOOK_TABLES + len(banner))
+    if plan is None:
+        return 0
+    plan.banner = list(banner)
+    plan.tables = [t for t in plan.tables if t.stub not in banner][:MAX_WORKBOOK_TABLES]
+    render_deck(run_tab_plan(parquet_path, plan, datamap), out_path)
+    return len(plan.tables)

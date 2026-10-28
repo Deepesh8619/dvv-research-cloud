@@ -89,6 +89,8 @@ Rules:
   a sentence or two. For a chart, ask ask_data for one ("a bar chart of Q4 by gender").
 - Say a difference is (or is not) "significant" only when a tool ran the test
   (`significance_tested` true). Otherwise say it has not been tested.
+- Asked for tables of EVERY question (or "all variables") by something, call
+  tables_workbook once — it returns one downloadable workbook, not ask_data per question.
 - Asked for a table or a crosstab, call ask_data and report its cells. If it
   returns no rows, say what it did return rather than describing a table you do
   not have.
@@ -172,6 +174,12 @@ TOOLS = [
         "data. Returns a written answer AND the cells behind it — use the cells "
         "when the question asked for a table, a crosstab or a breakdown.",
         {**_STUDY, "question": {"type": "string"}}, ["study_id", "question"]),
+    _fn("tables_workbook", "Crosstab EVERY question in a project's data by the banner "
+        "variable(s) — 'all variables by age', 'a full set of tables by region' — as one "
+        "Excel workbook the user downloads. Use a banded variable (an age break, not raw "
+        "age). For one or a few tables use ask_data instead.",
+        {**_STUDY, "banner": {"type": "array", "items": {"type": "string"}}},
+        ["study_id", "banner"]),
     _fn("propose_open_link", "Prepare opening a fielding link for the approved "
         "questionnaire, held at soft_launch_limit completes (default 50).",
         {**_STUDY, "soft_launch_limit": {"type": "integer"}}, ["study_id"]),

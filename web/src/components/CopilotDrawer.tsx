@@ -105,6 +105,32 @@ function ChartImage({ chart }: { chart: CopilotChart }) {
   )
 }
 
+/** A workbook the copilot built ("every question by age band"), fetched with the user's login. */
+function WorkbookDownload({ file }: { file: CopilotChart }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'failed'>('idle')
+  const save = async () => {
+    setState('busy')
+    try {
+      const res = await copilotApi.chart(file)
+      downloadBlob(file.filename, res.data,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      setState('idle')
+    } catch {
+      setState('failed')
+    }
+  }
+  return (
+    <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-slate-200 px-2 py-1.5 text-[11px]"
+      data-testid="copilot-workbook">
+      <span className="truncate text-slate-600">{file.title}</span>
+      <button type="button" disabled={state === 'busy'} onClick={save}
+        className="shrink-0 font-medium text-primary-600 hover:underline disabled:opacity-50">
+        {state === 'busy' ? 'Downloading…' : state === 'failed' ? 'Retry download' : 'Download Excel'}
+      </button>
+    </div>
+  )
+}
+
 /** Downloads for one answer's tables: each as CSV, all together as one Excel workbook. */
 function TableDownloads({ tables }: { tables: CopilotTable[] }) {
   const [busy, setBusy] = useState(false)
@@ -572,7 +598,9 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
                 </div>
               ))}
               {turn.tables && turn.tables.length > 0 && <TableDownloads tables={turn.tables} />}
-              {turn.charts?.map((c) => <ChartImage key={c.filename} chart={c} />)}
+              {turn.charts?.map((c) => c.kind === 'workbook'
+                ? <WorkbookDownload key={c.filename} file={c} />
+                : <ChartImage key={c.filename} chart={c} />)}
               {turn.answeredBy && (
                 <p className="text-[10px] text-slate-400 mt-1">answered by {turn.answeredBy}</p>
               )}
