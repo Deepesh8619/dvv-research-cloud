@@ -104,6 +104,15 @@ async def get_current_user(
     return user
 
 
+def role_permits(user, *allowed_roles: UserRole) -> bool:
+    """The rule require_role enforces, for code that is not an endpoint (the
+    Copilot reading a screen on the user's behalf)."""
+    role = UserRole(user.role)
+    return role in allowed_roles or (
+        role is UserRole.FOUNDER and UserRole.ANALYST in allowed_roles
+    )
+
+
 def require_role(*allowed_roles: UserRole):
     """Dependency factory to enforce role-based access.
 
@@ -118,11 +127,7 @@ def require_role(*allowed_roles: UserRole):
     """
 
     async def check_role(user=Depends(get_current_user)):
-        role = UserRole(user.role)
-        permitted = role in allowed_roles or (
-            role is UserRole.FOUNDER and UserRole.ANALYST in allowed_roles
-        )
-        if not permitted:
+        if not role_permits(user, *allowed_roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"This action requires one of these roles: {', '.join(allowed_roles)}",

@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from api.auth import UserRole, get_current_user, require_role
+from api.auth import UserRole, get_current_user, require_role, role_permits
 from api.db import (
     UserDB,
     answers_by_session,
@@ -114,6 +114,33 @@ def neighbours(definition, qid: str) -> dict:
     downstream = sorted({q.qid for q in definition.questions if q.qid != qid
                          and qid.upper() in {ref.upper() for _k, ref in _deps(q)}})
     return {k: v for k, v in (("depends_on", upstream), ("decides", downstream)) if v}
+
+
+def _route(module: str, name: str):
+    """An endpoint function, imported when first used (the route modules import
+    this one's neighbours; importing them at load time would be circular)."""
+    def call(*args, **kwargs):
+        import importlib
+
+        return getattr(importlib.import_module(f"api.routes.{module}"), name)(*args, **kwargs)
+    return call
+
+
+def _brief(obj, depth: int = 0):
+    """A screen's response, short enough for the model to read whole: long
+    lists keep their first dozen and say how many more, long text is cut."""
+    if hasattr(obj, "model_dump"):
+        obj = obj.model_dump()
+    if depth > 6:
+        return "…"
+    if isinstance(obj, dict):
+        return {k: _brief(v, depth + 1) for k, v in list(obj.items())[:40]}
+    if isinstance(obj, (list, tuple)):
+        head = [_brief(x, depth + 1) for x in obj[:12]]
+        return head + ([f"… and {len(obj) - 12} more"] if len(obj) > 12 else [])
+    if isinstance(obj, str) and len(obj) > 300:
+        return obj[:300] + "…"
+    return obj
 
 
 class _ToolError(Exception):
@@ -636,6 +663,72 @@ def make_executor(db: Session, user: UserDB):
 
         return {"entries": search_help(str(args.get("query") or ""))}
 
+    # --- every screen, read as that screen reads it ---------------------------
+    # Each calls the endpoint the screen itself calls, with this user, so the
+    # answer is what the screen shows — and a role that cannot open the screen
+    # cannot read it through the Copilot either.
+
+    def screen(fn, *roles):
+        def read(args):
+            s = study(args)
+            if roles and not role_permits(user, *roles):
+                raise _ToolError(f"a {user.role} cannot open this screen; "
+                                 + " or ".join(r.value for r in roles) + " can")
+            return {"study_id": s.id, "screen": _brief(fn(s.id, db=db, user=user))}
+        return read
+
+    def report_findings(args):
+        from api.routes.studies import get_findings, get_report
+
+        s = study(args)
+        out = {"study_id": s.id, "findings": _brief(get_findings(s.id, db=db, user=user))}
+        try:
+            out["cited_report"] = _brief(get_report(s.id, db=db, user=user))
+        except HTTPException as exc:  # no report drafted yet is an answer, not an error
+            out["cited_report"] = str(exc.detail)
+        return out
+
+    def open_end_coding(args):
+        from api.routes.studies import coding_status, get_coding
+
+        s = study(args)
+        return {"study_id": s.id, "status": _brief(coding_status(s.id, db=db, user=user)),
+                "coding": _brief(get_coding(s.id, db=db, user=user))}
+
+    def compliance_check(args):
+        from api.routes.compliance import adverse_events, notice_check
+
+        s = study(args)
+        if not role_permits(user, UserRole.OWNER, UserRole.ANALYST):
+            raise _ToolError(f"a {user.role} cannot open compliance; an owner or analyst can")
+        return {"study_id": s.id,
+                "adverse_events": _brief(adverse_events(s.id, db=db, user=user)),
+                "privacy_notice": _brief(notice_check(s.id, db=db, user=user))}
+
+    def run_method(args):
+        from api.routes.methods import MethodRequest
+        from api.routes.methods import run_method as run
+
+        s = study(args)
+        try:
+            body = MethodRequest(**{k: v for k, v in args.items() if k != "study_id"})
+        except ValueError as exc:
+            raise _ToolError(f"method needs: {exc}") from exc
+        return {"study_id": s.id, "method": body.method,
+                "result": _brief(run(s.id, body, db=db, user=user))}
+
+    def team_and_costs(args):
+        from api.routes.auth import list_all_users
+        from src.platform.usage import summary
+
+        if not role_permits(user, UserRole.OWNER, UserRole.FOUNDER):
+            raise _ToolError(f"a {user.role} cannot see the team or AI costs")
+        out = {"ai_usage_30_days": _brief(summary(db, days=30))}
+        if role_permits(user, UserRole.OWNER):
+            out["team"] = [{"name": u.name, "email": u.email, "role": u.role,
+                            "active": u.is_active} for u in list_all_users(db=db, user=user)]
+        return out
+
     def make_tables(args):
         """Any set of tables: rows x columns, filtered, grouped, weighted — one tool
         for the whole family instead of one tool per phrasing."""
@@ -1153,6 +1246,19 @@ def make_executor(db: Session, user: UserDB):
         "search_project": search_project,
         "ask_data": ask_data,
         "make_tables": make_tables,
+        "cleaning_status": screen(_route("cleaning", "get_cleaning")),
+        "data_vs_questionnaire": screen(_route("studies", "get_crosscheck")),
+        "fieldwork_from_data": screen(_route("studies", "data_field_report_route")),
+        "project_lifecycle": screen(_route("lifecycle", "get_lifecycle")),
+        "analysis_methods": screen(_route("methods", "method_inputs")),
+        "vendor_scorecard": screen(_route("vendors", "vendor_scorecard"),
+                                   UserRole.OWNER, UserRole.ANALYST),
+        "ledger_check": screen(_route("platform", "verify_ledger")),
+        "report_findings": report_findings,
+        "open_end_coding": open_end_coding,
+        "compliance_check": compliance_check,
+        "run_method": run_method,
+        "team_and_costs": team_and_costs,
         "data_variables": data_variables,
         "product_help": product_help,
         "propose_open_link": propose_open_link,

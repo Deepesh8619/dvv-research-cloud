@@ -1161,6 +1161,129 @@
      }
     }
    ]
+  },
+  {
+   "id": "screen-lifecycle",
+   "category": "screens",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "Where does the coffee project stand, and what is the next step?",
+     "expect": {
+      "tools_any": [
+       "project_lifecycle",
+       "study_overview"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "screen-cleaning",
+   "category": "screens",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "How many respondents in the coffee data are flagged as speeders or straightliners?",
+     "expect": {
+      "tools_any": [
+       "cleaning_status"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "screen-open-ends",
+   "category": "screens",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "Which open-ended questions in the coffee project were coded?",
+     "expect": {
+      "tools_any": [
+       "open_end_coding",
+       "data_variables"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "screen-findings",
+   "category": "screens",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "What are the key findings of the coffee project?",
+     "expect": {
+      "tools_any": [
+       "report_findings"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "screen-crosscheck",
+   "category": "screens",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "Does the coffee data match its questionnaire?",
+     "expect": {
+      "tools_any": [
+       "data_vs_questionnaire"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "screen-methods",
+   "category": "screens",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "Can I run a TURF or MaxDiff on the coffee data?",
+     "expect": {
+      "tools_any": [
+       "analysis_methods",
+       "run_method"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "screen-costs",
+   "category": "screens",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "How much have the AI models cost us this month?",
+     "expect": {
+      "tools_any": [
+       "team_and_costs"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "screen-ledger",
+   "category": "screens",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "Is the coffee project's record intact and verifiable?",
+     "expect": {
+      "tools_any": [
+       "ledger_check"
+      ]
+     }
+    }
+   ]
   }
  ]
 }
