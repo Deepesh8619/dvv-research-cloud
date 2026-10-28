@@ -566,6 +566,76 @@ def make_executor(db: Session, user: UserDB):
             "note": note,
         }
 
+    def data_variables(args):
+        """The variable list of the project's data: what is in it, what reached
+        it from the uploaded file, and what each variable is."""
+        import polars as pl
+
+        from api.config import STUDIES_DIR
+        from api.routes.chat import _load_datamap, _study_dir, by_label
+        from src.adapters.tabular import source_column_names
+
+        s = study(args)
+        d = _study_dir(s)
+        dm = _load_datamap(d, s)
+        if dm is None:
+            raise _ToolError(f"{s.id} has no data file processed yet")
+        parquet = d / "data.parquet"
+        columns = list(pl.read_parquet_schema(parquet)) if parquet.exists() else dm.names()
+        # Open-end coding writes 4 columns per coded question (+ a respondent id)
+        # into the data after the variable list was saved: they ARE the coding.
+        coding = [c for c in columns if c not in dm and (c == "respondent_id" or re.search(
+            r"_(codes|coding_confidence|coding_reasoning|needs_coding_review)$", c))]
+        unlisted = [c for c in columns if c not in dm and c not in coding]
+        types: dict[str, int] = {}
+        for v in dm.variables:
+            types[v.type.value] = types.get(v.type.value, 0) + 1
+        no_codes = [v.name for v in dm.variables
+                    if v.type.value == "single" and not v.values]
+
+        source = STUDIES_DIR / s.id / (s.source_filename or "")
+        try:
+            in_file = (source_column_names(source)
+                       if s.source_filename and source.is_file() else None)
+        except Exception:  # noqa: BLE001 - a header we cannot read is "not checked", not an error
+            in_file = None
+        not_carried = [c for c in in_file or [] if c not in dm]
+
+        found = []
+        if query := str(args.get("query") or "").strip():
+            names = [query] if query in dm else by_label(dm, query) or [
+                n for n in dm.names() if n.lower().startswith(query.lower())]
+            found = [{"name": n, "label": dm[n].label[:120], "type": dm[n].type.value,
+                      "answer_codes": len(dm[n].valid_codes()),
+                      "values": dict(list(dm[n].values.items())[:8])} for n in names[:15]]
+        return {
+            "variables_listed": len(dm),
+            "by_type": types,
+            "columns_in_data": len(columns),
+            "coding_columns": len(coding),
+            "coded_open_ends": sorted({re.sub(r"_(codes|coding_confidence|coding_reasoning|"
+                                              r"needs_coding_review)$", "", c)
+                                       for c in coding if c != "respondent_id"}),
+            "columns_not_listed": unlisted[:20],
+            "all_identified": not unlisted,
+            "uploaded_file": s.source_filename,
+            "columns_in_uploaded_file": len(in_file) if in_file is not None else None,
+            "file_columns_not_in_data": not_carried[:30],
+            "file_columns_not_in_data_count": len(not_carried),
+            "single_choice_without_answer_labels": no_codes[:20],
+            "matches": found,
+            "note": "Columns of the uploaded file that are not in the data were empty for every "
+                    "respondent: the importer drops those. Coding columns are the open-end "
+                    "coding, added after the variable list. Pass `query` (a name or words) to "
+                    "look a variable up.",
+        }
+
+    def product_help(args):
+        """How DVV itself works, from the same help the app shows on each screen."""
+        from src.platform.help import search_help
+
+        return {"entries": search_help(str(args.get("query") or ""))}
+
     def make_tables(args):
         """Any set of tables: rows x columns, filtered, grouped, weighted — one tool
         for the whole family instead of one tool per phrasing."""
@@ -1083,6 +1153,8 @@ def make_executor(db: Session, user: UserDB):
         "search_project": search_project,
         "ask_data": ask_data,
         "make_tables": make_tables,
+        "data_variables": data_variables,
+        "product_help": product_help,
         "propose_open_link": propose_open_link,
         "propose_set_hold": propose_set_hold,
         "propose_close_link": propose_close_link,
@@ -1183,6 +1255,9 @@ def copilot(
                             detail="The copilot can't reach an AI model right now.") from exc
     finally:
         usage.purpose.reset(tagged)
+    # The history shows the model "[Looked up for this answer: …]" after each
+    # earlier reply; it sometimes copies that line into its own. Not for the user.
+    reply = re.sub(r"\n*\[Looked up for this answer:[^\]]*\]", "", reply).strip()
     # A provider that fails mid-answer is retried on the next one from the top,
     # which re-prepares the same cards: keep one card per distinct action.
     unique = list({(c.method, c.path, json.dumps(c.body, sort_keys=True)): c

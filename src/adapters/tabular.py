@@ -219,3 +219,35 @@ def _normalize_mixed_columns(df: pd.DataFrame, datamap: DataMap) -> None:
             variable.type = VarType.TEXT
             variable.values = {}
         df[name] = df[name].map(lambda v: str(v) if pd.notna(v) else None)
+
+
+def source_column_names(path: str | Path) -> list[str] | None:
+    """The column names of an uploaded export, as the importer would name them,
+    from its header alone (a 600-column workbook in about a second). None for
+    a format it cannot read cheaply. Used to say which columns of the file did
+    not reach the data — the importer drops columns empty for every respondent."""
+    path = Path(path)
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        # ponytail: reads every row; CSV exports are small next to xlsx
+        header = list(_read_csv_any_encoding(path).columns)
+    elif suffix == ".xlsx":
+        from openpyxl import load_workbook
+
+        wb = load_workbook(path, read_only=True)
+        sheet = find_datamap_sheet(wb.sheetnames)
+        ws = wb[next(s for s in wb.sheetnames if s != sheet)] if sheet else wb.worksheets[0]
+        header = [c for c in next(ws.iter_rows(max_row=1, values_only=True), ()) if c is not None]
+        wb.close()
+    elif suffix == ".sav":
+        import pyreadstat
+
+        header = list(pyreadstat.read_sav(str(path), metadataonly=True)[1].column_names)
+    else:
+        return None
+    taken: set[str] = set()
+    names = []
+    for col in header:
+        names.append(_safe_name(col, taken))
+        taken.add(names[-1])
+    return names

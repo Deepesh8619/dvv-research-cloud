@@ -218,9 +218,11 @@ def test_the_field_monitor_summarises_fielded_data_from_an_upload(client) -> Non
                     values={1: "Terminated", 2: "Overquota", 3: "Qualified"}))
     run_dir = Path(tmp_path) / "study_run"
     run_dir.mkdir()
-    pl.DataFrame({"Q1": [1, 2, 1, 2, None], "status": [3, 3, 3, 1, 2]}).write_parquet(
-        run_dir / "data.parquet"
-    )
+    # + the 4 columns open-end coding writes for Q9 (and its respondent id)
+    pl.DataFrame({"Q1": [1, 2, 1, 2, None], "status": [3, 3, 3, 1, 2], "respondent_id": range(5),
+                  **{f"Q9_{c}": [None] * 5 for c in ("codes", "coding_confidence",
+                                                      "coding_reasoning", "needs_coding_review")},
+                  }).write_parquet(run_dir / "data.parquet")
     db = session_factory()
     db.query(StudyDB).filter(StudyDB.id == "s1").update(
         {"excel_path": str(run_dir / "deck.xlsx"), "datamap_json": dm.to_json(),
@@ -232,6 +234,7 @@ def test_the_field_monitor_summarises_fielded_data_from_an_upload(client) -> Non
     body = test_client.get("/api/studies/s1/fielded-data").json()
     assert body["available"] and body["source_filename"] == "fielded.xlsx"
     assert body["n_respondents"] == 5
+    assert body["n_variables"] == len(dm) and body["n_coded_open_ends"] == 1  # not 613-style
     assert body["status_variable"] == "status"  # how each ended: /data-field-report
 
 

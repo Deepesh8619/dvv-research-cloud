@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -410,14 +411,20 @@ def fielded_data_summary(
         return {"available": False, "source_filename": study.source_filename,
                 "processing": study.status == "classifying"}
 
-    status_column, _meaning = _disposition_labels(DataMap.from_json(study.datamap_json))
+    datamap = DataMap.from_json(study.datamap_json)
+    status_column, _meaning = _disposition_labels(datamap)
     columns = pl.read_parquet_schema(parquet)
+    # Open-end coding adds 4 columns per coded question to the data; counting
+    # them as variables showed "613 variables" for a 500-variable file.
+    coded = {re.sub(r"_codes$", "", c) for c in columns
+             if c.endswith("_codes") and c not in datamap}
     return {
         "available": True,
         "processing": study.status == "classifying",
         "source_filename": study.source_filename,
         "updated_at": study.updated_at,
-        "n_variables": len(columns),
+        "n_variables": sum(1 for c in columns if c in datamap),
+        "n_coded_open_ends": len(coded),
         "n_respondents": pl.scan_parquet(parquet).select(pl.len()).collect().item(),
         "status_variable": status_column if status_column in columns else None,
     }

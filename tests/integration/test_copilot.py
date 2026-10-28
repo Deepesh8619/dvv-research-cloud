@@ -1199,3 +1199,58 @@ def test_a_column_with_no_categories_says_what_it_is_and_what_works(client, monk
     db = next(app.dependency_overrides[get_db]())
     note = _history(db, conv["id"])[1]["content"]
     assert "make_tables(" in note and "-> refused: AGE (What is your age?)" in note
+
+
+def test_the_copilot_can_say_whether_every_variable_was_identified(client, monkeypatch, tmp_path):  # noqa: F811
+    """Live: "variable from uploaded data file are all identified?" was answered
+    with fielding links — the Copilot had no way to see the variable list."""
+    import polars as pl
+
+    import api.config
+    from api.db import StudyDB
+
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    run = tmp_path / "run"
+    df = pl.read_parquet(run / "data.parquet")
+    df.with_columns(**{f"Q7_1_{c}": pl.lit(None) for c in (
+        "codes", "coding_confidence", "coding_reasoning", "needs_coding_review")},
+        respondent_id=pl.lit(1)).write_parquet(run / "data.parquet")
+    uploads = tmp_path / "uploads"
+    (uploads / "s_wb").mkdir(parents=True)
+    (uploads / "s_wb" / "export.csv").write_text(
+        ",".join(df.columns + ["Q12r1", "Q12r2"]) + "\n"
+        + ",".join(["1"] * len(df.columns)) + ",,\n")
+    monkeypatch.setattr(api.config, "STUDIES_DIR", uploads)
+    db = sf()
+    db.query(StudyDB).filter(StudyDB.id == "s_wb").update({"source_filename": "export.csv"})
+    db.commit()
+    db.close()
+
+    seen = _script(monkeypatch,
+                   ("tool", "data_variables", {"study_id": "s_wb", "query": "gender"}),
+                   ("text", "All identified."))
+    test_client.post("/api/copilot", json={"message": "are all variables identified?"})
+    (got,) = _tool_results(seen)
+    assert got["variables_listed"] == got["columns_in_data"] - 5  # 4 coding + respondent_id
+    assert got["all_identified"] and got["coded_open_ends"] == ["Q7_1"]
+    assert got["file_columns_not_in_data"] == ["Q12r1", "Q12r2"]  # empty: dropped on import
+    assert got["matches"][0]["name"] == "GEND" and got["matches"][0]["answer_codes"] == 2
+
+
+def test_the_copilot_answers_how_the_app_works_from_its_own_help(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    seen = _script(monkeypatch,
+                   ("tool", "product_help", {"query": "soft launch"}),
+                   ("text", "A soft launch holds the link."))
+    test_client.post("/api/copilot", json={"message": "what is a soft launch?"})
+    (got,) = _tool_results(seen)
+    assert got["entries"][0]["title"] == "Soft launch" and got["entries"][0]["how"]
+
+
+def test_the_lookup_note_never_reaches_the_user(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    leaky = "Here it is.\n[Looked up for this answer: list_studies()]"
+    _script(monkeypatch, ("text", leaky))
+    resp = test_client.post("/api/copilot", json={"message": "hello"}).json()
+    assert resp["reply"] == "Here it is."
