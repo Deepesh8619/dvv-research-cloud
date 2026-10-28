@@ -614,6 +614,7 @@ def _run_agent_loop(
     system_prompt: str | None = None,
     max_turns: int = MAX_AGENT_TURNS,
     known_tools: frozenset | None = None,
+    result_limit: int = 1500,
 ) -> tuple[str, list[dict]]:
     """Shared multi-tool agent loop for any chat-completions backend (Groq,
     Cerebras). chat_fn must accept (messages, timeout, with_tools=,
@@ -696,7 +697,8 @@ def _run_agent_loop(
             result.setdefault("success", True)
             tool_results.append(result)
             messages.append(
-                {"role": "tool", "tool_call_id": call["id"], "content": _compact(result)}
+                {"role": "tool", "tool_call_id": call["id"],
+                 "content": _compact(result, result_limit)}
             )
             result["args"] = args  # after the model's copy: what was asked, for the record
 

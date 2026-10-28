@@ -24,6 +24,10 @@ from src.ai.navigator import _compatible_chat, _run_agent_loop
 from src.ai.router import BackendUnavailable, ModelOutputError
 
 MAX_TURNS = 5  # look something up, maybe a second thing, propose, answer
+#: What the model sees of one tool result. The navigator's 1500 was made for one
+#: table at a time; the Copilot's lookups (a variable list, a screen's state, a
+#: refusal listing what would work) were cut mid-JSON, and the model guessed.
+RESULT_LIMIT = 6000
 
 SYSTEM_PROMPT = """You are the copilot inside DVV Research Cloud, a market-research platform.
 A project moves through: questionnaire (uploaded, extracted, reviewed, approved) ->
@@ -96,6 +100,10 @@ Rules:
   text, what is S4, which is region) → data_variables. Questions about how DVV works,
   what something on screen means or how to do a task in it → product_help. Answer from
   what these return, never from general knowledge of other survey tools.
+- Anything a screen shows — where a project stands, cleaning, open-end coding, the
+  report's findings, data vs questionnaire, fieldwork from a data file, advanced
+  methods, vendors, compliance, the record's integrity, the team and AI costs — read it
+  with that screen's tool and answer from what it returns.
 - Never choose the columns yourself. If the user asked for tables "by" something
   without naming it, ask which — make_tables' refusals list the variables that work.
 - Asked for a table or a crosstab, report the cells make_tables returns. If it
@@ -191,6 +199,45 @@ TOOLS = [
         "to do something in the app (cleaning, soft launch, quotas, the Reports tab…). From the "
         "app's own help text. Empty query lists every topic.",
         {"query": {"type": "string"}}, []),
+    _fn("project_lifecycle", "Where a project stands: each stage (brief, questionnaire, "
+        "proof, field, verify, data, tables, insight) done or not, and what is next.",
+        _STUDY, ["study_id"]),
+    _fn("cleaning_status", "The Cleaning screen: respondents flagged by each quality check "
+        "(speeders, straightliners, duplicates…), authenticity scores, who was removed or "
+        "kept, whether cleaning is locked.", _STUDY, ["study_id"]),
+    _fn("open_end_coding", "The Open ends screen: which open-ended questions were coded, "
+        "their codeframes and code counts, answers waiting for review, coding progress.",
+        _STUDY, ["study_id"]),
+    _fn("report_findings", "The Reports screen: key findings read off the tables (with "
+        "their table ids) and the cited report's sentences, if drafted.", _STUDY, ["study_id"]),
+    _fn("data_vs_questionnaire", "The data-vs-questionnaire check: questions missing from "
+        "the data, codes that disagree, routing the data does not follow, hidden variables "
+        "explained.", _STUDY, ["study_id"]),
+    _fn("fieldwork_from_data", "Fieldwork read from an uploaded data file (not a DVV link): "
+        "dispositions, terminates by question, length of interview, quotas, field dates, "
+        "completes by day.", _STUDY, ["study_id"]),
+    _fn("analysis_methods", "Which advanced methods the data supports (MaxDiff, TURF, Van "
+        "Westendorp, key drivers) and the inputs each would use.", _STUDY, ["study_id"]),
+    _fn("run_method", "Run one advanced method on the completes and return its result: "
+        "method maxdiff (exercise), turf (question, max_size), van_westendorp (prices: the "
+        "four price questions in order too cheap, cheap, expensive, too expensive), drivers "
+        "(outcome, predictors). Call analysis_methods first for the inputs.",
+        {**_STUDY, "method": {"type": "string",
+                              "enum": ["maxdiff", "turf", "van_westendorp", "drivers"]},
+         "exercise": {"type": "string"}, "question": {"type": "string"},
+         "max_size": {"type": "integer"},
+         "prices": {"type": "array", "items": {"type": "string"}},
+         "outcome": {"type": "string"},
+         "predictors": {"type": "array", "items": {"type": "string"}}},
+        ["study_id", "method"]),
+    _fn("vendor_scorecard", "Sample vendors on the project's links: completes, incidence, "
+        "quality flags and cost per vendor.", _STUDY, ["study_id"]),
+    _fn("compliance_check", "Compliance: adverse events reported in open ends (pharma) and "
+        "whether the survey shows the privacy notice.", _STUDY, ["study_id"]),
+    _fn("ledger_check", "The project's tamper-evident record: whether every recorded step "
+        "still verifies (the verified-research certificate).", _STUDY, ["study_id"]),
+    _fn("team_and_costs", "The team (owner only) and AI model usage and estimated cost for "
+        "the last 30 days (owner, founder).", None, []),
     _fn("make_tables", "Crosstabs from a project's collected data — any rows by any "
         "columns: 'every variable by age band', 'Q5 to Q9 by gender and region among women', "
         "'top 2 box of Q4 by generation, weighted'. Few tables are shown in the reply; many "
@@ -362,7 +409,8 @@ def run_copilot(
         try:
             reply, results = _run_agent_loop(chat, label, message, "", execute, history,
                                              timeout, None, None, system_prompt=prompt,
-                                             max_turns=MAX_TURNS, known_tools=TOOL_NAMES)
+                                             max_turns=MAX_TURNS, known_tools=TOOL_NAMES,
+                                             result_limit=RESULT_LIMIT)
             # An answer that looked nothing up and still quotes figures is the
             # model answering from its own head. The prompt has always asked for
             # grounding and nothing enforced it, so "the Greenbrook study has an
@@ -375,7 +423,7 @@ def run_copilot(
                     [*(history or []), {"role": "assistant", "content": reply},
                      {"role": "user", "content": _NUDGE}],
                     timeout, None, None, system_prompt=prompt,
-                    max_turns=MAX_TURNS, known_tools=TOOL_NAMES,
+                    max_turns=MAX_TURNS, known_tools=TOOL_NAMES, result_limit=RESULT_LIMIT,
                 )
                 if not results and _asserts_data(reply, today):
                     # Twice asked, twice invented. Say so rather than pass it on.
@@ -392,7 +440,7 @@ def run_copilot(
                     [*(history or []), {"role": "assistant", "content": reply},
                      {"role": "user", "content": _UNTESTED}],
                     timeout, None, None, system_prompt=prompt,
-                    max_turns=MAX_TURNS, known_tools=TOOL_NAMES,
+                    max_turns=MAX_TURNS, known_tools=TOOL_NAMES, result_limit=RESULT_LIMIT,
                 )
                 results = results + more
                 reply = checked or reply
@@ -406,7 +454,7 @@ def run_copilot(
                     [*(history or []), {"role": "assistant", "content": reply},
                      {"role": "user", "content": _RETRY.format(tool=tool, error=error[:800])}],
                     timeout, None, None, system_prompt=prompt,
-                    max_turns=MAX_TURNS, known_tools=TOOL_NAMES,
+                    max_turns=MAX_TURNS, known_tools=TOOL_NAMES, result_limit=RESULT_LIMIT,
                 )
                 reply, results = more_reply or reply, results + more
             return reply, results, label

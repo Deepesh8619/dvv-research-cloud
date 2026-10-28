@@ -1254,3 +1254,43 @@ def test_the_lookup_note_never_reaches_the_user(client, monkeypatch):  # noqa: F
     _script(monkeypatch, ("text", leaky))
     resp = test_client.post("/api/copilot", json={"message": "hello"}).json()
     assert resp["reply"] == "Here it is."
+
+
+SCREEN_TOOLS = ("project_lifecycle", "cleaning_status", "open_end_coding", "report_findings",
+                "data_vs_questionnaire", "fieldwork_from_data", "analysis_methods",
+                "vendor_scorecard", "compliance_check", "ledger_check")
+
+
+def test_every_screen_can_be_read_by_the_copilot(client, monkeypatch, tmp_path):  # noqa: F811
+    """"Master of the tool": each screen's tool answers — with the screen, or with
+    the screen's own reason (no data yet) — never "failed on the server"."""
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    calls = [*[(t, {"study_id": "s_wb"}) for t in SCREEN_TOOLS], ("team_and_costs", {}),
+             ("run_method", {"study_id": "s_wb", "method": "drivers", "outcome": "SAT",
+                             "predictors": ["Q1", "GEND"]})]
+    results = []
+    for i in range(0, len(calls), 3):  # an answer takes at most a few lookups
+        seen = _script(monkeypatch, *[("tool", n, a) for n, a in calls[i:i + 3]],
+                       ("text", "Read them."))
+        test_client.post("/api/copilot", json={"message": "tell me everything"})
+        results += _tool_results(seen)
+    assert len(results) == len(calls)
+    for name, r in zip([*SCREEN_TOOLS, "team_and_costs", "run_method"], results, strict=True):
+        assert "failed on the server" not in str(r.get("error")), (name, r)
+        assert len(json.dumps(r, default=str)) < 20_000, name  # briefed, not the raw screen
+    by_name = dict(zip([*SCREEN_TOOLS, "team_and_costs", "run_method"], results, strict=True))
+    assert by_name["project_lifecycle"]["success"]
+    assert "ai_usage_30_days" in by_name["team_and_costs"] and "team" in by_name["team_and_costs"]
+
+
+def test_a_screen_a_role_cannot_open_cannot_be_read_through_the_copilot(client, monkeypatch, tmp_path):  # noqa: F811,E501
+    test_client, sf, state = client
+    _data_study(sf, tmp_path)
+    state["role"] = "reviewer"
+    seen = _script(monkeypatch, ("tool", "team_and_costs", {}),
+                   ("tool", "vendor_scorecard", {"study_id": "s_wb"}), ("text", "No."))
+    test_client.post("/api/copilot", json={"message": "what does the team cost?"})
+    costs, vendors = _tool_results(seen)
+    assert costs["success"] is False and "cannot see the team" in costs["error"]
+    assert vendors["success"] is False and "cannot open this screen" in vendors["error"]
