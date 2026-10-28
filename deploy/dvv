@@ -14,6 +14,7 @@
 #   ./dvv check-ai                                    which AI model answers, and can it use tools
 #   ./dvv load-seed | load-cleanup                    set up / remove the go-live load test
 #   ./dvv db-reader                                   read-only database login (new password each run)
+#   ./dvv embedder                                    switch on the search embedder (nomic-embed-text)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -53,14 +54,16 @@ wait_healthy() {  # up to ~3 minutes: first boot builds indexes, pulls nothing
   return 1
 }
 
-pull_model() {  # only when this client runs the local AI model
-  if grep -q '^COMPOSE_PROFILES=.*local-ai' .env; then
+pull_model() {  # only when this client runs Ollama (embed or local-ai profile)
+  if grep -qE '^COMPOSE_PROFILES=.*(embed|local-ai)' .env; then
     # The embedding model first: it is a few hundred MB, and it is what lets
     # the copilot find "how much would you pay" from "price sensitivity".
     # Without it search still works, by wording alone.
     embed=$(grep '^DVV_EMBED_MODEL=' .env | cut -d= -f2); embed=${embed:-nomic-embed-text}
     echo "Pulling embedding model $embed (first time only)..."
     dc exec -T ollama ollama pull "$embed"
+  fi
+  if grep -q '^COMPOSE_PROFILES=.*local-ai' .env; then
     model=$(grep '^OLLAMA_EXTRACT_MODEL=' .env | cut -d= -f2); model=${model:-llama3.2:3b}
     echo "Pulling local model $model (first time only; a few GB)..."
     dc exec -T ollama ollama pull "$model"
@@ -183,6 +186,25 @@ case "${1:-}" in
   offsite)
     dc exec -T offsite bash /offsite.sh once
     ;;
+  embedder)
+    # Turn on real search-by-meaning: Ollama with ONLY the embedding model,
+    # memory-capped, then pull it and check it answers. Re-indexing is
+    # automatic (each stored vector records what made it).
+    if grep -qE '^COMPOSE_PROFILES=.*(embed|local-ai)' .env; then
+      echo "Already on: $(grep '^COMPOSE_PROFILES=' .env)"
+    elif grep -q '^COMPOSE_PROFILES=' .env; then
+      sed -i.bak 's/^COMPOSE_PROFILES=\(.*\)/COMPOSE_PROFILES=\1,embed/' .env && rm -f .env.bak
+    else
+      echo 'COMPOSE_PROFILES=embed' >> .env
+    fi
+    grep -q '^DVV_EMBED_MODEL=' .env || echo 'DVV_EMBED_MODEL=nomic-embed-text' >> .env
+    dc up -d ollama
+    pull_model
+    dc up -d app  # re-read .env
+    wait_healthy || { echo "App did not come back healthy:"; dc logs --tail 60 app; exit 1; }
+    dc exec -T -e PYTHONPATH=/app app python scripts/check_ai.py --embeddings-only
+    echo; free -h 2>/dev/null | head -2
+    ;;
   db-reader)
     # A login that can READ the data and nothing else, for DBeaver, Excel,
     # Power BI or Python on a laptop, through an SSH tunnel. Running it again
@@ -229,6 +251,6 @@ EOT
     ls -1t backups/db-*.dump | head -3
     ;;
   *)
-    sed -n '2,16p' "$0"; exit 1
+    sed -n '2,17p' "$0"; exit 1
     ;;
 esac

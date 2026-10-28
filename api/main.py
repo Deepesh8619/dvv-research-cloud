@@ -169,7 +169,12 @@ def _configured_models() -> dict[str, str]:
     if os.environ.get("CEREBRAS_API_KEY", "").strip():
         models["cerebras"] = os.environ.get("CEREBRAS_MODEL", CEREBRAS_DEFAULT_MODEL)
     models["local"] = os.environ.get("OLLAMA_EXTRACT_MODEL", "llama3.2:3b")
-    models["embeddings"] = os.environ.get("DVV_EMBED_MODEL", "nomic-embed-text")
+    # The embedder that ANSWERS, not the one configured: reporting the setting
+    # said "nomic-embed-text" for months while every search ran on the lexical
+    # fallback. One tiny probe; a missing Ollama costs nothing (cool-down).
+    from src.engines.rag.embeddings import live_embedder
+
+    models["embeddings"] = live_embedder()
     # The model that reads questionnaires here. Two environments that disagree
     # on this extract the same document differently.
     lead = _extraction_chain()[0]

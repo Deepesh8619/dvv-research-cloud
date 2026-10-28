@@ -4,8 +4,21 @@ Run on a client's server after setup:  ./dvv check-ai
 Sends only a trivial prompt — never client data.
 """
 
+import sys
+
 from src.ai.copilot import run_copilot
 from src.ai.router import llm_key_presence, run_task
+from src.engines.rag.embeddings import LEXICAL, embed
+
+vectors, made_by = embed(["how likely are you to recommend us", "net promoter score"], kind="query")
+if made_by == LEXICAL:
+    print("search embedder: NONE (lexical fallback, wording only). Turn it on: ./dvv embedder")
+else:
+    a, b = vectors
+    print(f"search embedder: {made_by}, {len(a)} dimensions — "
+          f"'recommend' vs 'NPS' similarity {sum(x * y for x, y in zip(a, b, strict=True)):.2f}")
+if "--embeddings-only" in sys.argv:
+    sys.exit(0 if made_by != LEXICAL else 1)
 
 keys = [k for k, present in llm_key_presence().items() if present]
 print("AI keys set:", ", ".join(keys) or "none")

@@ -105,11 +105,22 @@ services:
       - ./offsite.sh:/offsite.sh:ro
       - ./backups:/backups
 
-  # Enabled per client with COMPOSE_PROFILES=local-ai in deploy/.env.
+  # Enabled per client in deploy/.env with COMPOSE_PROFILES=
+  #   embed     the search embedder only (nomic-embed-text, ~270 MB): fits a 4 GB server
+  #   local-ai  the embedder AND a local chat/extraction model (~8 GB RAM)
   ollama:
     image: ollama/ollama
     restart: unless-stopped
-    profiles: [local-ai]
+    profiles: [embed, local-ai]
+    environment:
+      # One model in memory at a time, kept warm between searches, so a 4 GB
+      # server holds the embedder without paging the database out.
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+    # A ceiling, so the AI can never starve Postgres or the app. local-ai
+    # clients raise it (OLLAMA_MEMORY=6g) for the bigger model.
+    mem_limit: ${OLLAMA_MEMORY:-1g}
     volumes:
       - ollama_models:/root/.ollama
 
