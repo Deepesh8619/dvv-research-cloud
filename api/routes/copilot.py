@@ -837,14 +837,26 @@ def make_executor(db: Session, user: UserDB):
         shown, n = run_heavy_detached(db, tables_job, d / "data.parquet", plan, dm,
                                       d / "charts" / filename if filename else None, inline_max)
         tables = [t for x in shown for t in tables_in({"table": x})]
+        charts = []
+        if args.get("chart") and tables:
+            # Drawn here, from the same rows and columns: a chart used to depend on
+            # the data chat choosing to draw one, and the model said "here is the
+            # chart" when it had not.
+            from src.engines.analysis.charts import generate_chart
+
+            for stub in stubs[:len(tables)]:
+                drawn = generate_chart(d, dm, stub=stub, banner=banner, filter_=filter_,
+                                       chart_type=str(args.get("chart_type") or "bar"))
+                if drawn.get("success"):
+                    charts += charts_in({**drawn, "study_id": s.id})
         return {
             "tables_made": n,
             "skipped_plain_numbers": skipped,
             "tables": tables,
             "significance_tested": any(t["significance_tested"] for t in tables) or (
                 filename is not None and len(banner) > 0),
-            "charts": [{"study_id": s.id, "filename": filename, "title": title,
-                        "kind": "workbook"}] if filename else [],
+            "charts": charts + ([{"study_id": s.id, "filename": filename, "title": title,
+                                  "kind": "workbook"}] if filename else []),
             "note": ("The tables are shown under your reply exactly as computed" if tables else
                      "The workbook is offered as a download under your reply, one sheet per "
                      "table with significance letters") + ". Say how many tables and what the "
