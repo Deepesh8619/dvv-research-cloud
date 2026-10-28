@@ -1147,3 +1147,27 @@ def test_an_ambiguous_word_lists_the_candidates_with_their_labels(client, monkey
     (refused, *_) = _tool_results(seen)
     assert "AGEB (Age break)" in refused["error"] and "KIDS (Child(ren)" in refused["error"]
     assert "AGE (What is your age?, a plain number)" in refused["error"]
+
+
+def test_a_wrong_answer_is_flagged_and_reaches_the_admin_list(client, monkeypatch):  # noqa: F811
+    test_client, sf, state = client
+    _make_study(sf)
+    _script(monkeypatch, ("text", "Yes, the price one."))
+    resp = test_client.post("/api/copilot", json={"message": "is there a price question?"}).json()
+    conv, seq = resp["conversation_id"], resp["seq"]
+    assert seq == 1  # the answer, after the question at 0
+    flag = f"/api/copilot/conversations/{conv}/messages/{seq}/feedback"
+    assert test_client.post(flag, json={"note": "there is no Q9"}).status_code == 204
+    assert test_client.post(f"/api/copilot/conversations/{conv}/messages/0/feedback",
+                            json={}).status_code == 404  # a question is not an answer
+
+    stored = test_client.get(f"/api/copilot/conversations/{conv}").json()["messages"][1]
+    assert stored["seq"] == 1 and stored["feedback"]["note"] == "there is no Q9"
+    (item,) = test_client.get("/api/admin/copilot-feedback").json()
+    assert item["question"] == "is there a price question?"
+    assert item["reply"] == "Yes, the price one." and item["note"] == "there is no Q9"
+
+    test_client.post(flag, json={"wrong": False})  # taken back
+    assert test_client.get("/api/admin/copilot-feedback").json() == []
+    state["role"] = "analyst"
+    assert test_client.get("/api/admin/copilot-feedback").status_code == 403

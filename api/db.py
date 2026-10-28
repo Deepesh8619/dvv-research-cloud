@@ -167,6 +167,7 @@ class CopilotMessageDB(Base):
     proposals = Column(JSON, default=None)  # the cards, as shown
     tables = Column(JSON, default=None)  # tables as computed, shown under the reply
     charts = Column(JSON, default=None)  # charts drawn for the reply (where they are served)
+    feedback = Column(JSON, default=None)  # {"wrong": true, "note", "at"}: the user flagged it
     answered_by = Column(String, nullable=True)
     created_at = Column(String)
 
@@ -958,6 +959,7 @@ def _ensure_new_columns():
             # Tables shown under a reply, added after conversations first shipped.
             "tables": "JSON",
             "charts": "JSON",
+            "feedback": "JSON",
         },
         "respondent_sessions": {
             "pid": "VARCHAR",
@@ -1282,8 +1284,9 @@ def save_copilot_exchange(
     answered_by: str,
     tables: list[dict] | None = None,
     charts: list[dict] | None = None,
-) -> CopilotConversationDB:
-    """Store one question and its answer, starting the conversation if needed."""
+) -> tuple[CopilotConversationDB, int]:
+    """Store one question and its answer, starting the conversation if needed.
+    Returns the conversation and the answer's seq (what feedback points at)."""
     from uuid import uuid4
 
     now = datetime.now().isoformat()
@@ -1311,7 +1314,44 @@ def save_copilot_exchange(
                             charts=charts or None,
                             created_at=now))
     db.commit()
-    return conversation
+    return conversation, seq + 1
+
+
+def flag_copilot_answer(db: Session, conversation_id: str, seq: int,
+                        wrong: bool, note: str) -> bool:
+    """Mark (or unmark) one answer as wrong. False when there is no such answer."""
+    m = (db.query(CopilotMessageDB)
+         .filter(CopilotMessageDB.conversation_id == conversation_id,
+                 CopilotMessageDB.seq == seq, CopilotMessageDB.role == "assistant").first())
+    if m is None:
+        return False
+    m.feedback = ({"wrong": True, "note": note[:1000], "at": datetime.now().isoformat()}
+                  if wrong else None)
+    db.commit()
+    return True
+
+
+def list_flagged_copilot_answers(db: Session, limit: int = 200) -> list[dict]:
+    """Answers users flagged as wrong, newest first, each with the question asked."""
+    flagged = [m for m in db.query(CopilotMessageDB)
+               .filter(CopilotMessageDB.feedback.isnot(None))
+               .order_by(CopilotMessageDB.created_at.desc()).limit(limit * 2)
+               if (m.feedback or {}).get("wrong")][:limit]
+    out = []
+    for m in flagged:
+        conv = db.get(CopilotConversationDB, m.conversation_id)
+        asked = (db.query(CopilotMessageDB)
+                 .filter(CopilotMessageDB.conversation_id == m.conversation_id,
+                         CopilotMessageDB.seq == m.seq - 1).first())
+        user = db.get(UserDB, conv.user_id) if conv else None
+        out.append({
+            "conversation_id": m.conversation_id, "seq": m.seq,
+            "flagged_at": m.feedback.get("at"), "note": m.feedback.get("note", ""),
+            "user": user.email if user else None, "study_id": conv.study_id if conv else None,
+            "question": asked.content if asked else "", "reply": m.content or "",
+            "lookups": m.lookups or [], "answered_by": m.answered_by,
+        })
+    return out
 
 
 def delete_copilot_conversation(db: Session, conversation: CopilotConversationDB) -> None:

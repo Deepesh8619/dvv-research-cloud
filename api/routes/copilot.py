@@ -16,12 +16,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from api.auth import UserRole, get_current_user
+from api.auth import UserRole, get_current_user, require_role
 from api.db import (
     UserDB,
     answers_by_session,
     delete_copilot_conversation,
     fielding_link_counts,
+    flag_copilot_answer,
     get_copilot_conversation,
     get_db,
     get_fielding_link,
@@ -29,6 +30,7 @@ from api.db import (
     list_copilot_conversations,
     list_copilot_messages,
     list_fielding_links_for_study,
+    list_flagged_copilot_answers,
     list_questionnaires_for_study,
     list_quota_cells,
     list_respondent_sessions,
@@ -40,6 +42,7 @@ from api.models import (
     ChatRequest,
     CopilotConversation,
     CopilotConversationSummary,
+    CopilotFeedback,
     CopilotProposal,
     CopilotRequest,
     CopilotResponse,
@@ -1173,10 +1176,10 @@ def copilot(
               for t in r.get("tables") or [] if isinstance(t, dict) and "header" in t]
     charts = [c for r in results if r.get("success") is not False
               for c in r.get("charts") or [] if isinstance(c, dict) and "filename" in c]
-    conversation = save_copilot_exchange(
+    conversation, seq = save_copilot_exchange(
         db, conversation, user.id, body.study_id, body.message, reply, lookups,
         [c.model_dump() for c in unique], answered_by, tables, charts)
-    return CopilotResponse(reply=reply, proposals=unique,
+    return CopilotResponse(reply=reply, proposals=unique, seq=seq,
                            tools_used=[r.get("tool", "") for r in results],
                            answered_by=answered_by, conversation_id=conversation.id,
                            tables=tables, charts=charts,
@@ -1219,8 +1222,33 @@ def copilot_conversation(
             tables=m.tables or [],
             charts=m.charts or [],
             answered_by=m.answered_by, created_at=m.created_at,
+            seq=m.seq, feedback=m.feedback,
         ) for m in list_copilot_messages(db, c.id)],
     )
+
+
+@router.post("/copilot/conversations/{conversation_id}/messages/{seq}/feedback",
+             status_code=204)
+def flag_answer(
+    conversation_id: str,
+    seq: int,
+    body: CopilotFeedback,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """"This answer was wrong" — the gaps reach the team as a list, not by surprise."""
+    _own(db, conversation_id, user)
+    if not flag_copilot_answer(db, conversation_id, seq, body.wrong, body.note.strip()):
+        raise HTTPException(status_code=404, detail="No such answer")
+
+
+@router.get("/admin/copilot-feedback")
+def flagged_answers(
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.FOUNDER)),
+):
+    """Every answer flagged as wrong, with the question behind it. (Owner/Founder)"""
+    return list_flagged_copilot_answers(db)
 
 
 @router.delete("/copilot/conversations/{conversation_id}", status_code=204)

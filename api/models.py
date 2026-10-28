@@ -719,6 +719,8 @@ class CopilotResponse(BaseModel):
     tools_used: list[str] = Field(default_factory=list)
     answered_by: str
     conversation_id: str | None = None
+    #: This answer's place in the conversation, for "this answer was wrong".
+    seq: int | None = None
     #: Tables as the engines computed them ({title, header, rows, truncated,
     #: significance_tested}), shown under the reply, never retyped by the model.
     tables: list[dict] = Field(default_factory=list)
@@ -743,6 +745,13 @@ class CopilotStoredMessage(BaseModel):
     charts: list[dict] = Field(default_factory=list)
     answered_by: str | None = None
     created_at: str
+    seq: int | None = None
+    feedback: dict | None = None
+
+
+class CopilotFeedback(BaseModel):
+    wrong: bool = True
+    note: str = ""
 
 
 class CopilotConversationSummary(BaseModel):

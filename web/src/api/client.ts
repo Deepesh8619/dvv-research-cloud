@@ -1860,9 +1860,31 @@ export interface CopilotReply {
   tools_used: string[]
   answered_by: string
   conversation_id?: string | null
+  /** This answer's place in the conversation, for "this answer was wrong". */
+  seq?: number | null
   tables?: CopilotTable[]
   charts?: CopilotChart[]
   significance_tested?: boolean
+}
+
+export interface CopilotFeedbackMark {
+  wrong: boolean
+  note?: string
+  at?: string
+}
+
+/** An answer a user flagged as wrong, with the question behind it (Admin). */
+export interface FlaggedCopilotAnswer {
+  conversation_id: string
+  seq: number
+  flagged_at: string | null
+  note: string
+  user: string | null
+  study_id: string | null
+  question: string
+  reply: string
+  lookups: Array<{ tool: string; args: Record<string, unknown> }>
+  answered_by: string | null
 }
 
 export interface CopilotConversationSummary {
@@ -1882,6 +1904,8 @@ export interface CopilotConversation extends CopilotConversationSummary {
     charts?: CopilotChart[]
     answered_by?: string | null
     created_at: string
+    seq?: number | null
+    feedback?: CopilotFeedbackMark | null
   }>
 }
 
@@ -1903,6 +1927,10 @@ export const copilotApi = {
   conversations: async () => api.get<CopilotConversationSummary[]>('/copilot/conversations'),
   conversation: async (id: string) => api.get<CopilotConversation>(`/copilot/conversations/${id}`),
   remove: async (id: string) => api.delete(`/copilot/conversations/${id}`),
+  /** "This answer was wrong" (or take it back with wrong: false). */
+  flag: async (id: string, seq: number, wrong: boolean, note = '') =>
+    api.post(`/copilot/conversations/${id}/messages/${seq}/feedback`, { wrong, note }),
+  flagged: async () => api.get<FlaggedCopilotAnswer[]>('/admin/copilot-feedback'),
 
   /** Tables as one Excel workbook, built from exactly what the answer showed. */
   excel: async (tables: CopilotTable[]) =>

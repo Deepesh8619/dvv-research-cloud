@@ -60,6 +60,8 @@ interface Turn {
   tables?: CopilotTable[]
   charts?: CopilotChart[]
   answeredBy?: string
+  seq?: number | null
+  flagged?: boolean
 }
 
 const fileName = (title: string, ext: string) =>
@@ -127,6 +129,60 @@ function WorkbookDownload({ file }: { file: CopilotChart }) {
         className="shrink-0 font-medium text-primary-600 hover:underline disabled:opacity-50">
         {state === 'busy' ? 'Downloading…' : state === 'failed' ? 'Retry download' : 'Download Excel'}
       </button>
+    </div>
+  )
+}
+
+/**
+ * "Wrong answer?" under a reply: an optional note, then it lands in Admin →
+ * Copilot feedback, so the gaps reach the team as a list instead of a surprise.
+ */
+function FlagAnswer({ conversationId, seq, flagged, onChange }: {
+  conversationId: string
+  seq: number
+  flagged: boolean
+  onChange: (flagged: boolean) => void
+}) {
+  const [writing, setWriting] = useState(false)
+  const [note, setNote] = useState('')
+  const [failed, setFailed] = useState(false)
+  const send = async (wrong: boolean) => {
+    setFailed(false)
+    try {
+      await copilotApi.flag(conversationId, seq, wrong, note)
+      onChange(wrong)
+      setWriting(false)
+    } catch {
+      setFailed(true)
+    }
+  }
+  if (flagged)
+    return (
+      <p className="mt-1 text-[10px] text-amber-700" data-testid="copilot-flagged">
+        Flagged as wrong; the team will see it.{' '}
+        <button type="button" className="underline" onClick={() => send(false)}>Undo</button>
+      </p>
+    )
+  if (!writing)
+    return (
+      <button type="button" className="mt-1 text-[10px] text-slate-400 hover:text-slate-600 hover:underline"
+        onClick={() => setWriting(true)}>
+        Wrong answer?
+      </button>
+    )
+  return (
+    <div className="mt-1 space-y-1" data-testid="copilot-flag-form">
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={1000}
+        aria-label="What was wrong"
+        placeholder="What was wrong, or what did you expect? (optional)"
+        className="w-full rounded border border-slate-300 px-2 py-1 text-xs" />
+      <div className="flex gap-3 text-[11px]">
+        <button type="button" className="font-medium text-primary-600 hover:underline" onClick={() => send(true)}>
+          Flag as wrong
+        </button>
+        <button type="button" className="text-slate-500 hover:underline" onClick={() => setWriting(false)}>Cancel</button>
+        {failed && <span className="text-red-600">Couldn't save. Try again.</span>}
+      </div>
     </div>
   )
 }
@@ -420,6 +476,8 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
             tables: m.tables,
             charts: m.charts,
             answeredBy: m.answered_by ?? undefined,
+            seq: m.seq,
+            flagged: !!m.feedback?.wrong,
           }
         }),
       )
@@ -478,6 +536,7 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
           tables: res.data.tables,
           charts: res.data.charts,
           answeredBy: res.data.answered_by,
+          seq: res.data.seq,
         },
       ])
     } catch (err) {
@@ -603,6 +662,10 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
                 : <ChartImage key={c.filename} chart={c} />)}
               {turn.answeredBy && (
                 <p className="text-[10px] text-slate-400 mt-1">answered by {turn.answeredBy}</p>
+              )}
+              {turn.role === 'assistant' && conversationId && turn.seq != null && (
+                <FlagAnswer conversationId={conversationId} seq={turn.seq} flagged={!!turn.flagged}
+                  onChange={(flagged) => setTurns((ts) => ts.map((t, ti) => (ti === i ? { ...t, flagged } : t)))} />
               )}
             </div>
           </div>
