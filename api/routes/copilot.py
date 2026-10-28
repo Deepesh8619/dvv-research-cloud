@@ -539,8 +539,11 @@ def make_executor(db: Session, user: UserDB):
         charts = [c for result in (answer.tool_results or []) for c in charts_in(result)]
         note = ("These tables and charts are shown to the user under your reply exactly "
                 "as computed, with downloads. Do not retype their cells; say what they show.")
-        errors = [str(r["error"]) for r in answer.tool_results or []
-                  if isinstance(r, dict) and r.get("error")]
+        # success False with an empty error is still a failure — a StopIteration
+        # once arrived as "" and the model could only say "there was an issue".
+        errors = [str(r.get("error") or f"{r.get('tool', 'the data tool')} failed with no message")
+                  for r in answer.tool_results or []
+                  if isinstance(r, dict) and (r.get("error") or r.get("success") is False)]
         # The eval caught the model saying "here is the chart" over an empty list.
         if not charts and re.search(r"\b(chart|graph|plot)", str(args.get("question", "")), re.I):
             note += (" NO CHART WAS DRAWN" + (f" ({'; '.join(errors)[:300]})" if errors else "")

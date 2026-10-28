@@ -110,3 +110,17 @@ def test_small_base_columns_are_not_tested(tmp_path):
     result = crosstab(path, stub="q1", banner=["gender"], datamap=datamap)
     for row in result.sig:
         assert row[1] == "" and row[2] == ""
+
+
+def test_a_banner_past_26_columns_does_not_crash(tmp_path):
+    """Live: Country with 47 codes ran out of A-Z and crashed with an empty error."""
+    path = tmp_path / "wide.parquet"
+    pq.write_table(pa.table({"country": list(range(1, 61)), "q1": [1, 2] * 30}), str(path))
+    datamap = DataMap([
+        Variable("country", "Country", VarType.SINGLE, {c: f"C{c}" for c in range(1, 61)}),
+        Variable("q1", "Aware", VarType.SINGLE, {1: "Yes", 2: "No"}),
+    ])
+    result = crosstab(path, stub="q1", banner=["country"], datamap=datamap)
+    letters = [c.letter for c in result.columns[1:]]
+    assert letters[25:27] == ["Z", "a"] and letters[51] == "z"
+    assert letters[52:] == [None] * 8  # no letter, no test — never a crash

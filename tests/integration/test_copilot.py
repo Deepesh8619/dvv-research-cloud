@@ -1043,3 +1043,16 @@ def test_a_failed_crosstab_comes_back_in_the_engines_words(client, monkeypatch):
     test_client.post("/api/copilot", json={"message": "crosstab Q4 by gender"})
     (result,) = _tool_results(seen)
     assert f"THE DATA ENGINE FAILED: {error}" in result["note"]
+
+
+def test_a_tool_failure_with_an_empty_message_still_counts(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    _navigator_returns(monkeypatch, {"success": False, "error": "", "tool": "show_table"})
+    seen = _script(monkeypatch,
+                   ("tool", "ask_data", {"study_id": "study_f1", "question": "age by country"}),
+                   ("text", "It failed."))
+    test_client.post("/api/copilot", json={"message": "age by country"})
+    (result,) = _tool_results(seen)
+    assert "THE DATA ENGINE FAILED: show_table failed with no message" in result["note"]
