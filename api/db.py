@@ -168,6 +168,7 @@ class CopilotMessageDB(Base):
     tables = Column(JSON, default=None)  # tables as computed, shown under the reply
     charts = Column(JSON, default=None)  # charts drawn for the reply (where they are served)
     feedback = Column(JSON, default=None)  # {"wrong": true, "note", "at"}: the user flagged it
+    trace = Column(JSON, default=None)  # how the answer was made: steps, time, tokens
     answered_by = Column(String, nullable=True)
     created_at = Column(String)
 
@@ -766,6 +767,22 @@ class WorkflowRunDB(Base):
     error = Column(Text, nullable=True)
 
 
+class CopilotEvalRunDB(Base):
+    """One run of scripts/eval_copilot.py: the score history Admin shows."""
+
+    __tablename__ = "copilot_eval_runs"
+
+    id = Column(String, primary_key=True)
+    at = Column(String, index=True)
+    commit = Column(String)
+    score = Column(Float)
+    passed = Column(Integer)
+    cases = Column(Integer)
+    median_seconds = Column(Float, nullable=True)
+    by_category = Column(JSON, default=None)
+    failed = Column(JSON, default=None)  # ids of the cases that failed
+
+
 class ModelUsageDB(Base):
     """AI model usage per day, provider, model and purpose (src/platform/usage.py).
 
@@ -960,6 +977,7 @@ def _ensure_new_columns():
             "tables": "JSON",
             "charts": "JSON",
             "feedback": "JSON",
+            "trace": "JSON",
         },
         "respondent_sessions": {
             "pid": "VARCHAR",
@@ -1284,6 +1302,7 @@ def save_copilot_exchange(
     answered_by: str,
     tables: list[dict] | None = None,
     charts: list[dict] | None = None,
+    trace: dict | None = None,
 ) -> tuple[CopilotConversationDB, int]:
     """Store one question and its answer, starting the conversation if needed.
     Returns the conversation and the answer's seq (what feedback points at)."""
@@ -1311,7 +1330,7 @@ def save_copilot_exchange(
     db.add(CopilotMessageDB(id=f"cmsg_{uuid4().hex[:12]}", conversation_id=conversation.id,
                             seq=seq + 1, role="assistant", content=reply, lookups=lookups,
                             proposals=proposals, answered_by=answered_by, tables=tables or None,
-                            charts=charts or None,
+                            charts=charts or None, trace=trace,
                             created_at=now))
     db.commit()
     return conversation, seq + 1
@@ -1331,27 +1350,58 @@ def flag_copilot_answer(db: Session, conversation_id: str, seq: int,
     return True
 
 
-def list_flagged_copilot_answers(db: Session, limit: int = 200) -> list[dict]:
-    """Answers users flagged as wrong, newest first, each with the question asked."""
-    flagged = [m for m in db.query(CopilotMessageDB)
-               .filter(CopilotMessageDB.feedback.isnot(None))
-               .order_by(CopilotMessageDB.created_at.desc()).limit(limit * 2)
-               if (m.feedback or {}).get("wrong")][:limit]
+def list_copilot_answers(db: Session, show: str = "all", limit: int = 100) -> list[dict]:
+    """Recent answers, newest first, each with the question asked and how it was
+    made. show: all | flagged | errors (a tool refused or failed) | slow (>20 s)."""
+    keep = {
+        "all": lambda m: True,
+        "flagged": lambda m: (m.feedback or {}).get("wrong"),
+        "errors": lambda m: any(not s.get("ok", True) for s in (m.trace or {}).get("steps", [])),
+        "slow": lambda m: (m.trace or {}).get("ms", 0) > 20_000,
+    }[show]
+    scan = (db.query(CopilotMessageDB).filter(CopilotMessageDB.role == "assistant")
+            .order_by(CopilotMessageDB.created_at.desc()).limit(max(limit * 10, 500)))
+    picked = [m for m in scan if keep(m)][:limit]
     out = []
-    for m in flagged:
+    for m in picked:
         conv = db.get(CopilotConversationDB, m.conversation_id)
         asked = (db.query(CopilotMessageDB)
                  .filter(CopilotMessageDB.conversation_id == m.conversation_id,
                          CopilotMessageDB.seq == m.seq - 1).first())
         user = db.get(UserDB, conv.user_id) if conv else None
+        flag = m.feedback or {}
         out.append({
-            "conversation_id": m.conversation_id, "seq": m.seq,
-            "flagged_at": m.feedback.get("at"), "note": m.feedback.get("note", ""),
+            "conversation_id": m.conversation_id, "seq": m.seq, "at": m.created_at,
+            "flagged": bool(flag.get("wrong")), "flagged_at": flag.get("at"),
+            "note": flag.get("note", ""),
             "user": user.email if user else None, "study_id": conv.study_id if conv else None,
             "question": asked.content if asked else "", "reply": m.content or "",
-            "lookups": m.lookups or [], "answered_by": m.answered_by,
+            "lookups": m.lookups or [], "answered_by": m.answered_by, "trace": m.trace,
         })
     return out
+
+
+def list_flagged_copilot_answers(db: Session, limit: int = 200) -> list[dict]:
+    """Answers users flagged as wrong, newest first, each with the question asked."""
+    return list_copilot_answers(db, "flagged", limit)
+
+
+def record_copilot_eval(db: Session, summary: dict, failed: list[str], commit: str) -> None:
+    from uuid import uuid4
+
+    db.add(CopilotEvalRunDB(
+        id=f"eval_{uuid4().hex[:10]}", at=datetime.now().isoformat(timespec="seconds"),
+        commit=commit, score=float(summary["score"]), passed=int(summary["passed"]),
+        cases=int(summary["cases"]), median_seconds=summary.get("median_seconds"),
+        by_category=summary.get("by_category"), failed=failed))
+    db.commit()
+
+
+def list_copilot_evals(db: Session, limit: int = 30) -> list[dict]:
+    rows = db.query(CopilotEvalRunDB).order_by(CopilotEvalRunDB.at.desc()).limit(limit)
+    return [{"at": r.at, "commit": r.commit, "score": r.score, "passed": r.passed,
+             "cases": r.cases, "median_seconds": r.median_seconds,
+             "by_category": r.by_category or {}, "failed": r.failed or []} for r in rows]
 
 
 def delete_copilot_conversation(db: Session, conversation: CopilotConversationDB) -> None:

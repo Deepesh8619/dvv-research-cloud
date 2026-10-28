@@ -10,6 +10,8 @@ describing something other than what Confirm will do.
 import json
 import logging
 import re
+import time
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,7 +29,9 @@ from api.db import (
     get_db,
     get_fielding_link,
     get_study,
+    list_copilot_answers,
     list_copilot_conversations,
+    list_copilot_evals,
     list_copilot_messages,
     list_fielding_links_for_study,
     list_flagged_copilot_answers,
@@ -1342,7 +1346,21 @@ def copilot(
         history = _history(db, conversation.id)
     else:
         history = [t.model_dump() for t in body.history]
-    execute, proposals = make_executor(db, user)
+    execute_tool, proposals = make_executor(db, user)
+    steps: list[dict] = []
+
+    def execute(name: str, args: dict) -> dict:
+        """Each step timed and kept, so a wrong answer can be explained from
+        Admin instead of being rebuilt on a laptop."""
+        started = time.perf_counter()
+        out = execute_tool(name, args)
+        steps.append({"tool": name, "ok": out.get("success") is not False,
+                      "ms": round((time.perf_counter() - started) * 1000),
+                      "chars": len(json.dumps(out, default=str)),
+                      **({"error": str(out.get("error"))[:300]}
+                         if out.get("success") is False else {})})
+        return out
+
     page = ""
     if body.study_id and (current := get_study(db, body.study_id)):
         page = f"The user is looking at project {current.id} ({current.client_name})."
@@ -1362,6 +1380,9 @@ def copilot(
     from src.platform import usage
 
     tagged = usage.purpose.set("copilot")  # this request's model calls count as copilot
+    totals = {"model_calls": 0, "tokens_in": 0, "tokens_out": 0}
+    counting = usage.tally.set(totals)
+    started = time.perf_counter()
     try:
         usage.count_question()
         reply, results, answered_by = run_copilot(
@@ -1373,6 +1394,9 @@ def copilot(
                             detail="The copilot can't reach an AI model right now.") from exc
     finally:
         usage.purpose.reset(tagged)
+        usage.tally.reset(counting)
+    trace = {"ms": round((time.perf_counter() - started) * 1000), **totals,
+             "steps": steps, "page": body.study_id, "focus_qid": body.focus_qid}
     # The history shows the model "[Looked up for this answer: …]" after each
     # earlier reply; it sometimes copies that line into its own. Not for the user.
     reply = re.sub(r"\n*\[Looked up for this answer:[^\]]*\]", "", reply).strip()
@@ -1391,7 +1415,7 @@ def copilot(
               for c in r.get("charts") or [] if isinstance(c, dict) and "filename" in c]
     conversation, seq = save_copilot_exchange(
         db, conversation, user.id, body.study_id, body.message, reply, lookups,
-        [c.model_dump() for c in unique], answered_by, tables, charts)
+        [c.model_dump() for c in unique], answered_by, tables, charts, trace)
     return CopilotResponse(reply=reply, proposals=unique, seq=seq,
                            tools_used=[r.get("tool", "") for r in results],
                            answered_by=answered_by, conversation_id=conversation.id,
@@ -1453,6 +1477,26 @@ def flag_answer(
     _own(db, conversation_id, user)
     if not flag_copilot_answer(db, conversation_id, seq, body.wrong, body.note.strip()):
         raise HTTPException(status_code=404, detail="No such answer")
+
+
+@router.get("/admin/copilot-answers")
+def copilot_answers(
+    show: Literal["all", "flagged", "errors", "slow"] = "all",
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.FOUNDER)),
+):
+    """Recent Copilot answers with how each was made. (Owner/Founder)"""
+    return list_copilot_answers(db, show, max(1, min(limit, 500)))
+
+
+@router.get("/admin/copilot-evals")
+def copilot_evals(
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.FOUNDER)),
+):
+    """The eval's score history, newest first. (Owner/Founder)"""
+    return list_copilot_evals(db)
 
 
 @router.get("/admin/copilot-feedback")

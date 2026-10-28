@@ -42,3 +42,4 @@ deploy/aws/out/
 # Knowledge graph output — generated, and large.
 graphify-out/
 copilot-eval-*.json
+deploy/logs/
