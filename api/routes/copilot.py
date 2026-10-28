@@ -9,6 +9,7 @@ describing something other than what Confirm will do.
 
 import json
 import logging
+import re
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -393,8 +394,10 @@ def make_executor(db: Session, user: UserDB):
         s, _row, definition, q = question(args)
         # The graph is written on approval only; refresh it from the questionnaire
         # as it stands, so a draft or a later edit is what gets walked.
+        # Flushed, not committed: a commit expires the request's user row, and the
+        # solver below closes the session, so the next tool read a detached user
+        # (HTTP 500 on the server, where the user comes from this session).
         sync_questionnaire(db, s.id, definition)
-        db.commit()
         node = graph.node_id(s.id, "question", q.qid)
 
         def described(rows):
@@ -534,15 +537,21 @@ def make_executor(db: Session, user: UserDB):
         # letters arrives under `table`, and was dropped here until it wasn't.
         tables = [t for result in (answer.tool_results or []) for t in tables_in(result)]
         charts = [c for result in (answer.tool_results or []) for c in charts_in(result)]
+        note = ("These tables and charts are shown to the user under your reply exactly "
+                "as computed, with downloads. Do not retype their cells; say what they show.")
+        # The eval caught the model saying "here is the chart" over an empty list.
+        if not charts and re.search(r"\b(chart|graph|plot)", str(args.get("question", "")), re.I):
+            errors = [str(r["error"]) for r in answer.tool_results or []
+                      if isinstance(r, dict) and r.get("error")]
+            note += (" NO CHART WAS DRAWN" + (f" ({'; '.join(errors)[:300]})" if errors else "")
+                     + ". Say so plainly; do not describe a chart.")
         return {
             "answer": answer.message.content,
             "tables": tables,
             "charts": charts,
             # Whether a test ran, so "significant" in a reply can be held to it.
             "significance_tested": any(t["significance_tested"] for t in tables),
-            "note": "These tables and charts are shown to the user under your reply exactly "
-                    "as computed, with downloads. Do not retype their cells; say what they "
-                    "show.",
+            "note": note,
         }
 
     # --- action tools: proposals only -----------------------------------------
