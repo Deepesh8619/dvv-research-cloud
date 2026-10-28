@@ -6,6 +6,8 @@ everything else — tools, validation, proposals, the endpoint — is real.
 
 import json
 
+from fastapi import Depends
+
 from api.db import FieldingLinkDB
 from tests.integration.test_fielding_routes import (  # noqa: F401 - `client` is a fixture
     _make_questionnaire,
@@ -946,6 +948,36 @@ def test_the_question_graph_walks_routing_quotas_and_the_solver(client, monkeypa
     assert q3["reachable"] is True and q3["example_path"]
 
 
+def test_the_question_graph_leaves_the_request_user_usable(client, monkeypatch):  # noqa: F811
+    """On the server the user row lives in the request's own session; the graph
+    tool committed it into expiry, then the solver closed the session, and the
+    next tool died with DetachedInstanceError."""
+    from api.auth import get_current_user
+    from api.db import UserDB, get_db
+    from api.main import app
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    db = sf()
+    db.add(UserDB(id="u1", email="test@x.com", name="Test", role="owner", is_active=True))
+    db.commit()
+    db.close()
+
+    def session_bound_user(db=Depends(get_db)):  # noqa: B008 - FastAPI idiom
+        return db.get(UserDB, "u1")
+
+    app.dependency_overrides[get_current_user] = session_bound_user
+    seen = _script(monkeypatch,
+                   ("tool", "question_graph", {"study_id": "study_f1", "qid": "Q2"}),
+                   ("tool", "question_graph", {"study_id": "study_f1", "qid": "Q3"}),
+                   ("text", "Q2 decides who sees Q3."))
+    resp = test_client.post("/api/copilot", json={"message": "what depends on Q2?"})
+    assert resp.status_code == 200
+    q2, q3 = _tool_results(seen)
+    assert [d["qid"] for d in q3["depends_on"]] == ["Q2"]
+
+
 def test_the_question_graph_says_why_nobody_reaches_a_question(client, monkeypatch):  # noqa: F811
     from src.core.survey_definition import Expression, Question, QuestionType
     from tests.integration.test_fielding_routes import _sample_survey
@@ -976,3 +1008,18 @@ def test_a_question_found_by_meaning_brings_its_neighbours(client, monkeypatch):
     by_ref = {m["ref"]: m for m in found["related_by_meaning"]}
     assert by_ref["Q3"]["depends_on"] == ["Q2"]
     assert by_ref["Q2"]["decides"] == ["Q3"]
+
+
+def test_a_chart_that_was_not_drawn_is_reported_as_not_drawn(client, monkeypatch):  # noqa: F811
+    """Seen on Bedrock: "here is the bar chart" over an empty chart list."""
+    test_client, sf, _ = client
+    _make_study(sf)
+    _make_questionnaire(sf)
+    _navigator_returns(monkeypatch, {"success": False, "error": "Chart rendering failed: boom"})
+    seen = _script(monkeypatch,
+                   ("tool", "ask_data", {"study_id": "study_f1", "question": "bar chart of Q4"}),
+                   ("text", "No chart was drawn."))
+    test_client.post("/api/copilot", json={"message": "bar chart of Q4"})
+    (result,) = _tool_results(seen)
+    assert result["charts"] == []
+    assert "NO CHART WAS DRAWN (Chart rendering failed: boom)" in result["note"]

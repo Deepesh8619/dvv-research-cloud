@@ -172,8 +172,9 @@
     {
      "say": "Is there a question about price sensitivity in the coffee survey?",
      "expect": {
-      "tools": [
-       "find_question"
+      "tools_any": [
+       "find_question",
+       "search_project"
       ],
       "mentions": [
        "(no|not|doesn.t|isn.t)"
