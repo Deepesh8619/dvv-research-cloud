@@ -7,6 +7,7 @@ which tools to call; every number comes from the deterministic engines
 (crosstab, DuckDB), never from the model (CLAUDE.md §4.4).
 """
 
+import difflib
 import json
 import logging
 import re
@@ -65,6 +66,19 @@ _SQL_DISALLOWED_RE = re.compile(
     re.IGNORECASE,
 )
 
+
+def _unknown(kind: str, names: list[str], datamap: DataMap) -> str:
+    """'Unknown variable' plus the nearest real names, so the model can retry
+    with one instead of telling the user "there was an issue"."""
+    known = datamap.names()
+    lower = {k.lower(): k for k in known}
+    near = sorted(
+        {m for n in names for m in difflib.get_close_matches(n, known, n=3, cutoff=0.5)}
+        # "Q4_satisfaction", "q4 by gender": a real name hiding inside the guess
+        | {lower[t] for n in names for t in re.split(r"[\W_]+", n.lower()) if t in lower})
+    hint = f" Closest variables: {', '.join(near)}." if near else (
+        f" Variables look like: {', '.join(known[:8])}.")
+    return f"Unknown {kind}: {', '.join(names)}.{hint}"
 
 def _run_sql(parquet_path: Path, sql: str, limit: int = 100) -> dict:
     """Run a read-only SELECT against the study's respondent data."""
@@ -277,7 +291,7 @@ def _make_executor(
             return {"success": False, "error": "Datamap unavailable — cannot compute new tables"}
         stub = params.get("stub", "")
         if stub not in datamap:
-            return {"success": False, "error": f"Unknown variable: {stub}"}
+            return {"success": False, "error": _unknown("variable", [stub], datamap)}
         # No default banner (product decision): a table is Total-only unless
         # the analyst's question named a comparison group, so the model
         # supplied one explicitly. Silently substituting a study-wide default
@@ -287,7 +301,7 @@ def _make_executor(
         banner = params.get("banner") or []
         bad = [b for b in banner if b not in datamap]
         if bad:
-            return {"success": False, "error": f"Unknown banner variable(s): {bad}"}
+            return {"success": False, "error": _unknown("banner variable(s)", bad, datamap)}
         filter_, err = _parse_filter(params.get("filter"), datamap)
         if err:
             return {"success": False, "error": err}
@@ -310,7 +324,7 @@ def _make_executor(
             return {"success": False, "error": "Datamap unavailable — cannot compute chart"}
         stub = params.get("stub", "")
         if stub not in datamap:
-            return {"success": False, "error": f"Unknown variable: {stub}"}
+            return {"success": False, "error": _unknown("variable", [stub], datamap)}
         filter_, err = _parse_filter(params.get("filter"), datamap)
         if err:
             return {"success": False, "error": err}

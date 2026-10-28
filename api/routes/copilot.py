@@ -539,12 +539,18 @@ def make_executor(db: Session, user: UserDB):
         charts = [c for result in (answer.tool_results or []) for c in charts_in(result)]
         note = ("These tables and charts are shown to the user under your reply exactly "
                 "as computed, with downloads. Do not retype their cells; say what they show.")
+        errors = [str(r["error"]) for r in answer.tool_results or []
+                  if isinstance(r, dict) and r.get("error")]
         # The eval caught the model saying "here is the chart" over an empty list.
         if not charts and re.search(r"\b(chart|graph|plot)", str(args.get("question", "")), re.I):
-            errors = [str(r["error"]) for r in answer.tool_results or []
-                      if isinstance(r, dict) and r.get("error")]
             note += (" NO CHART WAS DRAWN" + (f" ({'; '.join(errors)[:300]})" if errors else "")
                      + ". Say so plainly; do not describe a chart.")
+        elif errors and not tables:
+            # Seen live: "there was an issue generating the crosstab" — the
+            # user can't act on that. The engine's own words, and a retry.
+            note += (f" THE DATA ENGINE FAILED: {'; '.join(errors)[:300]}. If it names closest "
+                     "variables, call ask_data again with the right one; otherwise quote this "
+                     "error to the user.")
         return {
             "answer": answer.message.content,
             "tables": tables,
