@@ -581,8 +581,17 @@ def make_executor(db: Session, user: UserDB):
         if dm is None or not (d / "data.parquet").exists():
             raise _ToolError(f"{s.id} has no collected data to tabulate yet")
 
-        def flat(names):  # a plain number (raw age) has no categories to make rows/columns of
+        def flat(names):  # a plain number (raw age, a ZIP) or open text: no categories
             return [n for n in names if not dm[n].valid_codes()]
+
+        def what(name):
+            kind = "open-text answers" if dm[name].type.value == "text" else "a plain number"
+            return f"{name} ({dm[name].label[:50]}) is {kind}"
+
+        def good_columns():
+            from src.orchestration.orchestrator import suggest_banner_candidates
+
+            return ", ".join(f"{n} ({dm[n].label[:40]})" for n in suggest_banner_candidates(dm, 8))
 
         def named(word: str) -> str | None:
             """The variable meant: its name, or the ONE variable with categories
@@ -597,8 +606,12 @@ def make_executor(db: Session, user: UserDB):
             raise _ToolError(_unknown("column variable(s)", bad, dm))
         banner = list(dict.fromkeys(named(b) for b in cols))
         if f := flat(banner):
-            raise _ToolError(f"{', '.join(f)} has no answer categories (a plain number); "
-                             "use a banded version, such as an age break")
+            # Seen live: the model chose S4 (ZIP code) by itself and was told to
+            # "use an age break". Name what it is, and what would work here.
+            raise _ToolError("; ".join(what(x) for x in f) + " — no answer categories to make "
+                             "columns from. Variables that work as columns here: "
+                             f"{good_columns()}. "
+                             "If the user did not name the columns, ask them which.")
 
         # Rows: every question, or the names given — a grid's parent (Q5) brings its
         # rows (Q5r1, Q5r2…), so "Q5" works whichever way the data names them.
@@ -612,7 +625,8 @@ def make_executor(db: Session, user: UserDB):
                 hit = [r] if r in dm else [
                     v.name for v in dm.variables
                     if v.question_ref == r
-                    or re.fullmatch(rf"{re.escape(r)}[_.]?[a-zA-Z]+\d+.*", v.name)]
+                    # Q5r1, Q5_r1, Q13_15 — never Q1 matching Q13
+                    or re.fullmatch(rf"{re.escape(r)}(?:[_.]\w+|[a-zA-Z]+\d+.*)", v.name)]
                 if not hit and named(r):
                     hit = [named(r)]
                 (stubs.extend(hit) if hit else missing.append(r))
@@ -623,7 +637,8 @@ def make_executor(db: Session, user: UserDB):
         stubs = [x for x in stubs if x not in skipped][:MAX_WORKBOOK_TABLES]
         if not stubs:
             raise _ToolError("none of those rows has answer categories to tabulate"
-                             + (f" ({', '.join(skipped)} are plain numbers)" if skipped else ""))
+                             + (f": {'; '.join(what(x) for x in skipped[:5])}" if skipped else "")
+                             + ". Open text is read in the Open ends tab, not tabulated.")
 
         filter_, err = _parse_filter(args.get("filter"), dm)
         if err:
@@ -1107,6 +1122,7 @@ def _lookups_note(lookups: list[dict] | None) -> str:
     are looked up again, because they may have changed since."""
     calls = [
         f"{x.get('tool')}({', '.join(f'{k}={v}' for k, v in (x.get('args') or {}).items())})"
+        + (f" -> refused: {x['error']}" if x.get("error") else "")
         for x in lookups or [] if x.get("tool")
     ]
     return f"\n[Looked up for this answer: {'; '.join(calls)}]" if calls else ""
@@ -1171,7 +1187,11 @@ def copilot(
     # which re-prepares the same cards: keep one card per distinct action.
     unique = list({(c.method, c.path, json.dumps(c.body, sort_keys=True)): c
                    for c in proposals}.values())
-    lookups = [{"tool": r.get("tool", ""), "args": r.get("args") or {}} for r in results]
+    # A refusal is kept with its reason: a follow-up ("1", "try again") then knows
+    # what failed, and a flagged answer shows why in Admin instead of a guess.
+    lookups = [{"tool": r.get("tool", ""), "args": r.get("args") or {},
+                **({"error": str(r.get("error"))[:300]} if r.get("success") is False else {})}
+               for r in results]
     tables = [t for r in results if r.get("success") is not False
               for t in r.get("tables") or [] if isinstance(t, dict) and "header" in t]
     charts = [c for r in results if r.get("success") is not False

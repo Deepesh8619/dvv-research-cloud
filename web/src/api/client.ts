@@ -1883,7 +1883,7 @@ export interface FlaggedCopilotAnswer {
   study_id: string | null
   question: string
   reply: string
-  lookups: Array<{ tool: string; args: Record<string, unknown> }>
+  lookups: Array<{ tool: string; args: Record<string, unknown>; error?: string }>
   answered_by: string | null
 }
 
