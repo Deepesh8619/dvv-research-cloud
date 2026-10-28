@@ -1850,6 +1850,8 @@ export interface CopilotChart {
   filename: string
   title: string
   chart_type?: string
+  /** "workbook": an .xlsx of tables served from the same route, offered as a download. */
+  kind?: 'workbook'
 }
 
 export interface CopilotReply {

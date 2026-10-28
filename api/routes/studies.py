@@ -1394,7 +1394,10 @@ def get_chart(
     if charts_dir not in chart_path.parents or not chart_path.exists():
         raise HTTPException(status_code=404, detail="Chart not found")
 
-    return FileResponse(chart_path, media_type="image/png", filename=filename)
+    # A chart is a PNG; the copilot's "every question by X" workbook lives here too.
+    media = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+             if chart_path.suffix == ".xlsx" else "image/png")
+    return FileResponse(chart_path, media_type=media, filename=filename)
 
 
 @router.get("/studies/{study_id}/profile")

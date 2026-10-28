@@ -150,7 +150,9 @@ def suggest_banner_candidates(datamap: DataMap, limit: int = 3) -> list[str]:
     return [v.name for v in candidates][:limit]
 
 
-def auto_tab_plan(datamap: DataMap, title: str = "Topline Tables") -> TabPlan | None:
+def auto_tab_plan(
+    datamap: DataMap, title: str = "Topline Tables", limit: int = MAX_AUTO_TABLES
+) -> TabPlan | None:
     """Build a default tab plan from the datamap when the client sent no tab spec.
 
     No default banner: every stub table is Total-only unless a banner is
@@ -178,7 +180,7 @@ def auto_tab_plan(datamap: DataMap, title: str = "Topline Tables") -> TabPlan | 
 
     tables = [
         TableSpec(stub=v.name, nets=auto_nets(v), mean=len(v.valid_codes()) >= 5)
-        for v in singles[:MAX_AUTO_TABLES]
+        for v in singles[:limit]
     ]
     return TabPlan(title=title, banner=[], tables=tables)
 

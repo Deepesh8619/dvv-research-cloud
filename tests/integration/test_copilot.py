@@ -1056,3 +1056,47 @@ def test_a_tool_failure_with_an_empty_message_still_counts(client, monkeypatch):
     test_client.post("/api/copilot", json={"message": "age by country"})
     (result,) = _tool_results(seen)
     assert "THE DATA ENGINE FAILED: show_table failed with no message" in result["note"]
+
+
+def test_every_question_by_age_band_comes_back_as_one_workbook(client, monkeypatch, tmp_path):  # noqa: F811
+    """Live ask: "different crosstables for every variable with age"."""
+    from datetime import datetime
+
+    import polars as pl
+    from openpyxl import load_workbook
+
+    from api.db import StudyDB
+    from src.core.models import DataMap, Variable, VarType
+
+    test_client, sf, _ = client
+    run = tmp_path / "run"
+    run.mkdir()
+    pl.DataFrame({"AGEB": [1, 2] * 20, "AGE": list(range(20, 60)), "Q1": [1, 2, 2, 1] * 10,
+                  "Q2": [1, 2, 3, 1] * 10}).write_parquet(run / "data.parquet")
+    single = VarType.SINGLE
+    (run / "datamap.json").write_text(DataMap([
+        Variable("AGEB", "Age break", single, {1: "18-34", 2: "35+"}),
+        Variable("AGE", "What is your age?", single, {}),
+        Variable("Q1", "Aware", single, {1: "Yes", 2: "No"}),
+        Variable("Q2", "Brand", single, {1: "A", 2: "B", 3: "C"})]).to_json())
+    now = datetime.now().isoformat()
+    db = sf()
+    db.add(StudyDB(id="s_wb", client_name="C", status="qc", created_at=now, updated_at=now,
+                   excel_path=str(run / "d.xlsx"), study_metadata={}, approval_chain={}))
+    db.commit()
+    db.close()
+    seen = _script(monkeypatch,
+                   ("tool", "tables_workbook", {"study_id": "s_wb", "banner": ["AGE"]}),
+                   ("tool", "tables_workbook", {"study_id": "s_wb", "banner": ["AGEB"]}),
+                   ("text", "Two tables by age band."))
+    resp = test_client.post("/api/copilot", json={"message": "every variable by age"}).json()
+    raw_age, banded = _tool_results(seen)
+    assert "no answer categories" in raw_age["error"]  # raw age is refused, with the fix
+    assert banded["tables_written"] == 2  # Q1, Q2 — not the banner itself, not raw age
+    (wb,) = resp["charts"]
+    assert wb["kind"] == "workbook"
+    got = test_client.get(f"/api/studies/s_wb/charts/{wb['filename']}")
+    assert got.status_code == 200 and "spreadsheetml" in got.headers["content-type"]
+    out = tmp_path / "out.xlsx"
+    out.write_bytes(got.content)
+    assert len(load_workbook(out).sheetnames) == 3  # summary + one sheet per question

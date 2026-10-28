@@ -563,6 +563,43 @@ def make_executor(db: Session, user: UserDB):
             "note": note,
         }
 
+    def tables_workbook(args):
+        from api.routes.chat import _load_datamap, _study_dir, _unknown
+        from src.engines.tabs.runner import banner_workbook
+
+        s = study(args)
+        d = _study_dir(s)
+        dm = _load_datamap(d, s)
+        if dm is None or not (d / "data.parquet").exists():
+            raise _ToolError(f"{s.id} has no collected data to tabulate yet")
+        banner = [str(b) for b in args.get("banner") or []]
+        if not banner:
+            raise _ToolError("name the variable(s) to break every question by, e.g. an age band")
+        bad = [b for b in banner if b not in dm]
+        if bad:
+            raise _ToolError(_unknown("banner variable(s)", bad, dm))
+        flat = [b for b in banner if not dm[b].valid_codes()]
+        if flat:
+            raise _ToolError(f"{', '.join(flat)} has no answer categories (a plain number); "
+                             "use a banded version, such as an age break")
+        # Served by the chart route, which already checks the study and the path.
+        safe = "_".join(re.sub(r"\W", "", b) for b in banner)
+        filename = f"tables_by_{safe}_{uuid4().hex[:6]}.xlsx"
+        (d / "charts").mkdir(exist_ok=True)
+        title = "Every question by " + ", ".join(f"{b} ({dm[b].label[:40]})" for b in banner)
+        n = run_heavy_detached(db, banner_workbook, d / "data.parquet", dm, banner,
+                               d / "charts" / filename, title)
+        if not n:
+            raise _ToolError(f"{s.id} has no questions with answer categories to tabulate")
+        return {
+            "tables_written": n,
+            "charts": [{"study_id": s.id, "filename": filename, "title": title,
+                        "kind": "workbook"}],
+            "note": "The workbook is offered to the user as a download under your reply, one "
+                    "sheet per question with the banner as columns and significance letters. "
+                    "Say how many tables it holds and what the columns are; do not list them.",
+        }
+
     # --- action tools: proposals only -----------------------------------------
 
     def propose_open_link(args):
@@ -955,6 +992,7 @@ def make_executor(db: Session, user: UserDB):
         "question_graph": question_graph,
         "search_project": search_project,
         "ask_data": ask_data,
+        "tables_workbook": tables_workbook,
         "propose_open_link": propose_open_link,
         "propose_set_hold": propose_set_hold,
         "propose_close_link": propose_close_link,
