@@ -1073,7 +1073,7 @@ def _data_study(sf, tmp_path, study_id="s_wb"):
     pl.DataFrame({"AGEB": [1, 2] * 20, "AGE": list(range(20, 60)), "GEND": [1, 1, 2, 2] * 10,
                   "Q1": [1, 2, 2, 1] * 10, "Q5r1": [0, 1] * 20, "Q5r2": [1, 1, 0, 0] * 10,
                   "SAT": [1, 2, 3, 4, 5] * 8, "KIDS": [0, 0, 0, 1] * 10,
-                  "W": [1.0] * n}).write_parquet(run / "data.parquet")
+                  "W": [1.0] * n, "Q7_1": ["good"] * n, "Q7_2": ["fine"] * n}).write_parquet(run / "data.parquet")
     single = VarType.SINGLE
     (run / "datamap.json").write_text(DataMap([
         Variable("AGEB", "Age break", single, {1: "18-34", 2: "35+"}),
@@ -1085,6 +1085,8 @@ def _data_study(sf, tmp_path, study_id="s_wb"):
         Variable("SAT", "Satisfaction", single, {i: str(i) for i in range(1, 6)}),
         Variable("KIDS", "Child(ren) age 5 or under", single, {0: "No", 1: "Yes"}),
         Variable("W", "Weight", VarType.NUMERIC, {}),
+        Variable("Q7_1", "Why? Brand A", VarType.TEXT, {}),
+        Variable("Q7_2", "Why? Brand B", VarType.TEXT, {}),
     ]).to_json())
     now = datetime.now().isoformat()
     db = sf()
@@ -1171,3 +1173,28 @@ def test_a_wrong_answer_is_flagged_and_reaches_the_admin_list(client, monkeypatc
     assert test_client.get("/api/admin/copilot-feedback").json() == []
     state["role"] = "analyst"
     assert test_client.get("/api/admin/copilot-feedback").status_code == 403
+
+
+def test_a_column_with_no_categories_says_what_it_is_and_what_works(client, monkeypatch, tmp_path):  # noqa: F811
+    """Live: the model chose S4 (ZIP code) itself and was told to use an age break."""
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    seen = _script(monkeypatch,
+                   ("tool", "make_tables", {"study_id": "s_wb", "columns": ["AGE"]}),
+                   ("tool", "make_tables", {"study_id": "s_wb", "rows": ["Q7"]}),
+                   ("text", "Which columns?"))
+    resp = test_client.post("/api/copilot", json={"message": "tables by age"}).json()
+    by_age, text_rows = _tool_results(seen)
+    assert "AGE (What is your age?) is a plain number" in by_age["error"]
+    assert "work as columns here:" in by_age["error"] and "GEND (" in by_age["error"]
+    assert "Q7_1 (Why? Brand A) is open-text answers" in text_rows["error"]  # Q7 -> Q7_1, Q7_2
+
+    # The refusal is remembered, so a follow-up ("1", "try again") knows what failed.
+    conv = test_client.get(f"/api/copilot/conversations/{resp['conversation_id']}").json()
+    from api.db import get_db
+    from api.main import app
+    from api.routes.copilot import _history
+
+    db = next(app.dependency_overrides[get_db]())
+    note = _history(db, conv["id"])[1]["content"]
+    assert "make_tables(" in note and "-> refused: AGE (What is your age?)" in note

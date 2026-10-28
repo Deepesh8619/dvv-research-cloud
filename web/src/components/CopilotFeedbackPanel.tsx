@@ -71,6 +71,11 @@ export default function CopilotFeedbackPanel() {
                 {f.answered_by ? ` · ${f.answered_by}` : ''}
               </summary>
               <p className="mt-1 whitespace-pre-wrap text-slate-700">{f.reply}</p>
+              {f.lookups.filter((l) => l.error).map((l, i) => (
+                <p key={i} className="mt-1 text-xs text-red-700">
+                  {l.tool} refused: {l.error}
+                </p>
+              ))}
             </details>
           </li>
         )

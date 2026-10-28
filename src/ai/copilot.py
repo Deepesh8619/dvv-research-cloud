@@ -92,6 +92,8 @@ Rules:
 - Asked for crosstabs or tables — one, several, or every question, by any columns,
   filtered, netted or weighted — call make_tables ONCE with the variable names. Use
   ask_data for questions in words that are not a table (an average, a count, a why).
+- Never choose the columns yourself. If the user asked for tables "by" something
+  without naming it, ask which — make_tables' refusals list the variables that work.
 - Asked for a table or a crosstab, report the cells make_tables returns. If it
   returns no rows, say what it did return rather than describing a table you do
   not have.
