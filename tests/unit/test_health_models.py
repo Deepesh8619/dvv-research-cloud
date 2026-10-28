@@ -34,9 +34,11 @@ def test_the_local_and_embedding_models_are_always_reported(monkeypatch):
     monkeypatch.delenv("BEDROCK_API_KEY", raising=False)
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    monkeypatch.setattr("src.engines.rag.embeddings._ollama", lambda texts, timeout: None)
     models = main._configured_models()
     assert models["local"] == "llama3.2:3b"
-    assert models["embeddings"] == "nomic-embed-text"
+    # What answers, not the setting: with no Ollama, the lexical fallback.
+    assert models["embeddings"] == "lexical-v1 (no embedding model reachable)"
 
 
 def test_the_extracting_model_is_reported(monkeypatch):
@@ -44,3 +46,14 @@ def test_the_extracting_model_is_reported(monkeypatch):
     monkeypatch.delenv("DVV_EXTRACT_LOCAL", raising=False)
     monkeypatch.setenv("BEDROCK_API_KEY", "k")
     assert main._configured_models()["extraction"] == "bedrock/qwen.qwen3-32b-v1:0"
+
+
+def test_health_reports_the_embedder_that_answers_not_the_setting(monkeypatch):
+    """The setting said nomic-embed-text while every search ran on the fallback."""
+    from src.engines.rag import embeddings
+
+    monkeypatch.setenv("DVV_EMBED_MODEL", "nomic-embed-text")
+    monkeypatch.setattr(embeddings, "_ollama", lambda texts, timeout: None)
+    assert embeddings.live_embedder() == "lexical-v1 (no embedding model reachable)"
+    monkeypatch.setattr(embeddings, "_ollama", lambda texts, timeout: [[1.0, 0.0]])
+    assert embeddings.live_embedder() == "ollama:nomic-embed-text"

@@ -60,6 +60,12 @@ def embed(
     return [lexical_vector(t) for t in texts], LEXICAL
 
 
+def live_embedder() -> str:
+    """Which embedder would answer right now: the local model, or the fallback."""
+    return _model_name() if _ollama(["ping"], timeout=3) is not None else (
+        f"{LEXICAL} (no embedding model reachable)")
+
+
 def _model_name() -> str:
     return "ollama:" + os.getenv("DVV_EMBED_MODEL", "nomic-embed-text")
 
