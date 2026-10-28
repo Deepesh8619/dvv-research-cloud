@@ -87,6 +87,23 @@ def fuse(ids: Sequence[str], meaning: dict[str, float], words: dict[str, float],
     return [(i, round(fused[i], 4), how[i]) for i in order]
 
 
+def rank(query: str, ids: Sequence[str], texts: Sequence[str], refs: Sequence[str],
+         meaning: dict[str, float], k: int,
+         codes_from: str | None = None) -> list[tuple[str, float, list[str]]]:
+    """The whole hybrid ranking, given each piece's meaning score: the one
+    function store.search and the retrieval eval both call. `codes_from` is
+    the query as typed, when `query` has been expanded.
+
+    Tried and dropped: a fourth "spelling" signal (the lexical vector beside a
+    real embedder). It caught misspellings but outvoted synonyms — with
+    nomic-embed-text, MRR fell 0.90 -> 0.76 overall and 0.79 -> 0.65 held-out.
+    """
+    words = dict(zip(ids, bm25(query, list(texts)), strict=True))
+    named = codes_in(codes_from if codes_from is not None else query, list(refs))
+    code = {i for i, ref in zip(ids, refs, strict=True) if ref in named}
+    return fuse(ids, meaning, words, code, k)
+
+
 def _demo() -> None:
     docs = {"S3": "S3. Which brands of coffee have you heard of? Answers: Alpha; Beta",
             "Q5": "Q5. How much would you be willing to pay for a jar of instant coffee?",
