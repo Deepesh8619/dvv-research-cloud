@@ -169,7 +169,10 @@ def crosstab(
     columns: list[BannerColumn] = [
         BannerColumn(variable=TOTAL, code=0, label="Total", letter=None)
     ]
-    letters = iter(string.ascii_uppercase)
+    # A-Z then a-z (tab-shop convention past 26). Columns past 52 get no letter,
+    # so no sig test, rather than a crash: Country on one live file had 47 codes
+    # and next() raised a StopIteration whose message is empty.
+    letters = iter(string.ascii_uppercase + string.ascii_lowercase)
     for banner_name in banner:
         for code in datamap[banner_name].valid_codes():
             columns.append(
@@ -177,7 +180,7 @@ def crosstab(
                     variable=banner_name,
                     code=code,
                     label=datamap[banner_name].values.get(code, str(code)),
-                    letter=next(letters),
+                    letter=next(letters, None),
                 )
             )
 

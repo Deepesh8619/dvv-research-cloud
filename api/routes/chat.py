@@ -302,6 +302,11 @@ def _make_executor(
         bad = [b for b in banner if b not in datamap]
         if bad:
             return {"success": False, "error": _unknown("banner variable(s)", bad, datamap)}
+        if not datamap[stub].valid_codes():
+            return {"success": False, "error": (
+                f"{stub} ({datamap[stub].label[:60]}) has no answer categories — it is a "
+                "plain number such as an age. Crosstab a banded version of it (look for a "
+                "'break' or 'group' variable), or use query_data for its mean.")}
         filter_, err = _parse_filter(params.get("filter"), datamap)
         if err:
             return {"success": False, "error": err}
