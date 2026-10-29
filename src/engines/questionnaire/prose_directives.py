@@ -141,7 +141,11 @@ _TYPE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
                 re.I), QuestionType.MULTI),
     (re.compile(r"drop[- ]?down|\bpick[- ]?list\b", re.I), QuestionType.DROPDOWN),
     (re.compile(r"select one|choose one|single answer|select your|"
-                r"\bsingle[- ]?(?:code|select|punch)\b(?!\s*(?:for\s+)?(?:each|per)\b)", re.I),
+                r"\bsingle[- ]?(?:code|select|punch)\b(?!\s*(?:for\s+)?(?:each|per)\b)|"
+                # "Please make one selection below." / "Accept one response." —
+                # but never "Accept one response per brand", which is a grid.
+                r"\b(?:make|accept|allow)\s+(?:only\s+)?one\s+(?:selection|response|answer)\b"
+                r"(?!\s*(?:for\s+)?(?:each|per)\b)", re.I),
      QuestionType.SINGLE),
     # NUMERIC first: "NUMERIC OE: 3-DIGIT MINIMUM" is a number, not a verbatim.
     (re.compile(r"^\s*number\s*$|numeric\s*oe|record number|enter (a )?number|\bnumeric\b|"
@@ -157,7 +161,13 @@ _TYPE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
     (re.compile(r"^\s*open\s*$|_\s*_\s*_|open[- ]?end|\btextbox\b|\boe\b|please describe|"
                 r"in your own words|type your|enter response|verbatim", re.I),
      QuestionType.OPEN_TEXT),
+    # "[PN: Intermediate text only.]": a screen the respondent reads, stated.
+    (re.compile(r"\bintermediate text\b|\b(?:display|text) only\b", re.I), QuestionType.INFO),
 ]
+
+#: Wording that makes a question multi-answer; a grid card uses it to tell a
+#: tick-all grid from a one-per-row grid.
+MULTI_WORDING = _TYPE_PATTERNS[0][0]
 
 # SP / MP are the two most universal punch abbreviations in survey scripting —
 # every panel and platform writes them, and no client document has to teach us

@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from src.intake import card_tables
 from src.intake.revisions import live_cell_text, live_text
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,12 @@ class DocumentBlock:
     #: The number Word draws in front of an auto-numbered paragraph ("2",
     #: "Q2.", "a)"), as the reader sees it; None when it has none.
     list_label: str | None = None
+    #: The question this block opens, when the document's LAYOUT states it (a
+    #: question card's label line). Trusted over any reading of the text,
+    #: because "QGENDER." is a label only the layout can vouch for.
+    label: str | None = None
+    #: A grid the layout states outright, as ([(code, row)], [(code, column)]).
+    grid: tuple[list[tuple[int, str]], list[tuple[int, str]]] | None = None
 
 
 @dataclass
@@ -411,6 +418,9 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
     blocks: list[DocumentBlock] = []
     para_index = 0
     struck_out: list[str] = []
+    # Each table's distinct cells as lines, by its position in `blocks`, so a
+    # document laid out as question cards can be re-read once its layout is known.
+    table_cells: dict[int, list[list[list[str]]]] = {}
 
     # Map child XML elements back to python-docx objects to walk in order.
     para_map = {p._p: p for p in document.paragraphs}
@@ -467,6 +477,13 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
             serialized = clean if _rows_qid(rows) else "\n".join(
                 " | ".join(r) for r in rows
             )
+            table_cells[len(blocks)] = [
+                [
+                    [x for x in live_cell_text(cell)[0].split("\n") if x.strip()]
+                    for cell in _distinct(row.cells)
+                ]
+                for row in table.rows
+            ]
             blocks.append(
                 DocumentBlock(
                     block_type="table",
@@ -481,12 +498,60 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
             )
             para_index += 1
 
+    blocks = _read_cards(blocks, table_cells)
     if struck_out:
         logger.info(
             "%s: %d struck-out fragments left out of the questionnaire",
             path.name, len(struck_out),
         )
     return blocks
+
+
+def _distinct(cells) -> list:
+    """A row's cells with a merged cell once (Word repeats it per column)."""
+    seen: list = []
+    for cell in cells:
+        if all(cell._tc is not other._tc for other in seen):
+            seen.append(cell)
+    return seen
+
+
+def _read_cards(
+    blocks: list[DocumentBlock], table_cells: dict[int, list[list[list[str]]]]
+) -> list[DocumentBlock]:
+    """Rewrite a question-card document's tables as the lines they stand for.
+
+    Decided for the WHOLE document from its layout: only when several tables
+    are question cards (card_tables.MIN_CARDS) is any table rewritten, and then
+    every card plus the single-column heading/intro tables around them.
+    Everything else in the document, and every other document, is untouched.
+    """
+    cards = {i for i, cells in table_cells.items() if card_tables.label_of(cells)}
+    if len(cards) < card_tables.MIN_CARDS:
+        return blocks
+    out: list[DocumentBlock] = []
+    for i, block in enumerate(blocks):
+        cells = table_cells.get(i)
+        lines, grid = (
+            card_tables.card_lines(cells) if i in cards
+            else (card_tables.plain_lines(cells), None) if cells else ([], None)
+        )
+        if not lines:
+            out.append(block)
+            continue
+        # Every line keeps the table's own position, so "para 202" still
+        # opens the card in the document view.
+        out += [
+            DocumentBlock(block_type="paragraph", text=line,
+                          paragraph_index=block.paragraph_index, removed=list(block.removed),
+                          label=card_tables.label_of(cells) if i in cards else None,
+                          grid=grid)
+            if n == 0 else
+            DocumentBlock(block_type="paragraph", text=line,
+                          paragraph_index=block.paragraph_index)
+            for n, line in enumerate(lines)
+        ]
+    return out
 
 
 _CONTENTS_TITLE = re.compile(r"^\s*(table of contents|contents)\s*$", re.I)
@@ -820,7 +885,8 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
     screens = 0
 
     def starts_question(block: DocumentBlock) -> bool:
-        return _table_qid(block) is not None or _detect_label(block.text, base_tags_open)[0] \
+        return block.label is not None or _table_qid(block) is not None \
+            or _detect_label(block.text, base_tags_open)[0] \
             or (ident_named and _ident_qid(block) is not None)
 
     def before_a_question(i: int) -> bool:
@@ -868,7 +934,9 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
             seen_label = True
             continue
 
-        is_boundary, qid = _detect_label(block.text, base_tags_open)
+        is_boundary, qid = (
+            (True, block.label) if block.label else _detect_label(block.text, base_tags_open)
+        )
         if not is_boundary and ident_named and (ident := _ident_qid(block)):
             is_boundary, qid = True, ident
         if (

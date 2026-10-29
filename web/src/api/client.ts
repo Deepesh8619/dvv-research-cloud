@@ -638,6 +638,8 @@ export interface BriefChecklist {
   missing: number
   check: number
   screens: string[]
+  /** Study-wide scripting rules that name no question ("no horizontal scrolling"). */
+  general_notes?: number
   conventions: { label_families: Record<string, number>; pn_markers: Record<string, number> }
 }
 

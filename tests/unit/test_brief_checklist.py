@@ -58,6 +58,7 @@ def test_each_need_is_ticked_off_against_the_instrument():
 
     notes = [i for i in result["items"] if i["kind"] == "note"]
     assert len(notes) == 1 and notes[0]["status"] == "missing"  # Q99 does not exist
+    assert result["general_notes"] == 0
 
     assert result["screens"] == ["INTRO"]
     assert result["conventions"]["pn_markers"] == {"PN": 1}

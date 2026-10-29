@@ -79,6 +79,7 @@ from src.engines.questionnaire.mr_techniques import Mask, detect_techniques
 from src.engines.questionnaire.per_item import apply as apply_per_item_grids
 from src.engines.questionnaire.profiles import detect_profile
 from src.engines.questionnaire.prose_directives import (
+    MULTI_WORDING,
     ProseFields,
     is_derived_wording,
     order_terminal_options,
@@ -774,6 +775,20 @@ def _apply_table_shape(question: Question, chunk: QuestionChunk) -> None:
     """
     if _apply_labelled_sections(question, chunk):
         return
+    if stated := next((b.grid for b in chunk.source_blocks if b.grid), None):
+        # A question card states its grid cell by cell, codes included.
+        rows, cols = stated
+        multi = question.type in (QuestionType.MULTI, QuestionType.GRID_MULTI) \
+            or MULTI_WORDING.search(chunk.chunk_text)
+        question.type = QuestionType.GRID_MULTI if multi else QuestionType.GRID_SINGLE
+        question.rows = [Option(code=c, label=t) for c, t in rows]
+        question.cols = [Option(code=c, label=t) for c, t in cols]
+        question.options = []
+        question.extraction_evidence["options"] = f"a {len(rows)}x{len(cols)} grid card"
+        for flag in (schema.FLAG_EMPTY_OPTIONS,):
+            if flag in question.flags:
+                question.flags.remove(flag)
+        return
     tables = [b.rows for b in chunk.source_blocks if b.rows]
     if not tables:
         return
@@ -1052,7 +1067,7 @@ def _extract_via_prose(
         fill_from_datamap(fields, datamap_question) if datamap_question else []
     )
     question = _question_from_prose(fields, chunk)
-    if fields.missing == ["type"] and question.rows and question.cols:
+    if set(fields.missing) <= {"type", "options"} and question.rows and question.cols:
         # The table said what the prose could not. A grid written as a table has
         # no type in its wording — the shape IS the type — so every one of them
         # escalated to a model call for something already known from the cells.
@@ -1172,7 +1187,8 @@ def extract_question(
     # no screen-out, so a fully-read "[PN: TEXTBOX]" question fell through to a
     # full LLM extraction anyway. Measured on a 3-question document: 951s and
     # three model calls, for questions the parser answers in milliseconds.
-    if prose is not None and (prose.complete or prose.options or prose.terminate_if):
+    card_grid = any(b.grid for b in chunk.source_blocks)
+    if prose is not None and (prose.complete or prose.options or prose.terminate_if or card_grid):
         via_prose = _extract_via_prose(chunk, prose, datamap_question, patterns, study_context)
         if via_prose is not None:
             return via_prose

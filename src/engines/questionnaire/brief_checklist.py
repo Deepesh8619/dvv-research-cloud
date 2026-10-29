@@ -158,19 +158,28 @@ def brief_checklist(survey: SurveyDefinition) -> dict[str, Any]:
 
     items += _variables(survey)
 
+    # A note naming questions is checked against them; a study-wide rule
+    # ("NO HORIZONTAL SCROLLING") names none and is only counted — a hundred of
+    # them as "to confirm" buried the two notes that named missing questions.
     qids = {q.qid.upper() for q in survey.questions}
+    general = 0
     for note in brief.get("programming_notes") or []:
         if note.rstrip().endswith(":") or len(note.split()) < 3:
             continue  # "Grid question:" heads the notes under it; it is not one
         named = re.findall(r"\b[A-Z]{1,4}\d+[a-z]?\b", note)
+        if not named:
+            general += 1
+            continue
         lost = [n for n in named if n.upper() not in qids]
         items.append({
             "kind": "note",
             "text": note,
-            "status": "missing" if lost else "check",
+            # An outline entry ("Past Year Move (S1)") is met when its question
+            # exists; that is all an outline promises.
+            "status": "missing" if lost else "covered",
             "where": [n for n in named if n.upper() in qids][:5],
             "why": f"names {', '.join(lost)}, which the instrument does not have" if lost else
-                   "a rule for the whole study; confirm the script follows it",
+                   "every question it names is in the instrument",
         })
 
     screens = [q.qid for q in survey.questions if _is_screen_id(q)]
@@ -181,5 +190,6 @@ def brief_checklist(survey: SurveyDefinition) -> dict[str, Any]:
         "missing": counts["missing"],
         "check": counts["check"],
         "screens": screens,
+        "general_notes": general,
         "conventions": _conventions(survey),
     }
