@@ -21,6 +21,35 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-29 — question cards read by layout (branch feat/reader-question-cards)
+
+**The Charter NPS tracker read 14 unlabelled chunks out of 141 tables** and
+left every question to a model. Each question is a Word table with one fixed
+shape: short name, a label line ("S5c.", "QGENDER."), the question and its
+instruction; then codes | answers (or a scale across, or a grid); then a notes
+row. The label was never at the start of a line, so the segmenter never saw
+one, and word labels (QGENDER) match no label grammar at all.
+
+`src/intake/card_tables.py` reads that layout. Decided once per document:
+only with ≥3 cards is any table rewritten. Each card becomes the plain lines
+the prose reader already reads exactly ("question", "98<TAB>answer",
+"[PN: note]"); the label rides on the block (`DocumentBlock.label`) and a grid
+on `DocumentBlock.grid` with the codes the card states — the grid-table path
+numbers columns by position, which a 0-10 scale would get wrong. A code box
+that does not line up with its answers is reported in a note, never paired
+by position. Also: "Please make one selection" / "Accept one response" read
+as single, "[PN: Intermediate text only]" as an information screen.
+
+Measured on the Charter document (AI off): 14 chunks → 100; questions read
+without a model 0 → 99 of 101 (the other two are the cover page and a
+placeholder); grids CS1/KP2/FLEX1 with stated rows and columns. Brief
+checklist: the outline names INS2 and CSN4, which the document does not
+contain. Gold corpus: 231 → 231 of 382, newly wrong none (round `r-cards`).
+Study-wide rules naming no question are counted (`general_notes`) instead of
+listed: 106 "to confirm" items buried the two real findings.
+
+---
+
 ## 2026-10-29 — the brief read first, each need ticked off (branch feat/reader-brief-checklist)
 
 **Tabs are label separators.** `live_text` read only `w:t`, so "C3<tab>CODE

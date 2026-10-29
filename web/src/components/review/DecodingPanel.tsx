@@ -52,6 +52,7 @@ function BriefSection({ brief, onGoTo }: { brief: BriefChecklist; onGoTo: (qid: 
       <p className="text-xs text-slate-500">
         {brief.covered} met · {brief.missing} missing · {brief.check} to confirm
         {brief.screens.length > 0 && <> · {brief.screens.length} information screens</>}
+        {(brief.general_notes ?? 0) > 0 && <> · {brief.general_notes} study-wide scripting rules</>}
       </p>
       {(families.length > 0 || markers.length > 0) && (
         <p className="mt-1 text-xs text-slate-500">
