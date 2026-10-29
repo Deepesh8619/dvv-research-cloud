@@ -54,7 +54,7 @@ async function ask(reply: string, proposals: CopilotProposal[] = [card]) {
       <CopilotDrawer open onClose={() => {}} />
     </MemoryRouter>,
   )
-  fireEvent.change(screen.getByPlaceholderText('Ask about any project…'), {
+  fireEvent.change(screen.getByPlaceholderText('Ask about any project, or paste a screenshot…'), {
     target: { value: 'hold it at 50' },
   })
   fireEvent.click(screen.getByText('Ask'))
@@ -96,7 +96,7 @@ describe('CopilotDrawer', () => {
       data: { reply: 'Still held.', proposals: [], tools_used: [], answered_by: 'Bedrock',
               conversation_id: 'conv_1' },
     })
-    fireEvent.change(screen.getByPlaceholderText('Ask about any project…'), {
+    fireEvent.change(screen.getByPlaceholderText('Ask about any project, or paste a screenshot…'), {
       target: { value: 'still?' },
     })
     fireEvent.click(screen.getByText('Ask'))
@@ -226,7 +226,7 @@ describe('CopilotDrawer', () => {
     )
     act(() => focusQuestion('s1', 'S3'))
     act(() => askCopilot('About S3: '))
-    const box = screen.getByPlaceholderText('Ask about any project…') as HTMLInputElement
+    const box = screen.getByPlaceholderText('Ask about any project, or paste a screenshot…') as HTMLInputElement
     expect(box.value).toBe('About S3: ')
     fireEvent.change(box, { target: { value: 'About S3: what does it ask?' } })
     fireEvent.click(screen.getByText('Ask'))
@@ -262,7 +262,7 @@ describe('CopilotDrawer', () => {
         <CopilotDrawer open onClose={() => {}} />
       </MemoryRouter>,
     )
-    fireEvent.change(screen.getByPlaceholderText('Ask about any project…'), { target: { value: 'Q4 by gender' } })
+    fireEvent.change(screen.getByPlaceholderText('Ask about any project, or paste a screenshot…'), { target: { value: 'Q4 by gender' } })
     fireEvent.click(screen.getByText('Ask'))
     expect(await screen.findByText('36.4% B')).toBeTruthy()
     expect(screen.getByText(/letters mark significant differences/)).toBeTruthy()
@@ -285,7 +285,7 @@ describe('CopilotDrawer', () => {
         <CopilotDrawer open onClose={() => {}} />
       </MemoryRouter>,
     )
-    fireEvent.change(screen.getByPlaceholderText('Ask about any project…'), { target: { value: 'chart Q4' } })
+    fireEvent.change(screen.getByPlaceholderText('Ask about any project, or paste a screenshot…'), { target: { value: 'chart Q4' } })
     fireEvent.click(screen.getByText('Ask'))
     expect(await screen.findByAltText('Q4 chart')).toBeTruthy()
     expect(copilotApi.chart).toHaveBeenCalledWith({ study_id: 's1', filename: 'a.png', title: 'Q4 chart' })
@@ -336,5 +336,64 @@ describe('Copilot questions', () => {
     fireEvent.click(send)
     await waitFor(() => expect(copilotApi.ask).toHaveBeenLastCalledWith(
       'Which questions? Every question\nWhich columns? Total only; S1 (gender)', 's1', null, null))
+  })
+})
+
+describe('screenshots in the chat', () => {
+  beforeEach(() => {
+    // jsdom draws nothing: an image "loads" at once and the canvas returns a fixed URL.
+    Object.defineProperty(globalThis.Image.prototype, 'src', {
+      configurable: true,
+      set(this: HTMLImageElement) {
+        Object.defineProperty(this, 'naturalWidth', { value: 2400, configurable: true })
+        Object.defineProperty(this, 'naturalHeight', { value: 1200, configurable: true })
+        setTimeout(() => this.onload?.(new Event('load')))
+      },
+    })
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({ fillRect: vi.fn(), drawImage: vi.fn(), fillStyle: '' })) as never
+    HTMLCanvasElement.prototype.toDataURL = vi.fn(() => 'data:image/jpeg;base64,AAAA')
+    globalThis.URL.createObjectURL = vi.fn(() => 'blob:x')
+    globalThis.URL.revokeObjectURL = vi.fn()
+  })
+
+  it('a pasted screenshot is shown, can be removed, and is sent with the question', async () => {
+    const { copilotApi } = await import('../api/client')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(copilotApi.ask as any).mockResolvedValue({ data: { reply: 'It shows the review page.', proposals: [] } })
+    render(
+      <MemoryRouter initialEntries={['/projects/s1/questionnaire']}>
+        <CopilotDrawer open onClose={() => {}} />
+      </MemoryRouter>,
+    )
+    const box = screen.getByPlaceholderText('Ask about any project, or paste a screenshot…')
+    const shot = new File(['png'], 'shot.png', { type: 'image/png' })
+    fireEvent.paste(box, { clipboardData: { files: [shot, shot] } })
+    expect(await screen.findByAltText('Screenshot 2 to send')).toBeTruthy()
+    fireEvent.click(screen.getByLabelText('Remove screenshot 2'))
+    expect(screen.queryByAltText('Screenshot 2 to send')).toBeNull()
+
+    fireEvent.click(screen.getByText('Ask'))  // no words typed: the screenshot alone is a question
+    await waitFor(() => expect(copilotApi.askStreaming).toHaveBeenCalled())
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const call = (copilotApi.askStreaming as any).mock.calls.at(-1)
+    expect(call[0]).toBe('What does this screenshot show?')
+    expect(call[6]).toEqual(['data:image/jpeg;base64,AAAA'])
+    expect(await screen.findByAltText('Screenshot 1')).toBeTruthy()  // in the sent message
+  })
+
+  it('folds what the screenshot showed under the words typed', async () => {
+    const { copilotApi } = await import('../api/client')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(copilotApi.conversation as any).mockResolvedValue({ data: { messages: [
+      { role: 'user', content: 'why is this wrong?\n\n[Screenshot 1, as read]\nS6b. How long…\n[End of screenshot 1]', proposals: [] },
+    ] } })
+    localStorage.setItem('dvv.copilot.conversation', 'conv1')
+    render(
+      <MemoryRouter initialEntries={['/projects/s1/questionnaire']}>
+        <CopilotDrawer open onClose={() => {}} />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('What the screenshot showed')).toBeTruthy()
+    expect(screen.getByText(/why is this wrong\?/)).toBeTruthy()
   })
 })

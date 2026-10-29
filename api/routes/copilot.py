@@ -1909,6 +1909,14 @@ def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> Co
                          if out.get("success") is False else {})})
         return out
 
+    if body.images:
+        from src.ai.vision import with_screenshots
+
+        # The transcript becomes part of what the user said: every tool and rule
+        # applies to it, and later turns still know what the screenshot showed.
+        body = body.model_copy(update={
+            "message": with_screenshots(body.message, body.images, on_step), "images": []})
+
     page = ""
     if body.study_id and (current := get_study(db, body.study_id)):
         page = f"The user is looking at project {current.id} ({current.client_name}).\n"

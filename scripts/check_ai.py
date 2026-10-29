@@ -67,3 +67,23 @@ else:
               "      BEDROCK_FALLBACK_MODEL=none in deploy/.env, then ./dvv up")
     finally:
         copilot._providers = real
+
+
+# Screenshots pasted into the copilot are read by a vision model. A blank 1x1
+# test image — never client data — is enough to learn whether the model exists
+# in this region and accepts images.
+from src.ai import vision  # noqa: E402
+
+_BLANK = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42m"
+          "P8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=")
+if not vision.model():
+    print("screenshots: off (BEDROCK_VISION_MODEL is empty)")
+else:
+    try:
+        vision.transcribe(_BLANK, timeout=60)
+        print(f"screenshots: read by {vision.model()} — PASS")
+    except Exception as exc:  # noqa: BLE001 - say what failed, in AWS's words
+        print(f"screenshots: FAILED with {vision.model()} — {exc}\n"
+              "      Set BEDROCK_VISION_MODEL in deploy/.env to a vision model this region\n"
+              "      offers (Bedrock console -> Model catalog -> filter 'Image' input), then\n"
+              "      ./dvv up. Until then the copilot says it cannot see screenshots.")

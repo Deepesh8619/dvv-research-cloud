@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class StudyMetadata(BaseModel):
@@ -698,6 +698,18 @@ class CopilotRequest(BaseModel):
     focus_qid: str | None = Field(default=None, max_length=64)
     #: The screen it is asked from (path and tab), so the right tools are offered.
     screen: str | None = Field(default=None, max_length=300)
+    #: Pasted or attached screenshots, as data URLs (png/jpeg/webp). Read once
+    #: into text by src/ai/vision.py; the images themselves are not stored.
+    images: list[str] = Field(default_factory=list, max_length=3)
+
+    @field_validator("images")
+    @classmethod
+    def _images_are_screenshots(cls, images: list[str]) -> list[str]:
+        from src.ai.vision import valid
+
+        if not all(valid(i) for i in images):
+            raise ValueError("a screenshot must be a PNG, JPEG or WebP image under 4 MB")
+        return images
 
 
 class CopilotProposal(BaseModel):

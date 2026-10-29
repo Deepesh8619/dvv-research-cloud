@@ -65,6 +65,54 @@ interface Turn {
   answeredBy?: string
   seq?: number | null
   flagged?: boolean
+  /** Screenshots sent with this message, shown in this session only. */
+  images?: string[]
+}
+
+const MAX_SHOTS = 3
+
+/**
+ * A pasted or chosen image as a data URL the server accepts: at most 2000px on
+ * its longest side and re-encoded as JPEG, so a retina full-screen capture stays
+ * well under the 4 MB limit and its text stays sharp enough to read.
+ */
+async function shrinkScreenshot(file: Blob): Promise<string> {
+  const url = URL.createObjectURL(file)
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = () => reject(new Error('That file is not an image.'))
+      el.src = url
+    })
+    const scale = Math.min(1, 2000 / Math.max(img.naturalWidth, img.naturalHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(img.naturalWidth * scale)
+    canvas.height = Math.round(img.naturalHeight * scale)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('This browser cannot prepare the image.')
+    ctx.fillStyle = '#fff' // a transparent PNG would turn black as JPEG
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/jpeg', 0.9)
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+/** What the screenshot reader saw, kept in the message: folded away under the words typed. */
+function UserMessage({ text }: { text: string }) {
+  const cut = text.indexOf('\n\n[Screenshot ')
+  if (cut < 0) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, cut)}
+      <details className="mt-1 text-xs text-primary-50">
+        <summary className="cursor-pointer">What the screenshot showed</summary>
+        <div className="mt-1 whitespace-pre-wrap">{text.slice(cut + 2)}</div>
+      </details>
+    </>
+  )
 }
 
 const fileName = (title: string, ext: string) =>
@@ -536,6 +584,8 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
   const [showMemory, setShowMemory] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
   const [input, setInput] = useState('')
+  const [shots, setShots] = useState<string[]>([])
+  const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cardState, setCardState] = useState<Record<string, CardState>>({})
@@ -616,21 +666,40 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
 
   if (!open) return null
 
+  const addShots = async (files: Blob[]) => {
+    const images = files.filter((f) => f.type.startsWith('image/'))
+    if (!images.length) return
+    setError(null)
+    try {
+      const read = await Promise.all(images.map(shrinkScreenshot))
+      setShots((s) => {
+        const next = [...s, ...read]
+        if (next.length > MAX_SHOTS) setError(`Up to ${MAX_SHOTS} screenshots per message.`)
+        return next.slice(0, MAX_SHOTS)
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'That image could not be read.')
+    }
+  }
+
   const send = async (e: React.FormEvent) => {
     e.preventDefault()
-    await submit(input.trim())
+    await submit(input.trim() || (shots.length ? 'What does this screenshot show?' : ''))
   }
 
   const submit = async (message: string) => {
     if (!message || busy) return
-    setTurns((t) => [...t, { role: 'user', content: message }])
+    const images = shots
+    setTurns((t) => [...t, { role: 'user', content: message, images }])
     setInput('')
+    setShots([])
     setBusy(true)
     setError(null)
     try {
       setStatus(null)
       const data = await copilotApi.askStreaming(
-        message, (label) => setStatus(label), studyId, conversationId, focusQid, `${pathname}${search}`)
+        message, (label) => setStatus(label), studyId, conversationId, focusQid, `${pathname}${search}`,
+        images)
       const res = { data }
       if (res.data.conversation_id && res.data.conversation_id !== conversationId) {
         setConversationId(res.data.conversation_id)
@@ -756,7 +825,15 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
                   : 'text-slate-800'
               }
             >
-              {turn.role === 'user' ? turn.content : <Formatted text={turn.content} />}
+              {turn.images && turn.images.length > 0 && (
+                <div className="mb-1 flex flex-wrap gap-1">
+                  {turn.images.map((src, si) => (
+                    <img key={si} src={src} alt={`Screenshot ${si + 1}`}
+                      className="max-h-32 rounded border border-white/40 bg-white" />
+                  ))}
+                </div>
+              )}
+              {turn.role === 'user' ? <UserMessage text={turn.content} /> : <Formatted text={turn.content} />}
               {turn.cards?.map((card) => (
                 <Card
                   key={card.id}
@@ -799,17 +876,75 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={send} className="border-t border-slate-100 p-3 flex gap-2">
+      <form
+        onSubmit={send}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault()
+          void addShots(Array.from(e.dataTransfer.files))
+        }}
+        className="border-t border-slate-100 p-3 flex flex-wrap gap-2"
+      >
+        {shots.length > 0 && (
+          <div className="w-full flex flex-wrap gap-2" aria-label="Screenshots to send">
+            {shots.map((src, i) => (
+              <div key={i} className="relative">
+                <img src={src} alt={`Screenshot ${i + 1} to send`} className="h-14 rounded border border-slate-200" />
+                <button
+                  type="button"
+                  aria-label={`Remove screenshot ${i + 1}`}
+                  onClick={() => setShots((s) => s.filter((_, j) => j !== i))}
+                  className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-slate-700 text-white text-xs leading-5"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          multiple
+          hidden
+          data-testid="copilot-file"
+          onChange={(e) => {
+            void addShots(Array.from(e.target.files ?? []))
+            e.target.value = ''
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy || shots.length >= MAX_SHOTS}
+          title="Attach a screenshot — or paste one with ⌘V / Ctrl+V"
+          aria-label="Attach a screenshot"
+          className="h-9 w-9 shrink-0 rounded-md border border-slate-300 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+        >
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" className="mx-auto h-4 w-4" aria-hidden>
+            <rect x="2.5" y="4" width="15" height="12" rx="2" />
+            <circle cx="7" cy="8.5" r="1.5" />
+            <path d="M17.5 13l-4-4-6 6" />
+          </svg>
+        </button>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about any project…"
+          onPaste={(e) => {
+            const files = Array.from(e.clipboardData.files)
+            if (files.some((f) => f.type.startsWith('image/'))) {
+              e.preventDefault()
+              void addShots(files)
+            }
+          }}
+          placeholder={shots.length ? 'Ask about the screenshot…' : 'Ask about any project, or paste a screenshot…'}
           maxLength={2000}
-          className="flex-1 h-9 px-3 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          className="flex-1 min-w-0 h-9 px-3 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
         />
         <button
           type="submit"
-          disabled={busy || !input.trim()}
+          disabled={busy || (!input.trim() && !shots.length)}
           className="h-9 px-3 bg-primary-500 text-white text-sm font-medium rounded-md hover:bg-primary-600 disabled:opacity-50"
         >
           Ask
