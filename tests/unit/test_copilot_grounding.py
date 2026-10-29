@@ -19,7 +19,7 @@ def _model(*turns):
     queue = list(turns)
 
     def chat(url, key_env, model, label, messages, timeout, with_tools=True,
-             tools_subset=None, tools_schema=None):
+             tools_subset=None, tools_schema=None, max_tokens=1500):
         turn = queue.pop(0) if queue else {"content": "done"}
         return {"choices": [{"message": {"role": "assistant", **turn}}]}
 

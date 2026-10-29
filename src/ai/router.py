@@ -21,6 +21,7 @@ import ssl
 import time
 import urllib.error
 import urllib.request
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -375,7 +376,7 @@ def _ollama_generate(model: str, prompt: str, schema: dict, timeout: int) -> dic
             "format": "json",
             "stream": False,
             "keep_alive": "15m",
-            "options": {"temperature": 0},
+            "options": {"temperature": prose_temperature.get()},
         }
     ).encode()
     request = urllib.request.Request(
@@ -404,7 +405,7 @@ def _openai_compatible_generate(
         {
             "model": model,
             "max_tokens": MAX_OUTPUT_TOKENS,
-            "temperature": 0,
+            "temperature": prose_temperature.get(),
             "messages": [{"role": "user", "content": prompt}],
             "tools": [
                 {
@@ -723,6 +724,13 @@ def _extraction_chain() -> list[dict[str, str]]:
     return cloud
 
 
+#: 0 for everything that reads, routes or reports figures. Tasks that WRITE
+#: prose read better a little warmer; their figures are still checked after.
+prose_temperature: ContextVar[float] = ContextVar("dvv_prose_temperature", default=0.0)
+TASK_TEMPERATURE = {"report.narrative": 0.4}
+PROSE_TEMPERATURE = 0.4
+
+
 def run_task(
     task: str,
     prompt: str,
@@ -734,6 +742,14 @@ def run_task(
     route = (routes or DEFAULT_ROUTES).get(task)
     if route is None:
         raise KeyError(f"no route configured for task: {task}")
+    warm = prose_temperature.set(TASK_TEMPERATURE.get(task, prose_temperature.get()))
+    try:
+        return _run_routed(route, prompt, schema, timeout)
+    finally:
+        prose_temperature.reset(warm)
+
+
+def _run_routed(route: dict, prompt: str, schema: dict, timeout: int) -> AIResponse:
     # "auto" defers to _extraction_chain(), trying each backend until one succeeds.
     if route["backend"] == "auto":
         return _run_chain(_extraction_chain(), prompt, schema, timeout)

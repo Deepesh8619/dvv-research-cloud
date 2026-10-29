@@ -26,7 +26,7 @@ def _script(monkeypatch, *turns):
     seen: list[list[dict]] = []
 
     def fake_chat(url, key_env, model, label, messages, timeout, with_tools=True,
-                  tools_subset=None, tools_schema=None):
+                  tools_subset=None, tools_schema=None, max_tokens=1500):
         seen.append(messages)
         kind, *rest = queue.pop(0) if queue else ("text", "done")
         if kind == "text":
@@ -217,7 +217,7 @@ def test_a_provider_failing_mid_answer_does_not_duplicate_cards(client, monkeypa
     calls = {"n": 0}
 
     def flaky(url, key_env, model, label, messages, timeout, with_tools=True,
-              tools_subset=None, tools_schema=None):
+              tools_subset=None, tools_schema=None, max_tokens=1500):
         calls["n"] += 1
         if label == "Bedrock" and calls["n"] == 2:
             raise BackendUnavailable("429 mid-answer")
@@ -1694,3 +1694,84 @@ def test_a_refreshable_report_recalculates_from_its_data_sheet(client, monkeypat
     # A new wave pasted into Data changes the figures, no macro involved.
     rows.append([1 if h in ("AGEB", "GEND", "Q1") else None for h in head])
     assert value(t1, "B4") == 21
+
+
+def _capture_prompts(monkeypatch, *turns):
+    """Script the model and keep (label, system prompt, messages) of every call."""
+    import src.ai.copilot as cp
+
+    _script(monkeypatch, *turns)
+    scripted, calls = cp._compatible_chat, []
+
+    def capture(*a, **k):
+        calls.append((a[3], a[4][0]["content"], a[4]))
+        return scripted(*a, **k)
+
+    monkeypatch.setattr(cp, "_compatible_chat", capture)
+    return calls
+
+
+def test_the_project_card_puts_the_project_in_front_of_every_question(client, monkeypatch, tmp_path):  # noqa: F811,E501
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    calls = _capture_prompts(monkeypatch, ("text", "Noted."))
+    test_client.post("/api/copilot", json={"message": "hi", "study_id": "s_wb"})
+    system = calls[0][1]
+    assert "Project card — C (s_wb)" in system
+    assert "- Data: 40 respondents" in system and "Likely banner variables:" in system
+    assert "- Questionnaire: none uploaded" in system
+
+
+def test_a_long_conversation_is_summarised_not_resent_in_full(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    words = ["alpha", "bravo", "charlie", "delta", "echo"]  # no figures: no grounding nudge
+    _script(monkeypatch, *[("text", f"Answer {w}.") for w in words])
+    conv = None
+    for i in range(5):
+        body = {"message": f"question {words[i]}", **({"conversation_id": conv} if conv else {})}
+        conv = test_client.post("/api/copilot", json=body).json()["conversation_id"]
+    calls = _capture_prompts(monkeypatch, ("text", "Sixth."))
+    test_client.post("/api/copilot", json={"message": "and now?", "conversation_id": conv})
+    messages = calls[0][2]
+    summary = messages[1]["content"]
+    assert summary.startswith("Earlier in this conversation (summarised")
+    assert "- asked: question alpha" in summary and "answered: Answer alpha." in summary
+    verbatim = [m["content"] for m in messages[3:-1]]
+    assert len(verbatim) == 6 and verbatim[0].startswith("question charlie")
+
+
+def test_hard_questions_go_to_the_larger_model_first(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    calls = _capture_prompts(monkeypatch, ("text", "Because."), ("text", "Done."))
+    hard = test_client.post("/api/copilot", json={"message": "why is incidence low?"}).json()
+    easy = test_client.post("/api/copilot", json={"message": "list the projects"}).json()
+    assert hard["answered_by"] == "Bedrock fallback" and easy["answered_by"] == "Bedrock"
+    assert [c[0] for c in calls] == ["Bedrock fallback", "Bedrock"]
+
+
+def test_rules_travel_with_their_area_and_corrections_get_all(client, monkeypatch):  # noqa: F811
+    from src.ai.copilot import SYSTEM_PROMPT
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    # A figure with no lookup draws the grounding nudge: the second call is a correction.
+    calls = _capture_prompts(monkeypatch, ("text", "12 speeders."), ("text", "12 speeders."))
+    test_client.post("/api/copilot", json={"message": "how many speeders?"})
+    first, correction = calls[0][1], calls[1][1]
+    assert "Every fact you state" in first  # core
+    assert "→ excel_report, not make_tables" not in first  # the data playbook stays home
+    assert len(first) < len(SYSTEM_PROMPT) * 0.75
+    assert "→ excel_report, not make_tables" in correction
+
+
+def test_prose_tasks_run_warmer_and_everything_else_at_zero(monkeypatch):
+    from src.ai import router
+
+    seen = []
+    monkeypatch.setattr(router, "_run_routed",
+                        lambda *a, **k: seen.append(router.prose_temperature.get()))
+    router.run_task("report.narrative", "p", {})
+    router.run_task("questionnaire.resolve", "p", {})
+    assert seen == [0.4, 0.0] and router.prose_temperature.get() == 0.0

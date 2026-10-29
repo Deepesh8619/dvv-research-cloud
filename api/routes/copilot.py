@@ -86,7 +86,6 @@ router = APIRouter()
 _CAN_ACT = {UserRole.OWNER, UserRole.ANALYST, UserRole.FOUNDER}
 _MAX_FINDINGS = 12  # keep each tool result inside the model's context budget
 _MAX_VERBATIMS = 8  # enough to show a pattern, small enough to read in a side panel
-_HISTORY_TURNS = 12  # earlier messages sent back to the model with a new question
 
 
 #: Words people use for an answer the questionnaire words differently. Gender
@@ -1594,12 +1593,80 @@ def _lookups_note(lookups: list[dict] | None) -> str:
     return f"\n[Looked up for this answer: {'; '.join(calls)}]" if calls else ""
 
 
+#: Messages kept word for word; older ones (up to _EARLIER) become one summary.
+_RECENT = 6
+_EARLIER = 40
+
+
 def _history(db: Session, conversation_id: str) -> list[dict]:
-    rows = list_copilot_messages(db, conversation_id)[-_HISTORY_TURNS:]
-    return [{"role": m.role,
-             "content": (m.content or "")[:3900] + (_lookups_note(m.lookups)
-                                                    if m.role == "assistant" else "")}
-            for m in rows]
+    """The recent turns verbatim, and what came before as one compact summary —
+    a long session no longer sends twelve full answers with every question."""
+    rows = list_copilot_messages(db, conversation_id)[-(_RECENT + _EARLIER):]
+    older, recent = rows[:-_RECENT], rows[-_RECENT:]
+    out = []
+    if older:
+        lines = []
+        for m in older:
+            text = " ".join((m.content or "").split())
+            if m.role == "user":
+                lines.append(f"- asked: {text[:160]}")
+            else:
+                tools = ", ".join(x.get("tool", "") for x in m.lookups or [])
+                lines.append(f"  answered: {text[:220]}"
+                             + (f" [looked up: {tools}]" if tools else ""))
+        out = [{"role": "user", "content": "Earlier in this conversation (summarised; look "
+                "anything up again before relying on it):\n" + "\n".join(lines)},
+               {"role": "assistant", "content": "Understood."}]
+    return out + [{"role": m.role,
+                   "content": (m.content or "")[:3900] + (_lookups_note(m.lookups)
+                                                          if m.role == "assistant" else "")}
+                  for m in recent]
+
+
+def _project_card(db: Session, study) -> str:
+    """A compact picture of the project in view, put in front of every question,
+    so the model starts from where the project stands instead of rediscovering it.
+    Built from what is stored — no model, no heavy work — and never fatal."""
+    import polars as pl
+
+    from api.routes.chat import _load_datamap, _study_dir
+    from src.orchestration.orchestrator import suggest_banner_candidates
+
+    lines = [f"Project card — {study.client_name} ({study.id}), status {study.status}:"]
+    try:
+        qs = list_questionnaires_for_study(db, study.id)
+        if qs and qs[0].definition_json:
+            survey = json.loads(qs[0].definition_json)
+            questions = survey.get("questions") or []
+            hidden = sum(1 for q in questions
+                         if "hidden" in f"{q.get('text', '')} {q.get('qid', '')}".lower())
+            lines.append(f"- Questionnaire: {qs[0].status}, {len(questions)} questions"
+                         + (f", {hidden} hidden/derived" if hidden else ""))
+        else:
+            lines.append("- Questionnaire: none uploaded")
+        d = _study_dir(study)
+        dm = _load_datamap(d, study)
+        if dm is not None and (d / "data.parquet").exists():
+            n = pl.scan_parquet(d / "data.parquet").select(pl.len()).collect().item()
+            banners = ", ".join(f"{v} ({dm[v].label[:28]})"
+                                for v in suggest_banner_candidates(dm, 5))
+            lines.append(f"- Data: {n} respondents, {len(dm)} variables"
+                         + (f" from {study.source_filename}" if study.source_filename else ""))
+            if banners:
+                lines.append(f"- Likely banner variables: {banners}")
+        else:
+            lines.append("- Data: none processed yet")
+        if study.crosscheck_json:
+            match = (json.loads(study.crosscheck_json).get("variable_match") or {}).get(
+                "summary") or {}
+            if match:
+                lines.append(f"- Data vs questionnaire (last run): {match.get('rules_broken', 0)} "
+                             f"rules broken, {match.get('missing_in_data', 0)} questions not in "
+                             f"the data, {match.get('rules_met', 0)} rules met")
+        lines.append(f"- Tables: {'built' if study.excel_path else 'not built yet'}")
+    except Exception:  # noqa: BLE001 - a card is a convenience; the answer must not fail on it
+        logger.exception("project card for %s", study.id)
+    return "\n".join(lines)
 
 
 @router.post("/copilot", response_model=CopilotResponse)
@@ -1664,7 +1731,7 @@ def copilot_stream(
 
 def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> CopilotResponse:
     from src.ai.copilot import TOOL_NAMES
-    from src.ai.copilot_router import areas_for, label_for, route
+    from src.ai.copilot_router import areas_for, is_heavy, label_for, route
 
     conversation = None
     if body.conversation_id:
@@ -1693,7 +1760,8 @@ def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> Co
 
     page = ""
     if body.study_id and (current := get_study(db, body.study_id)):
-        page = f"The user is looking at project {current.id} ({current.client_name})."
+        page = f"The user is looking at project {current.id} ({current.client_name}).\n"
+        page += _project_card(db, current) + "\n"
         if qs := list_questionnaires_for_study(db, current.id):
             page += f" Its questionnaire is {qs[0].status}."
         if body.focus_qid:
@@ -1719,6 +1787,8 @@ def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> Co
                for x in m.lookups or []]
     screen = body.screen or ""
     offered = route(body.message, sorted(TOOL_NAMES), screen, earlier)
+    areas = areas_for(body.message, screen, earlier)
+    heavy = is_heavy(body.message, areas)
     tagged = usage.purpose.set("copilot")  # this request's model calls count as copilot
     totals = {"model_calls": 0, "tokens_in": 0, "tokens_out": 0}
     counting = usage.tally.set(totals)
@@ -1727,7 +1797,8 @@ def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> Co
         usage.count_question()
         reply, results, answered_by = run_copilot(
             body.message, history, execute,
-            user=user.name or user.email, role=user.role, page=page, offered=offered)
+            user=user.name or user.email, role=user.role, page=page, offered=offered,
+            areas=areas, heavy=heavy)
     except BackendUnavailable as exc:
         logger.warning(f"copilot: no backend ({exc})")
         raise HTTPException(status_code=503,
@@ -1737,8 +1808,8 @@ def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> Co
         usage.tally.reset(counting)
     trace = {"ms": round((time.perf_counter() - started) * 1000), **totals,
              "steps": steps, "page": body.study_id, "focus_qid": body.focus_qid,
-             "screen": screen, "areas": sorted(areas_for(body.message, screen, earlier)),
-             "tools_offered": len(offered)}
+             "screen": screen, "areas": sorted(areas), "tools_offered": len(offered),
+             "heavy": heavy, "history_messages": len(history)}
     # The history shows the model "[Looked up for this answer: …]" after each
     # earlier reply; it sometimes copies that line into its own. Not for the user.
     reply = re.sub(r"\n*\[Looked up for this answer:[^\]]*\]", "", reply).strip()

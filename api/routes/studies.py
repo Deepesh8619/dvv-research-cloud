@@ -829,7 +829,11 @@ def _draft_report(payload: dict, db: Session) -> dict:
 
             items = json.dumps([{"id": b["id"], "text": b["text"]} for b in base],
                                ensure_ascii=False)
-            reply = router.run_private(_REWRITE_PROMPT.format(items=items), _REWRITE_SCHEMA)
+            warm = router.prose_temperature.set(router.PROSE_TEMPERATURE)  # prose, not figures
+            try:
+                reply = router.run_private(_REWRITE_PROMPT.format(items=items), _REWRITE_SCHEMA)
+            finally:
+                router.prose_temperature.reset(warm)
             rewrites = {str(i.get("id")): str(i.get("text", "")).strip()
                         for i in reply.content.get("sentences") or []}
         except Exception as exc:
