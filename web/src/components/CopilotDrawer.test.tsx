@@ -306,3 +306,35 @@ describe('Copilot memory', () => {
     await waitFor(() => expect(screen.queryByText('Short bullets')).toBeNull())
   })
 })
+
+
+describe('Copilot questions', () => {
+  it('shows what it needs as options and sends the answers together', async () => {
+    const { copilotApi } = await import('../api/client')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(copilotApi.ask as any).mockResolvedValueOnce({
+      data: {
+        reply: 'A report by gender, I think. Two choices first.', proposals: [], tools_used: ['excel_report'],
+        answered_by: 'Bedrock', questions: [
+          { id: 'rows', question: 'Which questions?', options: ['Every question', 'Only some'] },
+          { id: 'columns', question: 'Which columns?', options: ['Total only', 'S1 (gender)'], multiple: true },
+        ],
+      },
+    })
+    render(<MemoryRouter initialEntries={['/projects/s1']}><CopilotDrawer open onClose={() => {}} /></MemoryRouter>)
+    fireEvent.change(screen.getByPlaceholderText(/Ask about any project/), { target: { value: 'excel report' } })
+    fireEvent.submit(screen.getByPlaceholderText(/Ask about any project/).closest('form')!)
+    expect(await screen.findByText('Which questions?')).toBeTruthy()
+    const send = screen.getByRole('button', { name: 'Send answers' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)  // every question answered first
+    fireEvent.click(screen.getByRole('button', { name: 'Every question' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Total only' }))
+    fireEvent.click(screen.getByRole('button', { name: 'S1 (gender)' }))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(copilotApi.ask as any).mockResolvedValueOnce({
+      data: { reply: 'Built.', proposals: [], tools_used: [], answered_by: 'Bedrock' } })
+    fireEvent.click(send)
+    await waitFor(() => expect(copilotApi.ask).toHaveBeenLastCalledWith(
+      'Which questions? Every question\nWhich columns? Total only; S1 (gender)', 's1', null, null))
+  })
+})

@@ -127,3 +127,26 @@ def tables_job(parquet_path: str | Path, plan: TabPlan, datamap: DataMap,
         render_deck(run, out_path)
     shown = run.results if len(run.results) <= inline_max else []
     return [table_to_dict(r, f"t{i + 1}") for i, r in enumerate(shown)], len(run.results)
+
+
+def report_job(parquet_path: str | Path, plan: TabPlan, datamap: DataMap, style, out_path,
+               meta: dict) -> int:
+    """A finished Excel report (src/renderers/excel_report.py). Heavy pool."""
+    from src.renderers.excel_report import render_static
+
+    run = run_tab_plan(parquet_path, plan, datamap)
+    render_static(run.results, style, out_path, meta)
+    return len(run.results)
+
+
+def refreshable_job(parquet_path: str | Path, datamap: DataMap, stubs: list[str],
+                    banner: list[str], filter_, nets: dict, style, out_path, meta: dict) -> int:
+    """A refreshable Excel report: COUNTIFS over a Data sheet. Heavy pool."""
+    import polars as pl
+
+    from src.renderers.excel_report import render_refreshable
+
+    used = list(dict.fromkeys([*stubs, *banner, *(filter_ or {})]))
+    df = pl.read_parquet(parquet_path, columns=used)
+    render_refreshable(df, datamap, stubs, banner, filter_, nets, style, out_path, meta)
+    return len(stubs)

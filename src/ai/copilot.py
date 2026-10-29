@@ -112,6 +112,14 @@ Rules:
 - When the user states a lasting preference or a client's convention ("always",
   "from now on", "my usual…", "this client calls X…"), offer propose_remember. Apply what
   is listed as Remembered, and say when an answer used it.
+- Before building or changing anything substantial (a report, a workbook, a set of
+  tables, a card), first understand the task: if a decision that changes the result is
+  open — which questions, which columns, which project, finished or refreshable — say
+  in one sentence what you understood and ask only what you need, briefly. When a tool
+  returns needs_answers, ask exactly those (they appear as options) and stop. Never fill
+  a gap with a guess; small styling choices take the stated defaults.
+- An Excel report the user describes ("one sheet per question, top-2-box in bold, a
+  chart each") → excel_report, not make_tables.
 - Never choose the columns yourself. If the user asked for tables "by" something
   without naming it, ask which — make_tables' refusals list the variables that work.
 - Asked for a table or a crosstab, report the cells make_tables returns. If it
@@ -251,6 +259,25 @@ TOOLS = [
         "still verifies (the verified-research certificate).", _STUDY, ["study_id"]),
     _fn("team_and_costs", "The team (owner only) and AI model usage and estimated cost for "
         "the last 30 days (owner, founder).", None, []),
+    _fn("excel_report", "Build an Excel REPORT from the user's instructions: a contents sheet, "
+        "then the tables (rows by columns, filter, nets), laid out one sheet per table or all on "
+        "one sheet, whole or decimal percentages, significance letters, nets in bold, counts, "
+        "native charts. output 'finished' (as computed, with letters) or 'refreshable' (every "
+        "figure a formula over a Data sheet: paste next wave's data and it recalculates). If a "
+        "decision is open it returns needs_answers instead of a file — ask those.",
+        {**_STUDY,
+         "rows": {"type": "array", "items": {"type": "string"},
+                  "description": "questions to include; [\"all\"] for every question"},
+         "columns": {"type": "array", "items": {"type": "string"},
+                     "description": "banner variables; [] for Total only"},
+         "output": {"type": "string", "enum": ["finished", "refreshable"]},
+         "filter": {"type": "object"}, "nets": {"type": "array", "items": {"type": "object"}},
+         "weight": {"type": "string"}, "title": {"type": "string"},
+         "layout": {"type": "string", "enum": ["sheet_per_table", "one_sheet"]},
+         "decimals": {"type": "integer"}, "show_counts": {"type": "boolean"},
+         "significance": {"type": "boolean"}, "bold_nets": {"type": "boolean"},
+         "charts": {"type": "boolean"}, "mean": {"type": "boolean"}},
+        ["study_id"]),
     _fn("make_tables", "Crosstabs from a project's collected data — any rows by any "
         "columns: 'every variable by age band', 'Q5 to Q9 by gender and region among women', "
         "'top 2 box of Q4 by generation, weighted'. Few tables are shown in the reply; many "

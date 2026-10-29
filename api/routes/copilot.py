@@ -779,13 +779,15 @@ def make_executor(db: Session, user: UserDB):
                             "active": u.is_active} for u in list_all_users(db=db, user=user)]
         return out
 
-    def make_tables(args):
-        """Any set of tables: rows x columns, filtered, grouped, weighted — one tool
-        for the whole family instead of one tool per phrasing."""
+    def plan_tables(args):
+        """What a table request means in this project's data: rows, columns,
+        filter, weight, nets — resolved and checked once, for every tool that
+        builds tables (make_tables, excel_report)."""
+        from types import SimpleNamespace
+
         from api.routes.chat import _load_datamap, _parse_filter, _study_dir, _unknown, by_label
         from src.engines.tabs.crosstab import Net
-        from src.engines.tabs.runner import MAX_WORKBOOK_TABLES, tables_job
-        from src.engines.tabs.spec import TableSpec, TabPlan, auto_nets
+        from src.engines.tabs.runner import MAX_WORKBOOK_TABLES
         from src.orchestration.orchestrator import auto_tab_plan
 
         s = study(args)
@@ -864,6 +866,108 @@ def make_executor(db: Session, user: UserDB):
                       for n in args.get("nets") or []]
         except (KeyError, TypeError, ValueError) as exc:
             raise _ToolError('nets look like [{"label": "Any A or B", "codes": [1, 2]}]') from exc
+        return SimpleNamespace(s=s, d=d, dm=dm, banner=banner, stubs=stubs, skipped=skipped,
+                               filter_=filter_, weight=weight, custom=custom, asked=asked)
+
+    def excel_report(args):
+        """An Excel report from instructions — finished, or refreshable by formula.
+        Asks before building when the request leaves a decision open."""
+        from src.engines.tabs.runner import MAX_WORKBOOK_TABLES, refreshable_job, report_job
+        from src.engines.tabs.spec import TableSpec, TabPlan, auto_nets
+        from src.orchestration.orchestrator import suggest_banner_candidates
+        from src.renderers.excel_report import ReportStyle
+
+        s = study(args)
+        rows = args.get("rows")
+        if isinstance(rows, str) or rows == ["all"]:
+            rows = [] if str(rows).strip("[]'\" ").lower() in ("all", "every", "") else [rows]
+        output = str(args.get("output") or "").lower()
+        questions = []
+        if "rows" not in args:
+            questions.append({"id": "rows",
+                              "question": "Which questions should the report include?",
+                              "options": ["Every question", "Only some (I'll name them)"]})
+        if "columns" not in args:
+            from api.routes.chat import _load_datamap, _study_dir
+
+            dm0 = _load_datamap(_study_dir(s), s)
+            picks = [f"{n} ({dm0[n].label[:40]})" for n in suggest_banner_candidates(dm0, 6)] \
+                if dm0 else []
+            questions.append({"id": "columns", "question": "Which columns should every table be "
+                              "broken by?", "options": ["Total only", *picks], "multiple": True})
+        if output not in ("finished", "refreshable"):
+            questions.append({"id": "output", "question": "Finished or refreshable?", "options": [
+                "Finished: as computed, with significance letters",
+                "Refreshable: paste next wave's data and it recalculates (no letters)"]})
+        if questions:
+            return {"needs_answers": questions,
+                    "note": "Nothing built yet. In one sentence say what you understood, then "
+                            "ask exactly these questions (the user sees them as options). "
+                            "Call excel_report again with their answers. Defaults if they do not "
+                            "say: one sheet per table, whole percentages, letters on, nets in "
+                            "bold, no counts, no charts."}
+
+        p = plan_tables({**args, "rows": rows})
+        if output == "refreshable" and p.weight:
+            raise _ToolError("a refreshable report counts respondents as they are, unweighted; "
+                             "choose finished for a weighted report")
+        if output == "refreshable" and len(p.stubs) > 150:
+            raise _ToolError(f"{len(p.stubs)} tables is too many to recalculate by formula; "
+                             "name fewer questions, or choose finished")
+        style = ReportStyle(
+            title=str(args.get("title") or ("Report" + (" by " + ", ".join(p.banner)
+                                                         if p.banner else ""))),
+            layout="one_sheet" if args.get("layout") == "one_sheet" else "sheet_per_table",
+            decimals=max(0, min(int(args.get("decimals") or 0), 2)),
+            show_counts=bool(args.get("show_counts")),
+            significance=args.get("significance", True) is not False,
+            bold_nets=args.get("bold_nets", True) is not False,
+            charts=bool(args.get("charts")))
+        meta = {"project": f"{s.client_name} ({s.id})",
+                "notes": ([f"Filter: {p.filter_}"] if p.filter_ else [])
+                + ([f"Weighted by {p.weight}"] if p.weight else ["Unweighted."])}
+        safe = re.sub(r"\W+", "_", style.title)[:40].strip("_") or "report"
+        filename = f"{safe}_{uuid4().hex[:6]}.xlsx"
+        (p.d / "charts").mkdir(exist_ok=True)
+        out = p.d / "charts" / filename
+        nets = {stub: [(n.label, n.codes) for n in auto_nets(p.dm[stub])
+                       + [c for c in p.custom if set(c.codes) <= set(p.dm[stub].valid_codes())]]
+                for stub in p.stubs}
+        if output == "refreshable":
+            n = run_heavy_detached(db, refreshable_job, p.d / "data.parquet", p.dm, p.stubs,
+                                   p.banner, p.filter_, nets, style, out, meta)
+        else:
+            mean = args.get("mean")
+            plan = TabPlan(title=style.title, banner=p.banner, weight=p.weight, tables=[
+                TableSpec(stub=x, filter=p.filter_,
+                          nets=[n for n in auto_nets(p.dm[x])] + [
+                              c for c in p.custom if set(c.codes) <= set(p.dm[x].valid_codes())],
+                          mean=len(p.dm[x].valid_codes()) >= 5 if mean is None else bool(mean))
+                for x in p.stubs[:MAX_WORKBOOK_TABLES]])
+            n = run_heavy_detached(db, report_job, p.d / "data.parquet", plan, p.dm, style, out,
+                                   meta)
+        return {
+            "tables": [],  # the file holds them; nothing to retype
+            "tables_in_file": n, "output": output,
+            "skipped_plain_numbers": p.skipped,
+            "charts": [{"study_id": s.id, "filename": filename, "title": style.title,
+                        "kind": "workbook"}],
+            "note": f"The {output} Excel report is offered as a download under your reply: "
+                    f"{n} tables, a contents sheet first. Say what it holds and the choices "
+                    "it used (layout, decimals, letters, charts); do not list the tables."
+                    + (" Refreshable: tell them to paste new data into the Data sheet, same "
+                       "column names, codes not labels." if output == "refreshable" else ""),
+        }
+
+    def make_tables(args):
+        """Any set of tables: rows x columns, filtered, grouped, weighted — one tool
+        for the whole family instead of one tool per phrasing."""
+        from src.engines.tabs.runner import tables_job
+        from src.engines.tabs.spec import TableSpec, TabPlan, auto_nets
+
+        p = plan_tables(args)
+        s, d, dm, banner, stubs = p.s, p.d, p.dm, p.banner, p.stubs
+        skipped, filter_, weight, custom, asked = p.skipped, p.filter_, p.weight, p.custom, p.asked
         mean = args.get("mean")
 
         def table(stub):
@@ -1423,6 +1527,7 @@ def make_executor(db: Session, user: UserDB):
         "search_project": search_project,
         "ask_data": ask_data,
         "make_tables": make_tables,
+        "excel_report": excel_report,
         "cleaning_status": screen(_route("cleaning", "get_cleaning")),
         "data_vs_questionnaire": screen(_route("studies", "get_crosscheck")),
         "fieldwork_from_data": screen(_route("studies", "data_field_report_route")),
@@ -1650,10 +1755,13 @@ def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> Co
               for t in r.get("tables") or [] if isinstance(t, dict) and "header" in t]
     charts = [c for r in results if r.get("success") is not False
               for c in r.get("charts") or [] if isinstance(c, dict) and "filename" in c]
+    # A tool that needs a decision first: shown as options the user can click.
+    questions = [q for r in results[-3:] if r.get("success") is not False
+                 for q in r.get("needs_answers") or [] if isinstance(q, dict)][:6]
     conversation, seq = save_copilot_exchange(
         db, conversation, user.id, body.study_id, body.message, reply, lookups,
         [c.model_dump() for c in unique], answered_by, tables, charts, trace)
-    return CopilotResponse(reply=reply, proposals=unique, seq=seq,
+    return CopilotResponse(reply=reply, proposals=unique, seq=seq, questions=questions,
                            tools_used=[r.get("tool", "") for r in results],
                            answered_by=answered_by, conversation_id=conversation.id,
                            tables=tables, charts=charts,

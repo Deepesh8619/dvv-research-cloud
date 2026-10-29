@@ -1893,9 +1893,19 @@ export interface CopilotReply {
   conversation_id?: string | null
   /** This answer's place in the conversation, for "this answer was wrong". */
   seq?: number | null
+  /** Decisions a tool needs before it acts, shown as options to click. */
+  questions?: CopilotQuestion[]
   tables?: CopilotTable[]
   charts?: CopilotChart[]
   significance_tested?: boolean
+}
+
+/** A decision the Copilot needs before it builds or changes something. */
+export interface CopilotQuestion {
+  id: string
+  question: string
+  options: string[]
+  multiple?: boolean
 }
 
 export interface CopilotFeedbackMark {
