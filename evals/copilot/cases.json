@@ -1288,6 +1288,24 @@
      }
     }
    ]
+  },
+  {
+   "id": "card-draft-report",
+   "category": "cards",
+   "study": "coffee",
+   "turns": [
+    {
+     "say": "Draft the cited report for the coffee project.",
+     "expect": {
+      "tools_any": [
+       "propose_draft_report"
+      ],
+      "cards": [
+       "draft_report"
+      ]
+     }
+    }
+   ]
   }
  ]
 }

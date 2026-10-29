@@ -79,7 +79,7 @@ def test_a_grounded_answer_is_never_second_guessed():
     reply, results, _ = _call(_model(
         _tool_call(),
         {"content": "1 complete, incidence 100%."},
-    ))
+    ), execute=lambda name, args: {"projects": [{"completes": 1, "incidence_pct": 100}]})
     assert len(results) == 1
     assert reply == "1 complete, incidence 100%."
 
@@ -114,3 +114,21 @@ def test_the_prompt_forbids_substituting_another_action():
     from src.ai.copilot import SYSTEM_PROMPT
 
     assert "NEVER prepare a different action in its place" in SYSTEM_PROMPT
+
+
+def test_a_figure_no_tool_returned_is_sent_back_then_marked():
+    """Looked something up, then wrote a number none of it held."""
+    looked_up = {"projects": [{"completes": 122, "incidence_pct": 36.4}]}
+    reply, results, _ = _call(_model(
+        _tool_call(),
+        {"content": "122 completes at 41% incidence."},
+        {"content": "122 completes at 41% incidence."},
+    ), execute=lambda name, args: looked_up)
+    assert "Not found in the data looked up for this answer: 41" in reply
+
+    fixed, _, _ = _call(_model(
+        _tool_call(),
+        {"content": "122 completes at 41% incidence."},
+        {"content": "122 completes at 36.4% incidence."},
+    ), execute=lambda name, args: looked_up)
+    assert fixed == "122 completes at 36.4% incidence."

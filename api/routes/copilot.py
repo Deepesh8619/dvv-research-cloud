@@ -912,6 +912,103 @@ def make_executor(db: Session, user: UserDB):
 
     # --- action tools: proposals only -----------------------------------------
 
+    # --- phase 3: acting on Cleaning, Open ends and Reports ---------------------
+
+    def propose_remove_respondents(args):
+        """Remove the respondents one check flagged (all speeders), or named ones."""
+        from api.routes.cleaning import get_cleaning
+        from src.engines.qc.cleaning import REASON_CODES
+
+        s = study(args)
+        state = get_cleaning(s.id, db=db, user=user)
+        if state["locked"]:
+            raise _ToolError(f"cleaning is locked for {s.id}; "
+                             "unlock it on the Cleaning screen first")
+        flags = state["flags"]
+        check = str(args.get("check") or "").strip().lower().replace(" ", "_")
+        asked = [str(k) for k in args.get("keys") or []]
+        if check:
+            keys = [k for k, fl in flags.items() if any(f["check"] == check for f in fl)]
+            if not keys:
+                checks = sorted({f["check"] for fl in flags.values() for f in fl})
+                raise _ToolError(f"no respondent is flagged by {check!r}. The checks that "
+                                 f"flagged someone: {', '.join(checks) or 'none'}")
+        elif asked:
+            unknown = [k for k in asked if k not in flags]
+            if unknown:
+                raise _ToolError(f"not flagged, so not removed here: {', '.join(unknown[:10])}. "
+                                 "Only flagged respondents can be removed from chat")
+            keys = asked
+        else:
+            raise _ToolError("say which check (e.g. speeder) or which respondents to remove")
+        keys = [k for k in keys if (state["decisions"].get(k) or {}).get("decision") != "remove"]
+        if not keys:
+            raise _ToolError("every one of those respondents is already removed")
+        reason = check if check in REASON_CODES else str(args.get("reason_code") or "other")
+        if reason not in REASON_CODES:
+            raise _ToolError(f"reason_code must be one of {', '.join(REASON_CODES)}")
+        note = str(args.get("note") or (f"flagged by {check}" if reason == "other" else ""))
+        return propose(
+            "remove_respondents", f"Remove {len(keys)} respondent{'s' * (len(keys) != 1)}"
+            + (f" flagged as {check.replace('_', ' ')}" if check else ""),
+            f"Reason: {reason.replace('_', ' ')}. Respondents: {', '.join(keys[:12])}"
+            + (f" and {len(keys) - 12} more" if len(keys) > 12 else "")
+            + ". They leave the tables when cleaning is locked and stay in the delivery file, "
+              "marked removed. Reversible until then.",
+            "POST", f"/studies/{s.id}/cleaning/decisions",
+            {"keys": keys, "decision": "remove", "reason_code": reason,
+             **({"note": note} if note else {})})
+
+    def propose_lock_cleaning(args):
+        from api.routes.cleaning import get_cleaning
+
+        s = study(args)
+        state = get_cleaning(s.id, db=db, user=user)
+        if state["locked"]:
+            raise _ToolError(f"cleaning is already locked for {s.id}")
+        removed = sum(1 for d in state["decisions"].values() if d.get("decision") == "remove")
+        return propose(
+            "lock_cleaning", f"Lock cleaning for {s.client_name}",
+            f"{removed} removed respondent{'s' * (removed != 1)} leave the tables, which are "
+            f"rebuilt; they stay in the delivery file, marked. {state['n_unreviewed_flagged']} "
+            "flagged respondents are still unreviewed and stay in.",
+            "POST", f"/studies/{s.id}/cleaning/lock")
+
+    def propose_code_open_ends(args):
+        from api.routes.chat import _load_datamap, _study_dir, _unknown
+
+        s = study(args)
+        dm = _load_datamap(_study_dir(s), s)
+        if dm is None:
+            raise _ToolError(f"{s.id} has no data to code yet")
+        wanted = [str(v) for v in args.get("variables") or []]
+        if bad := [v for v in wanted if v not in dm]:
+            raise _ToolError(_unknown("variable(s)", bad, dm))
+        if not_text := [v for v in wanted if dm[v].type.value != "text"]:
+            raise _ToolError(f"not open text, nothing to code: {', '.join(not_text)}")
+        return propose(
+            "code_open_ends",
+            "Code " + (", ".join(wanted) if wanted else "every open-ended question"),
+            "Builds a codeframe from a sample of answers and codes every answer with the "
+            "project's model, in the background. Uncertain answers go to the review queue on "
+            "the Open ends screen.",
+            "POST", f"/studies/{s.id}/coding/run", {"variables": wanted or None})
+
+    def propose_draft_report(args):
+        from api.routes.studies import get_crosstabs
+
+        s = study(args)
+        try:
+            get_crosstabs(s.id, db, user)
+        except HTTPException as exc:
+            raise _ToolError(f"no tables to report on yet: {exc.detail}") from exc
+        return propose(
+            "draft_report", f"Draft the cited report for {s.client_name}",
+            "Writes the report from the findings in the background; every sentence cites the "
+            "table it comes from and is checked against it. Drafting again replaces the "
+            "current sentences.",
+            "POST", f"/studies/{s.id}/report/draft")
+
     def propose_open_link(args):
         s = study(args)
         survey(args)  # refuses when nothing is approved
@@ -1320,6 +1417,10 @@ def make_executor(db: Session, user: UserDB):
         "data_variables": data_variables,
         "product_help": product_help,
         "propose_open_link": propose_open_link,
+        "propose_remove_respondents": propose_remove_respondents,
+        "propose_lock_cleaning": propose_lock_cleaning,
+        "propose_code_open_ends": propose_code_open_ends,
+        "propose_draft_report": propose_draft_report,
         "propose_set_hold": propose_set_hold,
         "propose_close_link": propose_close_link,
         "propose_materialize": propose_materialize,
