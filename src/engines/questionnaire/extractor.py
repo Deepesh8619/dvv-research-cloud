@@ -49,6 +49,7 @@ from src.core.survey_definition import (
 )
 from src.engines.questionnaire import schema
 from src.engines.questionnaire.block_notes import apply as apply_block_notes
+from src.engines.questionnaire.brief_checklist import brief_checklist
 from src.engines.questionnaire.carousel import apply as apply_carousels
 from src.engines.questionnaire.carousel import capture as capture_carousel
 from src.engines.questionnaire.constant_sum import apply as apply_constant_sums
@@ -1847,6 +1848,9 @@ def extract_survey_definition(
     # Which skills decoded this document, what none could, and what to teach —
     # so an unfamiliar format is announced, not found question by question.
     survey.metadata["decoding"] = decoding_report(survey)
+    # The brief's needs, each ticked off against the instrument, and how this
+    # document writes its labels and notes.
+    survey.metadata["decoding"]["brief"] = brief_checklist(survey)
     return survey
 
 

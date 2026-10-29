@@ -21,6 +21,30 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-29 — the brief read first, each need ticked off (branch feat/reader-brief-checklist)
+
+**Tabs are label separators.** `live_text` read only `w:t`, so "C3<tab>CODE
+GENDER" became "C3CODE GENDER" and the hidden variable C3 was never a
+question. A `w:tab` is now a tab (which `_QID_RE` accepts as a separator) and a
+line break a space. Measured: 228 → 231 of 382 MATCH, newly right bubble C3,
+Q35, Q40, newly wrong none (round `r-tabs2` vs `r-screens2`).
+
+**Brief checklist** (`brief_checklist.py`, stored as `decoding.brief`): every
+quota group, screening requirement, variable to create (CODE/HIDDEN lines and
+derived variables) and study-wide programming note, each marked covered,
+missing or check, with the questions that meet it; plus the information
+screens found and the document's conventions (label families, scripter-note
+markers). Shown at the top of "How this questionnaire was read" (opens itself
+when anything is missing) and returned by the copilot's `study_brief` tool.
+Read-only: changes no question, so reading scores are unchanged.
+
+Seen on the corpus: Google Ads 18 met, 13 to confirm (wording-only
+requirements and style notes); Bubble and Vivo list their CODE variables, all
+built. **Open:** Bubble states its quotas inside C2's table and on information
+screens, not in a GBK-style overview, so no quota items are listed for it yet.
+
+---
+
 ## 2026-10-29 — information screens read like an analyst reads them (branch feat/reader-information-screens)
 
 Mid-document information ("Moving on…", "Thinking now about one brand, Bubble…",
