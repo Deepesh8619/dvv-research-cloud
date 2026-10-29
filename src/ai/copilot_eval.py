@@ -28,7 +28,8 @@ CARD_KINDS = frozenset({
 })
 EXPECT_KEYS = frozenset({
     "tools", "tools_any", "no_tools", "cards", "cards_allowed", "card_mentions",
-    "mentions", "avoids", "may_skip_tools", "table_mentions", "has_chart",
+    "mentions", "avoids", "may_skip_tools", "table_mentions", "has_chart", "asks",
+    "asks_or_question",
 })
 _PLACEHOLDER = re.compile(r"\{([a-z_0-9]+)\}")
 
@@ -131,6 +132,11 @@ def score_turn(expect: dict, response: dict, facts: dict[str, str]) -> list[str]
             failures.append(f"no table shows {pattern!r}")
     if expect.get("has_chart") and not response.get("charts"):
         failures.append("no chart was drawn")
+    # Asked what it needed (as options) instead of building on a guess.
+    if expect.get("asks") and (not response.get("questions") or response.get("charts")):
+        failures.append("built or answered instead of asking what it needed")
+    if expect.get("asks_or_question") and not (response.get("questions") or "?" in reply):
+        failures.append("did not ask what it needed")
     # Every case: "significant" either way needs a test behind it.
     if claims_significance(reply) and not response.get("significance_tested"):
         failures.append("claimed significance that no tool tested")

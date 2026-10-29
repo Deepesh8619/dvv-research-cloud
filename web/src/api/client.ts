@@ -1945,6 +1945,10 @@ export interface CopilotEvalRun {
   median_seconds: number | null
   by_category: Record<string, string>
   failed: string[]
+  /** synthetic: the invented coffee study; gold: real projects, private to this server. */
+  suite?: 'synthetic' | 'gold'
+  /** Gold: cases that passed on some repeats only. */
+  flaky?: string[]
 }
 
 /** A recent Copilot answer, with the question behind it and how it was made (Admin). */

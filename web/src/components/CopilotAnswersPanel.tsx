@@ -31,7 +31,62 @@ const draftCase = (f: FlaggedCopilotAnswer) =>
     1,
   )
 
-/** The eval's score over time: the line every change to the Copilot is held to. */
+const SUITE_LABEL: Record<string, string> = {
+  synthetic: 'Copilot eval (synthetic project)',
+  gold: 'Gold set (your real projects)',
+}
+
+/** One suite's score over time: the line every change to the Copilot is held to. */
+function SuiteHistory({ runs }: { runs: CopilotEvalRun[] }) {
+  const latest = runs[0]
+  const oldestFirst = [...runs].reverse()
+  const suite = latest.suite ?? 'synthetic'
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4" data-testid={`copilot-evals-${suite}`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{SUITE_LABEL[suite] ?? suite}</p>
+        <p className="text-xs text-slate-400">
+          last run {new Date(latest.at).toLocaleString()} · commit {latest.commit}
+        </p>
+      </div>
+      <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">
+        {latest.score}%{' '}
+        <span className="text-sm font-normal text-slate-500">
+          ({latest.passed}/{latest.cases} {suite === 'gold' ? 'passed every repeat' : 'questions'})
+        </span>
+      </p>
+      <div className="mt-3 flex h-12 items-end gap-1" aria-label="Score per run, oldest first">
+        {oldestFirst.map((r, i) => (
+          <div key={`${r.at}-${i}`} title={`${r.score}% · ${new Date(r.at).toLocaleDateString()} · ${r.commit}`}
+            className={`w-3 rounded-sm ${r.score >= 95 ? 'bg-emerald-500' : r.score >= 90 ? 'bg-amber-400' : 'bg-red-400'}`}
+            style={{ height: `${Math.max(8, (r.score - 70) * 1.6)}%` }} />
+        ))}
+      </div>
+      {suite === 'gold' && Object.keys(latest.by_category).length > 0 && (
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
+          {Object.entries(latest.by_category).map(([skill, score]) => (
+            <div key={skill} className="flex justify-between gap-2">
+              <dt className="text-slate-500">{skill}</dt>
+              <dd className="tabular-nums text-slate-800">{score}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {latest.failed.length > 0 && (
+        <p className="mt-2 text-xs text-slate-600">
+          Failed last run: <span className="font-mono">{latest.failed.join(', ')}</span>
+        </p>
+      )}
+      {(latest.flaky ?? []).length > 0 && (
+        <p className="mt-1 text-xs text-amber-700">
+          Unstable (passed on some repeats only): <span className="font-mono">{(latest.flaky ?? []).join(', ')}</span>
+        </p>
+      )}
+    </section>
+  )
+}
+
+/** Every suite's history: the invented project, and the private gold set of real ones. */
 function EvalHistory() {
   const [runs, setRuns] = useState<CopilotEvalRun[] | null>(null)
   useEffect(() => {
@@ -45,33 +100,9 @@ function EvalHistory() {
         server, or <code className="rounded bg-slate-100 px-1">./dvv eval-nightly on</code> to run it every night.
       </p>
     )
-  const latest = runs[0]
-  const oldestFirst = [...runs].reverse()
-  return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4" data-testid="copilot-evals">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Copilot eval</p>
-        <p className="text-xs text-slate-400">
-          last run {new Date(latest.at).toLocaleString()} · commit {latest.commit}
-        </p>
-      </div>
-      <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">
-        {latest.score}% <span className="text-sm font-normal text-slate-500">({latest.passed}/{latest.cases} questions)</span>
-      </p>
-      <div className="mt-3 flex h-12 items-end gap-1" aria-label="Score per run, oldest first">
-        {oldestFirst.map((r, i) => (
-          <div key={`${r.at}-${i}`} title={`${r.score}% · ${new Date(r.at).toLocaleDateString()} · ${r.commit}`}
-            className={`w-3 rounded-sm ${r.score >= 95 ? 'bg-emerald-500' : r.score >= 90 ? 'bg-amber-400' : 'bg-red-400'}`}
-            style={{ height: `${Math.max(8, (r.score - 70) * 1.6)}%` }} />
-        ))}
-      </div>
-      {latest.failed.length > 0 && (
-        <p className="mt-2 text-xs text-slate-600">
-          Failed last run: <span className="font-mono">{latest.failed.join(', ')}</span>
-        </p>
-      )}
-    </section>
-  )
+  const suites = ['gold', 'synthetic'].map((s) => runs.filter((r) => (r.suite ?? 'synthetic') === s))
+    .filter((rs) => rs.length > 0)
+  return <div className="space-y-3">{suites.map((rs) => <SuiteHistory key={rs[0].suite ?? 'synthetic'} runs={rs} />)}</div>
 }
 
 /** One answer: what was asked, what came back, and every step that made it. */

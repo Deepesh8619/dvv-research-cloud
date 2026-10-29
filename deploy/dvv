@@ -17,6 +17,7 @@
 #   ./dvv embedder                                    switch on the search embedder (nomic-embed-text)
 #   ./dvv eval                                        run the Copilot eval now (score -> Admin)
 #   ./dvv eval-nightly on|off                         run it every night at 02:30 (~$0.10 a run)
+#   ./dvv gold <file> [check]                         the private real-project gold set (gold/)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -195,6 +196,16 @@ case "${1:-}" in
     dc exec -T -e PYTHONPATH=/app app python scripts/eval_copilot.py \
       --out "/tmp/copilot-eval-latest.json" 2>&1 | tee -a logs/copilot-eval.log
     ;;
+  gold)
+    # Cases about REAL projects: client material, so the file stays in deploy/gold/
+    # on this server (never in git) and is read through standard input.
+    file="${2:-}"
+    [ -f "$file" ] || { echo "usage: ./dvv gold gold/<cases>.json [check]  (file not found: $file)"; exit 1; }
+    mkdir -p logs
+    extra="--repeat 3"; [ "${3:-}" = "check" ] && extra="--check"
+    dc exec -T -e PYTHONPATH=/app app python scripts/eval_gold.py - $extra < "$file" \
+      2>&1 | tee -a logs/copilot-gold.log
+    ;;
   eval-nightly)
     here=$(pwd)
     line="30 2 * * * cd $here && ./dvv eval >/dev/null 2>&1  # dvv-copilot-eval"
@@ -272,6 +283,6 @@ EOT
     ls -1t backups/db-*.dump | head -3
     ;;
   *)
-    sed -n '2,19p' "$0"; exit 1
+    sed -n '2,20p' "$0"; exit 1
     ;;
 esac
