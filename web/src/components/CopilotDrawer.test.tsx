@@ -33,6 +33,8 @@ vi.mock('../api/client', () => {
     }),
     confirm: vi.fn(),
     conversations: vi.fn().mockResolvedValue({ data: [] }),
+    memories: vi.fn().mockResolvedValue({ data: [{ id: 'm1', scope: 'user', client: null, text: 'Short bullets', created_by: 'A', created_at: '' }] }),
+    forget: vi.fn().mockResolvedValue({}),
     conversation: vi.fn(),
     chart: vi.fn().mockResolvedValue({ data: new Blob(['png'], { type: 'image/png' }) }),
     excel: vi.fn().mockResolvedValue({ data: new Blob(['xlsx']) }),
@@ -290,5 +292,17 @@ describe('CopilotDrawer', () => {
     fireEvent.click(screen.getByText('Excel'))
     await vi.waitFor(() => expect(copilotApi.excel).toHaveBeenCalledWith([table]))
     expect(screen.getByText('CSV')).toBeTruthy()
+  })
+})
+
+describe('Copilot memory', () => {
+  it('shows what it remembers and forgets in one click', async () => {
+    const { copilotApi } = await import('../api/client')
+    render(<MemoryRouter initialEntries={['/projects/s1']}><CopilotDrawer open onClose={() => {}} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: 'Memory' }))
+    expect(await screen.findByText('Short bullets')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Forget: Short bullets' }))
+    await waitFor(() => expect(copilotApi.forget).toHaveBeenCalledWith('m1'))
+    await waitFor(() => expect(screen.queryByText('Short bullets')).toBeNull())
   })
 })

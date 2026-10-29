@@ -767,6 +767,23 @@ class WorkflowRunDB(Base):
     error = Column(Text, nullable=True)
 
 
+class CopilotMemoryDB(Base):
+    """Something the Copilot keeps across conversations: one user's preference
+    ("my usual banner is age x gender x region") or a client's convention
+    ("Acme calls quick-service restaurants QSR"). Saved only by a confirmed card
+    or by the person themselves; visible and deletable."""
+
+    __tablename__ = "copilot_memories"
+
+    id = Column(String, primary_key=True)
+    scope = Column(String, index=True)  # user | client
+    user_id = Column(String, index=True, nullable=True)  # scope user: whose
+    client = Column(String, index=True, nullable=True)  # scope client: which client_name
+    text = Column(Text)
+    created_by = Column(String)
+    created_at = Column(String)
+
+
 class CopilotEvalRunDB(Base):
     """One run of scripts/eval_copilot.py: the score history Admin shows."""
 
@@ -1384,6 +1401,44 @@ def list_copilot_answers(db: Session, show: str = "all", limit: int = 100) -> li
 def list_flagged_copilot_answers(db: Session, limit: int = 200) -> list[dict]:
     """Answers users flagged as wrong, newest first, each with the question asked."""
     return list_copilot_answers(db, "flagged", limit)
+
+
+def add_copilot_memory(db: Session, scope: str, text: str, created_by: str,
+                       user_id: str | None = None, client: str | None = None) -> dict:
+    from uuid import uuid4
+
+    row = CopilotMemoryDB(id=f"mem_{uuid4().hex[:10]}", scope=scope, user_id=user_id,
+                          client=client, text=text.strip()[:500], created_by=created_by,
+                          created_at=datetime.now().isoformat(timespec="seconds"))
+    db.add(row)
+    db.commit()
+    return _memory_dict(row)
+
+
+def _memory_dict(m: CopilotMemoryDB) -> dict:
+    return {"id": m.id, "scope": m.scope, "client": m.client, "text": m.text,
+            "created_by": m.created_by, "created_at": m.created_at}
+
+
+def list_copilot_memories(db: Session, user_id: str, client: str | None = None) -> list[dict]:
+    """This user's own memories, then the client's (when a project is in view)."""
+    rows = (db.query(CopilotMemoryDB)
+            .filter(CopilotMemoryDB.scope == "user", CopilotMemoryDB.user_id == user_id)
+            .order_by(CopilotMemoryDB.created_at).all())
+    if client:
+        rows += (db.query(CopilotMemoryDB)
+                 .filter(CopilotMemoryDB.scope == "client", CopilotMemoryDB.client == client)
+                 .order_by(CopilotMemoryDB.created_at).all())
+    return [_memory_dict(m) for m in rows]
+
+
+def get_copilot_memory(db: Session, memory_id: str) -> CopilotMemoryDB | None:
+    return db.get(CopilotMemoryDB, memory_id)
+
+
+def delete_copilot_memory(db: Session, memory: CopilotMemoryDB) -> None:
+    db.delete(memory)
+    db.commit()
 
 
 def record_copilot_eval(db: Session, summary: dict, failed: list[str], commit: str) -> None:

@@ -15,7 +15,7 @@ import re
 
 #: Always offered: finding your way around, whatever the question.
 CORE = ("list_studies", "study_overview", "project_lifecycle", "search_project",
-        "product_help", "data_variables", "find_question")
+        "product_help", "data_variables", "find_question", "propose_remember")
 
 AREAS: dict[str, tuple[str, ...]] = {
     "questionnaire": (

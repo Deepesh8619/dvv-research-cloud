@@ -751,6 +751,13 @@ class CopilotStoredMessage(BaseModel):
     feedback: dict | None = None
 
 
+class CopilotMemoryRequest(BaseModel):
+    scope: Literal["user", "client"]
+    text: str = Field(min_length=3, max_length=500)
+    #: For a client memory: the project whose client it belongs to.
+    study_id: str | None = None
+
+
 class CopilotFeedback(BaseModel):
     wrong: bool = True
     note: str = ""

@@ -1904,6 +1904,16 @@ export interface CopilotFeedbackMark {
   at?: string
 }
 
+/** Something the Copilot keeps across conversations: yours, or a client's. */
+export interface CopilotMemory {
+  id: string
+  scope: 'user' | 'client'
+  client: string | null
+  text: string
+  created_by: string
+  created_at: string
+}
+
 /** How one Copilot answer was made: every tool step, time and tokens. */
 export interface CopilotTrace {
   ms: number
@@ -2054,6 +2064,10 @@ export const copilotApi = {
   flag: async (id: string, seq: number, wrong: boolean, note = '') =>
     api.post(`/copilot/conversations/${id}/messages/${seq}/feedback`, { wrong, note }),
   flagged: async () => api.get<FlaggedCopilotAnswer[]>('/admin/copilot-feedback'),
+  /** What the Copilot remembers for this user, and for the client of the project in view. */
+  memories: async (studyId?: string | null) =>
+    api.get<CopilotMemory[]>('/copilot/memories', { params: studyId ? { study_id: studyId } : {} }),
+  forget: async (id: string) => api.delete(`/copilot/memories/${id}`),
   answers: async (show: 'all' | 'flagged' | 'errors' | 'slow' = 'all') =>
     api.get<CopilotAnswerRecord[]>('/admin/copilot-answers', { params: { show } }),
   evals: async () => api.get<CopilotEvalRun[]>('/admin/copilot-evals'),
