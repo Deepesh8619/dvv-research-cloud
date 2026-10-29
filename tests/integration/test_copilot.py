@@ -1889,3 +1889,45 @@ def test_the_copilot_previews_weighting_on_its_card(client, monkeypatch, tmp_pat
     confirmed = _confirm(test_client, card)
     assert confirmed.status_code == 200
     assert test_client.get("/api/studies/s_wb/weighting").json()["applied"] is True
+
+
+def test_the_copilot_is_told_what_the_message_is_about(client, monkeypatch, tmp_path):  # noqa: F811
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    calls = _capture_prompts(monkeypatch, ("text", "SAT is a 5-point scale."))
+    test_client.post("/api/copilot", json={"message": "how is SAT coded and why?",
+                                           "study_id": "s_wb"})
+    system = calls[0][1]
+    assert "What this message is about" in system
+    assert "- SAT: data variable (single, 5 codes)" in system
+    assert "an explanation (why / how it works)" in system
+    calls = _capture_prompts(monkeypatch, ("text", "Here."))
+    test_client.post("/api/copilot", json={"message": "show me gender", "study_id": "s_wb"})
+    assert '"gender" may mean: GEND' in calls[0][1]  # a word, resolved by label
+
+
+def test_a_generic_answer_is_sent_back_and_filler_is_dropped(client, monkeypatch):  # noqa: F811
+    from src.ai.copilot import is_generic, strip_filler
+
+    assert strip_filler("Q4 has 5 options. Let me know if you need anything else.") == \
+        "Q4 has 5 options."
+    assert is_generic("Please check if there are any fielding links you would like to examine "
+                      "or if you need further assistance.", [{"links": []}])
+    assert not is_generic("Q4 has 5 options; let me know.", [{"qid": "Q4"}])
+    test_client, sf, _ = client
+    _make_study(sf)
+    calls = _capture_prompts(monkeypatch,
+                             ("tool", "list_studies", {}),
+                             ("text", "Please check if there is anything else I can help with."),
+                             ("text", "There is one project, study_f1 (Test)."))
+    resp = test_client.post("/api/copilot", json={"message": "what projects are there?"}).json()
+    assert resp["reply"] == "There is one project, study_f1 (Test)."
+    assert any("That answer was generic" in json.dumps(c[2]) for c in calls)
+
+
+def test_filler_goes_but_the_layout_stays():
+    from src.ai.copilot import strip_filler
+
+    reply = "- Q4: 5 options\n- Q5: 3 options\n\nLet me know if you need anything else."
+    assert strip_filler(reply) == "- Q4: 5 options\n- Q5: 3 options"
+    assert strip_filler("Only filler, let me know.") == "Only filler, let me know."

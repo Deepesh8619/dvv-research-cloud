@@ -1658,6 +1658,65 @@ def _history(db: Session, conversation_id: str) -> list[dict]:
                   for m in recent]
 
 
+_INTENTS = (
+    ("a figure (count, share, average)", r"\bhow many|\bcount\b|share|percent|%|average|mean\b"),
+    ("a table or crosstab", r"table|crosstab|cross.?tab|\bby\b|breakdown|banner"),
+    ("an explanation (why / how it works)", r"\bwhy\b|\bhow (?:is|does|do|was)\b|explain|mean"),
+    ("a change to be prepared (card)", r"\b(change|edit|fix|remove|delete|add|set|weight|"
+                                       r"open|close|hold|release|approve|lock|code)\b"),
+    ("a file (Excel / report)", r"excel|workbook|report|deck|export|download|file"),
+    ("a check (is it right / does it match)", r"\b(check|verify|match|correct|identified|"
+                                              r"missing|broken|valid)\b"),
+)
+_STOP = frozenset("what which where when this that with from have does into they them their "
+                  "there about show tell give make please could would should data project "
+                  "question questions variable variables survey".split())
+
+
+def _understood(db: Session, study, message: str) -> str:
+    """What THIS message is about, resolved against this project: the questions and
+    variables it names (with what they are) and what kind of answer it wants — so the
+    model answers the question asked instead of a generic one. No model; never fatal."""
+    from api.routes.chat import _load_datamap, _study_dir, by_label
+
+    try:
+        dm = _load_datamap(_study_dir(study), study)
+        qs = list_questionnaires_for_study(db, study.id)
+        questions = {}
+        if qs and qs[0].definition_json:
+            questions = {q.get("qid"): q for q in json.loads(qs[0].definition_json).get(
+                "questions") or [] if q.get("qid")}
+        named, lines = set(), []
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9_.]*\d[A-Za-z0-9_]*|[A-Za-z_]{2,}", message):
+            for qid in questions:
+                if qid.lower() == token.lower() and qid not in named:
+                    q = questions[qid]
+                    named.add(qid)
+                    lines.append(f"- {qid}: questionnaire question ({q.get('type')}) — "
+                                 f"\"{(q.get('text') or '')[:90]}\"")
+            if dm is not None:
+                for v in dm.variables:
+                    if v.name.lower() == token.lower() and v.name not in named:
+                        named.add(v.name)
+                        lines.append(f"- {v.name}: data variable ({v.type.value}, "
+                                     f"{len(v.valid_codes())} codes) — \"{(v.label or '')[:90]}\"")
+        if dm is not None and not named:  # words, not names: "region", "age band"
+            for word in {w.lower() for w in re.findall(r"[A-Za-z]{4,}", message)} - _STOP:
+                hits = [h for h in by_label(dm, word) if dm[h].valid_codes()][:3]
+                if 0 < len(hits) <= 3:
+                    lines.append(f"- \"{word}\" may mean: " + ", ".join(
+                        f"{h} ({dm[h].label[:40]})" for h in hits))
+        wants = [label for label, pattern in _INTENTS if re.search(pattern, message, re.I)]
+        if not lines and not wants:
+            return ""
+        return ("What this message is about (resolved against the project — answer THIS, "
+                "specifically, naming these):\n" + "\n".join(lines[:8])
+                + (f"\n- Wants: {'; '.join(wants[:3])}" if wants else ""))
+    except Exception:  # noqa: BLE001 - grounding help only; the answer must not fail on it
+        logger.exception("understanding the ask for %s", study.id)
+        return ""
+
+
 def _project_card(db: Session, study) -> str:
     """A compact picture of the project in view, put in front of every question,
     so the model starts from where the project stands instead of rediscovering it.
@@ -1803,6 +1862,8 @@ def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> Co
     if body.study_id and (current := get_study(db, body.study_id)):
         page = f"The user is looking at project {current.id} ({current.client_name}).\n"
         page += _project_card(db, current) + "\n"
+        if about := _understood(db, current, body.message):
+            page += about + "\n"
         if qs := list_questionnaires_for_study(db, current.id):
             page += f" Its questionnaire is {qs[0].status}."
         if body.focus_qid:
