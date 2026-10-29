@@ -1576,14 +1576,14 @@ def test_the_copilot_offers_to_remember_by_card(client, monkeypatch):  # noqa: F
     assert card["title"] == "Remember for Test: Banner is age x region"
 
 
-def test_the_fallback_model_is_bedrock_llama_after_the_main_one(monkeypatch):
+def test_the_fallback_model_is_bedrock_qwen_235b_after_the_main_one(monkeypatch):
     from src.ai.copilot import _providers
 
     monkeypatch.setenv("BEDROCK_API_KEY", "x")
     monkeypatch.delenv("BEDROCK_FALLBACK_MODEL", raising=False)
     labels = [(label, model) for label, _url, _key, model in _providers()]
     assert labels[0][0] == "Bedrock"
-    assert labels[1] == ("Bedrock fallback", "meta.llama3-3-70b-instruct-v1:0")
+    assert labels[1] == ("Bedrock fallback", "qwen.qwen3-235b-a22b-2507-v1:0")
     assert labels[-1][0] == "local model"
     assert "bedrock-runtime.ap-south-1" in _providers()[1][1]  # same region by default
     monkeypatch.setenv("BEDROCK_FALLBACK_MODEL", "none")

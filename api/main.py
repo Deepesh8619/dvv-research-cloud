@@ -164,6 +164,10 @@ def _configured_models() -> dict[str, str]:
     models: dict[str, str] = {}
     if os.environ.get("BEDROCK_API_KEY", "").strip():
         models["bedrock"] = bedrock_model()
+        from src.ai.router import bedrock_fallback
+
+        if second := bedrock_fallback():  # the Copilot's second model, if switched on
+            models["bedrock_fallback"] = second[1]
     if os.environ.get("GROQ_API_KEY", "").strip():
         models["groq"] = os.environ.get("COPILOT_GROQ_MODEL", GROQ_DEFAULT_MODEL)
     if os.environ.get("CEREBRAS_API_KEY", "").strip():

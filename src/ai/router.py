@@ -488,7 +488,12 @@ def bedrock_model() -> str:
 
 #: The Copilot's second model, on Bedrock in the client's AWS account — never a
 #: laptop. Tried when the main model fails, before the small local one.
-BEDROCK_FALLBACK_DEFAULT_MODEL = "meta.llama3-3-70b-instruct-v1:0"
+#: Qwen3 235B: probed live 2026-10-29 in ap-south-1, it is the strongest open
+#: model Mumbai offers on both Bedrock endpoints. Llama 3.3 70B, Llama 3.1 70B
+#: and Mistral Large are "invalid model identifier" there; Llama 3.3 runs in
+#: us-east-1 (BEDROCK_FALLBACK_MODEL=us.meta.llama3-3-70b-instruct-v1:0 with
+#: BEDROCK_FALLBACK_REGION=us-east-1) — client text then leaves India.
+BEDROCK_FALLBACK_DEFAULT_MODEL = "qwen.qwen3-235b-a22b-2507-v1:0"
 
 
 def bedrock_fallback() -> tuple[str, str] | None:
