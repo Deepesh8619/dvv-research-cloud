@@ -21,6 +21,29 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-29 — teaching is understood from the document, not guessed (branch feat/teaching-understands)
+
+A correction ("the Spanish line is the question translated") used to become
+prose appended to the model prompt — which does nothing for questions the
+deterministic reader already handles. The classifier saw only the stored
+question JSON, knew nothing of what the reader can be taught, and could not
+tell that the same lesson already existed.
+
+`lesson_context.py` retrieves, for each correction: the question as the
+document writes it and what the reader made of it; the catalogue of
+conventions the reader can be taught directly; and lessons already taught that
+mean much the same (project embedder, lexical fallback: reworded 0.53 vs
+unrelated ≤0.36, floor 0.45). The model may now return a pattern
+(kind/pattern/value), kept ONLY if the document contains it
+(`grounded_pattern`), with the questions it touches.
+
+Review page: the correction box shows the question as written, its bracketed
+notes as chips to point at, then "The reader can learn this directly" with the
+affected questions and a one-click "Teach the reader", plus "Already taught
+something similar". The prose route and its preview remain.
+
+---
+
 ## 2026-10-29 — owners teach where questions start, from the Copilot (branch feat/teach-question-labels)
 
 Every new layout failed the same way: the reader could not tell where a question

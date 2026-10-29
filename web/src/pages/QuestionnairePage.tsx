@@ -881,6 +881,7 @@ export function QuestionDetail({
             <CorrectionBox
               studyId={studyId}
               questionId={q.qid}
+              sourceText={q.source_text}
               profileSlug={profile?.slug}
               profileLabel={profile?.label}
               prefill={teachText}
