@@ -1775,3 +1775,50 @@ def test_prose_tasks_run_warmer_and_everything_else_at_zero(monkeypatch):
     router.run_task("report.narrative", "p", {})
     router.run_task("questionnaire.resolve", "p", {})
     assert seen == [0.4, 0.0] and router.prose_temperature.get() == 0.0
+
+
+def test_a_gold_case_runs_on_the_real_path_and_leaves_no_conversation(client, monkeypatch, tmp_path):  # noqa: F811,E501
+    """Gold: a question about a real project, its right answer computed from the
+    project's data, asked through the full Copilot path; nothing left behind."""
+    from api.db import CopilotConversationDB, UserDB
+    from src.ai.gold_eval import compute_facts, resolve_study, run_case
+
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    _script(monkeypatch, ("tool", "data_variables", {"study_id": "s_wb"}),
+            ("text", "There are 11 variables, all identified."))
+    db = sf()
+    case = {"id": "nvars", "skill": "data", "study": {"id": "s_wb"},
+            "facts": {"n": {"n_variables": {}}, "female": {"pct": {"var": "GEND", "codes": [2]}}},
+            "turns": [{"say": "Are all variables identified?",
+                       "expect": {"tools": ["data_variables"], "mentions": ["{n}"]}}]}
+    facts = compute_facts(resolve_study(db, case["study"]), case["facts"])
+    assert "11" in facts["n"] and "50" in facts["female"]  # from the data, not typed in
+    user = UserDB(id="eval-gold", email="g@e", name="Gold", role="owner", is_active=True)
+    responses, _ = run_case(db, case, user)
+    assert responses[0]["tools_used"] == ["data_variables"]
+    assert "11 variables" in responses[0]["reply"]
+    assert db.query(CopilotConversationDB).filter_by(user_id="eval-gold").count() == 0
+    db.close()
+
+
+def test_gold_repeats_find_the_unstable_cases(monkeypatch):
+    import src.ai.gold_eval as gold
+
+    answers = iter(["Yes, 60%.", "No idea.", "Yes, 60%.", "Yes, 60%."])
+    monkeypatch.setattr(gold, "run_case", lambda db, case, user: (
+        [{"reply": next(answers), "tools_used": ["make_tables"], "seconds": 1.0}],
+        {"f": gold.number_pattern(60)}))
+    cases = [{"id": "a", "skill": "figures", "study": {"id": "x"},
+              "turns": [{"say": "?", "expect": {"mentions": ["{f}"]}}]},
+             {"id": "b", "skill": "tables", "study": {"id": "x"},
+              "turns": [{"say": "?", "expect": {"mentions": ["{f}"]}}]}]
+    report = gold.run(None, cases, user=None, repeat=2, say=lambda *_: None)
+    assert report["flaky"] == ["a"]  # passed once, failed once
+    assert [r["passed"] for r in report["results"]] == [False, True]
+    assert report["summary"]["by_category"] == {"figures": "50% (1/2)", "tables": "100% (2/2)"}
+    assert gold.problems([{"id": "z", "skill": "nope", "study": {}, "turns": [
+        {"say": "?", "expect": {"oops": 1, "tools": ["no_such_tool"]}}]}]) == [
+        "z: skill must be one of " + ", ".join(gold.SKILLS),
+        "z: study needs an id or a source filename fragment",
+        "z: unknown expectation ['oops']", "z: no tool ['no_such_tool']"]

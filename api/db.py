@@ -798,6 +798,8 @@ class CopilotEvalRunDB(Base):
     median_seconds = Column(Float, nullable=True)
     by_category = Column(JSON, default=None)
     failed = Column(JSON, default=None)  # ids of the cases that failed
+    suite = Column(String, default="synthetic")  # synthetic | gold (real projects, private)
+    flaky = Column(JSON, default=None)  # ids that passed on some repeats only
 
 
 class ModelUsageDB(Base):
@@ -988,6 +990,10 @@ def _ensure_new_columns():
             "vendor_name": "VARCHAR",
             "cpi": "FLOAT",
             "target_completes": "INTEGER",
+        },
+        "copilot_eval_runs": {
+            "suite": "VARCHAR",
+            "flaky": "JSON",
         },
         "copilot_messages": {
             # Tables shown under a reply, added after conversations first shipped.
@@ -1441,14 +1447,16 @@ def delete_copilot_memory(db: Session, memory: CopilotMemoryDB) -> None:
     db.commit()
 
 
-def record_copilot_eval(db: Session, summary: dict, failed: list[str], commit: str) -> None:
+def record_copilot_eval(db: Session, summary: dict, failed: list[str], commit: str,
+                        suite: str = "synthetic", flaky: list[str] | None = None) -> None:
     from uuid import uuid4
 
     db.add(CopilotEvalRunDB(
         id=f"eval_{uuid4().hex[:10]}", at=datetime.now().isoformat(timespec="seconds"),
         commit=commit, score=float(summary["score"]), passed=int(summary["passed"]),
         cases=int(summary["cases"]), median_seconds=summary.get("median_seconds"),
-        by_category=summary.get("by_category"), failed=failed))
+        by_category=summary.get("by_category"), failed=failed, suite=suite,
+        flaky=flaky or None))
     db.commit()
 
 
@@ -1456,7 +1464,8 @@ def list_copilot_evals(db: Session, limit: int = 30) -> list[dict]:
     rows = db.query(CopilotEvalRunDB).order_by(CopilotEvalRunDB.at.desc()).limit(limit)
     return [{"at": r.at, "commit": r.commit, "score": r.score, "passed": r.passed,
              "cases": r.cases, "median_seconds": r.median_seconds,
-             "by_category": r.by_category or {}, "failed": r.failed or []} for r in rows]
+             "by_category": r.by_category or {}, "failed": r.failed or [],
+             "suite": r.suite or "synthetic", "flaky": r.flaky or []} for r in rows]
 
 
 def delete_copilot_conversation(db: Session, conversation: CopilotConversationDB) -> None:

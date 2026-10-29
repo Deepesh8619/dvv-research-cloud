@@ -43,3 +43,4 @@ deploy/aws/out/
 graphify-out/
 copilot-eval-*.json
 deploy/logs/
+deploy/gold/
