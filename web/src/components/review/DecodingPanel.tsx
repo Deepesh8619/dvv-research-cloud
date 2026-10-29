@@ -1,4 +1,4 @@
-import type { Decoding } from '../../api/client'
+import type { BriefChecklist, Decoding } from '../../api/client'
 
 /**
  * How this questionnaire was read, for the WHOLE document: which reading skills
@@ -27,6 +27,55 @@ function QidLinks({ qids, onGoTo }: { qids: string[]; onGoTo: (qid: string) => v
   )
 }
 
+const KIND_LABEL: Record<string, string> = {
+  quota: 'Quota',
+  screening: 'Screening',
+  variable: 'Variable to create',
+  note: 'Programming note',
+}
+const STATUS_STYLE: Record<string, string> = {
+  covered: 'text-emerald-700',
+  missing: 'text-red-700 font-medium',
+  check: 'text-amber-700',
+}
+
+/** The brief, read first: each need it stated, met or not, and where. */
+function BriefSection({ brief, onGoTo }: { brief: BriefChecklist; onGoTo: (qid: string) => void }) {
+  const families = Object.entries(brief.conventions.label_families)
+  const markers = Object.keys(brief.conventions.pn_markers)
+  // Missing first, then the ones a person has to confirm.
+  const order = { missing: 0, check: 1, covered: 2 }
+  const items = [...brief.items].sort((a, b) => order[a.status] - order[b.status])
+  return (
+    <section>
+      <h4 className="font-medium">What the document asks for</h4>
+      <p className="text-xs text-slate-500">
+        {brief.covered} met · {brief.missing} missing · {brief.check} to confirm
+        {brief.screens.length > 0 && <> · {brief.screens.length} information screens</>}
+      </p>
+      {(families.length > 0 || markers.length > 0) && (
+        <p className="mt-1 text-xs text-slate-500">
+          Labels: {families.map(([p, n]) => `${p} (${n})`).join(', ') || '—'}
+          {markers.length > 0 && <> · scripter notes marked {markers.join(', ')}</>}
+        </p>
+      )}
+      {items.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {items.map((item, i) => (
+            <li key={i} className="text-xs">
+              <span className={STATUS_STYLE[item.status]}>{item.status}</span>
+              <span className="text-slate-500"> · {KIND_LABEL[item.kind] ?? item.kind} · </span>
+              {item.text}
+              <span className="text-slate-500"> — {item.why} </span>
+              <QidLinks qids={item.where} onGoTo={onGoTo} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 export default function DecodingPanel({
   decoding,
   onGoTo,
@@ -37,7 +86,7 @@ export default function DecodingPanel({
   if (!decoding) return null
   const unfamiliar = decoding.verdict === 'unfamiliar'
   return (
-    <details open={unfamiliar} className="bg-white border border-slate-200 rounded-md p-4 mb-4">
+    <details open={unfamiliar || (decoding.brief?.missing ?? 0) > 0} className="bg-white border border-slate-200 rounded-md p-4 mb-4">
       <summary className="cursor-pointer text-sm font-semibold text-slate-800">
         How this questionnaire was read
         <span className={`ml-2 text-xs font-normal ${unfamiliar ? 'text-amber-700' : 'text-slate-500'}`}>
@@ -46,6 +95,7 @@ export default function DecodingPanel({
         </span>
       </summary>
       <div className="mt-3 space-y-4 text-sm text-slate-700">
+        {decoding.brief && <BriefSection brief={decoding.brief} onGoTo={onGoTo} />}
         <section>
           <h4 className="font-medium">Skills used</h4>
           <ul className="mt-1 flex flex-wrap gap-2">

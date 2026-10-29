@@ -211,7 +211,12 @@ TOOLS = [
         {**_STUDY, "qid": {"type": "string"}}, ["study_id", "qid"]),
     _fn("study_brief", "What the document says about the STUDY: sample size, length of "
         "interview, markets, screening requirements, quota groups with their minimum "
-        "and maximum. Absent in questionnaires that open at the first question.",
+        "and maximum — and a checklist of every need it stated (quotas, screening, "
+        "variables to create, scripter notes) marked covered, missing or check, with "
+        "the questions that meet each, plus how THIS document labels questions and "
+        "marks programmer notes. Use it for 'does the survey cover everything the "
+        "brief asks?'. Overview fields are absent in questionnaires that open at "
+        "the first question.",
         _STUDY, ["study_id"]),
     _fn("search_verbatims", "Search what respondents actually typed in this project's "
         "open-ended questions, by meaning rather than by exact words. Returns the "

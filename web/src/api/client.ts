@@ -622,6 +622,23 @@ export interface Decoding {
   skills: { key: string; name: string; questions: number; examples: string[] }[]
   not_read: string[]
   teach: { fragment: string; questions: number; examples: string[]; suggest: string }[]
+  /** Every need the document stated, ticked off against the instrument. */
+  brief?: BriefChecklist
+}
+
+export interface BriefChecklist {
+  items: {
+    kind: 'quota' | 'screening' | 'variable' | 'note'
+    text: string
+    status: 'covered' | 'missing' | 'check'
+    where: string[]
+    why: string
+  }[]
+  covered: number
+  missing: number
+  check: number
+  screens: string[]
+  conventions: { label_families: Record<string, number>; pn_markers: Record<string, number> }
 }
 
 export interface LogicReview {
