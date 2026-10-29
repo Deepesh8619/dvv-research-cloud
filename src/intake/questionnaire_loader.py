@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Literal
 
 from src.intake import card_tables
+from src.intake import taught_labels as taught
 from src.intake.revisions import live_cell_text, live_text
 
 logger = logging.getLogger(__name__)
@@ -812,8 +813,14 @@ def _asks_a_question(block: DocumentBlock) -> bool:
     )
 
 
-def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
+def segment_into_questions(
+    blocks: list[DocumentBlock], taught_labels: list[str] | None = None
+) -> list[QuestionChunk]:
     """Split ordered blocks into candidate questions on detected label lines.
+
+    `taught_labels` are example labels owners taught ("QGENDER.", "Question 5:");
+    each is applied only where this document writes several labels that way
+    (taught_labels.py), so a label taught on one client reads the next.
 
     A chunk runs from one detected question-label / section / instruction line up
     to (not including) the next detected label, accumulating every block in
@@ -821,6 +828,8 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
     Leading content before the first label is emitted as its own chunk with
     `candidate_qid=None` so nothing is silently dropped.
     """
+    if taught_labels:
+        blocks, _marked = taught.apply(blocks, taught_labels)
     chunks: list[QuestionChunk] = []
     current: list[DocumentBlock] = []
     current_qid: str | None = None

@@ -115,6 +115,13 @@ RULES_BY_AREA = {
   now against how many the project holds), and then offer the fix. Never reply that you
   cannot see the problem, and never ask the user to re-upload without looking first: the
   document is kept, so it can be read again from here.
+- If the diagnosis shows the document was NOT split into questions (few labelled
+  questions, one question holding most of the text), the reader does not know how this
+  document writes its labels. Do not guess one: ask the owner, with a clickable question,
+  to copy ONE question label exactly as the document shows it ("S5c.", "QGENDER.",
+  "Question 5:"), offering labels you can see in the source text as options. Then
+  propose_teach_reading with kind=question_label and that label. Its card previews how
+  many questions the document splits into; confirming reads the document again.
 - Hidden or derived variables — how one is coded, whether it will be filled, which
   have no rule — → variable_plan (the questionnaire's plan); whether the uploaded data
   agrees → data_vs_questionnaire.""",
@@ -424,7 +431,12 @@ TOOLS = [
     _fn("propose_teach_reading", "Prepare teaching the PARSER a convention of this "
         "document's format, so every question using it is read correctly, now and in later "
         "documents: `kind` (see reading_conventions), `pattern` = the literal text as it "
-        "appears in the document (e.g. \"[SA]\"), `value` = what it means (e.g. single).",
+        "appears in the document (e.g. \"[SA]\"), `value` = what it means (e.g. single). "
+        "kind=question_label teaches WHERE QUESTIONS START: `pattern` = one question label "
+        "copied exactly as the document writes it (\"S5c.\", \"QGENDER.\", \"Question 5:\"), "
+        "no value. Use it when extraction_diagnosis shows the document was not split into "
+        "questions; the card previews how many questions it finds and then reads the "
+        "document again.",
         {**_STUDY, "kind": {"type": "string"}, "pattern": {"type": "string"},
          "value": {"type": "string"}},
         ["study_id", "kind", "pattern"]),

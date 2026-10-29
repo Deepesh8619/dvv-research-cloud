@@ -885,6 +885,23 @@ def active_patterns_for_profile(db, profile_slug: str):
     return patterns
 
 
+def taught_question_labels(db) -> list[str]:
+    """Every active question-label example, from every format.
+
+    Shared across formats on purpose: segmentation runs before a document's
+    format is known, and each shape only applies to a document that writes
+    several labels that way (src/intake/taught_labels.py).
+    """
+    rows = (
+        db.query(ProfileRuleDB.pattern)
+        .filter(ProfileRuleDB.active.is_(True))
+        .filter(ProfileRuleDB.pattern_kind == "question_label")
+        .order_by(ProfileRuleDB.ordinal)
+        .all()
+    )
+    return list(dict.fromkeys(r.pattern for r in rows if r.pattern))
+
+
 def init_db():
     """Initialize database tables."""
     Base.metadata.create_all(bind=engine)

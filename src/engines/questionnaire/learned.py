@@ -18,6 +18,9 @@ Six kinds, one per decision the parsers actually make:
     randomize_signal "[SCRAMBLE]"        -> (no value)      (directive lines)
     screen_out_range "CONTINUE IF AGES"  -> (no value)      (numeric range screen-out)
     hidden_variable  "SAMPLE SOURCE"     -> (no value)      (computed, never asked)
+    question_label   "QGENDER."          -> (no value)      (where a question starts;
+                                                             a SHAPE learned from the
+                                                             example, taught_labels.py)
 
 **Patterns are literal fragments, not regexes.** A founder types what they see
 in the document — `[SHOWCARD]` — and it is matched case-insensitively as a
@@ -55,6 +58,7 @@ PATTERN_KINDS = frozenset(
         "randomize_signal",
         "screen_out_range",
         "hidden_variable",
+        "question_label",
     }
 )
 
@@ -107,6 +111,13 @@ def validate_pattern(kind: str, pattern: str, value: str) -> str | None:
         return "The text to look for cannot be empty."
     if len((pattern or "").strip()) < 2:
         return "The text to look for is too short to identify a convention reliably."
+    if kind == "question_label":
+        from src.intake.taught_labels import shape_from_example
+
+        if shape_from_example(pattern) is None:
+            return ("Give one question label exactly as the document writes it, "
+                    "e.g. \"S5c.\" or \"QGENDER.\" — up to 30 characters, with a letter.")
+        return None
     allowed = _ALLOWED_VALUES.get(kind)
     if allowed is None:
         return None  # randomize_signal carries no value

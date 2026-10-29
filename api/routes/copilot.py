@@ -1490,6 +1490,7 @@ def make_executor(db: Session, user: UserDB):
         "randomize_signal": "means the options are shuffled",
         "screen_out_range": "introduces a range screen-out",
         "hidden_variable": "marks a computed variable that is never asked",
+        "question_label": "is how this format writes a question label",
     }
 
     #: How people name a question type, in the words the parser uses.
@@ -1511,6 +1512,49 @@ def make_executor(db: Session, user: UserDB):
         owners = [k for k, allowed in _ALLOWED_VALUES.items() if value in allowed]
         return owners[0] if len(owners) == 1 else kind
 
+    def _propose_label(s, row, slug: str, example: str):
+        """Teach where questions start, previewed on the document itself.
+
+        The card says how many questions the archived document splits into
+        today and with this label, so the owner confirms a measured change —
+        and a label the document does not use is refused before it is saved.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from api.db import taught_question_labels
+        from api.routes import questionnaire as qroutes
+        from src.intake.questionnaire_loader import segment_into_questions
+
+        if not row.source_file_b64:
+            raise _ToolError("the document was not archived for this study, so a label "
+                             "cannot be checked against it; upload it again")
+        with tempfile.TemporaryDirectory() as folder:
+            path = qroutes._archived_source(db, row, Path(folder))
+            blocks = qroutes.load_pdf(path) if path.suffix == ".pdf" else qroutes.load_docx(path)
+        known = taught_question_labels(db)
+        before = segment_into_questions(blocks, known)
+        after = segment_into_questions(blocks, [*known, example])
+        labelled = lambda chunks: [c.candidate_qid for c in chunks if c.candidate_qid]  # noqa: E731
+        now, then = labelled(before), labelled(after)
+        if len(then) <= len(now):
+            raise _ToolError(
+                f"\"{example}\" does not find any more questions in this document "
+                f"({len(now)} either way). It needs at least 3 lines that start the same "
+                "way; give a label copied exactly as the document writes it.")
+        gained = [q for q in then if q not in now]
+        return propose(
+            "teach", f"Teach how questions start: labels written like \"{example}\"",
+            f"This document splits into {len(now)} labelled questions today and "
+            f"{len(then)} with it (new: {', '.join(gained[:12])}"
+            f"{'…' if len(gained) > 12 else ''}). Confirm saves it and reads this "
+            "questionnaire again from the document as a new version — the current one "
+            "and its approvals are kept. Any later document writing labels this way is "
+            "read the same way.",
+            "POST", f"/profiles/{slug}/rules",
+            {"pattern_kind": "question_label", "pattern": example, "scope": "profile",
+             "study_id": s.id})
+
     def propose_teach_reading(args):
         from api.auth import UserRole as Role
         from api.routes.corrections import _CORRECTION_ROLES, _profile_slug
@@ -1529,6 +1573,8 @@ def make_executor(db: Session, user: UserDB):
         kind = _kind_for(str(args.get("kind") or "").strip().lower(), value)
         if problem := validate_pattern(kind, pattern, value):
             raise _ToolError(problem)
+        if kind == "question_label":
+            return _propose_label(s, row, slug, pattern)
         needle = pattern.strip("[]").strip().lower()
         hits = [x.qid for x in definition.questions
                 if needle in (x.source_text or x.text or "").lower()]
