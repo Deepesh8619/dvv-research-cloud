@@ -29,7 +29,7 @@ AREAS: dict[str, tuple[str, ...]] = {
         "fieldwork_from_data", "vendor_scorecard", "propose_open_link", "propose_set_hold",
         "propose_close_link", "propose_set_look", "propose_add_quota", "propose_materialize"),
     "data": ("make_tables", "excel_report", "ask_data", "analysis_methods", "run_method",
-             "variable_plan",
+             "variable_plan", "weighting_status", "propose_weighting",
              "data_vs_questionnaire", "report_findings"),
     "cleaning": ("cleaning_status", "qc_findings", "fieldwork_from_data",
                  "propose_remove_respondents", "propose_lock_cleaning"),
@@ -52,7 +52,7 @@ _INTENT: dict[str, re.Pattern] = {area: re.compile(words, re.I) for area, words 
     "data": r"table|crosstab|cross.?tab|banner|by (?:age|gender|region|generation|\w+)|"
             r"chart|graph|plot|percent|%|average|mean|significan|turf|maxdiff|"
             r"van westendorp|driver|price|variable|column|weight|net\b|top.?2|breakdown|"
-            r"excel|workbook|spreadsheet|xlsx|refresh",
+            r"excel|workbook|spreadsheet|xlsx|refresh|weight|rake|raking|rim\b|target",
     "cleaning": r"clean|speeder|straight.?lin|flag|duplicate|bot\b|fraud|authentic|"
                 r"remove|bad respondent|quality|lock",
     "open_ends": r"open.?end|verbatim|coded|coding|codeframe|said|comment|write.?in|\bcode\b",
@@ -82,7 +82,7 @@ LABELS = {
     "soft_launch_check": "Running the soft-launch check",
     "field_projection": "Projecting the fieldwork", "fieldwork_from_data": "Reading the fieldwork",
     "vendor_scorecard": "Scoring the vendors", "make_tables": "Computing the tables",
-    "excel_report": "Building the Excel report",
+    "excel_report": "Building the Excel report", "weighting_status": "Reading the weighting",
     "ask_data": "Asking the data", "analysis_methods": "Checking which methods fit",
     "run_method": "Running the analysis",
     "data_vs_questionnaire": "Comparing data and questionnaire",

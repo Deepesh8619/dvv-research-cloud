@@ -1135,6 +1135,39 @@ def make_executor(db: Session, user: UserDB):
                        + ". You can see and delete it under Memory in this panel.",
                        "POST", "/copilot/memories", body)
 
+    def propose_weighting(args):
+        """Rim weighting to the user's targets, previewed on the card before it is applied."""
+        from api.routes.methods import WeightingRequest, weighting_preview
+
+        s = study(args)
+        targets = args.get("targets") or {}
+        if not isinstance(targets, dict) or not targets:
+            raise _ToolError('targets look like {"S1": {"1": 49, "2": 51}, '
+                             '"S4b": {"1": 17, "2": 21, "3": 38, "4": 24}} — variable, code, share')
+        try:
+            body = WeightingRequest(targets={str(v): {str(c): float(x) for c, x in cells.items()}
+                                             for v, cells in targets.items()},
+                                    **{k: float(args[k]) for k in ("cap_low", "cap_high")
+                                       if args.get(k) is not None})
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise _ToolError(f"targets must be variable -> code -> share: {exc}") from exc
+        report = weighting_preview(s.id, body, db=db, user=user)
+        lines = []
+        for var, cells in report["targets"].items():
+            lines.append(f"{var}: " + ", ".join(
+                f"{c['label']} {c['unweighted_pct']}%→{c['weighted_pct']}% "
+                f"(target {c['target_pct']}%)"
+                for c in cells.values()))
+        detail = (f"Efficiency {report['efficiency_pct']}% (effective sample "
+                  f"{report['effective_n']} of {report['n']}); weights {report['min_weight']}–"
+                  f"{report['max_weight']}" + (", converged" if report["converged"]
+                                               else ", DID NOT fully converge")
+                  + f". {'; '.join(lines)}. Adds dvv_weight to the data; tables use it when "
+                  "asked for weighted figures.")
+        card = propose("weighting", f"Weight {s.client_name} to {', '.join(body.targets)}",
+                       detail, "POST", f"/studies/{s.id}/weighting", body.model_dump())
+        return {**card, "preview": report}
+
     def propose_open_link(args):
         s = study(args)
         survey(args)  # refuses when nothing is approved
@@ -1535,6 +1568,7 @@ def make_executor(db: Session, user: UserDB):
         "vendor_scorecard": screen(_route("vendors", "vendor_scorecard"),
                                    UserRole.OWNER, UserRole.ANALYST),
         "ledger_check": screen(_route("platform", "verify_ledger")),
+        "weighting_status": screen(_route("methods", "weighting_status")),
         "report_findings": report_findings,
         "variable_plan": variable_plan,
         "open_end_coding": open_end_coding,
@@ -1544,6 +1578,7 @@ def make_executor(db: Session, user: UserDB):
         "data_variables": data_variables,
         "product_help": product_help,
         "propose_open_link": propose_open_link,
+        "propose_weighting": propose_weighting,
         "propose_remember": propose_remember,
         "propose_remove_respondents": propose_remove_respondents,
         "propose_lock_cleaning": propose_lock_cleaning,
@@ -1664,6 +1699,12 @@ def _project_card(db: Session, study) -> str:
                              f"rules broken, {match.get('missing_in_data', 0)} questions not in "
                              f"the data, {match.get('rules_met', 0)} rules met")
         lines.append(f"- Tables: {'built' if study.excel_path else 'not built yet'}")
+        if w := (study.study_metadata or {}).get("weighting"):
+            lines.append(f"- Weighting: applied (dvv_weight, rim on {', '.join(w['targets'])}, "
+                         f"efficiency {w['report']['efficiency_pct']}%) — pass weight "
+                         "dvv_weight for weighted tables")
+        else:
+            lines.append("- Weighting: none (tables are unweighted)")
     except Exception:  # noqa: BLE001 - a card is a convenience; the answer must not fail on it
         logger.exception("project card for %s", study.id)
     return "\n".join(lines)
