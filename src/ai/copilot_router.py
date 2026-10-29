@@ -111,6 +111,18 @@ def areas_for(message: str, screen: str = "", earlier_tools: list[str] | None = 
     return found
 
 
+# Questions that need reasoning or writing, not a lookup: the larger model first.
+_HEAVY = re.compile(
+    r"\b(why|explain|interpret|summar|insight|story|storyline|recommend|implication|"
+    r"compare|plan|strategy|draft|write|narrative|what (?:does|do) (?:this|these|it) mean|"
+    r"so what|analy[sz]|deep.?dive|executive|takeaway|hypothes)", re.I)
+
+
+def is_heavy(message: str, areas: set[str]) -> bool:
+    """Reasoning, explaining or writing — or a long, multi-part request."""
+    return bool(_HEAVY.search(message)) or len(message) > 280 or "reports" in areas
+
+
 def route(message: str, all_tools: list[str], screen: str = "",
           earlier_tools: list[str] | None = None) -> list[str]:
     """The tool names to offer, in the order of `all_tools`. Everything when
@@ -129,4 +141,6 @@ if __name__ == "__main__":
     assert "cleaning_status" in route("how many speeders?", tools)
     assert route("hello there friend", tools) == tools
     assert "make_tables" in route("1", tools, earlier_tools=["make_tables"])
+    assert is_heavy("why did satisfaction drop among women?", set())
+    assert not is_heavy("crosstab Q4 by gender", {"data"})
     print("ok")

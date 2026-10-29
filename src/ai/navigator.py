@@ -484,6 +484,7 @@ def _compatible_chat(
     with_tools: bool = True,
     tools_subset: list[str] | None = None,
     tools_schema: list[dict] | None = None,
+    max_tokens: int = 1500,
 ) -> dict:
     """One chat-completions call to an open-model provider, with one 429 retry.
 
@@ -500,7 +501,10 @@ def _compatible_chat(
         if not api_key:
             raise BackendUnavailable(f"{key_env} not set")
         headers["Authorization"] = f"Bearer {api_key}"
-    body_obj = {"model": model, "max_tokens": 1500, "temperature": 0, "messages": messages}
+    # Temperature 0: these calls choose tools and report figures, where the same
+    # question must get the same answer. Prose tasks set their own (router).
+    body_obj = {"model": model, "max_tokens": max_tokens, "temperature": 0,
+                "messages": messages}
     if with_tools:
         body_obj["tools"] = tools_schema if tools_schema is not None else _groq_tools(tools_subset)
     request = urllib.request.Request(url, data=json.dumps(body_obj).encode(), headers=headers)
