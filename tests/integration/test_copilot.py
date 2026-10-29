@@ -1822,3 +1822,70 @@ def test_gold_repeats_find_the_unstable_cases(monkeypatch):
         "z: skill must be one of " + ", ".join(gold.SKILLS),
         "z: study needs an id or a source filename fragment",
         "z: unknown expectation ['oops']", "z: no tool ['no_such_tool']"]
+
+
+def test_weighting_preview_apply_use_and_remove(client, monkeypatch, tmp_path):  # noqa: F811
+    import polars as pl
+
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    targets = {"GEND": {"1": 40, "2": 60}, "AGEB": {"1": 70, "2": 30}}
+    preview = test_client.post("/api/studies/s_wb/weighting/preview",
+                               json={"targets": targets}).json()
+    assert preview["converged"] and preview["targets"]["GEND"]["2"]["weighted_pct"] == 60.0
+    assert preview["targets"]["GEND"]["2"]["label"] == "Female" and preview["n"] == 40
+    assert test_client.get("/api/studies/s_wb/weighting").json()["applied"] is False
+
+    applied = test_client.post("/api/studies/s_wb/weighting", json={"targets": targets}).json()
+    assert applied["weight_variable"] == "dvv_weight"
+    run = tmp_path / "run"
+    w = pl.read_parquet(run / "data.parquet")["dvv_weight"]
+    assert abs(w.mean() - 1) < 1e-9 and w.min() < 1 < w.max()
+    status = test_client.get("/api/studies/s_wb/weighting").json()
+    assert status["applied"] and status["stale"] is None
+    assert 0 < status["report"]["efficiency_pct"] < 100
+
+    # Weighted tables: female now 60% of the weighted total.
+    seen = _script(monkeypatch, ("tool", "make_tables", {
+        "study_id": "s_wb", "rows": ["GEND"], "columns": [], "weight": "dvv_weight"}),
+        ("text", "Weighted."))
+    resp = test_client.post("/api/copilot", json={"message": "weighted gender table"}).json()
+    (table,) = resp["tables"]
+    female = next(r for r in table["rows"] if r[0] == "Female")
+    assert female[1].startswith("60")
+    assert _tool_results(seen)[0]["success"]
+
+    # Cleaning removed a respondent: the weights no longer fit.
+    df = pl.read_parquet(run / "data.parquet")
+    df.head(39).write_parquet(run / "data.parquet")
+    assert "39 respondents" in test_client.get("/api/studies/s_wb/weighting").json()["stale"]
+
+    assert test_client.delete("/api/studies/s_wb/weighting").status_code == 204
+    assert "dvv_weight" not in pl.read_parquet(run / "data.parquet").columns
+    assert test_client.get("/api/studies/s_wb/weighting").json()["applied"] is False
+
+
+def test_weighting_refuses_codes_it_cannot_reach(client, tmp_path):  # noqa: F811
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    only_one = test_client.post("/api/studies/s_wb/weighting/preview",
+                                json={"targets": {"GEND": {"1": 100}}})
+    assert only_one.status_code == 422 and "no target" in only_one.json()["detail"]
+    wrong_code = test_client.post("/api/studies/s_wb/weighting/preview",
+                                  json={"targets": {"GEND": {"1": 50, "9": 50}}})
+    assert wrong_code.status_code == 422 and "1 Male" in wrong_code.json()["detail"]
+
+
+def test_the_copilot_previews_weighting_on_its_card(client, monkeypatch, tmp_path):  # noqa: F811
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    _script(monkeypatch, ("tool", "propose_weighting", {
+        "study_id": "s_wb", "targets": {"GEND": {"1": 49, "2": 51}}}), ("text", "Ready."))
+    resp = test_client.post("/api/copilot", json={"message": "weight gender to 49/51"}).json()
+    (card,) = resp["proposals"]
+    assert card["kind"] == "weighting" and card["path"] == "/studies/s_wb/weighting"
+    assert "Efficiency" in card["detail"] and "Female 50.0%→51.0% (target 51.0%)" in card["detail"]
+    assert test_client.get("/api/studies/s_wb/weighting").json()["applied"] is False  # not yet
+    confirmed = _confirm(test_client, card)
+    assert confirmed.status_code == 200
+    assert test_client.get("/api/studies/s_wb/weighting").json()["applied"] is True

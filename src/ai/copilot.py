@@ -135,6 +135,10 @@ RULES_BY_AREA = {
   ask_data for questions in words that are not a table (an average, a count, a why).
 - An Excel report the user describes ("one sheet per question, top-2-box in bold, a
   chart each") → excel_report, not make_tables.
+- Weighting: weighted tables pass weight "dvv_weight" only when weighting is applied
+  (project card or weighting_status) and not stale. To weight, the user gives the target
+  shares; propose_weighting previews it — report the efficiency and the largest weight,
+  and warn when efficiency is under 70%. Never invent population targets.
 - Never choose the columns yourself. If the user asked for tables "by" something
   without naming it, ask which — make_tables' refusals list the variables that work.
 - Asked for a table or a crosstab, report the cells make_tables returns. If it
@@ -349,6 +353,15 @@ TOOLS = [
         "'Acme calls quick-service restaurants QSR'). Never facts that a tool can look up.",
         {"scope": {"type": "string", "enum": ["user", "client"]}, "text": {"type": "string"},
          "study_id": {"type": "string"}}, ["scope", "text"]),
+    _fn("weighting_status", "The project's weighting: whether rim weights are applied "
+        "(dvv_weight), the targets, efficiency and effective sample size, achieved vs target "
+        "shares, and whether the data changed since (stale).", _STUDY, ["study_id"]),
+    _fn("propose_weighting", "Prepare rim weighting (raking) to target shares: targets = "
+        "{variable: {code: share}} for each weighting variable (percentages fine). The card "
+        "previews efficiency, extreme weights and achieved shares before it is applied. Use "
+        "the data's codes (data_variables) and the user's figures — never invent targets.",
+        {**_STUDY, "targets": {"type": "object"}, "cap_low": {"type": "number"},
+         "cap_high": {"type": "number"}}, ["study_id", "targets"]),
     _fn("propose_open_link", "Prepare opening a fielding link for the approved "
         "questionnaire, held at soft_launch_limit completes (default 50).",
         {**_STUDY, "soft_launch_limit": {"type": "integer"}}, ["study_id"]),

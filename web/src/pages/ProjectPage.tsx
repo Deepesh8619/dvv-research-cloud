@@ -14,6 +14,7 @@ import ReportPanel from '../components/ReportPanel'
 import TablesPanel from '../components/TablesPanel'
 import TrackerPanel from '../components/TrackerPanel'
 import MethodsPanel from '../components/MethodsPanel'
+import WeightingPanel from '../components/WeightingPanel'
 import LogicMap from '../components/LogicMap'
 import VariablesPanel from '../components/VariablesPanel'
 import NoticePanel from '../components/NoticePanel'
@@ -557,6 +558,7 @@ function ReportsTab({ study }: { study: Study }) {
       <FindingsPanel studyId={study.id} />
       <TablesPanel studyId={study.id} />
       <TrackerPanel study={study} />
+      <WeightingPanel studyId={study.id} />
       <MethodsPanel studyId={study.id} />
       <div className="grid grid-cols-2 gap-6">
         {items.map((item) => (

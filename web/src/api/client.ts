@@ -104,6 +104,32 @@ export interface ProfileVariable {
   top_values?: Array<{ value: unknown; count: number }>
 }
 
+/** variable -> code -> target share (percent). */
+export type WeightTargets = Record<string, Record<string, number>>
+
+export interface WeightingReport {
+  converged: boolean
+  iterations: number
+  efficiency_pct: number
+  effective_n: number
+  n: number
+  min_weight: number
+  max_weight: number
+  trimmed: number
+  targets: Record<string, Record<string, { label: string; target_pct: number; weighted_pct: number; unweighted_pct: number }>>
+}
+
+export interface WeightingStatus {
+  applied: boolean
+  weight_variable: string | null
+  stale?: string | null
+  targets?: WeightTargets
+  report?: WeightingReport
+  applied_by?: string
+  applied_at?: string
+  candidates: Array<{ name: string; label: string; codes: Array<{ code: number; label: string }> }>
+}
+
 export interface StudyProfile {
   ready: boolean
   variables: ProfileVariable[]
@@ -331,6 +357,12 @@ export const studiesApi = {
   /** The range this table's rows take across past studies. */
   norms: async (id: string, tableId: string) => api.get<Norms>(`/studies/${id}/tables/${tableId}/norms`),
   methodInputs: async (id: string) => api.get<MethodInputs>(`/studies/${id}/methods`),
+  weighting: async (id: string) => api.get<WeightingStatus>(`/studies/${id}/weighting`),
+  previewWeighting: async (id: string, targets: WeightTargets) =>
+    api.post<WeightingReport>(`/studies/${id}/weighting/preview`, { targets }),
+  applyWeighting: async (id: string, targets: WeightTargets) =>
+    api.post<WeightingStatus>(`/studies/${id}/weighting`, { targets }),
+  removeWeighting: async (id: string) => api.delete(`/studies/${id}/weighting`),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   runMethod: async (id: string, body: MethodRequest) => api.post<any>(`/studies/${id}/methods`, body),
   stackCheck: async (id: string, others: string[]) =>

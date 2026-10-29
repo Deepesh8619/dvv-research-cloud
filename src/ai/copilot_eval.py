@@ -25,6 +25,7 @@ CARD_KINDS = frozenset({
     "look", "approve_clean", "quota", "edit_question", "reread", "in_link",
     "approve_question", "delete_question", "teach",
     "remove_respondents", "lock_cleaning", "code_open_ends", "draft_report", "remember",
+    "weighting",
 })
 EXPECT_KEYS = frozenset({
     "tools", "tools_any", "no_tools", "cards", "cards_allowed", "card_mentions",
