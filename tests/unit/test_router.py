@@ -594,3 +594,19 @@ def test_a_malformed_tool_call_is_retried_then_reported_as_a_model_error(monkeyp
     with pytest.raises(router.ModelOutputError):
         router.http_json(urllib.request.Request("https://api.groq.com/x"), 5)
     assert calls["n"] == 2
+
+
+def test_questionnaire_work_falls_back_to_the_second_bedrock_model(monkeypatch):
+    """Live: one throttled call left the question agent with nothing to try."""
+    from src.ai import router
+
+    monkeypatch.setenv("BEDROCK_API_KEY", "bk")
+    for k in ("GROQ_API_KEY", "CEREBRAS_API_KEY", "HF_TOKEN", "BEDROCK_FALLBACK_MODEL",
+              "BEDROCK_FALLBACK_REGION"):
+        monkeypatch.delenv(k, raising=False)
+    models = [c["model"] for c in router._extraction_chain()]
+    assert models == [router.bedrock_model(), "qwen.qwen3-235b-a22b-2507-v1:0"]
+    monkeypatch.setenv("BEDROCK_FALLBACK_REGION", "us-east-1")  # another endpoint: not here
+    assert [c["model"] for c in router._extraction_chain()] == [router.bedrock_model()]
+    assert "rate limit" in router.why_unavailable(Exception("HTTP 429: Too many requests"))
+    assert "too long" in router.why_unavailable(Exception("The read operation timed out"))

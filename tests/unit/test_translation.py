@@ -87,4 +87,4 @@ def test_private_model_route_never_uses_a_free_tier(monkeypatch):
         "HF_TOKEN": True})
     monkeypatch.setattr(router, "_run_chain", lambda chain, *a: seen.append(chain))
     router.run_private("x", {})
-    assert [step["backend"] for step in seen[0]] == ["bedrock"]
+    assert {step["backend"] for step in seen[0]} == {"bedrock"}  # its two models, no free tier
