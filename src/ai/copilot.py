@@ -109,6 +109,9 @@ Rules:
   report's findings, data vs questionnaire, fieldwork from a data file, advanced
   methods, vendors, compliance, the record's integrity, the team and AI costs — read it
   with that screen's tool and answer from what it returns.
+- When the user states a lasting preference or a client's convention ("always",
+  "from now on", "my usual…", "this client calls X…"), offer propose_remember. Apply what
+  is listed as Remembered, and say when an answer used it.
 - Never choose the columns yourself. If the user asked for tables "by" something
   without naming it, ask which — make_tables' refusals list the variables that work.
 - Asked for a table or a crosstab, report the cells make_tables returns. If it
@@ -280,6 +283,12 @@ TOOLS = [
         {**_STUDY, "variables": {"type": "array", "items": {"type": "string"}}}, ["study_id"]),
     _fn("propose_draft_report", "Prepare drafting the cited report from the findings; each "
         "sentence cites its table.", _STUDY, ["study_id"]),
+    _fn("propose_remember", "Prepare remembering something for later answers: the user's own "
+        "lasting preference (scope user: 'my usual banner is age x gender x region', "
+        "'answer in short bullets') or a client's convention (scope client, with study_id: "
+        "'Acme calls quick-service restaurants QSR'). Never facts that a tool can look up.",
+        {"scope": {"type": "string", "enum": ["user", "client"]}, "text": {"type": "string"},
+         "study_id": {"type": "string"}}, ["scope", "text"]),
     _fn("propose_open_link", "Prepare opening a fielding link for the approved "
         "questionnaire, held at soft_launch_limit completes (default 50).",
         {**_STUDY, "soft_launch_limit": {"type": "integer"}}, ["study_id"]),
@@ -351,6 +360,10 @@ def _providers() -> list[tuple[str, str, str | None, str]]:
         from src.ai.router import bedrock_chat_url, bedrock_model
 
         out.append(("Bedrock", bedrock_chat_url(), "BEDROCK_API_KEY", bedrock_model()))
+        from src.ai.router import bedrock_fallback
+
+        if (second := bedrock_fallback()) and second[1] != bedrock_model():
+            out.append(("Bedrock fallback", second[0], "BEDROCK_API_KEY", second[1]))
     host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
     out.append(("local model", f"{host}/v1/chat/completions", None,
                 os.environ.get("OLLAMA_EXTRACT_MODEL", "llama3.2:3b")))

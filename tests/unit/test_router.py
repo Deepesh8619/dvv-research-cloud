@@ -549,7 +549,7 @@ def test_the_copilot_tries_bedrock_first(monkeypatch):
     monkeypatch.setenv("BEDROCK_API_KEY", "bk")
     monkeypatch.setenv("GROQ_API_KEY", "gk")
     labels = [p[0] for p in copilot._providers()]
-    assert labels == ["Bedrock", "local model"]  # a Groq key is ignored
+    assert labels == ["Bedrock", "Bedrock fallback", "local model"]  # a Groq key is ignored
 
 
 

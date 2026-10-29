@@ -42,3 +42,28 @@ if used:
 else:
     print("WARN: the copilot answered without calling a tool. On Bedrock, set in deploy/.env\n"
           "      BEDROCK_BASE_URL=https://bedrock-mantle.<region>.api.aws/v1  then ./dvv up")
+
+
+# The fallback on its own: the main model is fine most days, so a broken
+# fallback would otherwise only be discovered on the day it is needed.
+import src.ai.copilot as copilot  # noqa: E402
+
+second = [p for p in copilot._providers() if p[0] == "Bedrock fallback"]
+if not second:
+    print("copilot fallback: off (set BEDROCK_FALLBACK_MODEL to turn it on)")
+else:
+    used.clear()
+    real = copilot._providers
+    copilot._providers = lambda: second
+    try:
+        _, _, who = run_copilot("How many projects are there?", [], execute, user="check",
+                                role="owner")
+        print(f"copilot fallback ({second[0][3]}): answered by {who}; "
+              f"tools used: {', '.join(used) or 'none'} — {'PASS' if used else 'WARN'}")
+    except Exception as exc:  # noqa: BLE001 - say what failed, in AWS's words
+        print(f"copilot fallback ({second[0][3]}): FAILED — {exc}\n"
+              "      If the model is not offered in this region, either set\n"
+              "      BEDROCK_FALLBACK_REGION (client text then leaves this region) or\n"
+              "      BEDROCK_FALLBACK_MODEL=none in deploy/.env, then ./dvv up")
+    finally:
+        copilot._providers = real

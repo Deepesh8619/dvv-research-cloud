@@ -486,6 +486,26 @@ def bedrock_model() -> str:
     return os.environ.get("BEDROCK_MODEL") or BEDROCK_DEFAULT_MODEL
 
 
+#: The Copilot's second model, on Bedrock in the client's AWS account — never a
+#: laptop. Tried when the main model fails, before the small local one.
+BEDROCK_FALLBACK_DEFAULT_MODEL = "meta.llama3-3-70b-instruct-v1:0"
+
+
+def bedrock_fallback() -> tuple[str, str] | None:
+    """(chat URL, model id) of the Bedrock fallback, or None when switched off
+    (BEDROCK_FALLBACK_MODEL=none). Same region as the main model unless
+    BEDROCK_FALLBACK_REGION says otherwise — a different region can mean client
+    text leaves the country, so that is a setting someone chooses, never a default."""
+    model = os.environ.get("BEDROCK_FALLBACK_MODEL", BEDROCK_FALLBACK_DEFAULT_MODEL).strip()
+    if not model or model.lower() == "none":
+        return None
+    region = os.environ.get("BEDROCK_FALLBACK_REGION") or os.environ.get("BEDROCK_REGION",
+                                                                          "ap-south-1")
+    base = os.environ.get("BEDROCK_FALLBACK_BASE_URL",
+                          f"https://bedrock-runtime.{region}.amazonaws.com/openai/v1")
+    return base.rstrip("/") + "/chat/completions", model
+
+
 def _bedrock_generate(model: str, prompt: str, schema: dict, timeout: int) -> dict:
     """Structured extraction via Amazon Bedrock, in the client's own AWS region.
 

@@ -206,7 +206,7 @@ def test_screen_outs_carry_the_rule_that_fired(client, monkeypatch):  # noqa: F8
 
 
 def test_a_provider_failing_mid_answer_does_not_duplicate_cards(client, monkeypatch):  # noqa: F811
-    """Bedrock prepares a card, then dies; the local model redoes the answer. One card."""
+    """Bedrock prepares a card, then dies; the Bedrock fallback redoes the answer. One card."""
     test_client, sf, _ = client
     _make_study(sf)
     _make_questionnaire(sf)
@@ -230,7 +230,7 @@ def test_a_provider_failing_mid_answer_does_not_duplicate_cards(client, monkeypa
     monkeypatch.setattr("src.ai.copilot._compatible_chat", flaky)
     monkeypatch.setenv("BEDROCK_API_KEY", "bk")
     resp = test_client.post("/api/copilot", json={"message": "close it"}).json()
-    assert resp["answered_by"] == "local model"
+    assert resp["answered_by"] == "Bedrock fallback"
     assert len(resp["proposals"]) == 1
 
 
@@ -241,7 +241,7 @@ def test_client_data_never_goes_to_a_free_tier(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "gk")
     monkeypatch.setenv("CEREBRAS_API_KEY", "csk")
     monkeypatch.setenv("BEDROCK_API_KEY", "bk")
-    assert [label for label, *_ in _providers()] == ["Bedrock", "local model"]
+    assert [label for label, *_ in _providers()] == ["Bedrock", "Bedrock fallback", "local model"]
     for _label, url, *_ in _providers():
         assert "groq" not in url and "cerebras" not in url
 
@@ -1527,3 +1527,64 @@ def test_a_report_cannot_be_drafted_before_there_are_tables(client, monkeypatch)
     resp = test_client.post("/api/copilot", json={"message": "draft the report"}).json()
     (refused,) = _tool_results(seen)
     assert "no tables to report on yet" in refused["error"] and resp["proposals"] == []
+
+
+def test_memory_is_per_user_and_per_client_and_reaches_the_model(client, monkeypatch):  # noqa: F811
+    """Phase 4: your usual banner and a client's terms, kept across conversations."""
+    import src.ai.copilot as cp
+
+    test_client, sf, state = client
+    _make_study(sf)
+    mine = test_client.post("/api/copilot/memories",
+                            json={"scope": "user", "text": "Answer in short bullets"}).json()
+    theirs = test_client.post("/api/copilot/memories", json={
+        "scope": "client", "text": "Calls quick-service restaurants QSR",
+        "study_id": "study_f1"}).json()
+    assert theirs["client"] == "Test"
+    listed = test_client.get("/api/copilot/memories?study_id=study_f1").json()
+    assert [m["id"] for m in listed] == [mine["id"], theirs["id"]]
+    assert [m["id"] for m in test_client.get("/api/copilot/memories").json()] == [mine["id"]]
+
+    prompts: list[str] = []
+    _script(monkeypatch, ("text", "Noted."))
+    scripted = cp._compatible_chat
+
+    def capture(*a, **k):
+        prompts.append(json.dumps(a[4] if len(a) > 4 else k.get("messages")))
+        return scripted(*a, **k)
+
+    monkeypatch.setattr(cp, "_compatible_chat", capture)
+    test_client.post("/api/copilot", json={"message": "hello", "study_id": "study_f1"})
+    assert "Answer in short bullets" in prompts[0] and "[Test] Calls quick-service" in prompts[0]
+
+    state["role"] = "reviewer"
+    assert test_client.post("/api/copilot/memories", json={
+        "scope": "client", "text": "x y z", "study_id": "study_f1"}).status_code == 403
+    assert test_client.delete(f"/api/copilot/memories/{theirs['id']}").status_code == 404
+    assert test_client.delete(f"/api/copilot/memories/{mine['id']}").status_code == 204
+
+
+def test_the_copilot_offers_to_remember_by_card(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    _script(monkeypatch, ("tool", "propose_remember", {"scope": "client", "study_id": "study_f1",
+                                                       "text": "Banner is age x region"}),
+            ("text", "I can remember that."))
+    resp = test_client.post("/api/copilot", json={"message": "our banner is always age x region"})
+    (card,) = resp.json()["proposals"]
+    assert card["path"] == "/copilot/memories" and card["body"]["scope"] == "client"
+    assert card["title"] == "Remember for Test: Banner is age x region"
+
+
+def test_the_fallback_model_is_bedrock_llama_after_the_main_one(monkeypatch):
+    from src.ai.copilot import _providers
+
+    monkeypatch.setenv("BEDROCK_API_KEY", "x")
+    monkeypatch.delenv("BEDROCK_FALLBACK_MODEL", raising=False)
+    labels = [(label, model) for label, _url, _key, model in _providers()]
+    assert labels[0][0] == "Bedrock"
+    assert labels[1] == ("Bedrock fallback", "meta.llama3-3-70b-instruct-v1:0")
+    assert labels[-1][0] == "local model"
+    assert "bedrock-runtime.ap-south-1" in _providers()[1][1]  # same region by default
+    monkeypatch.setenv("BEDROCK_FALLBACK_MODEL", "none")
+    assert "Bedrock fallback" not in [p[0] for p in _providers()]

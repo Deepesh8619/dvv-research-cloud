@@ -4,6 +4,7 @@ import { useLocation } from 'react-router-dom'
 import {
   CopilotChart,
   CopilotConversationSummary,
+  CopilotMemory,
   CopilotProposal,
   CopilotTable,
   copilotApi,
@@ -183,6 +184,52 @@ function FlagAnswer({ conversationId, seq, flagged, onChange }: {
         <button type="button" className="text-slate-500 hover:underline" onClick={() => setWriting(false)}>Cancel</button>
         {failed && <span className="text-red-600">Couldn't save. Try again.</span>}
       </div>
+    </div>
+  )
+}
+
+/** What the Copilot remembers: shown, and forgotten in one click. */
+function MemoryList({ studyId, onClose }: { studyId: string | null; onClose: () => void }) {
+  const [items, setItems] = useState<CopilotMemory[] | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    copilotApi.memories(studyId).then((r) => setItems(r.data)).catch(() => setFailed(true))
+  }, [studyId])
+  const forget = async (id: string) => {
+    try {
+      await copilotApi.forget(id)
+      setItems((xs) => (xs ?? []).filter((m) => m.id !== id))
+    } catch {
+      setFailed(true)
+    }
+  }
+  return (
+    <div className="border-b border-slate-100 bg-slate-50 px-4 py-3 text-xs" data-testid="copilot-memory">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="font-medium text-slate-700">What the Copilot remembers</p>
+        <button type="button" onClick={onClose} className="text-slate-500 hover:underline">Done</button>
+      </div>
+      {failed && <p className="text-red-600">Couldn't load or change the memory.</p>}
+      {items && items.length === 0 && (
+        <p className="text-slate-500">
+          Nothing yet. Tell it a lasting preference ("my usual banner is age by gender") or a client's
+          convention, and it offers to remember it.
+        </p>
+      )}
+      <ul className="space-y-1.5">
+        {items?.map((m) => (
+          <li key={m.id} className="flex items-start justify-between gap-2">
+            <span className="text-slate-700">
+              <span className="mr-1 rounded bg-white px-1 text-[10px] uppercase tracking-wide text-slate-500">
+                {m.scope === 'user' ? 'you' : m.client}
+              </span>
+              {m.text}
+            </span>
+            <button type="button" onClick={() => forget(m.id)} aria-label={`Forget: ${m.text}`}
+              className="shrink-0 text-slate-400 hover:text-red-600">Forget</button>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -432,6 +479,7 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
   const { pathname, search } = useLocation()
   const studyId = studyFromPath(pathname)
   const [status, setStatus] = useState<string | null>(null)
+  const [showMemory, setShowMemory] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -568,8 +616,8 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
       aria-label="Copilot"
       className="fixed right-0 top-14 bottom-0 z-40 w-full max-w-[420px] bg-white border-l border-slate-200 shadow-xl flex flex-col"
     >
-      <div className="flex items-start justify-between px-4 py-3 border-b border-slate-100">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-2 px-4 py-3 border-b border-slate-100">
+        <div className="min-w-[13rem] flex-1">
           <p className="font-semibold text-slate-900">Copilot</p>
           <p className="text-xs text-slate-500">
             {studyId ? `Looking at ${studyId}${focusQid ? ` · ${focusQid}` : ''}. ` : ''}Open-source models. It prepares actions;
@@ -594,6 +642,14 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
           )}
           <button
             type="button"
+            onClick={() => setShowMemory((v) => !v)}
+            aria-pressed={showMemory}
+            className="h-7 rounded border border-slate-200 px-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Memory
+          </button>
+          <button
+            type="button"
             onClick={startNew}
             disabled={busy || turns.length === 0}
             className="h-7 rounded border border-slate-200 px-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
@@ -610,6 +666,8 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
         </button>
         </div>
       </div>
+
+      {showMemory && <MemoryList studyId={studyId} onClose={() => setShowMemory(false)} />}
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 text-sm">
         {turns.length === 0 && (

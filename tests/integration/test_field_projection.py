@@ -27,7 +27,9 @@ def _field(sf, link_id: str, per_day: list[tuple[int, int]], target: int | None 
                 db.add(RespondentSessionDB(
                     id=f"rs_{link_id}_{n}", fielding_link_id=link_id, status_code=status,
                     entry_params={}, started_at=start.isoformat(),
-                    completed_at=(start + timedelta(minutes=10)).isoformat()))
+                    # Same instant: 10 minutes later crossed midnight when the suite ran
+                    # near noon, and the daily table grew a row.
+                    completed_at=start.isoformat()))
         db.commit()
     finally:
         db.close()

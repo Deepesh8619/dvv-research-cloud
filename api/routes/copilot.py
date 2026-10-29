@@ -21,17 +21,21 @@ from sqlalchemy.orm import Session
 from api.auth import UserRole, get_current_user, require_role, role_permits
 from api.db import (
     UserDB,
+    add_copilot_memory,
     answers_by_session,
     delete_copilot_conversation,
+    delete_copilot_memory,
     fielding_link_counts,
     flag_copilot_answer,
     get_copilot_conversation,
+    get_copilot_memory,
     get_db,
     get_fielding_link,
     get_study,
     list_copilot_answers,
     list_copilot_conversations,
     list_copilot_evals,
+    list_copilot_memories,
     list_copilot_messages,
     list_fielding_links_for_study,
     list_flagged_copilot_answers,
@@ -47,6 +51,7 @@ from api.models import (
     CopilotConversation,
     CopilotConversationSummary,
     CopilotFeedback,
+    CopilotMemoryRequest,
     CopilotProposal,
     CopilotRequest,
     CopilotResponse,
@@ -1009,6 +1014,24 @@ def make_executor(db: Session, user: UserDB):
             "current sentences.",
             "POST", f"/studies/{s.id}/report/draft")
 
+    def propose_remember(args):
+        """Keep a lasting preference or a client's convention, by confirmed card."""
+        scope = str(args.get("scope") or "user")
+        text = " ".join(str(args.get("text") or "").split())
+        if scope not in ("user", "client") or len(text) < 3:
+            raise _ToolError("scope is user or client, and text says what to remember")
+        body = {"scope": scope, "text": text[:500]}
+        whose = "you"
+        if scope == "client":
+            s = study(args)
+            body["study_id"] = s.id
+            whose = s.client_name
+        return propose("remember", f"Remember for {whose}: {text[:80]}",
+                       "Used in every later answer" + (" about this client's projects"
+                                                       if scope == "client" else "")
+                       + ". You can see and delete it under Memory in this panel.",
+                       "POST", "/copilot/memories", body)
+
     def propose_open_link(args):
         s = study(args)
         survey(args)  # refuses when nothing is approved
@@ -1417,6 +1440,7 @@ def make_executor(db: Session, user: UserDB):
         "data_variables": data_variables,
         "product_help": product_help,
         "propose_open_link": propose_open_link,
+        "propose_remember": propose_remember,
         "propose_remove_respondents": propose_remove_respondents,
         "propose_lock_cleaning": propose_lock_cleaning,
         "propose_code_open_ends": propose_code_open_ends,
@@ -1580,6 +1604,11 @@ def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> Co
             ) + "."
     from src.platform import usage
 
+    client = current.client_name if body.study_id and current else None
+    if remembered := list_copilot_memories(db, user.id, client)[-20:]:
+        page += "\nRemembered — apply unless the user says otherwise, and say when you do:\n" + \
+            "\n".join(f"- [{'you' if m['scope'] == 'user' else m['client']}] {m['text'][:200]}"
+                      for m in remembered)
     earlier = [x.get("tool", "") for m in (list_copilot_messages(db, conversation.id)[-2:]
                                           if conversation else [])
                for x in m.lookups or []]
@@ -1685,6 +1714,52 @@ def flag_answer(
     _own(db, conversation_id, user)
     if not flag_copilot_answer(db, conversation_id, seq, body.wrong, body.note.strip()):
         raise HTTPException(status_code=404, detail="No such answer")
+
+
+@router.get("/copilot/memories")
+def copilot_memories(
+    study_id: str | None = None,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """What the Copilot remembers for you, and for the client of `study_id`."""
+    s = get_study(db, study_id) if study_id else None
+    return list_copilot_memories(db, user.id, s.client_name if s else None)
+
+
+@router.post("/copilot/memories", status_code=201)
+def remember(
+    body: CopilotMemoryRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """Keep a preference (yours) or a convention (a client's: owner or analyst)."""
+    if body.scope == "user":
+        return add_copilot_memory(db, "user", body.text, user.name or user.email,
+                                  user_id=user.id)
+    if not role_permits(user, UserRole.OWNER, UserRole.ANALYST):
+        raise HTTPException(status_code=403, detail="Only an owner or analyst can set what "
+                                                    "the Copilot remembers about a client")
+    s = get_study(db, body.study_id or "")
+    if not s:
+        raise HTTPException(status_code=404, detail="A client memory needs the project it is for")
+    return add_copilot_memory(db, "client", body.text, user.name or user.email,
+                              client=s.client_name)
+
+
+@router.delete("/copilot/memories/{memory_id}", status_code=204)
+def forget(
+    memory_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    m = get_copilot_memory(db, memory_id)
+    mine = m is not None and m.scope == "user" and m.user_id == user.id
+    clients = m is not None and m.scope == "client" and role_permits(
+        user, UserRole.OWNER, UserRole.ANALYST)
+    if not (mine or clients):  # someone else's reads the same as none
+        raise HTTPException(status_code=404, detail="No such memory")
+    delete_copilot_memory(db, m)
 
 
 @router.get("/admin/copilot-answers")
