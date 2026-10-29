@@ -1948,13 +1948,75 @@ export const copilotApi = {
     studyId?: string | null,
     conversationId?: string | null,
     focusQid?: string | null,
+    screen?: string | null,
   ) =>
     api.post<CopilotReply>('/copilot', {
       message,
       ...(studyId ? { study_id: studyId } : {}),
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(focusQid ? { focus_qid: focusQid } : {}),
+      ...(screen ? { screen } : {}),
     }),
+
+  /**
+   * The same answer, announcing each step while it works ("Reading the Cleaning
+   * screen…"). Falls back to the plain request when the stream is unavailable
+   * (an older server, a proxy that will not stream).
+   */
+  askStreaming: async (
+    message: string,
+    onStep: (label: string) => void,
+    studyId?: string | null,
+    conversationId?: string | null,
+    focusQid?: string | null,
+    screen?: string | null,
+  ): Promise<CopilotReply> => {
+    const body = {
+      message,
+      ...(studyId ? { study_id: studyId } : {}),
+      ...(conversationId ? { conversation_id: conversationId } : {}),
+      ...(focusQid ? { focus_qid: focusQid } : {}),
+      ...(screen ? { screen } : {}),
+    }
+    let res: Response
+    try {
+      res = await fetch(`${API_BASE}/copilot/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...authHeaders() },
+        body: JSON.stringify(body),
+      })
+    } catch {
+      res = new Response(null, { status: 599 })
+    }
+    if (!res.ok || !res.body) {
+      if (res.status === 401) {
+        localStorage.removeItem('authToken')
+        window.location.href = '/login'
+      }
+      return (await copilotApi.ask(message, studyId, conversationId, focusQid, screen)).data
+    }
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let cut: number
+      while ((cut = buffer.indexOf('\n\n')) >= 0) {
+        const block = buffer.slice(0, cut)
+        buffer = buffer.slice(cut + 2)
+        const kind = block.match(/^event: (.*)$/m)?.[1]
+        const data = block.match(/^data: (.*)$/m)?.[1]
+        if (!kind || data === undefined) continue
+        const parsed = JSON.parse(data)
+        if (kind === 'step') onStep(parsed.label)
+        if (kind === 'done') return parsed as CopilotReply
+        if (kind === 'error') throw new Error(parsed.detail || 'The copilot could not answer.')
+      }
+    }
+    throw new Error('The copilot stopped before answering. Try again.')
+  },
 
   conversations: async () => api.get<CopilotConversationSummary[]>('/copilot/conversations'),
   conversation: async (id: string) => api.get<CopilotConversation>(`/copilot/conversations/${id}`),

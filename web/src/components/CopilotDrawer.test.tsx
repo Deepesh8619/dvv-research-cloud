@@ -20,9 +20,17 @@ const card = {
   body: { limit: 50 },
 }
 
-vi.mock('../api/client', () => ({
+vi.mock('../api/client', () => {
+  const ask = vi.fn()
+  return {
   copilotApi: {
-    ask: vi.fn(),
+    ask,
+    // The panel streams; these tests assert on the request it makes.
+    askStreaming: vi.fn(async (m: string, onStep: (l: string) => void, s?: string | null,
+      c?: string | null, f?: string | null) => {
+      onStep('Reading the project')
+      return (await ask(m, s, c, f)).data
+    }),
     confirm: vi.fn(),
     conversations: vi.fn().mockResolvedValue({ data: [] }),
     conversation: vi.fn(),
@@ -30,7 +38,8 @@ vi.mock('../api/client', () => ({
     excel: vi.fn().mockResolvedValue({ data: new Blob(['xlsx']) }),
   },
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : null),
-}))
+  }
+})
 
 async function ask(reply: string, proposals: CopilotProposal[] = [card]) {
   const { copilotApi } = await import('../api/client')
