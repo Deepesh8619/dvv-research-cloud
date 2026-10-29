@@ -63,7 +63,14 @@ def live_text(paragraph) -> tuple[str, list[str]]:
     kept: list[str] = []
     removed: list[str] = []
     for run in paragraph._p.iter(f"{W}r"):
-        text = "".join(node.text or "" for node in run.findall(f"{W}t"))
+        # In document order, a tab as a tab (a label separator) and a line break as
+        # a space: "C3<tab>CODE GENDER"
+        # was read as "C3CODE GENDER" and the label was lost (and a contents line
+        # as "KEY METRICS22"). Word writes both as elements, not characters.
+        text = "".join(
+            (node.text or "") if node.tag == f"{W}t"
+            else "\t" if node.tag == f"{W}tab" else " "
+            for node in run if node.tag in (f"{W}t", f"{W}tab", f"{W}br", f"{W}cr"))
         gone = "".join(node.text or "" for node in run.findall(f"{W}delText"))
         if gone:
             removed.append(gone)
