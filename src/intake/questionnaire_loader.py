@@ -401,6 +401,11 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
     for child in body.iterchildren():
         if child in para_map:
             para: Paragraph = para_map[child]
+            if _is_contents_entry(para):
+                # "KEY METRICS ....... 22" is the document's table of contents,
+                # not a question. Read as one, it became question SCREENER8
+                # "KEY METRICS22" (heading + page number) on a live GBK file.
+                continue
             text, removed = live_text(para)
             # Advanced for every paragraph Word still numbers — an empty one
             # included — and not for one deleted outright.
@@ -461,6 +466,26 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
             path.name, len(struck_out),
         )
     return blocks
+
+
+_CONTENTS_TITLE = re.compile(r"^\s*(table of contents|contents)\s*$", re.I)
+
+
+def _is_contents_entry(paragraph) -> bool:
+    """A table-of-contents line: Word's TOC styles ("TOC 1", "toc 2"), a link to
+    a `_Toc` heading bookmark, a PAGEREF/TOC field, or the "Contents" title.
+    Any one is enough — each is how Word writes its own contents, never how a
+    questionnaire writes a question."""
+    style = (paragraph.style.name or "").lower() if paragraph.style is not None else ""
+    if style.startswith("toc") or style in ("table of contents", "contents"):
+        return True
+    p = paragraph._p
+    if p.xpath('.//w:hyperlink[starts-with(@w:anchor, "_Toc")]'):
+        return True
+    if any(("PAGEREF _Toc" in t or t.strip().startswith("TOC "))
+           for t in p.xpath(".//w:instrText/text()")):
+        return True
+    return bool(_CONTENTS_TITLE.match(paragraph.text or "")) and len(paragraph.text) < 30
 
 
 def _is_list_paragraph(paragraph) -> bool:

@@ -1243,3 +1243,26 @@ def test_anchor_code_in_the_randomize_details_is_anchored():
                  options=[Option(code=c, label=f"L{c}") for c in (1, 2, 3)])
     _limits_and_exclusives_from_cells(q, SpecTableFields(qid="C_OFFER"))
     assert [o.anchored for o in q.options] == [False, False, True]
+
+
+def test_a_question_whose_reading_failed_is_still_required():
+    """A failed AI reading left a stand-in with required=False; the repair that
+    gave it a type kept that, so in a throttled hour those questions became
+    skippable in the live link. Open ends and documented "optional" stay optional."""
+    from src.core.survey_definition import Option, Question, QuestionType, SurveyDefinition
+    from src.engines.questionnaire.extractor import settle_required
+
+    yes_no = [Option(code=1, label="Yes"), Option(code=2, label="No")]
+    survey = SurveyDefinition(study_id="s", title="t", source="extracted", status="draft",
+                              questions=[
+        Question(qid="S3", text="Do you drink coffee?", type=QuestionType.SINGLE,
+                 options=yes_no, required=False),
+        Question(qid="D9", text="Your income (optional)", type=QuestionType.SINGLE,
+                 options=yes_no, required=False),
+        Question(qid="OE1", text="Anything else to add?", type=QuestionType.OPEN_TEXT,
+                 required=False),
+        Question(qid="INTRO", text="Welcome", type=QuestionType.INFO, required=False)])
+    settle_required(survey)
+    req = {q.qid: q.required for q in survey.questions}
+    assert req == {"S3": True, "D9": False, "OE1": False, "INTRO": False}
+    assert "not say it is optional" in survey.questions[0].extraction_evidence["required"]

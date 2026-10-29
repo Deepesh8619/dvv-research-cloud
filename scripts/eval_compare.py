@@ -52,6 +52,7 @@ sys.path.insert(0, str(REPO))
 
 from src.ai.router import BackendUnavailable, llm_key_presence  # noqa: E402
 from src.core.survey_definition import (  # noqa: E402
+    GRID_TYPES,
     Expression,
     Question,
     QuestionType,
@@ -335,7 +336,8 @@ class Diff(dict):
         super().__init__(verdict=verdict, kind=kind, detail=detail)
 
 
-def cmp_options(gold: list[dict], got: list[dict], what: str, flags: bool) -> list[Diff]:
+def cmp_options(gold: list[dict], got: list[dict], what: str, flags: bool,
+                shuffled: bool = True) -> list[Diff]:
     gm = {str(o["code"]): o for o in gold}
     pm = {str(o["code"]): o for o in got}
     out: list[Diff] = []
@@ -348,8 +350,12 @@ def cmp_options(gold: list[dict], got: list[dict], what: str, flags: bool) -> li
     if bad:
         out.append(Diff("OPTION_DIFF", f"{what}_label", f"{what} labels differ: " + "; ".join(bad[:5])))
     if flags:
-        for gk, pk, name in (("exclusive", "exclusive", "exclusive"), ("anchored", "anchored", "anchored"),
-                             ("other_specify", "other", "other_specify")):
+        # "Anchored" is behaviour only when the options are shuffled: in fixed order
+        # an option stays where the document put it either way, so a difference
+        # there is not one a respondent can meet.
+        kinds = (("exclusive", "exclusive", "exclusive"), ("anchored", "anchored", "anchored"),
+                 ("other_specify", "other", "other_specify"))
+        for gk, pk, name in (k for k in kinds if shuffled or k[0] != "anchored"):
             d = [c for c in gm if c in pm and bool(gm[c].get(gk)) != bool(pm[c].get(pk))]
             if d:
                 out.append(Diff("OPTION_DIFF", f"{what}_{name}", f"{what} {name} differs on codes {d}"))
@@ -840,16 +846,23 @@ def _parser_diffs(g: dict, q: Question) -> list[Diff]:
         return out
     if not same_text(g.get("text"), q.text):
         out.append(Diff("TEXT_DIFF", "text", f"text: ASKED '{clip(g.get('text'), 90)}' GOT '{clip(q.text, 90)}'"))
+    grid = q.type in GRID_TYPES or bool(g.get("rows"))
+    rnd_gold = g.get("randomize") or {}
+    shuffled = bool(rnd_gold.get("options")) or (bool(q.randomize_options) and not grid)
     if g.get("options") or q.options:
-        out += cmp_options(g.get("options") or [], p_opts(q.options), "option", True)
+        out += cmp_options(g.get("options") or [], p_opts(q.options), "option", True, shuffled)
     if g.get("rows") or q.rows:
         out += cmp_options(g.get("rows") or [], p_opts(q.rows), "row", False)
     if g.get("columns") or q.cols:
         out += cmp_options(g.get("columns") or [], p_opts(q.cols), "column", False)
     out += cmp_constraints(g, parser_limits(q), "PARSER")
-    rnd = (g.get("randomize") or {}).get("options")
+    # One flag in the parser, two in the gold: on a grid the parser's
+    # randomize_options shuffles the ROWS (extractor: `or shape.randomize_rows`),
+    # so it is compared with the gold's rows there, not with its options.
+    which = "rows" if grid else "options"
+    rnd = rnd_gold.get(which)
     if rnd is not None and bool(rnd) != bool(q.randomize_options):
-        out.append(Diff("CONSTRAINT_DIFF", "constraint_randomize", f"randomize options: ASKED {rnd} GOT {q.randomize_options}"))
+        out.append(Diff("CONSTRAINT_DIFF", "constraint_randomize", f"randomize {which}: ASKED {rnd} GOT {q.randomize_options}"))
     out += cmp_list_pipes(g, q)
     return out
 

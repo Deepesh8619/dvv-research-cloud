@@ -655,3 +655,41 @@ def test_a_closing_thank_you_after_the_last_table_is_not_an_answer() -> None:
     chunks = segment_into_questions(blocks)
     assert "Thank you" not in chunks[0].chunk_text
     assert chunks[-1].chunk_text.startswith("Thank you")
+
+
+def test_a_table_of_contents_is_not_read_as_questions(tmp_path):
+    """Live (GBK file): "KEY METRICS ...... 22" became question SCREENER8
+    "KEY METRICS22" — the contents page read as heading + page number."""
+    from docx import Document
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+
+    from src.intake.questionnaire_loader import load_docx, segment_into_questions
+
+    doc = Document()
+    doc.add_paragraph("Table of Contents")
+
+    def toc_line(text: str, page: int, anchor: str):
+        p = doc.add_paragraph()
+        p._p.append(parse_xml(
+            f'<w:hyperlink {nsdecls("w")} w:anchor="{anchor}"><w:r><w:t>{text}</w:t></w:r>'
+            f'<w:r><w:tab/></w:r><w:r><w:t>{page}</w:t></w:r></w:hyperlink>'))
+
+    toc_line("SCREENER", 3, "_Toc101")
+    toc_line("KEY METRICS", 22, "_Toc102")
+    p = doc.add_paragraph("CLASSIFICATION\t43")  # a field-built line, no hyperlink
+    p._p.append(parse_xml(
+        f'<w:r {nsdecls("w")}><w:instrText xml:space="preserve">'
+        ' PAGEREF _Toc103 \\h </w:instrText></w:r>'))
+    doc.add_paragraph("Q1. Do you drink coffee?")
+    doc.add_paragraph("1. Yes")
+    doc.add_paragraph("2. No")
+    path = tmp_path / "toc.docx"
+    doc.save(path)
+
+    blocks = load_docx(path)
+    texts = [b.text for b in blocks]
+    assert not any(t.startswith(("Table of Contents", "SCREENER", "KEY METRICS",
+                                 "CLASSIFICATION")) for t in texts), texts
+    chunks = segment_into_questions(blocks)
+    assert [c.candidate_qid for c in chunks] == ["Q1"]
