@@ -107,3 +107,17 @@ def test_a_document_with_one_labelled_table_is_left_alone(tmp_path):
     path = tmp_path / "one.docx"
     doc.save(path)
     assert any(b.block_type == "table" for b in load_docx(path))
+
+
+def test_the_question_in_a_second_language_is_not_an_answer(tmp_path):
+    doc = Document()
+    for n in range(3):
+        _card(doc, ["LANGUAGE", f"QL{n}.", "Which language would you prefer?",
+                    "¿En qué idioma preferiría completar esta encuesta?"],
+              [[["1", "2"], ["English/Ingles", "Spanish/Español"]]], ["Allow one response."])
+    path = tmp_path / "bilingual.docx"
+    doc.save(path)
+    blocks = load_docx(path)
+    survey = extract_survey_definition(segment_into_questions(blocks), "T", blocks=blocks)
+    q = next(q for q in survey.questions if q.qid == "QL0")
+    assert [(o.code, o.label) for o in q.options] == [(1, "English/Ingles"), (2, "Spanish/Español")]

@@ -104,7 +104,7 @@ from src.engines.questionnaire.section_paths import (
     apply_worded_asks,
 )
 from src.engines.questionnaire.spec_table import SpecTableFields, parse_spec_table
-from src.engines.questionnaire.study_overview import parse_overview
+from src.engines.questionnaire.study_overview import looks_like_overview, parse_overview
 from src.engines.questionnaire.study_understanding import (
     context_for,
     governing_rules,
@@ -1631,7 +1631,12 @@ def extract_survey_definition(
     consecutive_backend_failures = 0
     tripped: BackendUnavailable | None = None
     _MODEL_OFF.set(False)
-    for chunk in chunks:
+    for n, chunk in enumerate(chunks):
+        if n == 0 and chunk.candidate_qid is None and looks_like_overview(chunk.source_blocks):
+            # The study's brief (research goal, quotas, scripting rules): read
+            # into metadata["study_overview"] and the brief checklist below, not
+            # a question for a reviewer to approve or a respondent to see.
+            continue
         key = normalize_qid(chunk.candidate_qid or "")
         not_asked = datamap_not_asked.get(key)
         if not_asked and key not in datamap_index:
