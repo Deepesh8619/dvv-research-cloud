@@ -1989,8 +1989,8 @@ def test_filler_goes_but_the_layout_stays():
 SHOT = "data:image/png;base64,iVBORw0KGgo="
 
 
-def test_a_screenshot_is_read_into_the_question_and_kept_in_the_history(  # noqa: F811
-        client, monkeypatch):
+def test_a_screenshot_is_read_into_the_question_and_kept_in_the_history(
+        client, monkeypatch):  # noqa: F811
     """The copilot reads text: a screenshot is transcribed once, in-region, and
     the transcript is what it reasons over — now and in later turns."""
     from api.db import CopilotMessageDB
@@ -1998,8 +1998,9 @@ def test_a_screenshot_is_read_into_the_question_and_kept_in_the_history(  # noqa
     test_client, sf, _ = client
     _make_study(sf)
     sent: list[str] = []
+    read = "Review page. S6b | Needs you"
     monkeypatch.setattr("src.ai.vision.transcribe",
-                        lambda image, timeout=90: sent.append(image) or "Review page. S6b | Needs you")
+                        lambda image, timeout=90: sent.append(image) or read)
     seen = _script(monkeypatch, ("text", "S6b needs a reviewer."))
     resp = test_client.post("/api/copilot", json={"message": "why is this flagged?",
                                                   "images": [SHOT]})
