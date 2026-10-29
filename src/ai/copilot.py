@@ -101,6 +101,9 @@ Rules:
   text, what is S4, which is region) → data_variables. Questions about how DVV works,
   what something on screen means or how to do a task in it → product_help. Answer from
   what these return, never from general knowledge of other survey tools.
+- Hidden or derived variables — how one is coded, whether it will be filled, which
+  have no rule — → variable_plan (the questionnaire's plan); whether the uploaded data
+  agrees → data_vs_questionnaire.
 - Anything a screen shows — where a project stands, cleaning, open-end coding, the
   report's findings, data vs questionnaire, fieldwork from a data file, advanced
   methods, vendors, compliance, the record's integrity, the team and AI costs — read it
@@ -200,6 +203,11 @@ TOOLS = [
         "to do something in the app (cleaning, soft launch, quotas, the Reports tab…). From the "
         "app's own help text. Empty query lists every topic.",
         {"query": {"type": "string"}}, []),
+    _fn("variable_plan", "The questionnaire's data plan (the Variables tab): every column the "
+        "link will write and what fills it. Hidden or derived variables (age breaks, "
+        "generations, segments) show the approved rule that computes each code, or that no "
+        "rule exists yet so the column arrives empty. `variable` narrows to one name, "
+        "question or word.", {**_STUDY, "variable": {"type": "string"}}, ["study_id"]),
     _fn("project_lifecycle", "Where a project stands: each stage (brief, questionnaire, "
         "proof, field, verify, data, tables, insight) done or not, and what is next.",
         _STUDY, ["study_id"]),
@@ -398,22 +406,32 @@ def run_copilot(
     role: str,
     page: str = "",
     timeout: int = 60,
+    offered: list[str] | None = None,
 ) -> tuple[str, list[dict], str]:
-    """Answer one message. Returns (reply, tool results, provider that answered)."""
+    """Answer one message. Returns (reply, tool results, provider that answered).
+
+    `offered` narrows the tools the FIRST attempt sees (copilot_router.route);
+    every corrective pass below — nudge, significance, refusal retry — sees all
+    of them, so a routing miss costs one turn, never the answer."""
     today = date.today().isoformat()
     prompt = SYSTEM_PROMPT.format(known_failures=block_for("copilot"), today=today, user=user,
                                   role=role, page=f"\n{page}" if page else "")
     failures = []
+    first = [t for t in TOOLS if t["function"]["name"] in offered] if offered else TOOLS
+    schema = {"now": first}
     for label, url, key_env, model in _providers():
+        schema["now"] = first
+
         def chat(messages, t, with_tools=True, tools_subset=None,  # noqa: B023 - bound per loop
                  _u=url, _k=key_env, _m=model, _l=label):
             return _compatible_chat(_u, _k, _m, _l, messages, t, with_tools, None,
-                                    tools_schema=TOOLS)
+                                    tools_schema=schema["now"])
         try:
             reply, results = _run_agent_loop(chat, label, message, "", execute, history,
                                              timeout, None, None, system_prompt=prompt,
                                              max_turns=MAX_TURNS, known_tools=TOOL_NAMES,
                                              result_limit=RESULT_LIMIT)
+            schema["now"] = TOOLS  # every correction below may need any tool
             # An answer that looked nothing up and still quotes figures is the
             # model answering from its own head. The prompt has always asked for
             # grounding and nothing enforced it, so "the Greenbrook study has an

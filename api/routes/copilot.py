@@ -681,6 +681,47 @@ def make_executor(db: Session, user: UserDB):
             return {"study_id": s.id, "screen": _brief(fn(s.id, db=db, user=user))}
         return read
 
+    def variable_plan(args):
+        """The questionnaire's data plan: every column the link will write and
+        what fills it — asked, computed by an approved rule (shown), computed
+        from a base, assigned, recorded — and the hidden variables with no rule,
+        which arrive empty."""
+        from api.routes.questionnaire import questionnaire_datamap
+
+        s = study(args)
+        if not role_permits(user, UserRole.OWNER, UserRole.ANALYST):
+            raise _ToolError(f"a {user.role} cannot open the Variables tab; "
+                             "an owner or analyst can")
+        plan = questionnaire_datamap(s.id, db=db, user=user)
+        rows = plan["variables"]
+        counts: dict[str, int] = {}
+        for v in rows:
+            counts[v["filled_by"]] = counts.get(v["filled_by"], 0) + 1
+        want = str(args.get("variable") or "").strip().lower()
+
+        def brief(v):
+            return {k: v[k] for k in ("name", "label", "filled_by", "how", "question_ref")
+                    if v.get(k)} | ({"values": dict(list(v["values"].items())[:10])}
+                                    if v.get("values") else {})
+
+        return {
+            "study_id": s.id,
+            "questionnaire_status": plan["status"],
+            "columns": plan["n_variables"],
+            "filled_by": counts,
+            "hidden_without_rule": [v["name"] for v in rows if v["filled_by"] == "not_filled"],
+            "computed_by_rule": [brief(v) for v in rows
+                                 if v["filled_by"] == "computed" and not v["derived"]][:25],
+            "matches": [brief(v) for v in rows if want and (
+                want == v["name"].lower() or want == (v.get("question_ref") or "").lower()
+                or want in (v.get("label") or "").lower())][:10],
+            "note": "computed = an approved rule fills it for every respondent (in the link, "
+                    "for routing and quotas, and in the data); not_filled = a hidden variable "
+                    "with no approved rule: its column arrives empty until a rule is approved "
+                    "in Questionnaire review or it is supplied with the sample; assigned = "
+                    "the link sets it (rotations, splits); recorded = paradata.",
+        }
+
     def report_findings(args):
         from api.routes.studies import get_findings, get_report
 
@@ -1271,6 +1312,7 @@ def make_executor(db: Session, user: UserDB):
                                    UserRole.OWNER, UserRole.ANALYST),
         "ledger_check": screen(_route("platform", "verify_ledger")),
         "report_findings": report_findings,
+        "variable_plan": variable_plan,
         "open_end_coding": open_end_coding,
         "compliance_check": compliance_check,
         "run_method": run_method,
@@ -1338,6 +1380,62 @@ def copilot(
 ):
     """Ask the copilot anything about the platform. It may prepare actions,
     never perform them. Each exchange is saved to the user's conversation."""
+    return _answer(body, db, user)
+
+
+@router.post("/copilot/stream")
+def copilot_stream(
+    body: CopilotRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(get_current_user),
+):
+    """The same answer, with each step announced as it starts (server-sent
+    events): `step` {label} while it works, then `done` {the CopilotResponse},
+    or `error` {status, detail}. Up to a minute of silence read as broken."""
+    import queue
+    import threading
+
+    from fastapi.responses import StreamingResponse
+    from sqlalchemy.orm import sessionmaker
+
+    # Its own session and a plain copy of the user: the request's session may be
+    # closed before the stream finishes.
+    own_session = sessionmaker(bind=db.get_bind(), autoflush=False)
+    me = UserDB(id=user.id, email=user.email, name=user.name, role=user.role,
+                is_active=user.is_active)
+    events: queue.Queue = queue.Queue()
+
+    def work() -> None:
+        session = own_session()
+        try:
+            answer = _answer(body, session, me,
+                             on_step=lambda label: events.put(("step", {"label": label})))
+            events.put(("done", answer.model_dump()))
+        except HTTPException as exc:
+            events.put(("error", {"status": exc.status_code, "detail": exc.detail}))
+        except Exception:  # noqa: BLE001 - the browser gets a sentence, the log the trace
+            logger.exception("copilot stream failed")
+            events.put(("error", {"status": 500, "detail": "The copilot failed on the server."}))
+        finally:
+            session.close()
+            events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def stream():
+        yield ": started\n\n"  # past any proxy buffer at once
+        while (item := events.get()) is not None:
+            kind, data = item
+            yield f"event: {kind}\ndata: {json.dumps(data, default=str)}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> CopilotResponse:
+    from src.ai.copilot import TOOL_NAMES
+    from src.ai.copilot_router import areas_for, label_for, route
+
     conversation = None
     if body.conversation_id:
         conversation = get_copilot_conversation(db, body.conversation_id, user.id)
@@ -1352,6 +1450,8 @@ def copilot(
     def execute(name: str, args: dict) -> dict:
         """Each step timed and kept, so a wrong answer can be explained from
         Admin instead of being rebuilt on a laptop."""
+        if on_step:
+            on_step(label_for(name))
         started = time.perf_counter()
         out = execute_tool(name, args)
         steps.append({"tool": name, "ok": out.get("success") is not False,
@@ -1379,6 +1479,11 @@ def copilot(
             ) + "."
     from src.platform import usage
 
+    earlier = [x.get("tool", "") for m in (list_copilot_messages(db, conversation.id)[-2:]
+                                          if conversation else [])
+               for x in m.lookups or []]
+    screen = body.screen or ""
+    offered = route(body.message, sorted(TOOL_NAMES), screen, earlier)
     tagged = usage.purpose.set("copilot")  # this request's model calls count as copilot
     totals = {"model_calls": 0, "tokens_in": 0, "tokens_out": 0}
     counting = usage.tally.set(totals)
@@ -1387,7 +1492,7 @@ def copilot(
         usage.count_question()
         reply, results, answered_by = run_copilot(
             body.message, history, execute,
-            user=user.name or user.email, role=user.role, page=page)
+            user=user.name or user.email, role=user.role, page=page, offered=offered)
     except BackendUnavailable as exc:
         logger.warning(f"copilot: no backend ({exc})")
         raise HTTPException(status_code=503,
@@ -1396,7 +1501,9 @@ def copilot(
         usage.purpose.reset(tagged)
         usage.tally.reset(counting)
     trace = {"ms": round((time.perf_counter() - started) * 1000), **totals,
-             "steps": steps, "page": body.study_id, "focus_qid": body.focus_qid}
+             "steps": steps, "page": body.study_id, "focus_qid": body.focus_qid,
+             "screen": screen, "areas": sorted(areas_for(body.message, screen, earlier)),
+             "tools_offered": len(offered)}
     # The history shows the model "[Looked up for this answer: …]" after each
     # earlier reply; it sometimes copies that line into its own. Not for the user.
     reply = re.sub(r"\n*\[Looked up for this answer:[^\]]*\]", "", reply).strip()

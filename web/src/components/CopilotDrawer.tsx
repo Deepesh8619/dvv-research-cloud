@@ -429,8 +429,9 @@ function Card({
 }
 
 export default function CopilotDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   const studyId = studyFromPath(pathname)
+  const [status, setStatus] = useState<string | null>(null)
   const [turns, setTurns] = useState<Turn[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -522,7 +523,10 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
     setBusy(true)
     setError(null)
     try {
-      const res = await copilotApi.ask(message, studyId, conversationId, focusQid)
+      setStatus(null)
+      const data = await copilotApi.askStreaming(
+        message, (label) => setStatus(label), studyId, conversationId, focusQid, `${pathname}${search}`)
+      const res = { data }
       if (res.data.conversation_id && res.data.conversation_id !== conversationId) {
         setConversationId(res.data.conversation_id)
         remember(res.data.conversation_id)
@@ -540,9 +544,10 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
         },
       ])
     } catch (err) {
-      setError(errorMessage(err) || 'The copilot could not answer.')
+      setError(errorMessage(err) || (err instanceof Error ? err.message : '') || 'The copilot could not answer.')
     } finally {
       setBusy(false)
+      setStatus(null)
     }
   }
 
@@ -670,7 +675,7 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
             </div>
           </div>
         ))}
-        {busy && <p className="text-slate-400">Looking into it…</p>}
+        {busy && <p className="text-slate-400" aria-live="polite">{status ? `${status}…` : 'Looking into it…'}</p>}
         {error && <p className="text-red-600">{error}</p>}
         <div ref={endRef} />
       </div>

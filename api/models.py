@@ -696,6 +696,8 @@ class CopilotRequest(BaseModel):
     conversation_id: str | None = None
     #: The question open on the questionnaire page, if any — context, not a permission.
     focus_qid: str | None = Field(default=None, max_length=64)
+    #: The screen it is asked from (path and tab), so the right tools are offered.
+    screen: str | None = Field(default=None, max_length=300)
 
 
 class CopilotProposal(BaseModel):

@@ -1382,3 +1382,91 @@ def test_model_usage_is_tallied_per_request():
     finally:
         usage.tally.reset(token)
     assert mine == {"model_calls": 1, "tokens_in": 1200, "tokens_out": 80}
+
+
+def test_every_tool_is_routed_and_every_routed_name_is_a_tool():
+    """The registry and the router cannot drift: a new tool not placed in an
+    area would only ever be offered when nothing matched."""
+    from src.ai.copilot import TOOL_NAMES
+    from src.ai.copilot_router import AREAS, CORE, LABELS
+
+    placed = set(CORE) | {t for ts in AREAS.values() for t in ts}
+    assert TOOL_NAMES - placed == set(), "tools in no area"
+    assert placed - TOOL_NAMES == set(), "areas name tools that do not exist"
+    assert set(LABELS) <= TOOL_NAMES
+
+
+def test_a_question_is_offered_its_area_and_retries_get_everything(client, monkeypatch):  # noqa: F811
+    import src.ai.copilot as cp
+    from src.ai.copilot import TOOLS
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    # A figure with no lookup draws the grounding nudge: the second call.
+    _script(monkeypatch, ("text", "Q4 has 30% top box."), ("text", "Q4 has 30% top box."))
+    seen_schemas: list[list[str]] = []
+    scripted = cp._compatible_chat
+
+    def capture(*a, tools_schema=None, **k):
+        seen_schemas.append([t["function"]["name"] for t in tools_schema or []])
+        return scripted(*a, tools_schema=tools_schema, **k)
+
+    monkeypatch.setattr(cp, "_compatible_chat", capture)
+    resp = test_client.post("/api/copilot", json={"message": "crosstab Q4 by gender"}).json()
+    first, *later = seen_schemas
+    assert "make_tables" in first and "propose_set_hold" not in first
+    assert len(first) < len(TOOLS) / 2
+    assert later and len(later[0]) == len(TOOLS)  # the grounding nudge widens to all
+    conv = test_client.get(f"/api/copilot/conversations/{resp['conversation_id']}").json()
+    assert conv["messages"]
+
+
+def test_the_stream_announces_each_step_then_the_answer(client, monkeypatch, tmp_path):  # noqa: F811
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    _script(monkeypatch, ("tool", "data_variables", {"study_id": "s_wb"}),
+            ("tool", "make_tables", {"study_id": "s_wb", "rows": ["Q1"], "columns": ["GEND"]}),
+            ("text", "Aware by gender."))
+    with test_client.stream("POST", "/api/copilot/stream",
+                            json={"message": "Q1 by gender", "screen": "/projects/s_wb"}) as r:
+        assert r.headers["content-type"].startswith("text/event-stream")
+        body = "".join(r.iter_text())
+    events = [(b.split("\n")[0][7:], json.loads(b.split("\n")[1][6:]))
+              for b in body.split("\n\n") if b.startswith("event:")]
+    kinds = [k for k, _ in events]
+    assert kinds == ["step", "step", "done"]
+    assert events[0][1]["label"] == "Reading the variable list"
+    assert events[1][1]["label"] == "Computing the tables"
+    done = events[2][1]
+    assert done["reply"] == "Aware by gender." and len(done["tables"]) == 1
+
+    (answer,) = test_client.get("/api/admin/copilot-answers").json()
+    assert answer["trace"]["screen"] == "/projects/s_wb" and "data" in answer["trace"]["areas"]
+    assert answer["trace"]["tools_offered"] < 40
+
+
+def test_the_hidden_variable_plan_says_what_fills_each_column(client, monkeypatch):  # noqa: F811
+    from src.core.survey_definition import Expression, Option, Question, QuestionType
+    from tests.integration.test_fielding_routes import _sample_survey
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    survey = _sample_survey("study_f1")
+    survey.questions.append(Question(
+        qid="HID_SEG", text="CODE SEGMENT — HIDDEN", type=QuestionType.SINGLE, options=[
+            Option(code=1, label="Drinker", derive_if=Expression(op="eq", qid="Q2", value=1)),
+            Option(code=2, label="Other", derive_if=Expression(op="eq", qid="Q2", value=2))]))
+    survey.questions.append(Question(
+        qid="HID_REGION", text="CODE REGION FROM ZIP — HIDDEN", type=QuestionType.SINGLE,
+        options=[Option(code=1, label="North"), Option(code=2, label="South")]))
+    survey.blocks[0].question_ids += ["HID_SEG", "HID_REGION"]
+    _make_questionnaire(sf, survey=survey)
+    seen = _script(monkeypatch, ("tool", "variable_plan", {"study_id": "study_f1",
+                                                           "variable": "HID_SEG"}),
+                   ("text", "HID_SEG is computed."))
+    test_client.post("/api/copilot", json={"message": "how is HID_SEG coded?"})
+    (plan,) = _tool_results(seen)
+    assert plan["success"], plan
+    assert "HID_REGION" in plan["hidden_without_rule"]
+    (seg,) = plan["matches"]
+    assert seg["filled_by"] == "computed" and "Q2" in seg["how"]
