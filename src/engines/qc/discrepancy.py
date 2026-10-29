@@ -160,6 +160,21 @@ class Discrepancy:
         }
 
 
+class _Ran(dict):
+    """The check counts, also remembering which question each check ran on —
+    so a report can say what was MET per question, not only what broke."""
+
+    def __init__(self, kinds: list[str]) -> None:
+        super().__init__({k: 0 for k in kinds})
+        self.qid: str | None = None
+        self.by_qid: dict[str, set[str]] = {}
+
+    def __setitem__(self, kind: str, value: int) -> None:
+        if self.qid and value > self.get(kind, 0):
+            self.by_qid.setdefault(self.qid, set()).add(kind)
+        super().__setitem__(kind, value)
+
+
 @dataclass
 class DiscrepancyReport:
     """Findings plus what was actually examined.
@@ -173,6 +188,8 @@ class DiscrepancyReport:
     n_rows: int = 0
     checked: dict[str, int] = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)
+    #: qid -> the checks that ran on it (met unless a finding says otherwise).
+    ran_by_qid: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -184,6 +201,7 @@ class DiscrepancyReport:
             "n_rows": self.n_rows,
             "checked": self.checked,
             "skipped": self.skipped,
+            "checks_by_question": self.ran_by_qid,
             "findings": [f.to_dict() for f in self.findings],
         }
 
@@ -480,17 +498,8 @@ def check_against_questionnaire(
         report.skipped.append("data file has no rows")
         return report
 
-    counts = {
-        "codes": 0,
-        "single": 0,
-        "range": 0,
-        "terminate": 0,
-        "mask": 0,
-        "pipe": 0,
-        "exclusive": 0,
-        "max_select": 0,
-        "sum": 0,
-    }
+    counts = _Ran(["codes", "single", "range", "terminate", "mask", "pipe", "exclusive",
+                   "max_select", "sum"])
     companions = find_companions(datamap) if datamap is not None else {}
 
     for question in survey.questions:
@@ -503,6 +512,7 @@ def check_against_questionnaire(
             )
 
     for qid, variables in sorted(link_map.items()):
+        counts.qid = qid
         question = by_qid.get(qid)
         if question is None:
             continue
@@ -720,6 +730,7 @@ def check_against_questionnaire(
             )
 
     for qid, variables in sorted(link_map.items()):
+        counts.qid = qid
         question = by_qid.get(qid)
         if question is None:
             continue
@@ -842,6 +853,7 @@ def check_against_questionnaire(
             )
 
     for qid, variables in sorted(link_map.items()):
+        counts.qid = qid
         question = by_qid.get(qid)
         if question is None:
             continue
@@ -884,6 +896,7 @@ def check_against_questionnaire(
                 )
 
     for qid, question in sorted(by_qid.items()):
+        counts.qid = qid
         if question.terminate_if is None:
             continue
         referenced = question.terminate_if.referenced_qids()
@@ -973,6 +986,7 @@ def check_against_questionnaire(
             )
 
     report.checked = {k: v for k, v in counts.items() if v}
+    report.ran_by_qid = {q: sorted(k) for q, k in sorted(counts.by_qid.items())}
     # Worst first: a researcher reads the top of this list and stops.
     report.findings.sort(key=lambda f: (-f.n_rows, f.qid))
     return report

@@ -3,6 +3,7 @@ import axios from 'axios'
 
 import { CrosscheckReport, QuestionnaireStatus, questionnaireApi, studiesApi } from '../api/client'
 import InfoTip from './ui/InfoTip'
+import VariableMatchTable from './VariableMatchTable'
 
 /**
  * Check the collected data against the questionnaire it was collected under.
@@ -373,9 +374,12 @@ export default function CrosscheckPanel({
             </div>
           )}
 
+          {report.variable_match && <VariableMatchTable match={report.variable_match} />}
+
           {/* What every column in the file is for. Hidden variables carry the
               segment and quota logic a client analyses by, so they are named
               rather than buried in an "unmatched" count. */}
+
           {report.variable_roles && report.variable_roles.length > 0 && (
             <details className="text-xs text-slate-600">
               <summary className="cursor-pointer text-slate-500 hover:text-slate-700">

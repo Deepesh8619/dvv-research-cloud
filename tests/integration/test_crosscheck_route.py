@@ -284,3 +284,79 @@ def test_an_uploaded_export_gets_the_field_report_a_link_gets(client) -> None:
         ("hRegion_r1", 2), ("hRegion_r2", 1)]
     q1 = next(q for q in body["questions"] if q["qid"] == "Q1")
     assert q1["base"] == 3 and q1["answered"] == 3
+
+
+def test_every_variable_shows_what_met_and_what_broke(client) -> None:
+    """Variables from the questionnaire against the data, one row each: each rule
+    tested on it met or broken (how many, which rows), the ones missing from the
+    data, and the data columns no question claims."""
+    import polars as pl
+
+    from src.core.survey_definition import Expression
+
+    test_client, session_factory, tmp_path = client
+    survey = SurveyDefinition(
+        study_id="s1", title="t", source="extracted", status="approved",
+        blocks=[Block(block_id="B1", question_ids=["S1", "Q1", "Q2", "Q3", "Q4"])],
+        questions=[
+            Question(qid="S1", text="Do you drink coffee?", type=QuestionType.SINGLE,
+                     options=[Option(code=1, label="Yes"), Option(code=2, label="No")],
+                     terminate_if=Expression(op="eq", qid="S1", value=2)),
+            Question(qid="Q1", text="Which brand?", type=QuestionType.SINGLE,
+                     options=[Option(code=1, label="Alpha"), Option(code=2, label="Beta")]),
+            Question(qid="Q2", text="Why Alpha?", type=QuestionType.SINGLE,
+                     options=[Option(code=1, label="Taste"), Option(code=2, label="Price")],
+                     show_if=Expression(op="eq", qid="Q1", value=1)),
+            Question(qid="Q3", text="Never fielded", type=QuestionType.SINGLE,
+                     options=[Option(code=1, label="A"), Option(code=2, label="B")]),
+            Question(qid="Q4", text="Cups a day", type=QuestionType.NUMERIC,
+                     validation={"min": 0, "max": 10}),
+        ])
+    dm = DataMap()
+    for name, label, values in (("S1", "Do you drink coffee?", {1: "Yes", 2: "No"}),
+                                ("Q1", "Which brand?", {1: "Alpha", 2: "Beta"}),
+                                ("Q2", "Why Alpha?", {1: "Taste", 2: "Price"}),
+                                ("HID_SEG", "Hidden: segment", {1: "A", 2: "B"}),
+                                ("zz_extra", "Something else", {1: "x"})):
+        dm.add(Variable(name=name, label=label, type=VarType.SINGLE, values=values,
+                        provenance="spss"))
+    dm.add(Variable(name="Q4", label="Cups a day", type=VarType.NUMERIC, provenance="spss"))
+    run_dir = Path(tmp_path) / "run"
+    run_dir.mkdir()
+    n = 40
+    s1 = [1] * (n - 1) + [2]          # the last one should have been screened out…
+    q1 = [1, 2] * (n // 2)
+    q2 = [1 if a == 1 else None for a in q1]
+    q2[1] = 2                          # …row 2 answered Q2 with Q1 = 2: a broken skip
+    q1[5] = 7                          # a code the questionnaire never had
+    pl.DataFrame({"S1": s1, "Q1": q1, "Q2": q2, "Q4": [3] * n, "HID_SEG": [1] * n,
+                  "zz_extra": [1] * n}).write_parquet(run_dir / "data.parquet")
+    db = session_factory()
+    db.add(StudyDB(id="s1", client_name="T", status="rendered",
+                   created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat(),
+                   study_metadata={}, approval_chain={}, datamap_json=dm.to_json(),
+                   excel_path=str(run_dir / "deck.xlsx")))
+    db.add(QuestionnaireDB(id="quest_1", study_id="s1", status="approved",
+                           source_filename="q.docx", version=1,
+                           definition_json=survey.to_json(), approved_qids=[],
+                           created_at=datetime.now().isoformat(),
+                           updated_at=datetime.now().isoformat()))
+    db.commit()
+    db.close()
+
+    match = test_client.post("/api/studies/s1/crosscheck").json()["variable_match"]
+    rows = {r["qid"]: r for r in match["questions"]}
+    rules = {qid: {x["rule"]: x for x in r["rules"]} for qid, r in rows.items()}
+
+    assert rows["Q3"]["status"] == "missing_in_data" and rows["Q3"]["columns"] == []
+    assert rows["Q4"]["status"] == "met" and rules["Q4"]["range"]["result"] == "met"
+    assert rules["Q1"]["codes"]["result"] == "broken" and rules["Q1"]["codes"]["n_rows"] == 1
+    assert rules["Q2"]["skip"]["result"] == "broken"
+    assert rows["Q2"]["status"] == "broken"
+    assert "terminate" in rules["S1"]
+    # zz_extra looks like a question: recovered as one, marked as not in the document
+    assert rows["zz_extra"]["status"] == "not_in_questionnaire"
+    data_only = {d["column"]: d for d in match["data_only"]}
+    assert set(data_only) == {"HID_SEG"}
+    assert data_only["HID_SEG"]["role"] == "hidden" and not data_only["HID_SEG"]["to_chase"]
+    assert match["summary"]["rules_met"] >= 2 and match["summary"]["rules_broken"] >= 2
