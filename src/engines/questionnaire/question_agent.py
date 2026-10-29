@@ -214,11 +214,13 @@ def revise_with_context(q: Question, instruction: str, by_qid: dict[str, Questio
     """`revise`, given the questions around it. Labels may come from any of them."""
     try:
         response = run_task(task, _prompt(q, instruction, related, document), REVISE_SCHEMA)
-    except BackendUnavailable:
+    except BackendUnavailable as exc:
+        from src.ai.router import why_unavailable
+
         return {"error": (
-            "No AI model could be reached just now, so the agent could not follow "
-            "your words. Any suggestions shown come from the programmer agent, which "
-            "needs no AI. Try again in a minute."
+            f"No AI model could answer just now ({why_unavailable(exc)}), so the agent "
+            "could not follow your words. Any suggestions shown come from the programmer "
+            "agent, which needs no AI. Try again in a minute."
         )}
     except ModelOutputError:
         return {"error": (

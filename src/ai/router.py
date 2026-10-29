@@ -681,6 +681,17 @@ def _local_extraction_opted_in() -> bool:
     return os.environ.get("DVV_EXTRACT_LOCAL", "").strip().lower() in {"1", "true", "yes"}
 
 
+def _bedrock_second() -> list[dict[str, str]]:
+    """The Bedrock fallback model as a chain step — same region only, since the
+    generator calls the main region's endpoint. Seen live: with one model in the
+    chain, one throttled or slow call left the question agent with nothing to try
+    ("No AI model could be reached") while a second model sat idle."""
+    second = bedrock_fallback()
+    if not second or second[1] == bedrock_model() or second[0] != bedrock_chat_url():
+        return []
+    return [{"backend": "bedrock", "model": second[1]}]
+
+
 def _extraction_chain() -> list[dict[str, str]]:
     """Ordered backend fallback for judgment-heavy extraction: one brain per environment.
 
@@ -705,6 +716,7 @@ def _extraction_chain() -> list[dict[str, str]]:
     # rate limits. Groq and Cerebras remain as fallbacks when their keys are set.
     if keys.get("BEDROCK_API_KEY"):
         cloud.append({"backend": "bedrock", "model": bedrock_model()})
+        cloud += _bedrock_second()
     if keys.get("GROQ_API_KEY"):
         primary = _EXTRACTION_MODELS["groq"]
         cloud.append({"backend": "groq", "model": primary})
@@ -729,6 +741,18 @@ def _extraction_chain() -> list[dict[str, str]]:
 prose_temperature: ContextVar[float] = ContextVar("dvv_prose_temperature", default=0.0)
 TASK_TEMPERATURE = {"report.narrative": 0.4}
 PROSE_TEMPERATURE = 0.4
+
+
+def why_unavailable(exc: Exception) -> str:
+    """A failed model call in words an analyst can act on."""
+    text = str(exc)
+    if "429" in text or "quota" in text.lower() or "rate" in text.lower():
+        return "the AI service is busy (rate limit); it eases within minutes"
+    if "timed out" in text.lower() or "timeout" in text.lower():
+        return "the model took too long to answer"
+    if "not set" in text or "no AI backend" in text:
+        return "no AI model is configured on this server"
+    return text[:200]
 
 
 def run_task(
@@ -781,7 +805,7 @@ def run_private(prompt: str, schema: dict, timeout: int = 120) -> AIResponse:
     are skipped even when their keys are present."""
     keys = llm_key_presence()
     if keys.get("BEDROCK_API_KEY"):
-        chain = [{"backend": "bedrock", "model": bedrock_model()}]
+        chain = [{"backend": "bedrock", "model": bedrock_model()}, *_bedrock_second()]
     elif not any(keys.values()):
         chain = [{"backend": "ollama", "model": _EXTRACTION_MODELS["ollama"]}]
     else:

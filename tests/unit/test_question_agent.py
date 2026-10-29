@@ -77,7 +77,7 @@ def test_an_unreachable_agent_says_so(monkeypatch):
         raise BackendUnavailable("no backend")
     monkeypatch.setattr(qa, "run_task", down)
     q = _stored_sum_question()
-    assert "No AI model could be reached" in qa.revise(q, "fix it", {"Q2": q})["error"]
+    assert "No AI model could answer" in qa.revise(q, "fix it", {"Q2": q})["error"]
 
 
 def test_a_made_up_type_is_refused(monkeypatch):
