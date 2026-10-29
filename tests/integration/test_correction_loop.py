@@ -680,3 +680,53 @@ def test_proposal_queue_lists_only_unapplied_proposals(client):
     assert body["proposals"][0]["instruction"] == "add a new question type"
     # The model's structured resolution survives, not just the raw instruction.
     assert body["proposals"][0]["rule_text"] == "needs code"
+
+
+def test_a_convention_is_understood_from_the_question_as_written():
+    """The classifier sees the document's own wording and what can be taught,
+    and a proposed convention is kept only when the document contains it."""
+    from api.routes.corrections import _classify
+
+    question = {"qid": "QLANG", "type": "single",
+                "source_text": "Which language?\n[ALSO] ¿En qué idioma?\n1 English\n2 Spanish",
+                "options": [{"code": 1, "label": "[ALSO] ¿En qué idioma?"}]}
+    seen = {}
+
+    def model(task, prompt, schema):
+        seen["prompt"] = prompt
+        return AIResponse(content={
+            "lane": "live", "scope": "profile", "rationale": "A client convention.",
+            "rule_text": "A line marked [ALSO] is the question in another language.",
+            "pattern_kind": "type_signal", "pattern": "[ALSO]", "pattern_value": "info",
+        }, backend="t", model="m")
+
+    texts = [("QLANG", question["source_text"]), ("QHH", "[ALSO] ¿Qué idioma?"), ("Q9", "Age?")]
+    with patch("api.routes.corrections.run_task", side_effect=model):
+        verdict = _classify("the [ALSO] line is a translation, not an answer", question, "gbk",
+                            similar=[{"rule_text": "Spanish lines are translations."}],
+                            document_texts=texts)
+    assert "THE QUESTION AS THE DOCUMENT WRITES IT" in seen["prompt"]
+    assert "[ALSO] ¿En qué idioma?" in seen["prompt"]
+    assert "question_label" in seen["prompt"]  # what can be taught is offered
+    assert "Spanish lines are translations." in seen["prompt"]  # and what already was
+    assert verdict["pattern"]["affects"] == ["QLANG", "QHH"]
+
+    # A pattern the document does not contain is never offered.
+    def invented(task, prompt, schema):
+        return AIResponse(content={"lane": "live", "scope": "profile", "rationale": "x",
+                                   "rule_text": "x", "pattern_kind": "type_signal",
+                                   "pattern": "[TRANSLATION]", "pattern_value": "info"},
+                          backend="t", model="m")
+
+    with patch("api.routes.corrections.run_task", side_effect=invented):
+        verdict = _classify("x", question, "gbk", document_texts=texts)
+    assert verdict["pattern"] is None
+
+
+def test_lessons_already_taught_are_found_by_meaning():
+    from src.engines.questionnaire.lesson_context import similar_lessons
+
+    rules = [{"id": "a", "rule_text": "Terminates sit in the TERM row under the answers."},
+             {"id": "b", "rule_text": "Grids show brands as rows."}]
+    found = similar_lessons("the terminate is written in the TERM row", rules)
+    assert [r["id"] for r in found] == ["a"]

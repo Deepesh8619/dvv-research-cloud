@@ -585,6 +585,12 @@ class CorrectionResponse(BaseModel):
     rationale: str
     degraded: bool = False
     created_at: str | None = None
+    #: The correction understood as a convention the reader can apply itself:
+    #: {kind, pattern, value, meaning, affects: [qids]} — only when the
+    #: document really contains the pattern.
+    pattern: dict | None = None
+    #: Lessons already taught that mean much the same.
+    similar: list[dict] = Field(default_factory=list)
 
 
 class SuggestionResponse(BaseModel):

@@ -62,6 +62,7 @@ from src.engines.questionnaire.learned import (
     TYPE_VALUES,
     validate_pattern,
 )
+from src.engines.questionnaire.lesson_context import grounded_pattern
 from src.intake.questionnaire_loader import (
     load_docx,
     load_pdf,
@@ -249,6 +250,10 @@ _CLASSIFY_SCHEMA = {
         "rule_text": {"type": "string"},
         "rationale": {"type": "string"},
         "confidence": {"type": "number"},
+        # When the correction is a CONVENTION the reader can apply itself.
+        "pattern_kind": {"type": "string"},
+        "pattern": {"type": "string"},
+        "pattern_value": {"type": "string"},
     },
     "required": ["lane", "scope", "rule_text", "rationale"],
 }
@@ -259,13 +264,11 @@ def _classify_prompt(
     question: dict | None,
     profile: str | None,
     revise_note: str | None = None,
+    similar: list[dict] | None = None,
 ) -> str:
-    ctx = ""
-    if question:
-        ctx = (
-            "The correction was written against this extracted question:\n"
-            f"{json.dumps(question, indent=2)[:2000]}\n\n"
-        )
+    from src.engines.questionnaire.lesson_context import prompt_context
+
+    ctx = prompt_context(question, similar or [])
     return (
         "A market-research expert is correcting how our system reads client "
         "questionnaire documents. Turn their correction into a reusable EXTRACTION "
@@ -296,7 +299,12 @@ def _classify_prompt(
         "the extractor, in the imperative, that will still make sense on a different "
         "document of the same format. Do not mention specific question ids unless "
         "the scope is 'question'.\n"
-        "rationale: one sentence on why you chose that lane and scope."
+        "rationale: one sentence on why you chose that lane and scope, in plain words "
+        "for the person who wrote the correction.\n"
+        "pattern_kind / pattern / pattern_value: ONLY when the correction describes a "
+        "marker or wording the document uses that the reader can be taught directly "
+        "(the list above). `pattern` must be copied EXACTLY from the question as the "
+        "document writes it — never invented. Leave all three empty otherwise."
     )
 
 
@@ -305,6 +313,8 @@ def _classify(
     question: dict | None,
     profile: str | None,
     revise_note: str | None = None,
+    similar: list[dict] | None = None,
+    document_texts: list[tuple[str, str]] | None = None,
 ) -> dict:
     """Ask the model for lane + scope + rule text. Fails safe to the proposal lane.
 
@@ -315,7 +325,7 @@ def _classify(
     try:
         response = run_task(
             "questionnaire.extract",
-            _classify_prompt(instruction, question, profile, revise_note),
+            _classify_prompt(instruction, question, profile, revise_note, similar),
             _CLASSIFY_SCHEMA,
         )
         # run_task returns AIResponse, whose parsed payload is `.content`.
@@ -333,6 +343,10 @@ def _classify(
             "rationale": data.get("rationale") or "",
             "confidence": data.get("confidence"),
             "degraded": False,
+            # Kept only if the document really contains it (lesson_context).
+            "pattern": grounded_pattern(data.get("pattern_kind"), data.get("pattern"),
+                                        data.get("pattern_value"), document_texts or []),
+            "similar": similar or [],
         }
     except Exception as exc:  # noqa: BLE001
         # Deliberately catch EVERYTHING. The point of this function is that a
@@ -353,6 +367,8 @@ def _classify(
             ),
             "confidence": None,
             "degraded": True,
+            "pattern": None,
+            "similar": similar or [],
         }
 
 
@@ -388,7 +404,9 @@ def create_correction(
         else None
     )
 
-    verdict = _classify(instruction, question, profile_slug)
+    similar, document_texts = _lesson_inputs(db, instruction, questionnaire)
+    verdict = _classify(instruction, question, profile_slug, similar=similar,
+                        document_texts=document_texts)
     # The author's confirmed scope wins over the model's guess — the UI shows the
     # inferred scope as a chip and lets them change it before sending.
     scope = request.scope if request.scope in VALID_SCOPES else verdict["scope"]
@@ -439,7 +457,33 @@ def _correction_response(correction: CorrectionDB, verdict: dict) -> CorrectionR
         rationale=verdict["rationale"],
         degraded=verdict.get("degraded", False),
         created_at=correction.created_at,
+        pattern=verdict.get("pattern"),
+        similar=verdict.get("similar") or [],
     )
+
+
+def _lesson_inputs(db: Session, instruction: str, questionnaire) -> tuple[list[dict], list]:
+    """Similar lessons already taught, and every question's text as written."""
+    from src.engines.questionnaire.lesson_context import similar_lessons
+
+    rules = [
+        {"id": r.id, "rule_text": r.rule_text, "profile_slug": r.profile_slug,
+         "active": bool(r.active)}
+        for r in db.query(ProfileRuleDB).order_by(ProfileRuleDB.created_at.desc()).limit(300)
+    ]
+    try:
+        similar = similar_lessons(instruction, rules)
+    except Exception as exc:  # noqa: BLE001 - a lookup must never lose the correction
+        logger.warning(f"similar-lesson lookup failed: {exc}")
+        similar = []
+    questions = []
+    if questionnaire and questionnaire.definition_json:
+        try:
+            questions = json.loads(questionnaire.definition_json).get("questions") or []
+        except (json.JSONDecodeError, TypeError):
+            questions = []
+    return similar, [(q.get("qid"), q.get("source_text") or q.get("text") or "")
+                     for q in questions]
 
 
 @router.get("/studies/{study_id}/corrections")
@@ -1071,8 +1115,10 @@ def revise_correction(
         else None
     )
 
+    similar, document_texts = _lesson_inputs(db, correction.instruction, questionnaire)
     verdict = _classify(
-        correction.instruction, question, correction.profile_slug, revise_note=note
+        correction.instruction, question, correction.profile_slug, revise_note=note,
+        similar=similar, document_texts=document_texts,
     )
     correction.revise_note = note
     correction.attempt_no = (correction.attempt_no or 1) + 1

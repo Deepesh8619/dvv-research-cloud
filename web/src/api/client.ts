@@ -1573,6 +1573,10 @@ export interface CorrectionResult {
   rationale: string
   degraded: boolean
   created_at: string | null
+  /** Understood as a convention the reader applies itself, found in this document. */
+  pattern?: { kind: string; pattern: string; value: string | null; meaning: string; affects: string[] } | null
+  /** Lessons already taught that mean much the same. */
+  similar?: { id: string; rule_text: string; profile_slug: string; active: boolean; similarity: number }[]
 }
 
 export interface PatternKind {

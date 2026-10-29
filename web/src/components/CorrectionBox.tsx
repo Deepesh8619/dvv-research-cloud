@@ -46,6 +46,15 @@ interface Props {
   onApplied?: () => void
   /** Open pre-filled — from the question agent's "Teach the parser". */
   prefill?: { text: string; nonce: number } | null
+  /** The question as the document writes it, shown so a correction can point at it. */
+  sourceText?: string | null
+}
+
+/** Bracketed notes and short marker lines a correction is most often about. */
+function fragmentsOf(text: string): string[] {
+  const found = new Set<string>()
+  for (const m of text.matchAll(/\[[^\][\n]{1,60}\]/g)) found.add(m[0])
+  return [...found].slice(0, 12)
 }
 
 export default function CorrectionBox({
@@ -55,6 +64,7 @@ export default function CorrectionBox({
   profileLabel,
   onApplied,
   prefill,
+  sourceText,
 }: Props) {
   const tTrigger = useLabel('correction.trigger', 'Correct this')
   const tHeading = useLabel('correction.heading', 'What did we read wrong?')
@@ -70,6 +80,7 @@ export default function CorrectionBox({
   const [rules, setRules] = useState<ProfileRule[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [taught, setTaught] = useState<string | null>(null)
   useEffect(() => {
     if (!prefill) return
     setOpen(true)
@@ -161,6 +172,32 @@ export default function CorrectionBox({
             Describe the mistake the way you'd explain it to a colleague. If it's about how this
             client writes questionnaires, say so — that teaches the parser for every future document.
           </p>
+          {sourceText && (
+            <details open className="bg-white border border-slate-200 rounded">
+              <summary className="cursor-pointer px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider text-slate-500">
+                As the document writes it
+              </summary>
+              <pre className="px-2.5 pb-2 max-h-40 overflow-auto whitespace-pre-wrap text-xs text-slate-700 font-sans">
+                {sourceText}
+              </pre>
+              {fragmentsOf(sourceText).length > 0 && (
+                <div className="px-2.5 pb-2 flex flex-wrap gap-1" aria-label="Point at a part of it">
+                  {fragmentsOf(sourceText).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      title="Add it to your correction"
+                      onClick={() => setInstruction((t) => `${t}${t && !t.endsWith(' ') ? ' ' : ''}"${f}" `)}
+                      className="text-[11px] font-mono bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5
+                                 hover:border-sky-300 hover:bg-sky-50 text-slate-700"
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </details>
+          )}
 
           <textarea
             value={instruction}
@@ -263,9 +300,89 @@ export default function CorrectionBox({
             {result.lane === 'live' ? 'Can be applied now' : 'Queued for engineering'}
           </div>
 
+          {result.pattern && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded p-3 space-y-2">
+              <p className="text-[10px] font-mono uppercase tracking-wider text-emerald-800">
+                The reader can learn this directly
+              </p>
+              <p className="text-sm text-slate-800">
+                <code className="bg-white border border-emerald-200 rounded px-1">{result.pattern.pattern}</code>{' '}
+                {result.pattern.meaning}
+                {result.pattern.value ? <> — <strong>{result.pattern.value}</strong></> : null}
+              </p>
+              <p className="text-xs text-slate-600">
+                Found in {result.pattern.affects.length} question{result.pattern.affects.length === 1 ? '' : 's'} of
+                this document: {result.pattern.affects.slice(0, 12).join(', ')}
+                {result.pattern.affects.length > 12 ? '…' : ''}. No model is needed to apply it, here or on later
+                documents in this format.
+              </p>
+              {taught ? (
+                <p className="text-xs font-medium text-emerald-800">{taught}</p>
+              ) : (
+                <button
+                  onClick={async () => {
+                    if (!slug || !result.pattern) return
+                    setBusy(true)
+                    setError(null)
+                    try {
+                      const r = await correctionsApi.applyRule(slug, {
+                        pattern_kind: result.pattern.kind,
+                        pattern: result.pattern.pattern,
+                        pattern_value: result.pattern.value ?? undefined,
+                        scope: 'profile',
+                        correction_id: result.id,
+                        study_id: studyId,
+                      })
+                      const applied = (r.data as { applied_to_current?: { n_updated?: number; reextract?: number } })
+                        .applied_to_current
+                      setTaught(
+                        applied?.reextract
+                          ? `Taught. Reading the document again as version ${applied.reextract}.`
+                          : `Taught. ${applied?.n_updated ?? 0} question(s) in this document re-read with it.`,
+                      )
+                      loadRules()
+                      onApplied?.()
+                    } catch (e) {
+                      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+                      setError(detail ?? 'Could not teach that. Try again.')
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}
+                  disabled={busy || !slug}
+                  className="text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded px-3 py-1.5
+                             disabled:opacity-50 active:scale-[0.98] transition"
+                >
+                  Teach the reader
+                </button>
+              )}
+            </div>
+          )}
+
+          {result.similar && result.similar.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded p-3">
+              <p className="text-[10px] font-mono uppercase tracking-wider text-amber-800 mb-1">
+                Already taught something similar
+              </p>
+              <ul className="space-y-1 text-xs text-slate-700">
+                {result.similar.map((s) => (
+                  <li key={s.id}>
+                    {s.rule_text}{' '}
+                    <span className="text-slate-400">
+                      ({s.profile_slug}{s.active ? '' : ', switched off'})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[11px] text-amber-800 mt-1">
+                If it is the same lesson, switch that one back on or rewrite it instead of adding another.
+              </p>
+            </div>
+          )}
+
           <div className="bg-white border border-slate-200 rounded p-3">
             <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-1">
-              The rule we'd remember
+              {result.pattern ? 'As an instruction to the AI model' : "The rule we'd remember"}
             </p>
             <p className="text-sm text-slate-800 leading-snug">{result.rule_text}</p>
             {result.rationale && (
@@ -283,7 +400,10 @@ export default function CorrectionBox({
 
           <div className="flex gap-2">
             <button
-              onClick={() => setResult(null)}
+              onClick={() => {
+                setResult(null)
+                setTaught(null)
+              }}
               className="text-sm text-slate-600 px-3 py-1.5 rounded border border-slate-300
                          hover:bg-slate-50 active:scale-[0.98] transition"
             >
