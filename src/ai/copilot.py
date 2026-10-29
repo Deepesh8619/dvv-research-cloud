@@ -19,6 +19,7 @@ from collections.abc import Callable
 from datetime import date
 
 from src.ai.copilot_tables import claims_significance
+from src.ai.copilot_verify import untraced
 from src.ai.known_failures import block_for
 from src.ai.navigator import _compatible_chat, _run_agent_loop
 from src.ai.router import BackendUnavailable, ModelOutputError
@@ -266,6 +267,19 @@ TOOLS = [
          "chart_type": {"type": "string", "enum": ["bar", "line", "pie", "heatmap"]},
          "output": {"type": "string", "enum": ["auto", "chat", "excel"]}},
         ["study_id"]),
+    _fn("propose_remove_respondents", "Prepare removing respondents in Cleaning: every one a "
+        "check flagged (check: speeder, straightliner, duplicate, gibberish, trap_failed, "
+        "fraud_signal…) or named respondents (keys). Read cleaning_status first.",
+        {**_STUDY, "check": {"type": "string"},
+         "keys": {"type": "array", "items": {"type": "string"}},
+         "reason_code": {"type": "string"}, "note": {"type": "string"}}, ["study_id"]),
+    _fn("propose_lock_cleaning", "Prepare locking cleaning: removed respondents leave the "
+        "tables (rebuilt), and stay in the delivery file marked removed.", _STUDY, ["study_id"]),
+    _fn("propose_code_open_ends", "Prepare coding open-ended answers into a codeframe (all "
+        "open questions, or the named variables).",
+        {**_STUDY, "variables": {"type": "array", "items": {"type": "string"}}}, ["study_id"]),
+    _fn("propose_draft_report", "Prepare drafting the cited report from the findings; each "
+        "sentence cites its table.", _STUDY, ["study_id"]),
     _fn("propose_open_link", "Prepare opening a fielding link for the approved "
         "questionnaire, held at soft_launch_limit completes (default 50).",
         {**_STUDY, "soft_launch_limit": {"type": "integer"}}, ["study_id"]),
@@ -367,6 +381,13 @@ _UNTESTED_NOTE = (
     "\n\n_No significance test was run for this answer, so any statement above about "
     "significance is unverified._"
 )
+
+_UNTRACED = (
+    "These figures in your answer appear in no tool result: {figures}. Every number "
+    "must come from a tool. Answer again using only figures the tools returned (call a "
+    "tool if you need one), and do not compute new ones yourself."
+)
+_UNTRACED_NOTE = "\n\n_Not found in the data looked up for this answer: {figures}._"
 
 _RETRY = (
     "Your {tool} call was refused: {error}\n"
@@ -478,6 +499,19 @@ def run_copilot(
                     max_turns=MAX_TURNS, known_tools=TOOL_NAMES, result_limit=RESULT_LIMIT,
                 )
                 reply, results = more_reply or reply, results + more
+            # A figure no tool returned: a misread cell, a sum of its own, memory.
+            said = message + " " + " ".join(str(t.get("content") or "") for t in history or [])
+            if missing := untraced(reply, results, said):
+                fixed, more = _run_agent_loop(
+                    chat, label, message, "", execute,
+                    [*(history or []), {"role": "assistant", "content": reply},
+                     {"role": "user", "content": _UNTRACED.format(figures=", ".join(missing))}],
+                    timeout, None, None, system_prompt=prompt,
+                    max_turns=MAX_TURNS, known_tools=TOOL_NAMES, result_limit=RESULT_LIMIT,
+                )
+                results, reply = results + more, fixed or reply
+                if missing := untraced(reply, results, said):
+                    reply += _UNTRACED_NOTE.format(figures=", ".join(missing))
             return reply, results, label
         except (BackendUnavailable, ModelOutputError) as exc:
             failures.append(f"{label}: {exc}")

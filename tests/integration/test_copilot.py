@@ -1470,3 +1470,60 @@ def test_the_hidden_variable_plan_says_what_fills_each_column(client, monkeypatc
     assert "HID_REGION" in plan["hidden_without_rule"]
     (seg,) = plan["matches"]
     assert seg["filled_by"] == "computed" and "Q2" in seg["how"]
+
+
+def _fake_cleaning(monkeypatch, locked=False):
+    state = {"flags": {"r1": [{"check": "speeder", "detail": "2 min"}],
+                       "r2": [{"check": "straightliner", "detail": "Q4 grid"}],
+                       "r3": [{"check": "speeder", "detail": "1 min"}]},
+             "decisions": {"r3": {"decision": "remove"}}, "locked": locked,
+             "n_unreviewed_flagged": 2}
+    monkeypatch.setattr("api.routes.cleaning.get_cleaning", lambda *a, **k: state)
+
+
+def test_cleaning_can_be_acted_on_by_card(client, monkeypatch, tmp_path):  # noqa: F811
+    """Phase 3: the Cleaning screen could be read from chat but not acted on."""
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    _fake_cleaning(monkeypatch)
+    seen = _script(monkeypatch,
+                   ("tool", "propose_remove_respondents", {"study_id": "s_wb", "check": "bots"}),
+                   ("tool", "propose_remove_respondents", {"study_id": "s_wb", "check": "speeder"}),
+                   ("tool", "propose_lock_cleaning", {"study_id": "s_wb"}),
+                   ("text", "Two cards ready."))
+    resp = test_client.post("/api/copilot", json={"message": "remove the speeders"}).json()
+    refused, removed, locked = _tool_results(seen)
+    assert "speeder, straightliner" in refused["error"]  # the checks that did flag someone
+    remove, lock = resp["proposals"]
+    assert remove["path"] == "/studies/s_wb/cleaning/decisions"
+    assert remove["body"] == {"keys": ["r1"], "decision": "remove", "reason_code": "speeder"}
+    assert "Remove 1 respondent flagged as speeder" == remove["title"]  # r3 already removed
+    assert lock["path"] == "/studies/s_wb/cleaning/lock"
+    assert "1 removed respondent" in lock["detail"]
+
+
+def test_locked_cleaning_and_missing_tables_refuse_with_the_reason(client, monkeypatch, tmp_path):  # noqa: F811,E501
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    _fake_cleaning(monkeypatch, locked=True)
+    seen = _script(monkeypatch,
+                   ("tool", "propose_remove_respondents", {"study_id": "s_wb", "check": "speeder"}),
+                   ("tool", "propose_code_open_ends", {"study_id": "s_wb", "variables": ["SAT"]}),
+                   ("tool", "propose_code_open_ends", {"study_id": "s_wb", "variables": ["Q7_1"]}),
+                   ("text", "Done."))
+    resp = test_client.post("/api/copilot", json={"message": "clean and code"}).json()
+    locked, not_text, coded = _tool_results(seen)
+    assert "locked" in locked["error"]
+    assert "not open text" in not_text["error"]
+    (card,) = resp["proposals"]
+    assert card["path"] == "/studies/s_wb/coding/run" and card["body"] == {"variables": ["Q7_1"]}
+
+
+def test_a_report_cannot_be_drafted_before_there_are_tables(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    seen = _script(monkeypatch, ("tool", "propose_draft_report", {"study_id": "study_f1"}),
+                   ("text", "No tables yet."))
+    resp = test_client.post("/api/copilot", json={"message": "draft the report"}).json()
+    (refused,) = _tool_results(seen)
+    assert "no tables to report on yet" in refused["error"] and resp["proposals"] == []

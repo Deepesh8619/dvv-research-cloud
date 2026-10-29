@@ -30,9 +30,10 @@ AREAS: dict[str, tuple[str, ...]] = {
         "propose_close_link", "propose_set_look", "propose_add_quota", "propose_materialize"),
     "data": ("make_tables", "ask_data", "analysis_methods", "run_method", "variable_plan",
              "data_vs_questionnaire", "report_findings"),
-    "cleaning": ("cleaning_status", "qc_findings", "fieldwork_from_data"),
-    "open_ends": ("open_end_coding", "search_verbatims"),
-    "reports": ("report_findings", "make_tables", "ask_data"),
+    "cleaning": ("cleaning_status", "qc_findings", "fieldwork_from_data",
+                 "propose_remove_respondents", "propose_lock_cleaning"),
+    "open_ends": ("open_end_coding", "search_verbatims", "propose_code_open_ends"),
+    "reports": ("report_findings", "make_tables", "ask_data", "propose_draft_report"),
     "trust": ("compliance_check", "ledger_check", "qc_findings", "data_vs_questionnaire"),
     "admin": ("team_and_costs",),
 }
@@ -50,9 +51,9 @@ _INTENT: dict[str, re.Pattern] = {area: re.compile(words, re.I) for area, words 
             r"chart|graph|plot|percent|%|average|mean|significan|turf|maxdiff|"
             r"van westendorp|driver|price|variable|column|weight|net\b|top.?2|breakdown",
     "cleaning": r"clean|speeder|straight.?lin|flag|duplicate|bot\b|fraud|authentic|"
-                r"remove|bad respondent|quality",
-    "open_ends": r"open.?end|verbatim|coded|coding|codeframe|said|comment|write.?in",
-    "reports": r"finding|report|insight|summary|topline|deck|powerpoint|story",
+                r"remove|bad respondent|quality|lock",
+    "open_ends": r"open.?end|verbatim|coded|coding|codeframe|said|comment|write.?in|\bcode\b",
+    "reports": r"finding|report|insight|summary|topline|deck|powerpoint|story|draft",
     "trust": r"compliance|adverse|privacy|notice|ledger|certificate|tamper|verif|"
              r"match(?:es)? (?:the|its) questionnaire|discrepanc",
     "admin": r"cost|spend|bill|usage|team|user|who (?:is|are) on|invite|aws",
