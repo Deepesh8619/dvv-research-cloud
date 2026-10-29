@@ -1588,3 +1588,109 @@ def test_the_fallback_model_is_bedrock_llama_after_the_main_one(monkeypatch):
     assert "bedrock-runtime.ap-south-1" in _providers()[1][1]  # same region by default
     monkeypatch.setenv("BEDROCK_FALLBACK_MODEL", "none")
     assert "Bedrock fallback" not in [p[0] for p in _providers()]
+
+
+def test_an_excel_report_asks_before_it_builds(client, monkeypatch, tmp_path):  # noqa: F811
+    """"Ask what it needs so it doesn't make gibberish": an open decision comes
+    back as questions with options, and nothing is built."""
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    seen = _script(monkeypatch, ("tool", "excel_report", {"study_id": "s_wb"}),
+                   ("text", "A few choices first."))
+    resp = test_client.post("/api/copilot", json={"message": "make me an excel report"}).json()
+    (result,) = _tool_results(seen)
+    assert [q["id"] for q in result["needs_answers"]] == ["rows", "columns", "output"]
+    assert [q["id"] for q in resp["questions"]] == ["rows", "columns", "output"]
+    columns = resp["questions"][1]
+    assert columns["multiple"] and columns["options"][0] == "Total only"
+    assert any(o.startswith("GEND (") for o in columns["options"])
+    assert resp["charts"] == []  # nothing built on a guess
+
+
+def _report(test_client, monkeypatch, args):
+    seen = _script(monkeypatch, ("tool", "excel_report", {"study_id": "s_wb", **args}),
+                   ("text", "Here it is."))
+    resp = test_client.post("/api/copilot", json={"message": "build it"}).json()
+    (result,) = _tool_results(seen)
+    assert result["success"], result
+    (wb,) = resp["charts"]
+    got = test_client.get(f"/api/studies/s_wb/charts/{wb['filename']}")
+    assert got.status_code == 200
+    return result, got.content
+
+
+def test_a_finished_excel_report_follows_the_instructions(client, monkeypatch, tmp_path):  # noqa: F811
+    import io
+
+    from openpyxl import load_workbook
+
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    result, content = _report(test_client, monkeypatch, {
+        "rows": ["SAT", "Q1"], "columns": ["gender"], "output": "finished", "charts": True,
+        "show_counts": True, "title": "Coffee report"})
+    assert result["tables_in_file"] == 2
+    wb = load_workbook(io.BytesIO(content))
+    assert wb.sheetnames[0] == "Contents" and wb["Contents"]["A1"].value == "Coffee report"
+    sat = wb[wb.sheetnames[1]]
+    assert sat["A1"].value.startswith("T1 · Satisfaction")
+    assert [sat.cell(row=3, column=j).value for j in (2, 3, 4)] == ["Total", "Male (A)",
+                                                                    "Female (B)"]
+    assert sat["B4"].value == 40  # base
+    assert sat["B5"].number_format == "0%" and abs(sat["B5"].value - 0.2) < 1e-9
+    assert sat._charts and any(c.value == "Counts" for c in sat["A"])
+    nets = [c for c in sat["A"] if c.value and "Top" in str(c.value)]
+    assert nets and nets[0].font.bold  # top-2-box in bold
+
+
+def test_a_refreshable_report_recalculates_from_its_data_sheet(client, monkeypatch, tmp_path):  # noqa: F811
+    """Every figure is a COUNTIFS over Data: evaluated here exactly as Excel would,
+    it matches the data; changing Data changes the figures."""
+    import io
+    import re as _re
+
+    from openpyxl import load_workbook
+
+    test_client, sf, _ = client
+    _data_study(sf, tmp_path)
+    _, content = _report(test_client, monkeypatch, {
+        "rows": ["Q1"], "columns": ["gender"], "output": "refreshable",
+        "filter": {"AGEB": [1]}})
+    wb = load_workbook(io.BytesIO(content))
+    assert set(wb.sheetnames) >= {"Contents", "Data", "Labels"}
+    data = wb["Data"]
+    head = [c.value for c in data[1]]
+    rows = [[c.value for c in r] for r in data.iter_rows(min_row=2)]
+
+    def countifs(expr: str) -> int:
+        pairs = _re.findall(r"Data!\$([A-Z]+)\$2:\$[A-Z]+\$\d+,(\"<>\"|-?\d+)", expr)
+        n = 0
+        for r in rows:
+            ok = True
+            for col, crit in pairs:
+                v = r[ord(col) - 65]
+                ok &= v is not None if crit == '"<>"' else v == int(crit)
+            n += ok
+        return n
+
+    def value(sheet, ref) -> float:
+        f = sheet[ref].value
+        terms = _re.findall(r"COUNTIFS\([^)]*\)", f)
+        total = sum(countifs(t) for t in terms)
+        if "IFERROR" not in f:
+            return total
+        base = value(sheet, _re.search(r"/([A-Z]+)\$(\d+)", f).group(1) + _re.search(
+            r"/[A-Z]+\$(\d+)", f).group(1))
+        return total / base if base else 0
+
+    t1 = wb[wb.sheetnames[-1]] if wb.sheetnames[-1].startswith("T1") else wb["T1 Q1"]
+    assert [t1.cell(row=3, column=j).value for j in (2, 3, 4)] == ["Total", "Male", "Female"]
+    # Under 35s only (AGEB = 1): 20 respondents; Q1 = 1 among them, by gender.
+    under35 = [r for r in rows if r[head.index("AGEB")] == 1]
+    assert value(t1, "B4") == len(under35) == 20
+    yes_men = sum(1 for r in under35 if r[head.index("Q1")] == 1 and r[head.index("GEND")] == 1)
+    men = sum(1 for r in under35 if r[head.index("GEND")] == 1)
+    assert abs(value(t1, "C5") - yes_men / men) < 1e-9
+    # A new wave pasted into Data changes the figures, no macro involved.
+    rows.append([1 if h in ("AGEB", "GEND", "Q1") else None for h in head])
+    assert value(t1, "B4") == 21

@@ -5,6 +5,7 @@ import {
   CopilotChart,
   CopilotConversationSummary,
   CopilotMemory,
+  CopilotQuestion,
   CopilotProposal,
   CopilotTable,
   copilotApi,
@@ -60,6 +61,7 @@ interface Turn {
   cards?: CopilotProposal[]
   tables?: CopilotTable[]
   charts?: CopilotChart[]
+  questions?: CopilotQuestion[]
   answeredBy?: string
   seq?: number | null
   flagged?: boolean
@@ -184,6 +186,58 @@ function FlagAnswer({ conversationId, seq, flagged, onChange }: {
         <button type="button" className="text-slate-500 hover:underline" onClick={() => setWriting(false)}>Cancel</button>
         {failed && <span className="text-red-600">Couldn't save. Try again.</span>}
       </div>
+    </div>
+  )
+}
+
+/**
+ * What the Copilot needs to know before it acts, as options to click: one per
+ * question (several where it says so), then Send answers. Typing an answer in
+ * the box works too.
+ */
+function Questions({ questions, onAnswer, disabled }: {
+  questions: CopilotQuestion[]
+  onAnswer: (text: string) => void
+  disabled: boolean
+}) {
+  const [picked, setPicked] = useState<Record<string, string[]>>({})
+  const toggle = (q: CopilotQuestion, option: string) =>
+    setPicked((p) => {
+      const now = p[q.id] ?? []
+      const next = q.multiple
+        ? (now.includes(option) ? now.filter((o) => o !== option) : [...now, option])
+        : [option]
+      return { ...p, [q.id]: next }
+    })
+  const ready = questions.every((q) => (picked[q.id] ?? []).length > 0)
+  const send = () =>
+    onAnswer(questions.map((q) => `${q.question} ${(picked[q.id] ?? []).join('; ')}`).join('\n'))
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-slate-200 p-2" data-testid="copilot-questions">
+      {questions.map((q) => (
+        <fieldset key={q.id}>
+          <legend className="text-xs font-medium text-slate-700">
+            {q.question}{q.multiple ? ' (choose any)' : ''}
+          </legend>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {q.options.map((o) => {
+              const on = (picked[q.id] ?? []).includes(o)
+              return (
+                <button key={o} type="button" aria-pressed={on} disabled={disabled}
+                  onClick={() => toggle(q, o)}
+                  className={`rounded-full border px-2.5 py-0.5 text-xs ${on
+                    ? 'border-primary-600 bg-primary-600 text-white' : 'border-slate-300 text-slate-700 hover:border-slate-500'}`}>
+                  {o}
+                </button>
+              )
+            })}
+          </div>
+        </fieldset>
+      ))}
+      <button type="button" onClick={send} disabled={!ready || disabled}
+        className="rounded bg-slate-900 px-3 py-1 text-xs font-medium text-white disabled:opacity-40">
+        Send answers
+      </button>
     </div>
   )
 }
@@ -564,7 +618,10 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault()
-    const message = input.trim()
+    await submit(input.trim())
+  }
+
+  const submit = async (message: string) => {
     if (!message || busy) return
     setTurns((t) => [...t, { role: 'user', content: message }])
     setInput('')
@@ -587,6 +644,7 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
           cards: res.data.proposals,
           tables: res.data.tables,
           charts: res.data.charts,
+          questions: res.data.questions,
           answeredBy: res.data.answered_by,
           seq: res.data.seq,
         },
@@ -723,6 +781,9 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
               {turn.charts?.map((c) => c.kind === 'workbook'
                 ? <WorkbookDownload key={c.filename} file={c} />
                 : <ChartImage key={c.filename} chart={c} />)}
+              {turn.questions && turn.questions.length > 0 && i === turns.length - 1 && (
+                <Questions questions={turn.questions} disabled={busy} onAnswer={(text) => void submit(text)} />
+              )}
               {turn.answeredBy && (
                 <p className="text-[10px] text-slate-400 mt-1">answered by {turn.answeredBy}</p>
               )}

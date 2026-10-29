@@ -723,6 +723,9 @@ class CopilotResponse(BaseModel):
     conversation_id: str | None = None
     #: This answer's place in the conversation, for "this answer was wrong".
     seq: int | None = None
+    #: Decisions a tool needs before it acts ({id, question, options, multiple}):
+    #: shown as options to click, so nothing is built on a guess.
+    questions: list[dict] = Field(default_factory=list)
     #: Tables as the engines computed them ({title, header, rows, truncated,
     #: significance_tested}), shown under the reply, never retyped by the model.
     tables: list[dict] = Field(default_factory=list)
