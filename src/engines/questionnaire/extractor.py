@@ -1490,6 +1490,21 @@ _OPTIONAL_WORDING = re.compile(
     r"\bleave\s+(?:it\s+)?blank\b", re.I)
 
 
+def settle_required(survey: SurveyDefinition) -> None:
+    """Required by default, as the market-research convention is: every asked
+    question that takes a choice or a number, unless its own text says it is
+    optional. Open ends keep their deliberate default (optional)."""
+    for q in survey.questions:
+        if q.required or not _default_required(q.type):
+            continue
+        if _OPTIONAL_WORDING.search(f"{q.text or ''} {q.source_text or ''}"):
+            continue
+        q.required = True
+        q.extraction_evidence = {**(q.extraction_evidence or {}),
+                                 "required": "required by default; the document does not "
+                                             "say it is optional"}
+
+
 def promote_multi_answer_grids(survey: SurveyDefinition) -> None:
     """A grid whose own wording says "select all that apply" takes several answers per row."""
     for q in survey.questions:
@@ -1815,6 +1830,11 @@ def extract_survey_definition(
     from src.engines.questionnaire.second_look import second_look
 
     second_look(survey, use_model=blocks is not None)
+    # After every pass that can give a question its real type: a question whose
+    # AI reading failed was built as a stand-in with required=False, and the
+    # repair that later gave it a type left that in place — so whenever the
+    # model was throttled, those questions became skippable in the live link.
+    settle_required(survey)
     # A second opinion over the whole survey, for problems between questions no
     # rule covers. Real documents only (one model call); never blocks anything.
     if blocks is not None:

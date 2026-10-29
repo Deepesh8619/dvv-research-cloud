@@ -21,6 +21,33 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-29 — questionnaire reading accuracy: contents pages, required, honest scoring (branch fix/skip-table-of-contents)
+
+**What changed**
+- A Word table of contents is no longer read as questions (TOC styles, `_Toc` links,
+  PAGEREF/TOC fields, the "Contents" title). On a live GBK file, "KEY METRICS ...... 22"
+  had become question SCREENER8 "KEY METRICS22".
+- `settle_required`: after every pass, an asked choice/number question is required unless
+  its own text says optional. A failed AI reading built a stand-in with required=False and
+  the repair kept it — so when the model was throttled, those questions were skippable.
+- `eval_compare` scored two things a respondent cannot meet: on grids the parser's one
+  shuffle flag means ROWS (now compared with the gold's rows), and "anchored" is compared
+  only when the options are shuffled.
+
+**Measured** (7 gold documents, 369 questions, AI off, item lists diffed)
+
+| | exact matches |
+|---|---|
+| old code, old scoring | 170 |
+| old code, corrected scoring | 202 |
+| this branch | 216 (+14 newly right, 0 newly wrong) |
+
+Per document (exact %): bubble 51→59, google_ads_a 46→64, google_ads_b 48→63,
+trd1 70→70, trd2 43→68, vivo 30→40.
+
+**Open decision:** open ends are optional by default (28 of the remaining "required"
+differences); the gold readings follow the document, which rarely says so.
+
 ## 2026-10-25 — MaxDiff utilities and shares of preference (branch feat/maxdiff-utilities)
 
 Advanced methods → MaxDiff gave only counting scores. When the file records the
