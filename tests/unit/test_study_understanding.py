@@ -127,7 +127,9 @@ def test_a_governed_question_is_flagged_for_the_analyst_not_edited(monkeypatch):
     blocks = _blocks()
     survey = ex.extract_survey_definition(segment_into_questions(blocks), "s", blocks=blocks)
 
-    assert calls == ["questionnaire.extract"]
+    # The opening brief is read into the study overview, never sent to a model
+    # as a "display screen" (it used to be, and became a question to approve).
+    assert calls == []
     s2 = next(q for q in survey.questions if q.qid == "S2")
     assert schema.FLAG_BRIEF_RULE in s2.flags
     assert "panel respondents only" in s2.validation["brief_rules"][0]

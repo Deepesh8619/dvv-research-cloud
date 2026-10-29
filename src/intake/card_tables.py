@@ -144,6 +144,10 @@ def card_lines(cells: list[list[list[str]]]) -> tuple[list[str], Grid | None]:
     # "QGENDER. Are you?" is no label the text reader knows, and left in it
     # became part of the question wording.
     lines = list(rest) or [f"{label}."]
+    # The question again in another language ("¿En qué idioma…?" under
+    # "Which language…?"): the same wording, never an answer.
+    lines = lines[:1] + [f"[PN: also worded as: {x}]" if x.rstrip().endswith("?") else x
+                         for x in lines[1:]]
     # "ISSUES:" closing the head cell introduces the answers; it is not one.
     if len(lines) > 1 and lines[-1].endswith(":") and lines[-1][:-1].isupper():
         lines[-1] = f"[PN: {lines[-1]}]"
