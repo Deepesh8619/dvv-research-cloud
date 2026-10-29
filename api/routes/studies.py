@@ -1677,6 +1677,7 @@ def crosscheck_study(
     from src.engines.qc.base_gaps import summarise as summarise_base_gaps
     from src.engines.qc.condition_audit import audit_conditions
     from src.engines.qc.discrepancy import check_against_questionnaire
+    from src.engines.qc.variable_match import build_variable_match
     from src.engines.qc.variable_roles import ROLE_LABELS, summarize, unexplained
     from src.engines.questionnaire.datamap_recovery import reconcile, recover_missing
     from src.engines.questionnaire.label_merge import (
@@ -1888,6 +1889,12 @@ def crosscheck_study(
             for role, n in sorted(roles.counts().items(), key=lambda kv: -kv[1])
         ],
         "hidden_variables": roles.of("hidden"),
+        # One row per questionnaire question: its columns and every rule tested
+        # on it — met, broken (how many, which rows) or not checked — then the
+        # data columns no question claims.
+        "variable_match": build_variable_match(
+            survey, link_report.links, report, routing, link_report.unmatched_questions,
+            datamap, {q.qid for q in recovered}),
         "run_by": user.name,
         "run_at": datetime.now().isoformat(),
     }

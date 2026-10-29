@@ -1559,6 +1559,33 @@ export interface Discrepancy {
   example_rows: number[]
 }
 
+/** One rule tested on one question: met, broken (how many, which rows) or a warning. */
+export interface VariableRule {
+  rule: string
+  label: string
+  result: 'met' | 'broken' | 'warning'
+  n_rows?: number
+  detail?: string
+  example_rows?: number[]
+  agreement_pct?: number
+}
+
+export interface VariableMatchRow {
+  qid: string
+  text: string
+  type: string
+  columns: string[]
+  n_columns: number
+  status: 'met' | 'broken' | 'warning' | 'not_checked' | 'missing_in_data' | 'not_in_questionnaire'
+  rules: VariableRule[]
+}
+
+export interface VariableMatch {
+  summary: Record<string, number>
+  questions: VariableMatchRow[]
+  data_only: Array<{ column: string; label: string; role: string; role_label: string; to_chase: boolean }>
+}
+
 export interface CrosscheckReport {
   passed: boolean
   n_rows: number
@@ -1575,6 +1602,8 @@ export interface CrosscheckReport {
   unmatched_variables: string[]
   variable_roles?: Array<{ role: string; label: string; n: number }>
   hidden_variables?: string[]
+  /** Questionnaire variables against data columns, one row each (missing on old reports). */
+  variable_match?: VariableMatch
   /** Each question's base — who it was meant to be asked of — checked against
       who actually answered it, respondent by respondent. */
   routing?: {
