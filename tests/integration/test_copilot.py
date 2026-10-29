@@ -769,6 +769,59 @@ def test_teaching_the_parser_names_what_it_touches_and_takes_effect(client, monk
         db.close()
 
 
+def test_an_owner_teaches_where_questions_start_and_the_document_is_read_again(
+        client, monkeypatch):  # noqa: F811
+    """A format the reader has never seen: the owner shows one label, the card
+    previews what it finds, and confirming saves it and re-reads the document."""
+    import base64
+    import gzip
+
+    import api.routes.questionnaire as qroutes
+    from api.db import ProfileRuleDB, QuestionnaireDB
+    from src.intake.questionnaire_loader import DocumentBlock
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    _draft(sf, profile={"slug": "acme_fmt"})
+    db = sf()
+    row = db.query(QuestionnaireDB).filter_by(study_id="study_f1").first()
+    row.source_file_b64 = base64.b64encode(gzip.compress(b"the document")).decode()
+    db.commit()
+    db.close()
+    lines = ["QGENDER.", "Are you?", "Male", "Female", "QAGE.", "Your age?",
+             "QREGION.", "Where?", "North", "South"]
+    monkeypatch.setattr(qroutes, "load_docx", lambda path: [
+        DocumentBlock("paragraph", t, i) for i, t in enumerate(lines)])
+    started = []
+    monkeypatch.setattr(qroutes, "_run_extraction", lambda *a: started.append(a))
+
+    seen = _script(monkeypatch,
+                   ("tool", "propose_teach_reading", {"study_id": "study_f1",
+                                                      "kind": "question_label",
+                                                      "pattern": "Question 5:"}),
+                   ("tool", "propose_teach_reading", {"study_id": "study_f1",
+                                                      "kind": "question_label",
+                                                      "pattern": "QGENDER."}),
+                   ("text", "Ready to confirm."))
+    resp = test_client.post("/api/copilot",
+                            json={"message": "questions start like QGENDER."}).json()
+    assert "does not find any more questions" in _tool_results(seen)[0]["error"]
+    (card,) = resp["proposals"]
+    assert "0 labelled questions today and 3 with it" in card["detail"]
+    assert "QGENDER, QAGE, QREGION" in card["detail"]
+
+    confirmed = test_client.post(f"/api{card['path']}", json=card["body"])
+    assert confirmed.status_code == 200
+    assert confirmed.json()["applied_to_current"] == {"reextract": 2}
+    assert len(started) == 1  # the document is read again, as version 2
+    db = sf()
+    try:
+        rule = db.query(ProfileRuleDB).filter_by(pattern_kind="question_label").one()
+        assert rule.pattern == "QGENDER."
+    finally:
+        db.close()
+
+
 def test_teaching_is_refused_without_a_format_or_for_an_analyst(client, monkeypatch):  # noqa: F811
     test_client, sf, state = client
     _make_study(sf)

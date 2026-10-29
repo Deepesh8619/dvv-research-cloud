@@ -398,6 +398,7 @@ def _run_extraction(
         active_patterns_for_profile,
         active_rules_for_profile,
         set_questionnaire_definition,
+        taught_question_labels,
         touch_questionnaire,
     )
 
@@ -415,7 +416,7 @@ def _run_extraction(
         else:  # .pdf — the only other accepted type (validated at upload)
             blocks = load_pdf(file_path)
 
-        chunks = segment_into_questions(blocks)
+        chunks = segment_into_questions(blocks, taught_question_labels(job_db))
         logger.info(
             f"[{study_id}] loaded {len(blocks)} blocks -> {len(chunks)} question chunks"
         )
@@ -2621,7 +2622,9 @@ def diagnose_extraction(
                 status_code=422,
                 detail="This document could not be opened to check it.",
             ) from exc
-        chunks = segment_into_questions(blocks)
+        from api.db import taught_question_labels
+
+        chunks = segment_into_questions(blocks, taught_question_labels(db))
 
     return diagnose(survey.questions, chunks, blocks, can_reextract=True)
 

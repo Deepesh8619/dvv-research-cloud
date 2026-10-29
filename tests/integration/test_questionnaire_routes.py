@@ -105,7 +105,7 @@ def client(tmp_path, monkeypatch):
     # Patch the loader/segmenter to no-ops and extraction to return our fixture.
     monkeypatch.setattr(qroutes, "load_docx", lambda p: [])
     monkeypatch.setattr(qroutes, "load_pdf", lambda p: [])
-    monkeypatch.setattr(qroutes, "segment_into_questions", lambda blocks: [])
+    monkeypatch.setattr(qroutes, "segment_into_questions", lambda blocks, *_taught: [])
     monkeypatch.setattr(
         qroutes,
         "extract_survey_definition",

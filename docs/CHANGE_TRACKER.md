@@ -21,6 +21,34 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-29 — owners teach where questions start, from the Copilot (branch feat/teach-question-labels)
+
+Every new layout failed the same way: the reader could not tell where a question
+starts, and each one needed a code change (#227 for question cards). Now an
+owner shows the Copilot ONE label exactly as the document writes it
+("QGENDER.", "Question 5:", "S5c)"), and the shape is learned
+(`src/intake/taught_labels.py`): built from character classes, never a regex
+the user typed; anchored at line start.
+
+- New pattern kind `question_label`. Shared across formats on purpose, since
+  segmentation runs before the format is known: a shape only applies to a
+  document with ≥3 lines written that way, so a label taught on one client
+  reads the next client who writes labels the same way, and never splits a
+  document written differently.
+- The Copilot card previews it on the archived document ("0 labelled
+  questions today, 3 with it: QGENDER, QAGE, QREGION") and refuses a label
+  that finds nothing new. Confirming saves the rule and re-extracts the
+  document as a new version (approvals on the old version are kept).
+- Used by upload, re-extract, the diagnosis and the correction preview.
+- Rule for the Copilot: when the diagnosis shows the document was not split
+  into questions, ask the owner for one label (clickable options taken from the
+  source text). Do not guess one.
+
+No change for documents nobody taught a label for (segmentation is identical
+without taught labels).
+
+---
+
 ## 2026-10-29 — question cards read by layout (branch feat/reader-question-cards)
 
 **The Charter NPS tracker read 14 unlabelled chunks out of 141 tables** and

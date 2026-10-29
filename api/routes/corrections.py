@@ -565,6 +565,18 @@ def apply_rule(
     db.refresh(rule)
     logger.info(f"Rule {rule.id} applied to profile {profile_slug} by {user.email}")
     response = _rule_response(rule)
+    if kind == "question_label" and request.study_id:
+        # Where questions START changed, which a re-read cannot reach: it
+        # replays stored questions. Read the document again as a new version
+        # (the old one and its approvals are kept).
+        from api.routes.questionnaire import reextract_questionnaire
+
+        try:
+            started = reextract_questionnaire(request.study_id, db, user)
+            response.applied_to_current = {"reextract": started.get("version")}
+        except HTTPException as exc:
+            logger.warning(f"taught label saved; re-extract not started: {exc.detail}")
+        return response
     if kind:
         # A PATTERN (not a prose-only rule) just became active for this
         # profile — apply it to whatever questionnaire the founder was
@@ -620,6 +632,14 @@ def pattern_kinds(user: UserDB = Depends(require_correction_access)):
                 "label": "Screens out numbers outside the range after this phrase",
                 "help": "On a number question, e.g. 'CONTINUE IF AGES' before "
                         "'18-60. TERMINATE ALL OTHERS'.",
+                "values": [],
+            },
+            {
+                "kind": "question_label",
+                "label": "Is how a question label is written",
+                "help": "One label exactly as the document writes it, e.g. 'S5c.' or "
+                        "'QGENDER.'. Every document writing labels that way is then "
+                        "split into questions correctly.",
                 "values": [],
             },
             {
@@ -759,6 +779,7 @@ def _run_preview(preview_id: str, study_id: str, questionnaire_id: str,
         SessionLocal,
         active_patterns_for_profile,
         active_rules_for_profile,
+        taught_question_labels,
     )
 
     job_db = SessionLocal()
@@ -766,7 +787,7 @@ def _run_preview(preview_id: str, study_id: str, questionnaire_id: str,
         blocks = (
             load_docx(source) if source.suffix.lower() == ".docx" else load_pdf(source)
         )
-        chunks = segment_into_questions(blocks)
+        chunks = segment_into_questions(blocks, taught_question_labels(job_db))
 
         # Candidate rule set = what is already active, plus the one under review
         # appended last so it wins on conflict — the same ordering the prompt
@@ -882,8 +903,11 @@ def start_preview(
         daemon=True,
     ).start()
 
+    from api.db import taught_question_labels
+
     n_chunks = len(segment_into_questions(
-        load_docx(source) if source.suffix.lower() == ".docx" else load_pdf(source)
+        load_docx(source) if source.suffix.lower() == ".docx" else load_pdf(source),
+        taught_question_labels(db),
     ))
     logger.info(f"[{study_id}] preview {preview.id} started by {user.email}")
     return {"preview_id": preview.id, "status": "running", "estimated_model_calls": n_chunks}
