@@ -137,6 +137,27 @@ _BASE_TAG_RE = re.compile(r"^\s*\[\s*BASE\b(?:\s*[:\-]|\s+)", re.IGNORECASE)
 # "Thank you! We appreciate your input!" — the end screen, not one more answer.
 _CLOSING = re.compile(r"^\s*(?:thank\s+you|thanks)\b.{0,120}$", re.I)
 
+# A screen the respondent READS, not answers: the document talking to them —
+# a welcome, a hand-over, a transition into the next block. Recognised by what
+# it does (addresses the respondent, introduces what comes next), not by a label.
+_SCREEN = re.compile(
+    r"^\s*(?:thank\s+you|thanks|hi\b|hello\b|welcome|"
+    r"thinking\s+(?:now\s+)?(?:about|of)|moving\s+on|now,?\s+(?:we|i|please|let'?s|thinking)|"
+    r"you\s+will\s+(?:now\s+)?(?:be|see)|these\s+(?:final|next|following|last)|"
+    r"the\s+(?:next|following|final|last)\s+(?:few\s+)?(?:questions|section|part)|"
+    r"next,?\s+(?:we|you|i)|please\s+(?:now\s+)?(?:hand|read|take|think|imagine|consider|pass)|"
+    r"in\s+this\s+(?:section|part)|before\s+we\s+(?:begin|start)|"
+    r"we(?:'d|\s+would)\s+(?:now\s+)?like|imagine|for\s+the\s+(?:next|following|rest)|"
+    r"after\s+seeing|to\s+start|to\s+begin|finally|lastly)\b", re.I)
+
+
+def _is_screen(block: DocumentBlock) -> bool:
+    """A respondent-facing sentence that asks nothing: an information screen."""
+    text = (block.text or "").strip()
+    return (block.block_type == "paragraph" and bool(_SCREEN.match(text))
+            and len(text.split()) >= 2 and "?" not in text and not _asks_a_question(block)
+            and not text.startswith(("[", "<", "(")) and not _CAPS_HEADING.match(text))
+
 # A Word list number drawn as a plain number: "7", "7.", "7)", "Q7.".
 _LIST_NUMBER = re.compile(r"^\s*Q?(\d{1,3})\s*[.)]?\s*$", re.I)
 
@@ -796,7 +817,39 @@ def segment_into_questions(blocks: list[DocumentBlock]) -> list[QuestionChunk]:
             )
         )
 
-    for block in blocks:
+    screens = 0
+
+    def starts_question(block: DocumentBlock) -> bool:
+        return _table_qid(block) is not None or _detect_label(block.text, base_tags_open)[0] \
+            or (ident_named and _ident_qid(block) is not None)
+
+    def before_a_question(i: int) -> bool:
+        """The next block that is not a scripter note or another screen starts a question."""
+        for later in blocks[i + 1:i + 6]:
+            text = (later.text or "").strip()
+            if starts_question(later):
+                return True
+            if _is_screen(later) or text.startswith(("[", "<")) or _NOTE_RE.match(text) \
+                    or _CAPS_HEADING.match(text):
+                continue
+            return False
+        return False
+
+    for i, block in enumerate(blocks):
+        if _is_screen(block) and before_a_question(i) and not starts_question(block) \
+                and (current_qid is not None or seen_label or current):
+            # "Moving on…", "Thinking now about one brand, Bubble…", "Please now hand
+            # your device to your teen": its own screen, read before the next question.
+            # It used to ride at the end of the PREVIOUS question's text.
+            if current_qid is not None and current and _is_screen(current[-1]) \
+                    and current_qid.startswith(("INFO_", "INTRO")):
+                current.append(block)  # a second sentence of the same screen
+                continue
+            flush()
+            screens += 1
+            current = [block]
+            current_qid = "INTRO" if not seen_label and screens == 1 else f"INFO_{screens}"
+            continue
         table_qid = _table_qid(block)
         if table_qid is not None:
             # A table-per-question block is its own chunk. Peel any immediately-

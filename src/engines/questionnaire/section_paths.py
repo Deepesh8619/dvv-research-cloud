@@ -409,6 +409,11 @@ _PREFIX = re.compile(r"[A-Za-z]*")
 _NOTE_LINE = re.compile(r"^\s*(?:\[|NOTE\b|PN\b|PROGRAMMER|SCRIPTER)", re.I)
 
 
+def _is_screen_id(question: Question) -> bool:
+    """An information screen the reader made from the document's own words."""
+    return question.type is QuestionType.INFO and question.qid.startswith(("INFO_", "INTRO"))
+
+
 def apply_section_bases(survey: SurveyDefinition) -> list[str]:
     """Give each question under a "<SECTION> (S0=2)" heading that base.
 
@@ -442,8 +447,21 @@ def apply_section_bases(survey: SurveyDefinition) -> list[str]:
         if condition is None or start >= len(questions):
             continue
         stop = starts[n + 1][0] if n + 1 < len(starts) else len(questions)
-        prefix = _PREFIX.match(questions[start].qid).group(0).upper()
+        # The section's name prefix comes from its first QUESTION: an information
+        # screen right under the heading ("Thank you for agreeing…") is part of the
+        # section — it is shown only to that section's respondents — but its
+        # INFO_/INTRO id must not end the section before S1 is reached.
+        first = next((k for k in range(start, stop) if not _is_screen_id(questions[k])), None)
+        if first is None:
+            continue
+        prefix = _PREFIX.match(questions[first].qid).group(0).upper()
         for question in questions[start:stop]:
+            if _is_screen_id(question):
+                condition_copy = Expression.from_dict(condition.to_dict())
+                condition_copy.verbatim_text = condition_copy.verbatim_text or line
+                question.show_if = _both(question.show_if, condition_copy)
+                gated.append(question.qid)
+                continue
             if _PREFIX.match(question.qid).group(0).upper() != prefix:
                 break
             if schema.FLAG_DERIVED_VARIABLE in question.flags:

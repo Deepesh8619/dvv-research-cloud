@@ -693,3 +693,47 @@ def test_a_table_of_contents_is_not_read_as_questions(tmp_path):
                                  "CLASSIFICATION")) for t in texts), texts
     chunks = segment_into_questions(blocks)
     assert [c.candidate_qid for c in chunks] == ["Q1"]
+
+
+def test_a_screen_the_respondent_reads_is_its_own_screen():
+    """Mid-document information ("Moving on…", "Thinking now about one brand…",
+    "Please now hand your device to your teen") rode at the end of the previous
+    question's text and never became a screen. It is recognised by what it does —
+    talks to the respondent, asks nothing, comes straight before a question."""
+    from src.intake.questionnaire_loader import DocumentBlock
+
+    blocks = [
+        DocumentBlock("paragraph", "Q1. Which brands have you heard of?", 0),
+        DocumentBlock("paragraph", "1. Alpha", 1),
+        DocumentBlock("paragraph", "2. Beta", 2),
+        DocumentBlock("paragraph", "Moving on…", 3),
+        DocumentBlock("paragraph", "Thinking now about one brand, Bubble…", 4),
+        DocumentBlock("paragraph", "Q2. How likely are you to buy Bubble?", 5),
+        DocumentBlock("paragraph", "1. Very likely", 6),
+        # A lead-in that ASKS is not a screen, even after an answer list.
+        DocumentBlock("paragraph", "Q3.", 7),
+        DocumentBlock("paragraph", "Thinking about last month, what did you buy?", 8),
+    ]
+    chunks = segment_into_questions(blocks)
+    assert [c.candidate_qid for c in chunks] == ["Q1", "INFO_1", "Q2", "Q3"]
+    assert chunks[1].chunk_text == "Moving on…\nThinking now about one brand, Bubble…"
+    assert "Moving on" not in chunks[0].chunk_text  # no longer glued to Q1
+    assert "Thinking about last month" in chunks[3].chunk_text
+
+
+def test_a_section_condition_passes_through_its_intro_screen():
+    from src.core.survey_definition import Question, QuestionType, SurveyDefinition
+    from src.engines.questionnaire.section_paths import apply_section_bases
+
+    survey = SurveyDefinition(study_id="s", title="t", source="extracted", status="draft",
+                              questions=[
+        Question(qid="S0", text="Which panel?", type=QuestionType.SINGLE,
+                 source_text="S0. Which panel?\nCONSUMER PANEL SCREENER (S0=1)"),
+        Question(qid="INTRO", text="Thank you for agreeing…", type=QuestionType.INFO,
+                 source_text="Thank you for agreeing…"),
+        Question(qid="S1", text="What is your age?", type=QuestionType.SINGLE,
+                 source_text="S1. What is your age?"),
+        Question(qid="S2", text="Where do you live?", type=QuestionType.SINGLE,
+                 source_text="S2. Where do you live?")])
+    gated = apply_section_bases(survey)
+    assert gated == ["INTRO", "S1", "S2"]

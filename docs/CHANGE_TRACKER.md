@@ -21,6 +21,18 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-29 — information screens read like an analyst reads them (branch feat/reader-information-screens)
+
+Mid-document information ("Moving on…", "Thinking now about one brand, Bubble…",
+"Please now hand your device over to your teen…", the welcome) rode at the end of the
+PREVIOUS question's text: it never became a screen, and it muddied that question's
+reading. A paragraph that talks to the respondent, asks nothing, and comes straight
+before a question is now its own information screen. A section's condition passes
+through such a screen (and applies to it) instead of stopping at its INFO id.
+
+Measured (7 gold documents, AI off, item lists diffed): 12 newly right, 0 newly wrong.
+Missing gold questions: bubble 12 -> 5, vivo 7 -> 2.
+
 ## 2026-10-29 — questionnaire reading accuracy: contents pages, required, honest scoring (branch fix/skip-table-of-contents)
 
 **What changed**
