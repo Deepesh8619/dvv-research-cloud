@@ -2053,6 +2053,7 @@ export const copilotApi = {
     conversationId?: string | null,
     focusQid?: string | null,
     screen?: string | null,
+    images?: string[],
   ) =>
     api.post<CopilotReply>('/copilot', {
       message,
@@ -2060,6 +2061,7 @@ export const copilotApi = {
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(focusQid ? { focus_qid: focusQid } : {}),
       ...(screen ? { screen } : {}),
+      ...(images?.length ? { images } : {}),
     }),
 
   /**
@@ -2074,6 +2076,7 @@ export const copilotApi = {
     conversationId?: string | null,
     focusQid?: string | null,
     screen?: string | null,
+    images?: string[],
   ): Promise<CopilotReply> => {
     const body = {
       message,
@@ -2081,6 +2084,7 @@ export const copilotApi = {
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(focusQid ? { focus_qid: focusQid } : {}),
       ...(screen ? { screen } : {}),
+      ...(images?.length ? { images } : {}),
     }
     let res: Response
     try {
@@ -2097,7 +2101,7 @@ export const copilotApi = {
         localStorage.removeItem('authToken')
         window.location.href = '/login'
       }
-      return (await copilotApi.ask(message, studyId, conversationId, focusQid, screen)).data
+      return (await copilotApi.ask(message, studyId, conversationId, focusQid, screen, images)).data
     }
     const reader = res.body.getReader()
     const decoder = new TextDecoder()

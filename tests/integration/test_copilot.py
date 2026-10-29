@@ -1984,3 +1984,57 @@ def test_filler_goes_but_the_layout_stays():
     reply = "- Q4: 5 options\n- Q5: 3 options\n\nLet me know if you need anything else."
     assert strip_filler(reply) == "- Q4: 5 options\n- Q5: 3 options"
     assert strip_filler("Only filler, let me know.") == "Only filler, let me know."
+
+
+SHOT = "data:image/png;base64,iVBORw0KGgo="
+
+
+def test_a_screenshot_is_read_into_the_question_and_kept_in_the_history(
+        client, monkeypatch):  # noqa: F811
+    """The copilot reads text: a screenshot is transcribed once, in-region, and
+    the transcript is what it reasons over — now and in later turns."""
+    from api.db import CopilotMessageDB
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    sent: list[str] = []
+    read = "Review page. S6b | Needs you"
+    monkeypatch.setattr("src.ai.vision.transcribe",
+                        lambda image, timeout=90: sent.append(image) or read)
+    seen = _script(monkeypatch, ("text", "S6b needs a reviewer."))
+    resp = test_client.post("/api/copilot", json={"message": "why is this flagged?",
+                                                  "images": [SHOT]})
+    assert resp.status_code == 200
+    assert sent == [SHOT]
+    user_turn = seen[0][-1]["content"]
+    assert "why is this flagged?" in user_turn
+    assert "[Screenshot 1, as read]\nReview page. S6b | Needs you" in user_turn
+    db = sf()
+    try:
+        stored = db.query(CopilotMessageDB).filter_by(role="user").one().content
+        assert "S6b | Needs you" in stored  # the next turn still knows what it showed
+        assert "base64" not in stored  # the image itself is never stored
+    finally:
+        db.close()
+
+
+def test_a_screenshot_that_cannot_be_read_is_said_not_pretended(client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    monkeypatch.delenv("BEDROCK_VISION_MODEL", raising=False)
+    monkeypatch.setenv("BEDROCK_VISION_MODEL", "")
+    seen = _script(monkeypatch, ("text", "I could not see the screenshot."))
+    test_client.post("/api/copilot", json={"message": "what is this?", "images": [SHOT]})
+    assert "Screenshot 1 could not be read" in seen[0][-1]["content"]
+    assert "Tell the user you could not see it" in seen[0][-1]["content"]
+
+
+def test_only_images_are_accepted_as_screenshots(client):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    for bad in ("data:text/html;base64,PGgxPg==", "https://example.com/a.png",
+                "data:image/png;base64," + "A" * 6_000_000):
+        resp = test_client.post("/api/copilot", json={"message": "x", "images": [bad]})
+        assert resp.status_code == 422
+    resp = test_client.post("/api/copilot", json={"message": "x", "images": [SHOT] * 4})
+    assert resp.status_code == 422
