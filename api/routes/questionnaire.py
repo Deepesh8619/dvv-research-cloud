@@ -1112,6 +1112,10 @@ def add_question(
             if request.terminate_if
             else None,
         )
+        if request.hidden:
+            question.type = QuestionType.INFO
+            question.flags = [*question.flags, "DERIVED_VARIABLE"]
+            question.validation = {**(question.validation or {}), "not_in_link": True}
     except (ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid question: {exc}") from exc
 

@@ -71,6 +71,7 @@ from src.engines.fielding.decisions import QuotaCell
 from src.engines.fielding.dryrun import simulate
 from src.engines.fielding.field_report import build_field_report
 from src.engines.fielding.launch_check import launch_check
+from src.engines.questionnaire.conditions import compile_condition, describe_condition
 from src.engines.questionnaire.navigator_tools import (
     _describe_expression,
     explain_question_base,
@@ -182,6 +183,30 @@ def _screen_outs(survey, by_question: list[dict]) -> list[dict]:
                 rule += f" ({labels[q.terminate_if.value]})"
         out.append({**row, "question": q.text if q else None, "screen_out_rule": rule})
     return out
+
+
+def _options_from(raw: list) -> list[dict]:
+    """Answers as the copilot writes them: "99=Prefer not to answer [exclusive]",
+    plain labels (numbered in order), or {code, label, exclusive, anchored}."""
+    options = []
+    for i, o in enumerate(raw, 1):
+        if isinstance(o, dict):
+            if not str(o.get("label") or "").strip():
+                continue
+            options.append({"code": int(o.get("code") or i), "label": str(o["label"]).strip(),
+                            "exclusive": bool(o.get("exclusive")),
+                            "anchored": bool(o.get("anchored") or o.get("anchor"))})
+            continue
+        text = str(o).strip()
+        if not text:
+            continue
+        tags = {t.lower() for t in re.findall(r"\[(exclusive|anchor(?:ed)?)\]", text, re.I)}
+        text = re.sub(r"\s*\[(?:exclusive|anchor(?:ed)?)\]", "", text, flags=re.I).strip()
+        m = re.match(r"^(\d+)\s*[=:.)]\s*(.+)$", text)
+        options.append({"code": int(m.group(1)) if m else i, "label": m.group(2) if m else text,
+                        "exclusive": "exclusive" in tags,
+                        "anchored": any(t.startswith("anchor") for t in tags)})
+    return options
 
 
 def make_executor(db: Session, user: UserDB):
@@ -1390,20 +1415,27 @@ def make_executor(db: Session, user: UserDB):
                                  f"{', '.join(t.value for t in QuestionType)}")
             body["type"] = kind
         if args.get("options"):
-            options = []
-            for i, o in enumerate(args["options"]):
-                if isinstance(o, dict) and str(o.get("label") or "").strip():
-                    options.append({"code": int(o.get("code") or i + 1),
-                                    "label": str(o["label"]).strip()})
-                elif str(o).strip():
-                    options.append({"code": i + 1, "label": str(o).strip()})
-            body["options"] = options
+            body["options"] = _options_from(args["options"])
         for flag in ("required", "randomize_options"):
             if isinstance(args.get(flag), bool):
                 body[flag] = args[flag]
+        # Conditions in plain words ("QAGE < 18"), compiled and checked against
+        # this questionnaire; "none" clears one.
+        for field in ("show_if", "terminate_if"):
+            if (said := str(args.get(field) or "").strip()):
+                if said.lower() in ("none", "clear", "remove", "-"):
+                    body[field] = None
+                else:
+                    try:
+                        body[field] = compile_condition(said, definition).to_dict()
+                    except ValueError as exc:
+                        raise _ToolError(f"{field}: {exc}") from exc
+        bounds = {k: args[k] for k in ("min", "max") if isinstance(args.get(k), (int, float))}
+        if bounds:
+            body["validation"] = bounds
         if not body:
-            raise _ToolError("name what to change: text, type, options, required or "
-                             "randomize_options")
+            raise _ToolError("name what to change: text, type, options, required, "
+                             "randomize_options, show_if, terminate_if, min or max")
 
         # Tried on a copy first, through the endpoint's own code, so a card that
         # would be refused on Confirm is never shown.
@@ -1419,7 +1451,14 @@ def make_executor(db: Session, user: UserDB):
         def shown(field: str, question) -> str:
             value = getattr(question, field)
             if field == "options":
-                return "; ".join(f"{o.code}={o.label}" for o in value or []) or "(none)"
+                return "; ".join(
+                    f"{o.code}={o.label}" + (" [exclusive]" if o.exclusive else "")
+                    + (" [anchor]" if o.anchored else "") for o in value or []) or "(none)"
+            if field in ("show_if", "terminate_if"):
+                return describe_condition(value) if value is not None else "(none)"
+            if field == "validation":
+                v = value or {}
+                return f"{v.get('min', '…')} to {v.get('max', '…')}" if v else "(none)"
             return getattr(value, "value", value) if value is not None else "(none)"
 
         diff = [{"field": field, "before": str(shown(field, q)),
@@ -1430,6 +1469,49 @@ def make_executor(db: Session, user: UserDB):
             f"Saved to the questionnaire under review; {q.qid} goes back to review. If anyone "
             f"changes {q.qid} before you confirm, this card is refused.",
             "PATCH", f"/studies/{s.id}/questionnaire/questions/{q.qid}", body, diff)
+
+    def propose_add_hidden_variable(args):
+        """A variable the script computes and never asks: bands, each with the
+        condition that puts a respondent in it, compiled and checked here."""
+        s, _row, definition = current(args)
+        name = re.sub(r"[^A-Za-z0-9_]", "_", str(args.get("name") or "").strip()).upper()
+        if not name:
+            raise _ToolError("give the variable a name, e.g. HID_AGE_BANDS")
+        if not name.startswith(("HID_", "HIDDEN_")):
+            name = f"HID_{name}"
+        if name in {q.qid.upper() for q in definition.questions}:
+            raise _ToolError(f"{name} already exists; edit it instead")
+        bands = args.get("bands") or []
+        options = []
+        for i, band in enumerate(bands, 1):
+            if isinstance(band, dict):
+                code, label, rule = band.get("code") or i, band.get("label"), band.get("when")
+            else:
+                m = re.match(r"^\s*(?:(\d+)\s*=\s*)?(.+?)\s*:\s*(.+)$", str(band))
+                if not m:
+                    raise _ToolError(f"write each band as \"code=label: condition\", e.g. "
+                                     f"\"1=18-34: QAGE between 18 and 34\" (got {band!r})")
+                code, label, rule = m.group(1) or i, m.group(2), m.group(3)
+            try:
+                when = compile_condition(str(rule), definition)
+            except ValueError as exc:
+                raise _ToolError(f"band {label!r}: {exc}") from exc
+            options.append({"code": int(code), "label": str(label).strip(),
+                            "derive_if": when.to_dict()})
+        if not options:
+            raise _ToolError("give at least one band: \"code=label: condition\"")
+        text = str(args.get("label") or name).strip()
+        return propose(
+            "add_question", f"Add hidden variable {name}",
+            "Computed for every respondent, never asked: "
+            + "; ".join(f"{o['code']}={o['label']} when {b}" for o, b in
+                        zip(options, [str(x.get("when") if isinstance(x, dict) else
+                                          str(x).split(":", 1)[1]).strip() for x in bands],
+                            strict=True))
+            + ". It is added at the end of the questionnaire and goes to review.",
+            "POST", f"/studies/{s.id}/questionnaire/questions",
+            {"qid": name, "text": text, "type": "info", "options": options,
+             "required": False, "hidden": True})
 
     def propose_reread_question(args):
         s, _row, _definition, q = question(args)
@@ -1601,6 +1683,7 @@ def make_executor(db: Session, user: UserDB):
         "qc_findings": qc_findings,
         "extraction_diagnosis": extraction_diagnosis,
         "propose_reextract": propose_reextract,
+        "propose_add_hidden_variable": propose_add_hidden_variable,
         "study_brief": study_brief,
         "field_report": field_report,
         "soft_launch_check": soft_launch_check,

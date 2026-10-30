@@ -134,6 +134,9 @@ def seed() -> None:
                  type=QuestionType.SINGLE,
                  options=[Option(code=1, label="Leaf"), Option(code=2, label="Cup")]),
         Question(qid="T4", text="Rate these teas.", type=QuestionType.SINGLE, options=[]),
+        # A number with a refusal code: the target of "apply this note" tasks.
+        Question(qid="T5", text="What is your age?", type=QuestionType.NUMERIC,
+                 options=[Option(code=99, label="Prefer not to answer")]),
     ]
     # Read from a document of a known format, so the review cases have source
     # text to explain and a format to teach: "[SA]" marks single choice.
