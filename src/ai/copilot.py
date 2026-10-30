@@ -580,9 +580,18 @@ def _unretried_refusal(results: list[dict]) -> tuple[str, str] | None:
 _ASSERTS_DATA = re.compile(r"\d|\b[A-Z]{1,4}\d{1,3}[a-z]?\b")
 
 
-def _asserts_data(reply: str, today: str) -> bool:
-    """Does this answer state something only the platform's data could supply?"""
-    return bool(_ASSERTS_DATA.search((reply or "").replace(today, "")))
+def _asserts_data(reply: str, today: str, said: str = "") -> bool:
+    """Does this answer state something only the platform's data could supply?
+
+    A figure or question id the USER gave — typed, or read off their screenshot
+    ("1-120", "18-34", QAGE) — is not one: repeating it back is not inventing
+    it. Counting it was replacing every answer about a pasted screenshot with
+    "I could not look that up".
+    """
+    found = _ASSERTS_DATA.findall((reply or "").replace(today, ""))
+    tokens = set(re.findall(r"\d+|\b[A-Z]{1,4}\d{1,3}[a-z]?\b", (reply or "").replace(today, "")))
+    return bool(found) and not tokens <= set(re.findall(r"\d+|\b[A-Z]{1,4}\d{1,3}[a-z]?\b",
+                                                         said))
 
 
 def run_copilot(
@@ -636,7 +645,8 @@ def run_copilot(
             # incidence of about 62% with 340 completes" shipped to the user
             # exactly like a real reading — the most expensive kind of wrong,
             # because it is specific and confident and there is no tell.
-            if not results and _asserts_data(reply, today):
+            said = message + " " + " ".join(str(t.get("content") or "") for t in history or [])
+            if not results and _asserts_data(reply, today, said):
                 reply, results = _run_agent_loop(
                     chat, label, message, "", execute,
                     [*(history or []), {"role": "assistant", "content": reply},
@@ -644,7 +654,7 @@ def run_copilot(
                     timeout, None, None, system_prompt=prompt,
                     max_turns=MAX_TURNS, known_tools=TOOL_NAMES, result_limit=RESULT_LIMIT,
                 )
-                if not results and _asserts_data(reply, today):
+                if not results and _asserts_data(reply, today, said):
                     # Twice asked, twice invented. Say so rather than pass it on.
                     return _UNGROUNDED, [], label
             # A card refused and never retried: seen on Bedrock, the model read
@@ -688,7 +698,6 @@ def run_copilot(
                 results, reply = results + more, again or reply
             reply = strip_filler(reply)
             # A figure no tool returned: a misread cell, a sum of its own, memory.
-            said = message + " " + " ".join(str(t.get("content") or "") for t in history or [])
             if missing := untraced(reply, results, said):
                 fixed, more = _run_agent_loop(
                     chat, label, message, "", execute,
