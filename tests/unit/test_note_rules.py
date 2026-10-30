@@ -43,3 +43,12 @@ def test_bases_answers_ranges_and_screen_outs_from_notes():
     assert by["S2"].terminate_if.to_dict()["op"] == "not"
     assert (by["AGE"].validation["min"], by["AGE"].validation["max"]) == (1, 120)
     assert by["AGE"].terminate_if.to_dict()["value"] == 18
+
+
+def test_a_ranking_keeps_its_limit():
+    q = _q("Q1", ["Allow one response."], QuestionType.RANK)
+    q.validation = {"max_select": 3}
+    survey = SurveyDefinition(study_id="s", source="x", status="draft",
+                              blocks=[Block(block_id="B", question_ids=["Q1"])], questions=[q])
+    apply(survey)
+    assert q.validation["max_select"] == 3

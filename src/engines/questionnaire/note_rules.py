@@ -308,7 +308,7 @@ def _limits(q, notes: list[str], made: list[dict]) -> None:
             made.append({"qid": q.qid, "set": f"type {q.type.value}", "said": boxed.group(0).strip()})  # noqa: E501
     if boxed and q.type is QuestionType.OPEN_TEXT and re.search(r"\bnumeric\b|\bdigits?\b", text, re.I):  # noqa: E501
         q.type = QuestionType.NUMERIC  # "Numeric field with 5 digits"
-    if q.type is not QuestionType.MULTI and q.type is not QuestionType.GRID_MULTI:
+    if q.type in (QuestionType.SINGLE, QuestionType.NUMERIC):
         # "Allow one response" on a single or a number says nothing a single
         # does not already mean; as a limit it read as a select-max of 1.
         q.validation = {k: v for k, v in (q.validation or {}).items()

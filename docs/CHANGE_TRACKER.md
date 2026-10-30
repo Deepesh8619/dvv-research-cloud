@@ -26,8 +26,8 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 Claude read the Charter NPS tracker from the document and wrote it as a gold
 reading (`~/dev/DVV/eval/gold/charter.json`, 104 entries, 13 document defects;
 not committed). DVV agreed on **19%** (44% silently wrong). Every difference
-was a reading habit; each is now in the reader. Charter: **19% → 81%** (silent
-9.6%), corpus newly wrong: none.
+was a reading habit; each is now in the reader. Charter: **19% → 82.7%** (silent
+7.7%), corpus 407 → 496 of 995 correct, newly wrong: none (`s-fix3` vs `s-claude3`).
 
 - `note_rules.py` (new): the scripter's sentences applied — "Ask if punch 1-2 at
   S5d", "Ask for … at CSN1=1, 2 or 3", block "ASK QS5…QS5d if SERVICETYPE = 1"
