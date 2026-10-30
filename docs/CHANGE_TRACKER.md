@@ -21,6 +21,41 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-30 — read like Claude: Charter compared reading-for-reading (branch feat/read-like-claude)
+
+Claude read the Charter NPS tracker from the document and wrote it as a gold
+reading (`~/dev/DVV/eval/gold/charter.json`, 104 entries, 13 document defects;
+not committed). DVV agreed on **19%** (44% silently wrong). Every difference
+was a reading habit; each is now in the reader. Charter: **19% → 82.7%** (silent
+7.7%), corpus 407 → 496 of 995 correct, newly wrong: none (`s-fix3` vs `s-claude3`).
+
+- `note_rules.py` (new): the scripter's sentences applied — "Ask if punch 1-2 at
+  S5d", "Ask for … at CSN1=1, 2 or 3", block "ASK QS5…QS5d if SERVICETYPE = 1"
+  (QS5→S5, SERVICETYPE resolved from its own definition), "Show module if …"
+  (or the base of the question it names, or a group it names: "mobile
+  service" → MOBILE), a variable tested by label ("INTERNETINSTALLATION=Self-
+  Install") or by a near-identical name; a question's own note beats a block.
+  Exclusive/anchored answers ("except punch 99", "anchor punch 98 ‘Other’ and
+  punch 99"), write-in boxes with special codes, ranges, "if less than 18,
+  terminate", "must select at least 1 or 4, otherwise TERMINATE", "enforce
+  response", two wordings (one / all that apply) → multi.
+- Answers: "98<TAB>label" keeps its code (tabs were turned to spaces first);
+  card answers written "98. label" (numeric labels were misread); NPS "0 – Not
+  likely [1]" keeps its 0.
+- Pipes vs masks: "[INSERT PROVIDER SELECTED AT S5a]" (one) is a pipe, "BRANDS
+  SELECTED AT" (many) a mask, "Ask if … selected at" a condition; "EXCEPT for
+  option selected at S6" a not-selected list.
+- Cards: head read as one question + instruction + explanation + alternative/
+  translated wording; guidance "(please do not include …)" is not an answer;
+  "ZIP code: _ _ _" is the box; "9899" split when the notes name 98 and 99; two
+  cards in one table; a label without its full stop; blank placeholder grid
+  rows; manual line breaks inside a box; headings and screens stated by their
+  own table ("INTRO TEXT", "Intermediate text only").
+- "Do not rotate" is not randomise. Struck text stays out (the gold was
+  corrected where Claude's first read had included it).
+
+---
+
 ## 2026-10-30 — stress-tested on new layouts; the notes read like an analyst (branch test/reader-stress)
 
 Measured on everything with a known reading — 7 real documents + 17 synthetic

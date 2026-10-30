@@ -53,7 +53,7 @@ def _is_deleted(run) -> bool:
     return False
 
 
-def live_text(paragraph) -> tuple[str, list[str]]:
+def live_text(paragraph, line_break: str = " ") -> tuple[str, list[str]]:
     """(what this paragraph still says, what was taken out of it).
 
     Word keeps deleted text in `w:delText` rather than `w:t`, so a tracked
@@ -69,7 +69,7 @@ def live_text(paragraph) -> tuple[str, list[str]]:
         # as "KEY METRICS22"). Word writes both as elements, not characters.
         text = "".join(
             (node.text or "") if node.tag == f"{W}t"
-            else "\t" if node.tag == f"{W}tab" else " "
+            else "\t" if node.tag == f"{W}tab" else line_break
             for node in run if node.tag in (f"{W}t", f"{W}tab", f"{W}br", f"{W}cr"))
         gone = "".join(node.text or "" for node in run.findall(f"{W}delText"))
         if gone:
@@ -83,12 +83,16 @@ def live_text(paragraph) -> tuple[str, list[str]]:
     return "".join(kept).strip(), [r.strip() for r in removed if r.strip()]
 
 
-def live_cell_text(cell) -> tuple[str, list[str]]:
-    """The same reading for one table cell: a struck row of a brand list."""
+def live_cell_text(cell, line_break: str = " ") -> tuple[str, list[str]]:
+    """The same reading for one table cell: a struck row of a brand list.
+
+    `line_break="\n"` keeps a manual line break as a line: two answers typed in
+    one paragraph with Shift+Enter between them are two answers.
+    """
     kept: list[str] = []
     removed: list[str] = []
     for paragraph in cell.paragraphs:
-        text, gone = live_text(paragraph)
+        text, gone = live_text(paragraph, line_break)
         if text:
             kept.append(text)
         removed.extend(gone)

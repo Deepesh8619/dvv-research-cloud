@@ -76,6 +76,7 @@ from src.engines.questionnaire.loop_bases import (
 )
 from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import Mask, detect_techniques
+from src.engines.questionnaire.note_rules import apply as apply_note_rules
 from src.engines.questionnaire.per_item import apply as apply_per_item_grids
 from src.engines.questionnaire.profiles import detect_profile
 from src.engines.questionnaire.prose_directives import (
@@ -1190,7 +1191,7 @@ def extract_question(
     # the three real client documents are prose, so this is not a niche path.
     prose = parse_prose_question(chunk.chunk_text, chunk.candidate_qid, patterns)
     if (prose is not None and not prose.options and not prose.qtype
-            and re.match(r"^(?:INFO_\d+|INTRO)", chunk.candidate_qid or "")):
+            and re.match(r"^(?:INFO_T?\d+|INTRO)", chunk.candidate_qid or "")):
         # The segmenter already decided this is a screen the respondent reads
         # ("Thanks. Now some questions about restaurants." + its scripter note);
         # with nothing to answer, a model has nothing to add.
@@ -1889,6 +1890,11 @@ def extract_survey_definition(
     # repair that later gave it a type left that in place — so whenever the
     # model was throttled, those questions became skippable in the live link.
     settle_required(survey)
+    # The scripter's notes, applied: "Ask if punch 1-2 at S5d", "ASK QS5…QS5d if
+    # SERVICETYPE = 1", "Show module if …", exclusive/anchored answers, ranges,
+    # screen-outs. After every question exists, so each rule is checked against
+    # the questions and codes it names; nothing already set is overwritten.
+    survey.metadata["note_rules"] = apply_note_rules(survey)
     # A second opinion over the whole survey, for problems between questions no
     # rule covers. Real documents only (one model call); never blocks anything.
     if blocks is not None:
