@@ -108,6 +108,7 @@ _STEM_CONTINUES_RE = re.compile(r"[?:.!\]]\s*$")
 # entirely (1,2,3,98,99), so counting down the list invents codes that the data
 # file does not use and every one of them becomes a false discrepancy.
 _OPTION_CODE_RE = re.compile(r"^\s*(\d{1,3})\s*[.):]\s+(?=\S)")
+_TAB_CODE = re.compile(r"^\s*(\d{1,3})\t+(?=\S)")
 # Multi-punch items are as often lettered as numbered ("a. It's cheaper").
 # The letter is an item marker, not a code — strip it from the label, keep the
 # position as the code, so the label matches the data map's option label.
@@ -128,6 +129,11 @@ _OPTION_LETTER_RE = re.compile(r"^\s*([A-Za-z])\s*[.):]\s+(?=\S)")
 # unparseable directive visible in the wording, which is this module's rule
 # already: a directive nobody noticed is worse than an untidy one.
 _OPTION_TAG_RE = re.compile(r"\s*(?P<tags>\[[^\][]*\](?:\s*\[[^\][]*\])*)\s*$")
+
+# "Do not rotate order", "Keep responses in order (do not rotate)": the order
+# note says NOT to shuffle — matched first, or "rotate" in it read as shuffle.
+_NO_RANDOM = (r"KEEP ORDER|DO NOT (?:RANDOMI[SZ]E|ROTATE)|DON.T (?:RANDOMI[SZ]E|ROTATE)|"
+              r"NOT (?:BE )?(?:RANDOMI[SZ]ED|ROTATED)|KEEP (?:RESPONSES|OPTIONS|ANSWERS) IN ORDER")
 
 # Type instructions, most specific first — "select all that apply" must beat a
 # bare "select".
@@ -770,7 +776,10 @@ def parse_prose_question(
 ) -> ProseFields | None:
     """Extract what a prose question states. None if it has no usable id."""
     column_lines, column_labels = _code_column_lines(chunk_text or "")
-    lines = [ln.replace("\t", " ").strip() for ln in column_lines]
+    # "98<TAB>I don't know": the tab IS the code's separator. Kept as "98. " before
+    # tabs become spaces — turned into "98 I don't know" the code was lost, and a
+    # numeric answer ("4<TAB>4", "2<TAB>$15,000 - $24,999") ran into the next.
+    lines = [_TAB_CODE.sub(r"\1. ", ln).replace("\t", " ").strip() for ln in column_lines]
     lines = _join_wrapped_directives([ln for ln in lines if ln])
     # Routing written as plain lines ("Base: ...", "TERMINATE INTERVIEW IF S1 = 1")
     # is lifted out before anything can read it as wording or as an answer.
@@ -853,7 +862,7 @@ def parse_prose_question(
             randomize = True
             randomize_evidence = f"learned: {taught_random}"
         elif re.search(r"RANDOMI[SZ]E|\bROTATE\b", body, re.I) and not re.search(
-            r"KEEP ORDER|DO NOT RANDOMI[SZ]E", body, re.I
+            _NO_RANDOM, body, re.I
         ):
             randomize = True
             randomize_evidence = f"[{body.strip()}]"
@@ -916,7 +925,7 @@ def parse_prose_question(
                     randomize_evidence = f"learned: {taught_random}"
                 elif re.search(
                     r"RANDOMI[SZ]E|\bROTATE\b", body, re.I
-                ) and not re.search(r"KEEP ORDER|DO NOT RANDOMI[SZ]E", body, re.I):
+                ) and not re.search(_NO_RANDOM, body, re.I):
                     randomize = True
                     randomize_evidence = f"[{body}]"
                 range_result = _range_terminate(body, qid, patterns)

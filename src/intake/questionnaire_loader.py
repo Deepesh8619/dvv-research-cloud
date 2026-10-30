@@ -484,7 +484,7 @@ def load_docx(path: str | Path) -> list[DocumentBlock]:
             )
             table_cells[len(blocks)] = [
                 [
-                    [x for x in live_cell_text(cell)[0].split("\n") if x.strip()]
+                    [x for x in live_cell_text(cell, "\n")[0].split("\n") if x.strip()]
                     for cell in _distinct(row.cells)
                 ]
                 for row in table.rows
@@ -521,6 +521,9 @@ def _distinct(cells) -> list:
     return seen
 
 
+_CARD_HEADING = re.compile(r"^\s*(?=[^a-z]*[A-Z]{3})[^a-z]{4,120}$")
+
+
 def _read_cards(
     blocks: list[DocumentBlock], table_cells: dict[int, list[list[list[str]]]]
 ) -> list[DocumentBlock]:
@@ -531,16 +534,48 @@ def _read_cards(
     every card plus the single-column heading/intro tables around them.
     Everything else in the document, and every other document, is untouched.
     """
+    from dataclasses import replace
+
     cards = {i for i, cells in table_cells.items() if card_tables.label_of(cells)}
     if len(cards) < card_tables.MIN_CARDS:
         return blocks
     out: list[DocumentBlock] = []
+    screens = 0
     for i, block in enumerate(blocks):
+        if (block.block_type in ("paragraph", "heading") and _CARD_HEADING.match(block.text or "")
+                and i not in table_cells):
+            # "CS MODULE 2: CS OTHER ISSUE INTERACTION JOURNEY" printed between two
+            # cards is a heading. Left bare it ran into the previous card's last
+            # answer ("Very Satisfied CS MODULE 2: …").
+            out.append(replace(block, text=f"[SECTION: {block.text.strip()}]"))
+            continue
         cells = table_cells.get(i)
+        if i in cards and len(parts := card_tables.split_cards(cells)) > 1:
+            for part in parts:
+                part_lines, part_grid = card_tables.card_lines(part)
+                out += [
+                    DocumentBlock(block_type="paragraph", text=line,
+                                  paragraph_index=block.paragraph_index,
+                                  label=card_tables.label_of(part) if n == 0 else None,
+                                  grid=part_grid if n == 0 else None)
+                    for n, line in enumerate(part_lines)
+                ]
+            continue
         lines, grid = (
             card_tables.card_lines(cells) if i in cards
             else (card_tables.plain_lines(cells), None) if cells else ([], None)
         )
+        screen_label = None
+        if lines and i not in cards and any(card_tables.SCREEN.search(x) for x in lines):
+            # "INTERNET INSTALLATION INTRO TEXT" / "Intermediate text only": the
+            # table says it is a screen. Its title is a heading; the text is the
+            # screen, and its "Show module if …" note stays with it.
+            screens += 1
+            screen_label = f"INFO_T{screens}"
+            if len(lines) > 1 and lines[0].startswith("[SECTION:"):
+                out.append(DocumentBlock(block_type="paragraph", text=lines[0],
+                                         paragraph_index=block.paragraph_index))
+                lines = lines[1:]
         if not lines:
             out.append(block)
             continue
@@ -549,7 +584,7 @@ def _read_cards(
         out += [
             DocumentBlock(block_type="paragraph", text=line,
                           paragraph_index=block.paragraph_index, removed=list(block.removed),
-                          label=card_tables.label_of(cells) if i in cards else None,
+                          label=card_tables.label_of(cells) if i in cards else screen_label,
                           grid=grid)
             if n == 0 else
             DocumentBlock(block_type="paragraph", text=line,

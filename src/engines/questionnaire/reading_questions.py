@@ -101,6 +101,12 @@ def _host_number(question, survey) -> str | None:
     return question.qid if question.type.value == "numeric" else None
 
 
+def _band_like(line: str) -> bool:
+    return bool(_BAND.match(line) or _CODED_BAND.match(line) or _RANGE_BAND.match(line)
+                or _NAME_LINE.match(line) or len(line.split()) <= 4) and not re.match(
+        r"^\s*(?:allow|accept|randomi[sz]e|anchor|ask|show|must|do not|if\b)", line, re.I)
+
+
 def _variables(survey: SurveyDefinition) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
     for q in survey.questions:
@@ -114,7 +120,9 @@ def _variables(survey: SurveyDefinition) -> list[dict[str, Any]]:
             rest = m.group("rest")
             name = _name_in(rest) or f"{q.qid}_VAR"
             bands, i = [], i + 1
-            while i < len(notes) and not _CREATE.search(notes[i]):
+            # The list ends at the first line not shaped like a group: "Allow
+            # multiple response except punch 99." after the groups is a rule.
+            while i < len(notes) and not _CREATE.search(notes[i]) and _band_like(notes[i]):
                 bands.append(notes[i])
                 i += 1
             # "SPECTRUMBOTH" / "Spectrum Internet and Mobile = …" / "ATTBOTH" / …:

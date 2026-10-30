@@ -66,6 +66,12 @@ _MASK_PATTERNS: list[tuple[re.Pattern, str]] = [
         "not_selected",
     ),
     (
+        # "Show all response options EXCEPT for option selected at S6".
+        re.compile(rf"\bEXCEPT\s+(?:FOR\s+)?(?:THE\s+)?(?:OPTION|ANSWER|CODE|PUNCH|BRAND|RESPONSE)S?"
+                   rf"\s+(?:SELECTED|CHOSEN|PICKED)\s+(?:AT|IN)\s+(?P<source>{_QID})", re.I),
+        "not_selected",
+    ),
+    (
         # The forms a real document actually writes: a NOUN sits between the
         # verb and the word that matters — "SHOW ONLY BRANDS SELECTED AT Q4A",
         # "ONLY OF PHARMACIES USED AT Q4A", "SHOW ONLY THOSE SELECTED IN Q13" —
@@ -126,6 +132,28 @@ _PIPE_RANK_RE = re.compile(
     rf"(?P<source>{_QID})\b",
     re.I,
 )
+
+# "[INSERT INTERNET PROVIDER SELECTED AT S5a]", "Pipe in primary provider brand
+# selected or auto-punched at S5a": ONE answer put into the wording. Only a
+# plural ("BRANDS SELECTED AT", "CODES CHOSEN AT") builds an answer LIST — read
+# as a mask, every question that merely names the S5a provider had its own
+# answers replaced by S5a's.
+_PIPE_SELECTED_RE = re.compile(
+    rf"(?:\bINSERT|\bPIPE\s+IN)\s+(?P<what>(?:(?!\b(?:BRANDS|ITEMS|OPTIONS|CODES|STATEMENTS|"
+    rf"ANSWERS|RESPONSES|LIST|SERVICES|ALL)\b)[A-Za-z /&'’-]){{0,60}}?)\s*\b(?:SELECTED|CHOSEN|"
+    rf"PUNCHED)(?:\s+OR\s+AUTO-?PUNCHED)?\s+(?:AT|IN|FROM)\s+(?P<source>{_QID})",
+    re.I,
+)
+# "Ask if more than one response is selected at S5": who is asked, not a list.
+_ASKING = re.compile(r"\b(?:ASK|SHOW)\s+(?:ONLY\s+)?(?:IF|FOR)\b|\bIF\b[^.]{0,40}$", re.I)
+
+
+def _not_a_mask(match: re.Match, fragment: str, pipes: list[re.Match]) -> bool:
+    """A "selected at" that is a pipe or a condition, not a list of answers."""
+    if any(p.start() <= match.end() and match.start() <= p.end() for p in pipes):
+        return True
+    return bool(_ASKING.search(fragment[: match.start() + 12]))
+
 
 # --- Least fill ------------------------------------------------------------
 _LEAST_FILL_RE = re.compile(r"least[\s-]?fill(?:ed)?", re.I)
@@ -203,9 +231,17 @@ def detect_techniques(*fragments: str) -> Techniques:
         if _LEAST_FILL_RE.search(fragment):
             least_fill = True
 
+        singular = list(_PIPE_SELECTED_RE.finditer(fragment))
+        for match in singular:
+            source = match.group("source").upper()
+            if (source, None) not in seen_pipes:
+                seen_pipes.add((source, None))
+                pipes.append(Pipe(source_qid=source, name=None, verbatim=match.group(0).strip()))
         for pattern, mode in _MASK_PATTERNS:
             match = pattern.search(fragment)
             if not match:
+                continue
+            if mode in ("selected", "not_selected") and _not_a_mask(match, fragment, singular):
                 continue
             source = match.group("source").upper()
             key = (source, mode)

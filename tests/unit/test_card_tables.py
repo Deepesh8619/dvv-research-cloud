@@ -96,7 +96,7 @@ def test_a_code_box_that_does_not_line_up_is_said_not_guessed(tmp_path):
     blocks = load_docx(_document(tmp_path))
     chunks = segment_into_questions(blocks)
     text = next(c.chunk_text for c in chunks if c.candidate_qid == "QGENDER")
-    assert "98\tOther" in text and "99\tPrefer not to say" in text
+    assert "98. Other" in text and "99. Prefer not to say" in text
 
 
 def test_a_document_with_one_labelled_table_is_left_alone(tmp_path):
