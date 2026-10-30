@@ -132,3 +132,26 @@ def test_a_figure_no_tool_returned_is_sent_back_then_marked():
         {"content": "122 completes at 36.4% incidence."},
     ), execute=lambda name, args: looked_up)
     assert fixed == "122 completes at 36.4% incidence."
+
+
+def test_figures_the_user_gave_are_not_invented_data():
+    """Read off their own screenshot, "1-120" and "18-34" are the user's words.
+    Repeating them back used to be replaced with "I could not look that up"."""
+    message = ("apply this to QAGE\n\n[Screenshot 1, as read]\nAcceptable range: 1-120. "
+               "If less than 18, terminate. Ranges 18-34, 35-49.\n[End of screenshot 1]")
+    reply, results, _ = _call(
+        _model({"content": "QAGE should accept 1-120 and terminate under 18, "
+                           "with ranges 18-34 and 35-49."}),
+        message=message,
+    )
+    assert results == []
+    assert "not going to guess" not in reply
+    assert "1-120" in reply
+
+
+def test_a_new_figure_beside_the_users_own_is_still_checked():
+    reply, results, _ = _call(_model(
+        {"content": "QAGE terminates under 18; 412 respondents were screened out."},
+        {"content": "412 were screened out."},
+    ), message="QAGE terminates if less than 18 — how many did?")
+    assert "412" not in reply and "not going to guess" in reply
