@@ -1306,6 +1306,71 @@
      }
     }
    ]
+  },
+  {
+   "id": "task-apply-note",
+   "category": "task",
+   "study": "tea",
+   "focus": "T5",
+   "turns": [
+    {
+     "say": "Apply this programming note to this question: Allow a whole number. Acceptable range: 1-120. If less than 18, terminate. 'Prefer not to answer' cannot be combined with any other response.",
+     "expect": {
+      "cards": [
+       "edit_question"
+      ],
+      "card_mentions": [
+       "T5 < 18",
+       "1 to 120",
+       "99=Prefer not to answer \\[exclusive\\]"
+      ],
+      "avoids": [
+       "(is|has been|now) (changed|updated|applied)"
+      ],
+      "may_skip_tools": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "task-hidden-bands",
+   "category": "task",
+   "study": "tea",
+   "turns": [
+    {
+     "say": "Create a hidden variable with age bands from T5: 18-34, 35-49, 50-64 and 65+.",
+     "expect": {
+      "cards": [
+       "add_question"
+      ],
+      "card_mentions": [
+       "HID_",
+       "18-34",
+       "65"
+      ],
+      "may_skip_tools": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "task-show-if",
+   "category": "task",
+   "study": "tea",
+   "turns": [
+    {
+     "say": "Only ask T2 to people who said Yes at T1.",
+     "expect": {
+      "cards": [
+       "edit_question"
+      ],
+      "card_mentions": [
+       "T1 = 1"
+      ],
+      "may_skip_tools": true
+     }
+    }
+   ]
   }
  ]
 }

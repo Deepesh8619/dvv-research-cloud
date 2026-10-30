@@ -21,7 +21,8 @@ AREAS: dict[str, tuple[str, ...]] = {
     "questionnaire": (
         "question_details", "who_was_asked", "question_graph", "reading_conventions",
         "extraction_diagnosis", "study_brief", "variable_plan", "dry_run",
-        "propose_reextract", "propose_edit_question", "propose_reread_question",
+        "propose_reextract", "propose_edit_question", "propose_add_hidden_variable",
+        "propose_reread_question",
         "propose_question_in_link", "propose_approve_question", "propose_delete_question",
         "propose_teach_reading", "propose_approve_clean"),
     "fielding": (
@@ -118,9 +119,17 @@ _HEAVY = re.compile(
     r"so what|analy[sz]|deep.?dive|executive|takeaway|hypothes)", re.I)
 
 
+#: Asking for a change to the questionnaire: several fields, conditions, a new
+#: variable — planned by the larger model, not the quick one.
+_CHANGE = re.compile(r"\b(apply|set|change|make|add|create|fix|update|implement|code|"
+                     r"terminate|exclusive|range|condition)\b", re.I)
+
+
 def is_heavy(message: str, areas: set[str]) -> bool:
-    """Reasoning, explaining or writing — or a long, multi-part request."""
-    return bool(_HEAVY.search(message)) or len(message) > 280 or "reports" in areas
+    """Reasoning, explaining or writing — or a long, multi-part request, or a
+    change to the questionnaire."""
+    return (bool(_HEAVY.search(message)) or len(message) > 280 or "reports" in areas
+            or ("questionnaire" in areas and bool(_CHANGE.search(message))))
 
 
 def route(message: str, all_tools: list[str], screen: str = "",

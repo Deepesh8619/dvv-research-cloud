@@ -105,6 +105,13 @@ RULES_BY_AREA = {
   that decided each field. Use them to explain how a question was read.
 - "What depends on Q5", "what breaks if I delete Q5", "why can nobody reach Q7", "which
   quotas use S2": call question_graph and report its paths and verdict, in its words.
+- "Apply this", "set this condition", "make it do what the note says": call
+  question_details first, then turn EVERY instruction into card fields — answers with
+  their codes and [exclusive]/[anchor], show_if / terminate_if in plain words
+  ("QAGE < 18"), min/max for a number. One propose_edit_question card may carry several
+  fields. A variable to create (age bands, a segment) → propose_add_hidden_variable.
+  Then list each card and what it does, and name plainly any instruction no field can
+  express (e.g. "terminate on the second refusal") so a scripter sets it.
 - To fix ONE question, propose_edit_question. When the same misreading comes from a
   convention of the document (a marker like "[SA]" read wrongly everywhere), teach it
   with propose_teach_reading — check reading_conventions for the kind and values first.
@@ -409,13 +416,25 @@ TOOLS = [
         "format, the conventions already taught, and the kinds that can be taught with "
         "their allowed values.", _STUDY, ["study_id"]),
     _fn("propose_edit_question", "Prepare changing one question in the questionnaire "
-        "under review: any of `text`, `type`, `options` (a list of labels in order, codes "
-        "are numbered 1..n), `required`, `randomize_options`. The card shows before and "
-        "after.",
+        "under review. Any of: `text`; `type`; `options` — each \"code=label\", with "
+        "[exclusive] or [anchor] after it when it is one (e.g. \"99=Prefer not to answer "
+        "[exclusive]\"), plain labels are numbered 1..n; `required`; `randomize_options`; "
+        "`show_if` and `terminate_if` in plain words (\"QAGE < 18\", \"S2 = 1, 2\", "
+        "\"QAGE between 18 and 34\", \"S5 = 1 and S6 = 2\"; \"none\" clears it); `min` and "
+        "`max` for a number. Several fields in one card. The card shows before and after.",
         {**_STUDY, "qid": {"type": "string"}, "text": {"type": "string"},
          "type": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}},
-         "required": {"type": "boolean"}, "randomize_options": {"type": "boolean"}},
+         "required": {"type": "boolean"}, "randomize_options": {"type": "boolean"},
+         "show_if": {"type": "string"}, "terminate_if": {"type": "string"},
+         "min": {"type": "number"}, "max": {"type": "number"}},
         ["study_id", "qid"]),
+    _fn("propose_add_hidden_variable", "Prepare adding a hidden variable — computed for "
+        "every respondent, never asked (age bands, a sample source, a segment). `name` "
+        "(HID_ is added), `label`, `bands`: each \"code=label: condition\" in plain words, "
+        "e.g. \"1=18-34: QAGE between 18 and 34\", \"4=65+: QAGE >= 65\".",
+        {**_STUDY, "name": {"type": "string"}, "label": {"type": "string"},
+         "bands": {"type": "array", "items": {"type": "string"}}},
+        ["study_id", "name", "bands"]),
     _fn("propose_reread_question", "Prepare reading one question again from its source "
         "text in the document, with today's parsers and what has been taught.",
         {**_STUDY, "qid": {"type": "string"}}, ["study_id", "qid"]),

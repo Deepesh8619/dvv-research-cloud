@@ -2038,3 +2038,80 @@ def test_only_images_are_accepted_as_screenshots(client):  # noqa: F811
         assert resp.status_code == 422
     resp = test_client.post("/api/copilot", json={"message": "x", "images": [SHOT] * 4})
     assert resp.status_code == 422
+
+
+def test_an_instruction_from_a_screenshot_becomes_cards_that_really_change_qage(
+        client, monkeypatch):  # noqa: F811
+    """The live failure: "this highlighted note is the condition, apply it to QAGE".
+    Range 1-120, terminate under 18, 'Prefer not to answer' exclusive, and the
+    age bands as a hidden variable — each a card, each landing when confirmed."""
+    from api.db import QuestionnaireDB
+    from src.core.survey_definition import (
+        Block,
+        Option,
+        Question,
+        QuestionType,
+        SurveyDefinition,
+    )
+
+    test_client, sf, _ = client
+    _make_study(sf)
+    survey = SurveyDefinition(
+        study_id="study_f1", source="extracted", status="draft",
+        blocks=[Block(block_id="B1", question_ids=["QAGE"])],
+        questions=[Question(qid="QAGE", text="What is your age?", type=QuestionType.NUMERIC,
+                            options=[Option(code=99, label="Prefer not to answer")])])
+    _make_questionnaire(sf, status="in_review", survey=survey)
+    seen = _script(
+        monkeypatch,
+        ("tool", "question_details", {"study_id": "study_f1", "qid": "QAGE"}),
+        ("tool", "propose_edit_question", {
+            "study_id": "study_f1", "qid": "QAGE", "min": 1, "max": 120,
+            "terminate_if": "QAGE < 18",
+            "options": ["99=Prefer not to answer [exclusive]"]}),
+        ("tool", "propose_add_hidden_variable", {
+            "study_id": "study_f1", "name": "DUMMYAGERANGES", "label": "Age ranges",
+            "bands": ["1=18-34: QAGE between 18 and 34", "2=35-49: QAGE between 35 and 49",
+                      "3=50-64: QAGE between 50 and 64", "4=65+: QAGE >= 65"]}),
+        ("text", "Two cards: QAGE's range, screen-out and exclusive answer; the age bands."))
+    resp = test_client.post("/api/copilot", json={
+        "message": "apply the highlighted condition to QAGE", "study_id": "study_f1"}).json()
+    assert resp["tool_errors"] == []
+    edit, add = resp["proposals"]
+    fields = {d["field"]: d["after"] for d in edit["diff"]}
+    assert fields["terminate_if"] == "QAGE < 18"
+    assert fields["validation"] == "1 to 120"
+    assert fields["options"] == "99=Prefer not to answer [exclusive]"
+    assert "1=18-34 when QAGE between 18 and 34" in add["detail"]
+
+    for card in (edit, add):
+        r = test_client.request(card["method"], f"/api{card['path']}", json=card["body"])
+        assert r.status_code == 200, r.text
+    db = sf()
+    try:
+        stored = json.loads(db.query(QuestionnaireDB).filter_by(study_id="study_f1")
+                            .one().definition_json)
+    finally:
+        db.close()
+    qage, bands = stored["questions"]
+    assert qage["terminate_if"]["op"] == "lt" and qage["terminate_if"]["value"] == 18
+    assert (qage["validation"]["min"], qage["validation"]["max"]) == (1, 120)
+    assert qage["options"][0]["exclusive"] is True
+    assert bands["qid"] == "HID_DUMMYAGERANGES" and "DERIVED_VARIABLE" in bands["flags"]
+    assert bands["options"][3]["derive_if"] == {"op": "gt", "qid": "QAGE", "value": 64,
+                                                "verbatim_text": "QAGE >= 65"}
+    assert len(seen) == 4
+
+
+def test_a_condition_on_an_answer_that_does_not_exist_is_refused_with_the_real_ones(
+        client, monkeypatch):  # noqa: F811
+    test_client, sf, _ = client
+    _make_study(sf)
+    _draft(sf)
+    seen = _script(monkeypatch,
+                   ("tool", "propose_edit_question", {"study_id": "study_f1", "qid": "Q3",
+                                                      "show_if": "Q2 = 7"}),
+                   ("text", "No such answer."))
+    test_client.post("/api/copilot", json={"message": "show Q3 if Q2 is 7"})
+    error = _tool_results(seen)[0]["error"]
+    assert "Q2 has no answer coded 7" in error and "1=Yes" in error

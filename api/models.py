@@ -321,6 +321,9 @@ class QuestionCreateRequest(BaseModel):
     randomize_options: bool = False
     show_if: dict | None = None
     terminate_if: dict | None = None
+    #: A variable the script computes and never asks (flagged DERIVED_VARIABLE,
+    #: kept out of the link); its answers carry their `derive_if` rules.
+    hidden: bool = False
 
 
 class QuestionOrderRequest(BaseModel):
