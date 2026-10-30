@@ -79,6 +79,7 @@ from src.engines.questionnaire.mr_techniques import Mask, detect_techniques
 from src.engines.questionnaire.per_item import apply as apply_per_item_grids
 from src.engines.questionnaire.profiles import detect_profile
 from src.engines.questionnaire.prose_directives import (
+    _TYPE_PATTERNS,
     MULTI_WORDING,
     ProseFields,
     is_derived_wording,
@@ -86,6 +87,7 @@ from src.engines.questionnaire.prose_directives import (
     parse_prose_question,
 )
 from src.engines.questionnaire.qa_loop import run_qa
+from src.engines.questionnaire.reading_questions import analyst_reading
 from src.engines.questionnaire.reconciler import reconcile_segmentation
 from src.engines.questionnaire.relative_bases import (
     resolve_counted_bases,
@@ -680,14 +682,20 @@ def _extract_via_spec_table(
         response = _ask_model(
             "questionnaire.extract", prompt, schema.residue_schema(fields.missing)
         )
-    except (BackendUnavailable, ModelOutputError, KeyError):
-        if set(fields.missing) != {"base"}:
+    except (BackendUnavailable, ModelOutputError, KeyError) as exc:
+        if not isinstance(exc, BackendUnavailable) or not (question.options or question.rows):
+            # A model that answered badly may do better on a full read, and a
+            # table that yielded nothing substantial has nothing worth keeping.
+            # Only when NO model is reachable — the full read would fail too —
+            # is the table's own reading kept.
             return None
-        # Only the base needs judgment. The rest of the question was read
-        # exactly; discarding it for a full model read produced a question whose
-        # answers were the table's own labels. Keep it and show the base words.
+        # The table was read; only part of it needs judgment (a base, a
+        # screen-out written in words). Discarding the rest for a full model read
+        # produced a question whose answers were the table's own row labels.
+        # Keep it, flag what is unresolved, and show its words.
         question.flags.append(schema.FLAG_AMBIGUOUS_ROUTING)
-        question.validation[_ROUTING_VERBATIM_KEY] = fields.base
+        question.validation[_ROUTING_VERBATIM_KEY] = fields.base or fields.notes
+        question.validation["unresolved_fields"] = sorted(fields.missing)
         result = ExtractionResult(question=question, confidence=confidence)
         _flag_derived_variable(result, chunk, patterns)
         _validate_question(result, {})
@@ -1181,6 +1189,30 @@ def extract_question(
     # on an option is a screen-out, "[PN: RANDOMIZE]" is randomisation. Two of
     # the three real client documents are prose, so this is not a niche path.
     prose = parse_prose_question(chunk.chunk_text, chunk.candidate_qid, patterns)
+    if (prose is not None and not prose.options and not prose.qtype
+            and re.match(r"^(?:INFO_\d+|INTRO)", chunk.candidate_qid or "")):
+        # The segmenter already decided this is a screen the respondent reads
+        # ("Thanks. Now some questions about restaurants." + its scripter note);
+        # with nothing to answer, a model has nothing to add.
+        prose.qtype = QuestionType.INFO
+        prose.missing = [m for m in prose.missing if m != "type"]
+        prose.evidence.setdefault("type", "an information screen between questions")
+    if prose is not None and prose.qtype is None and not prose.options:
+        # "Which company is your primary provider? Please select one." with its
+        # answers taken from S5 ("show codes selected at S5"): the list arrives
+        # later (list_sources), and the wording already states the type.
+        borrowed = detect_techniques(prose.text or "", *prose.directives).masks
+        # The question's own instruction ("Please select one."), never a note
+        # about routing ("Ask if more than one response is selected at S5").
+        own = "\n".join(ln for ln in chunk.chunk_text.splitlines()
+                        if not ln.lstrip().startswith("["))
+        stated = next((kind for pattern, kind in _TYPE_PATTERNS
+                       if kind in (QuestionType.SINGLE, QuestionType.MULTI)
+                       and pattern.search(own)), None)
+        if borrowed and stated:
+            prose.qtype = stated
+            prose.missing = [m for m in prose.missing if m not in ("type", "options")]
+            prose.evidence.setdefault("type", f"its answers come from {borrowed[0].source_qid}")
     # `prose.complete` FIRST. The gate used to be options-or-terminate alone,
     # which silently threw away every question the prose parser resolves best:
     # an open end, a numeric entry and a display screen all have no options and
@@ -1872,6 +1904,10 @@ def extract_survey_definition(
     # The brief's needs, each ticked off against the instrument, and how this
     # document writes its labels and notes.
     survey.metadata["decoding"]["brief"] = brief_checklist(survey)
+    # The scripter's notes read like an analyst: variables to build (with their
+    # rules where the words are exact), questions only a person can settle,
+    # quality checks to add.
+    survey.metadata["decoding"]["analyst"] = analyst_reading(survey)
     return survey
 
 

@@ -140,6 +140,10 @@ _TYPE_PATTERNS: list[tuple[re.Pattern, QuestionType]] = [
                 r"\bmulti[- ]?(?:code|select|punch)\b",
                 re.I), QuestionType.MULTI),
     (re.compile(r"drop[- ]?down|\bpick[- ]?list\b", re.I), QuestionType.DROPDOWN),
+    # "MATRIX. SELECT ONE PER ROW": a grid, before "select one" reads it as single.
+    (re.compile(r"\bmatrix\b|\b(?:select|choose|one)\s+(?:one\s+)?(?:answer\s+|response\s+)?"
+                r"(?:per|for each)\s+(?:row|statement|item|brand|attribute)\b", re.I),
+     QuestionType.GRID_SINGLE),
     (re.compile(r"select one|choose one|single answer|select your|"
                 r"\bsingle[- ]?(?:code|select|punch)\b(?!\s*(?:for\s+)?(?:each|per)\b)|"
                 # "Please make one selection below." / "Accept one response." —

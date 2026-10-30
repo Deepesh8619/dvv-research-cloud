@@ -129,6 +129,12 @@ RULES_BY_AREA = {
   "Question 5:"), offering labels you can see in the source text as options. Then
   propose_teach_reading with kind=question_label and that label. Its card previews how
   many questions the document splits into; confirming reads the document again.
+- "What do I need to decide?", "anything unclear in this questionnaire?", or after a
+  questionnaire is read: study_brief returns `analyst` — variables the notes say to
+  create (ready = rule compiled), and `questions`, each with options. Ask those
+  questions as clickable choices, a few at a time, most important first (codes that do
+  not line up, groups used by a code they were never given, files not attached). A ready
+  variable → offer propose_add_hidden_variable with its bands. Never answer one yourself.
 - Hidden or derived variables — how one is coded, whether it will be filled, which
   have no rule — → variable_plan (the questionnaire's plan); whether the uploaded data
   agrees → data_vs_questionnaire.""",

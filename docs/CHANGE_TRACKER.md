@@ -21,6 +21,36 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-30 — stress-tested on new layouts; the notes read like an analyst (branch test/reader-stress)
+
+Measured on everything with a known reading — 7 real documents + 17 synthetic
+(11 dev, 6 hold-out never looked at while building), AI off:
+**373 → 407 of 891 correct, newly wrong: none** (`scripts/eval_diff.py s-base s-fix3`).
+`scripts/reader_whatif.py` (new) rewrites each synthetic document in 8 styles
+real documents use; every style now reads the same as the original
+(487/487; cards 486 — the generator's own limit on one question).
+
+Reader, by layout (`questionnaire_loader._normalise_labels` unless noted):
+"Q1 – wording"; "Q1." alone on its line; "1." number labels (accepted only in
+sequence and when the line asks something — answers restart and do not);
+"Q.1"; Word auto-numbering supplying "Q1."; a second line in another language
+kept as a note; TERMINATE/SKIP lines stay with their question; a QUOTA heading
+is a boundary. Spec tables: "Answers"/"Codes" with all answers in one cell
+("1 = X", "[1] X"), SC/MC/OE shorthand, "TEXT SCREEN", bases "X in (1-6)",
+"TERMINATE if X = 1, 8", "(exclusive)/(anchor)", "PN" notes; a table read is
+kept (flagged) when no model is reachable. Grids with punch codes in every row;
+"MATRIX / SELECT ONE PER ROW" is a grid. Cards: "[INSERT BRAND SELECTED AT S5]"
+rows become the S5 mask; information screens with only a note need no model.
+
+New: `reading_questions.py` reads the scripter's notes like an analyst —
+variables to create (Charter: 44, 18 with exact rules), questions only a person
+can settle (codes not lining up, groups used by a code they were never given,
+files not attached, a language switch), quality checks. Review page: "What a
+reader would ask" (a click hands the answer to the Copilot) and "Create the N
+ready variables". `docs/READER_FIX_GUIDE.md` (new): symptom → file → test.
+
+---
+
 ## 2026-10-29 — teaching is understood from the document, not guessed (branch feat/teaching-understands)
 
 A correction ("the Spanish line is the question translated") used to become

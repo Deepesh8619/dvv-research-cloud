@@ -32,6 +32,11 @@ _LABEL = re.compile(r"^([A-Za-z][A-Za-z0-9_]{0,24})\.$")
 _CODE = re.compile(r"^\d{1,4}$")
 # "[3]" closing a scale cell, "[99] I plan to drop this service" opening a line.
 _BRACKET_CODE = re.compile(r"^\[(\d{1,4})\]\s*(.*)$")
+# "[INSERT BRAND SELECTED AT S5]" — answers taken from another question.
+_INSERT_FROM = re.compile(
+    r"\[\s*INSERT\b[^\]]*?\bSELECTED\s+(?:AT|IN)\s+([A-Z]{1,6}\d+[A-Za-z]?)\s*\]", re.I)
+# A line in another language: Spanish/French/German marks, or a non-Latin script.
+OTHER_LANGUAGE = re.compile(r"[¿¡ñçßœ]|[à-öø-ÿ]|[^\x00-\u024f\s\d\W]", re.I)
 # "1 – Very Dissatisfied": the scale point repeated in front of its label.
 _POINT_PREFIX = re.compile(r"^\d{1,2}\s*[–-]\s*")
 
@@ -146,7 +151,10 @@ def card_lines(cells: list[list[list[str]]]) -> tuple[list[str], Grid | None]:
     lines = list(rest) or [f"{label}."]
     # The question again in another language ("¿En qué idioma…?" under
     # "Which language…?"): the same wording, never an answer.
-    lines = lines[:1] + [f"[PN: also worded as: {x}]" if x.rstrip().endswith("?") else x
+    # Only a line in another language: two English wordings with their own
+    # conditions ("[IF 1 ENTERED AT S7a]") are alternatives, not a translation.
+    lines = lines[:1] + [f"[PN: also worded as: {x}]"
+                         if x.rstrip().endswith("?") and OTHER_LANGUAGE.search(x) else x
                          for x in lines[1:]]
     # "ISSUES:" closing the head cell introduces the answers; it is not one.
     if len(lines) > 1 and lines[-1].endswith(":") and lines[-1][:-1].isupper():
@@ -156,6 +164,16 @@ def card_lines(cells: list[list[list[str]]]) -> tuple[list[str], Grid | None]:
     has_notes = len(cells) > 2 and len(cells[-1]) == 1
     middle = cells[1:-1] if has_notes else cells[1:]
     notes = cells[-1][0] if has_notes else []
+    # "1 | [INSERT BRAND SELECTED AT S5]" on every answer row: not answers, the
+    # statement that this question's answers ARE the ones chosen at S5. Kept as
+    # rows, the brackets were dropped as directives and "1. 2. 3." remained.
+    inserted = {m.group(1) for row in middle for cell in row for line in cell
+                if (m := _INSERT_FROM.search(line))}
+    if len(inserted) == 1 and middle and all(
+            len(row) == 2 and all(_INSERT_FROM.search(x) for x in row[1]) for row in middle):
+        source = inserted.pop()
+        lines.append(f"[PN: MASK: show codes selected at {source}]")
+        middle = []
     # The same answer row twice (a row the document repeats) is one list.
     middle = [row for n, row in enumerate(middle) if n == 0 or row != middle[n - 1]]
     grid = _grid(middle) if middle and len(middle[0]) > 2 else None

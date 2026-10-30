@@ -1856,7 +1856,7 @@ export default function QuestionnairePage() {
       {status && !notFound && !['processing', 'error'].includes(status.status) && (
         <>
           <StudyUnderstandingPanel understanding={status.study_understanding} onGoTo={goTo} />
-          <DecodingPanel decoding={status.decoding} onGoTo={goTo} />
+          <DecodingPanel decoding={status.decoding} onGoTo={goTo} studyId={studyId} />
           <SecondLookSummary record={status.second_look} />
           <QAPanel
             qa={status.qa}
