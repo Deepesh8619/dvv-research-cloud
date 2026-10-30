@@ -2,6 +2,11 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import DecodingPanel from './DecodingPanel'
 
+vi.mock('../../api/client', () => ({
+  questionnaireApi: { addQuestion: vi.fn().mockResolvedValue({ data: {} }) },
+}))
+vi.mock('../CopilotDrawer', () => ({ askCopilot: vi.fn() }))
+
 const report = {
   verdict: 'unfamiliar' as const,
   questions: 10,
@@ -43,6 +48,32 @@ describe('DecodingPanel', () => {
     expect(rows[0].textContent).toContain('C3: CODE GENDER')
     fireEvent.click(screen.getByText('C3'))
     expect(onGoTo).toHaveBeenCalledWith('C3')
+  })
+
+  it('asks what only a person can settle and creates the ready variables', async () => {
+    const { askCopilot } = await import('../CopilotDrawer')
+    const { questionnaireApi } = await import('../../api/client')
+    const analyst = {
+      variables: [
+        { name: 'TENURE', at: 'S8', said: 'TENURE', status: 'ready' as const, why: '',
+          bands: [{ label: '<6M', line: '<6M: punch 1 at S5d', condition: { op: 'in', qid: 'S5d', values: [1] } }] },
+        { name: 'PARENTBRAND', at: 'S8', said: 'using excel file', status: 'needs_you' as const,
+          why: 'built from a file that is not attached', bands: [] },
+      ],
+      ready: 1,
+      questions: [{ qid: 'S6', kind: 'codes', ask: "S6's code box does not match its answers.",
+                    options: ['Number the answers in order', 'I will set the codes'] }],
+      checks: [{ qid: 'S5', kind: 'quality' as const, said: 'flag if more than 3 responses' }],
+    }
+    render(<DecodingPanel decoding={{ ...report, verdict: 'familiar', analyst }} onGoTo={() => {}} studyId="s1" />)
+    fireEvent.click(screen.getByText('Number the answers in order'))
+    expect(askCopilot).toHaveBeenCalledWith("S6's code box does not match its answers.\nMy answer: Number the answers in order")
+    fireEvent.click(screen.getByText('Create the 1 ready variables'))
+    expect(await screen.findByText(/Created 1/)).toBeTruthy()
+    expect(questionnaireApi.addQuestion).toHaveBeenCalledWith('s1', expect.objectContaining({
+      qid: 'HID_TENURE', hidden: true, type: 'info',
+      options: [{ code: 1, label: '<6M', derive_if: { op: 'in', qid: 'S5d', values: [1] } }],
+    }))
   })
 
   it('renders nothing before a report exists', () => {

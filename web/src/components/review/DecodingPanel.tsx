@@ -1,4 +1,6 @@
-import type { BriefChecklist, Decoding } from '../../api/client'
+import { useState } from 'react'
+import { questionnaireApi, type AnalystReading, type BriefChecklist, type Decoding } from '../../api/client'
+import { askCopilot } from '../CopilotDrawer'
 
 /**
  * How this questionnaire was read, for the WHOLE document: which reading skills
@@ -77,17 +79,125 @@ function BriefSection({ brief, onGoTo }: { brief: BriefChecklist; onGoTo: (qid: 
   )
 }
 
+/**
+ * What an analyst reading the scripter's notes would stop at: questions only a
+ * person can settle (a click hands the choice to the Copilot, which prepares the
+ * change as a card), and the variables the notes say to create.
+ */
+function AnalystSection({ analyst, studyId, onGoTo }: {
+  analyst: AnalystReading
+  studyId?: string
+  onGoTo: (qid: string) => void
+}) {
+  const [creating, setCreating] = useState<string | null>(null)
+  const ready = analyst.variables.filter((v) => v.status === 'ready')
+  const createReady = async () => {
+    if (!studyId) return
+    setCreating('Creating…')
+    let made = 0
+    const failed: string[] = []
+    for (const v of ready) {
+      try {
+        await questionnaireApi.addQuestion(studyId, {
+          qid: v.name.toUpperCase().startsWith('HID_') ? v.name : `HID_${v.name}`,
+          text: v.said || v.name,
+          type: 'info',
+          required: false,
+          hidden: true,
+          options: v.bands.map((b, i) => ({ code: b.code ?? i + 1, label: b.label, derive_if: b.condition })),
+        })
+        made += 1
+      } catch {
+        failed.push(v.name)
+      }
+    }
+    setCreating(`Created ${made}${failed.length ? `; not created (already there?): ${failed.join(', ')}` : ''}.`)
+    window.dispatchEvent(new CustomEvent('dvv:changed'))
+  }
+  if (!analyst.questions.length && !analyst.variables.length && !analyst.checks.length) return null
+  return (
+    <section>
+      <h4 className="font-medium">What a reader would ask</h4>
+      <p className="text-xs text-slate-500">
+        Read from the scripter&apos;s notes. Pick an answer and the Copilot prepares the change for you to confirm.
+      </p>
+      {analyst.questions.length > 0 && (
+        <ul className="mt-2 space-y-2">
+          {analyst.questions.map((q, i) => (
+            <li key={i} className="text-xs">
+              <button className="font-mono underline mr-1 hover:text-slate-900" onClick={() => onGoTo(q.qid)}>
+                {q.qid}
+              </button>
+              {q.ask}
+              <div className="mt-1 flex flex-wrap gap-1">
+                {q.options.map((o) => (
+                  <button
+                    key={o}
+                    type="button"
+                    onClick={() => askCopilot(`${q.ask}\nMy answer: ${o}`)}
+                    className="rounded border border-slate-200 bg-white px-2 py-0.5 hover:border-sky-300 hover:bg-sky-50"
+                  >
+                    {o}
+                  </button>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {analyst.variables.length > 0 && (
+        <div className="mt-3 text-xs">
+          <p>
+            The notes ask for {analyst.variables.length} variables; {analyst.ready} have exact rules
+            {analyst.ready > 0 && studyId ? ' and can be created now.' : '.'}
+          </p>
+          <ul className="mt-1 flex flex-wrap gap-1">
+            {analyst.variables.map((v, i) => (
+              <li key={i} title={v.why || v.bands.map((b) => b.line).join('\n')}
+                className={`rounded px-1.5 py-0.5 ${v.status === 'ready' ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+                {v.name}
+              </li>
+            ))}
+          </ul>
+          {ready.length > 0 && studyId && (
+            creating ? <p className="mt-1 text-emerald-800">{creating}</p> : (
+              <button type="button" onClick={() => void createReady()}
+                className="mt-2 rounded bg-emerald-600 px-2.5 py-1 text-white hover:bg-emerald-700">
+                Create the {ready.length} ready variables
+              </button>
+            )
+          )}
+        </div>
+      )}
+      {analyst.checks.length > 0 && (
+        <details className="mt-2 text-xs">
+          <summary className="cursor-pointer text-slate-600">
+            {analyst.checks.length} checks for cleaning and scripting (quality flags, automatic answers)
+          </summary>
+          <ul className="mt-1 space-y-0.5 text-slate-600">
+            {analyst.checks.map((c, i) => (
+              <li key={i}><span className="font-mono">{c.qid}</span> · {c.said}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
+  )
+}
+
 export default function DecodingPanel({
   decoding,
   onGoTo,
+  studyId,
 }: {
   decoding: Decoding | null | undefined
   onGoTo: (qid: string) => void
+  studyId?: string
 }) {
   if (!decoding) return null
   const unfamiliar = decoding.verdict === 'unfamiliar'
   return (
-    <details open={unfamiliar || (decoding.brief?.missing ?? 0) > 0} className="bg-white border border-slate-200 rounded-md p-4 mb-4">
+    <details open={unfamiliar || (decoding.brief?.missing ?? 0) > 0 || (decoding.analyst?.questions.length ?? 0) > 0} className="bg-white border border-slate-200 rounded-md p-4 mb-4">
       <summary className="cursor-pointer text-sm font-semibold text-slate-800">
         How this questionnaire was read
         <span className={`ml-2 text-xs font-normal ${unfamiliar ? 'text-amber-700' : 'text-slate-500'}`}>
@@ -97,6 +207,7 @@ export default function DecodingPanel({
       </summary>
       <div className="mt-3 space-y-4 text-sm text-slate-700">
         {decoding.brief && <BriefSection brief={decoding.brief} onGoTo={onGoTo} />}
+        {decoding.analyst && <AnalystSection analyst={decoding.analyst} studyId={studyId} onGoTo={onGoTo} />}
         <section>
           <h4 className="font-medium">Skills used</h4>
           <ul className="mt-1 flex flex-wrap gap-2">

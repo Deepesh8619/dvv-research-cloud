@@ -151,7 +151,13 @@ def grid(rows: list[list[str]]) -> TableQuestion | None:
     statements = _statements(body, positions)
     if len(statements) < _MIN_GRID_ROWS or len(cols) < _MIN_GRID_COLUMNS:
         return None
-    if not _interior_is_empty(body, positions):
+    if punched := _punch_codes(filled[header_index + 1:], positions):
+        # Each row repeats the column's punch code ("Pizza | 1 | 2 | … | 6"):
+        # the scale's codes, printed for the scripter — not answers written in.
+        # The first such row is a statement too, not a separate code row.
+        statements = _statements(filled[header_index + 1:], positions)
+        cols = [Option(code=code, label=c.label) for code, c in zip(punched, cols, strict=True)]
+    elif not _interior_is_empty(body, positions):
         # A respondent grid's interior is EMPTY — the respondent fills it in.
         # A quota table ("N=400 QUOTA" / "No Quota") and a region map ("23%")
         # have the same shape with the answers already written in, and reading
@@ -167,6 +173,22 @@ def grid(rows: list[list[str]]) -> TableQuestion | None:
         randomize_rows=randomize,
         evidence=f"a {len(statements)}x{len(cols)} table",
     )
+
+
+def _punch_codes(body: list[list[str]], positions: list[int]) -> list[int] | None:
+    """The column codes when every row prints the same ones, else None.
+
+    A quota table's interior varies row to row (targets, percentages); a punch
+    grid's never does — that is the difference, not whether cells are empty.
+    """
+    rows = [tuple(_clean(row[i]) if i < len(row) else "" for i in positions) for row in body]
+    rows = [r for r in rows if any(r)]
+    if len(rows) < _MIN_GRID_ROWS or len(set(rows)) != 1:
+        return None
+    codes = rows[0]
+    if not all(c.isdigit() for c in codes) or len(set(codes)) != len(codes):
+        return None
+    return [int(c) for c in codes]
 
 
 def _interior_is_empty(body: list[list[str]], positions: list[int]) -> bool:

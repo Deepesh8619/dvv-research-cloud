@@ -175,16 +175,23 @@ def _para(text: str, idx: int) -> DocumentBlock:
     return DocumentBlock(block_type="paragraph", text=text, paragraph_index=idx)
 
 
-def test_segment_instruction_marker_is_a_boundary() -> None:
+def test_an_instruction_under_a_question_is_that_questions_rule() -> None:
+    """"TERMINATE IF …" / "SKIP TO …" under Q1 is Q1's routing. As its own
+    chunk it became an unlabelled question and Q1 lost its screen-out (BWW S11)."""
     blocks = [
         _para("Q1. Intro question", 0),
         _para("SKIP TO Q5 IF UNDER 18", 1),
         _para("Q5. Main question", 2),
     ]
     chunks = segment_into_questions(blocks)
-    assert [c.candidate_qid for c in chunks] == ["Q1", None, "Q5"]
-    # The SKIP TO instruction is its own chunk, not swallowed into Q1.
-    assert "SKIP TO Q5" in chunks[1].chunk_text
+    assert [c.candidate_qid for c in chunks] == ["Q1", "Q5"]
+    assert "SKIP TO Q5" in chunks[0].chunk_text
+
+
+def test_an_instruction_before_any_question_still_stands_alone() -> None:
+    chunks = segment_into_questions([_para("TERMINATE IF UNDER 18", 0),
+                                     _para("Q1. Main question", 1)])
+    assert [c.candidate_qid for c in chunks] == [None, "Q1"]
 
 
 def test_segment_qid_normalizes_case_and_suffix() -> None:

@@ -70,6 +70,9 @@ FIELD_ALIASES: dict[str, set[str]] = {
     "notes": {
         "other details", "notes", "note", "instructions", "scripter notes",
         "programming notes", "programmer notes", "comments", "special instructions",
+        "scripter instructions", "programming instructions", "programmer instructions",
+        "scripting notes", "scripting instructions", "pn", "prog note", "prog notes",
+        "programmer note", "programming note",
     },
     "text": {
         "question text", "question", "wording", "q text", "text",
@@ -79,9 +82,15 @@ FIELD_ALIASES: dict[str, set[str]] = {
 # Markers that introduce the answer list rather than being content.
 _LIST_MARKERS = ("response list", "answer list", "options", "response options",
                  "code frame", "codes", "scale", "variable list", "statement list",
-                 "item list", "row list")
+                 "item list", "row list", "answers", "answer options", "answer codes",
+                 "responses", "response codes", "precodes", "answer list codes",
+                 "statements", "items", "rows")
+# "1 = Under 16" / "2: Female" / "98. Don't know" — one answer per line inside
+# a single cell, the way a "one table per variable" spec writes its list.
+_CODED_LINE = re.compile(r"^\s*(?:\[(\d{1,4})\]|(\d{1,4})\s*(?:=|:|\.|\)|-|–))\s*(.+?)\s*$")
 # What is being rated, versus the scale it is rated on.
-_ROW_LIST_MARKERS = ("variable list", "statement list", "item list", "row list")
+_ROW_LIST_MARKERS = ("variable list", "statement list", "item list", "row list",
+                     "statements", "items", "rows")
 # A scale labelled only at its ends: "10: Strongly Agree / 9: (blank) / ... /
 # 1: Strongly Disagree". The blanks are real scale points — dropping them turned
 # a ten-point scale into a two-point one.
@@ -160,9 +169,20 @@ def _value_of(row: list[str]) -> str:
 _ALL_RESPONDENTS = re.compile(r"^\s*(?:all(?:\s+respondents)?|everyone|total)\s*\.?\s*$", re.I)
 #: "C_ACCOUNT = 2", "HID_GOOGLE_USER = 2 or 3", "DA_PLACEMENT = 3 and/or 4", "S1=1-3".
 _CODED_BASE = re.compile(
-    r"\b(?P<qid>[A-Za-z][A-Za-z0-9_]{1,40})\s*=\s*"
-    r"(?P<codes>\d{1,3}(?:\s*(?:-|–|,|or|and/or)\s*\d{1,3})*)",
+    # "HID_X = 1", "SVOD_AWARE in (1-6)"
+    r"\b(?P<qid>[A-Za-z][A-Za-z0-9_]{1,40})\s*(?:=|\bin\b)\s*\(?\s*"
+    r"(?P<codes>\d{1,3}(?:\s*(?:-|–|,|or|and/or)\s*\d{1,3})*)\s*\)?",
 )
+_ROUND_TAG = re.compile(r"\s*\((exclusive|anchor|anchored|fixed)\)", re.I)
+
+
+def _round_tags(label: str) -> tuple[str, set[str]]:
+    """"None of these (exclusive) (anchor)" -> ("None of these", {exclusive, anchor})."""
+    tags = {t.lower() for t in _ROUND_TAG.findall(label)}
+    return _ROUND_TAG.sub("", label).strip(), tags
+
+
+_TERMINATE_IF = re.compile(r"\b(?:terminate|screen\s*-?\s*out)\s+if\s+([^.;\n]+)", re.I)
 #: Wording that means more than one coded condition — left for a person/model.
 _COMPOUND = re.compile(r"\band\b(?!/or)|\bfor at least\b|\bselected at\b|\bonly show\b", re.I)
 
@@ -281,7 +301,8 @@ _LAYOUT_QUALIFIER = re.compile(r"\b(?:multi|single|one)[\s-]*line\b", re.I)
 # words, because "Text Only" contains "text" and would otherwise win.
 _DISPLAY_ONLY = re.compile(
     r"\btext\s*only\b|\bdisplay\s+(?:text|only)\b|\bno\s+response\b|"
-    r"\binfo(?:rmation)?\b|\bintro(?:duction)?\b|\btransition\b",
+    r"\binfo(?:rmation)?\b|\bintro(?:duction)?\b|\btransition\b|"
+    r"\b(?:text|display|message|info)\s+screen\b|^\s*display\s*$",
     re.I,
 )
 
@@ -300,6 +321,16 @@ _TYPE_WORDS = [
     ("grid", QuestionType.GRID_SINGLE),
     ("matrix", QuestionType.GRID_SINGLE),
 ]
+# The scripting shorthand a whole type cell often is: SC/SA/SP/SR single,
+# MC/MA/MP/MR multi, OE open, NUM numeric, DD dropdown. Matched only as the
+# WHOLE cell — two letters inside a word mean nothing.
+_TYPE_SHORTHAND = {
+    **dict.fromkeys(("sc", "sa", "sp", "sr", "s"), QuestionType.SINGLE),
+    **dict.fromkeys(("mc", "ma", "mp", "mr", "m"), QuestionType.MULTI),
+    **dict.fromkeys(("oe", "ot", "o"), QuestionType.OPEN_TEXT),
+    **dict.fromkeys(("num", "ne", "n"), QuestionType.NUMERIC),
+    "dd": QuestionType.DROPDOWN,
+}
 
 
 @dataclass
@@ -453,6 +484,8 @@ def _infer_type(
     low = _LAYOUT_QUALIFIER.sub(" ", (stated or "").strip().lower())
     if _DISPLAY_ONLY.search(low):
         return QuestionType.INFO, f"Q type: {stated.strip()}"
+    if low.strip(" .") in _TYPE_SHORTHAND:
+        return _TYPE_SHORTHAND[low.strip(" .")], f"Q type: {stated.strip()}"
     for word, qtype in _TYPE_WORDS:
         if word in low:
             return qtype, f"Q type: {stated.strip()}"
@@ -630,6 +663,19 @@ def parse_spec_table(
         if any(marker.startswith(m) for m in _LIST_MARKERS):
             in_row_list = any(marker.startswith(m) for m in _ROW_LIST_MARKERS)
             in_list = True
+            # The whole list in the cell beside the label, one answer a line.
+            raw = [c for c in row if c and c.strip()][1:]  # before _cells joins the lines
+            lines = [ln for c in raw for ln in c.split("\n") if ln.strip()]
+            coded = [m for ln in lines if (m := _CODED_LINE.match(ln))]
+            if lines and len(coded) == len(lines):
+                target = row_items if in_row_list else options
+                for m in coded:
+                    label, tags = _round_tags(m.group(3))
+                    target.append(Option(code=int(m.group(1) or m.group(2)), label=label,
+                                         exclusive="exclusive" in tags,
+                                         anchored=bool(tags & {"anchor", "anchored", "fixed"})))
+                last_option = target[-1]
+                continue
 
         if not cells or not cells[0]:
             # A directive can sit in the value column with NO code beside it:
@@ -824,6 +870,9 @@ def parse_spec_table(
             )
     else:
         fields.terminate_if = _parse_terminate(notes, options, qid)
+        if fields.terminate_if is None and (said := _TERMINATE_IF.search(notes or "")):
+            # "TERMINATE if AGE_BAND = 1, 8" — a coded rule written out in full.
+            fields.terminate_if = base_condition(said.group(1))
     if fields.terminate_if is not None:
         fields.terminate_verbatim = notes.strip()
         fields.evidence["terminate"] = notes.strip()

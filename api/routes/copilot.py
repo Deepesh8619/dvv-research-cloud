@@ -381,6 +381,9 @@ def make_executor(db: Session, user: UserDB):
             # every item quoting the instruction line it rests on.
             "understanding": understood,
             "checklist": checklist,
+            # Variables the notes say to create, questions only a person can
+            # settle (each with options), and quality checks to add.
+            "analyst": ((definition.metadata or {}).get("decoding") or {}).get("analyst"),
             # The QA loop's record — the same one the review page shows.
             "qa": (definition.metadata or {}).get("qa"),
             "markets": brief.get("markets"),

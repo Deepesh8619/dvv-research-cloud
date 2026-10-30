@@ -624,6 +624,22 @@ export interface Decoding {
   teach: { fragment: string; questions: number; examples: string[]; suggest: string }[]
   /** Every need the document stated, ticked off against the instrument. */
   brief?: BriefChecklist
+  /** The scripter's notes read like an analyst: variables to build, questions to ask. */
+  analyst?: AnalystReading
+}
+
+export interface AnalystReading {
+  variables: {
+    name: string
+    at: string
+    said: string
+    status: 'ready' | 'needs_you'
+    why: string
+    bands: { label: string; code?: number; condition: Record<string, unknown> | null; line: string }[]
+  }[]
+  ready: number
+  questions: { qid: string; kind: string; ask: string; options: string[]; variables?: string[] }[]
+  checks: { qid: string; kind: 'quality' | 'auto_answer'; said: string }[]
 }
 
 export interface BriefChecklist {
@@ -716,6 +732,8 @@ export interface QuestionCreate {
   randomize_options?: boolean
   show_if?: Record<string, unknown> | null
   terminate_if?: Record<string, unknown> | null
+  /** A variable the script computes and never asks. */
+  hidden?: boolean
 }
 
 export interface UnresolvedQuestion {

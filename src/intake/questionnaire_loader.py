@@ -96,9 +96,13 @@ class QuestionChunk:
 # written — it is the variable name the data map will carry.
 # A sub-item suffix "_1" (Q7_1) is part of the name, and a label may be followed
 # by two spaces or a tab instead of punctuation ("Q7_1  NUM 1-60 How many...").
-_QID_RE = re.compile(r"^\s*([A-Za-z]{1,3})(\d+)([A-Za-z]?(?:_\d+)?)(?:[.):]|\s{2,}\S|\t)")
+# "Q1 – wording" separates with a dash, as often as with a full stop.
+_QID_RE = re.compile(
+    r"^\s*([A-Za-z]{1,3})(\d+)([A-Za-z]?(?:_\d+)?)(?:[.):]|\s{2,}\S|\t|\s+[–—-]\s)")
 # SECTION B, SECTION 2 — a labelled section boundary with no question number.
-_SECTION_RE = re.compile(r"^\s*SECTION\s+[A-Z0-9]", re.IGNORECASE)
+# SECTION in any case; a QUOTA heading only in capitals ("QUOTA S5 – purchase
+# timing") — "Quota" in a sentence is wording, not a boundary.
+_SECTION_RE = re.compile(r"^\s*(?i:SECTION)\s+[A-Za-z0-9]|^\s*QUOTAS?\b(?=\s*[–—:-]|\s+[A-Z])")
 # Strong instruction/boundary markers even without a question-number prefix.
 _INSTRUCTION_RE = re.compile(r"^\s*(?:TERMINATE|SCREEN\s*OUT|SKIP\s*TO)\b", re.IGNORECASE)
 # Table-per-question format (real Google/GBK programming QREs): each question is
@@ -813,6 +817,105 @@ def _asks_a_question(block: DocumentBlock) -> bool:
     )
 
 
+# A label with nothing after it: "Q1." alone, the wording on the next line.
+_LABEL_ONLY = re.compile(r"^\s*([A-Za-z]{1,3}\d+[A-Za-z]?(?:_\d+)?)\s*[.):]?\s*$")
+# An English second sentence ("How much do you agree…?") is the question
+# continuing, not a translation of it (card_tables.OTHER_LANGUAGE).
+_OTHER_LANGUAGE = card_tables.OTHER_LANGUAGE
+_WORD_LABEL = re.compile(r"^\s*[A-Za-z]{1,3}\d{1,3}[A-Za-z]?\s*[.):]?\s*$")
+_DOTTED_LABEL = re.compile(r"^\s*([A-Za-z]{1,3})\.\s?(\d{1,3}[A-Za-z]?)\s+(\S.*)$", re.S)
+# "1.<tab>Which…" / "12a) How…": a number-only label.
+_NUMBER_LABEL = re.compile(r"^\s*(\d{1,3})([a-z]?)[.)]\s+(\S.*)$", re.S)
+# What a question line carries and an answer line does not: a question type to
+# the scripter. Answer tags (TERMINATE, EXCLUSIVE, ANCHOR) are deliberately not
+# here — answers carry those.
+_ASKS = re.compile(r"\?|\b(?:SINGLE|MULTI|OPEN|NUMERIC|NUMBER|RANK|GRID|SCALE|SELECT|"
+                   r"DROP ?DOWN|CONSTANT SUM|TEXT ?BOX|OE)\b"
+                   # In any case as a PHRASE ("Single response", "(rank 3)"); an
+                   # answer "Single" alone is a marital status, not an instruction.
+                   r"|(?i:\b(?:single|multiple|multi)[- ](?:response|code|choice|select|answer)s?\b"
+                   r"|\brank\b|\bconstant sum\b|\bopen[- ]?ended?\b)")
+
+
+def _normalise_labels(blocks: list[DocumentBlock]) -> list[DocumentBlock]:
+    """Three ways documents write a label that the line reader cannot see as one.
+
+    - "Q1." alone on its line names the line after it: joined, so the wording
+      is the question and not its first answer.
+    - A second question sentence straight under the wording, before any answer
+      ("¿En qué idioma…?" under "Which language…?") is the same question in
+      another language: kept as a note, never offered as an answer.
+    - "1. Which…?" with no letters at all: a question label only when the
+      numbers run in sequence across the document AND the line asks something
+      (a "?" or a bracketed instruction). Answer lists restart at 1 and do
+      neither, which is what tells them apart.
+    """
+    from dataclasses import replace
+
+    # "Q.1 Please write in your age": a dot between the letters and the number.
+    # Rewritten to "Q1." when the document writes several labels that way.
+    dotted = [i for i, b in enumerate(blocks)
+              if b.block_type == "paragraph" and _DOTTED_LABEL.match(b.text or "")]
+    if len(dotted) >= 3:
+        blocks = list(blocks)
+        for i in dotted:
+            m = _DOTTED_LABEL.match(blocks[i].text)
+            blocks[i] = replace(blocks[i], text=f"{m.group(1)}{m.group(2)}. {m.group(3)}")
+    # Word's own numbering drawing "Q1." in front of the wording: the label is in
+    # the list settings, not the text, and was never seen as one.
+    blocks = [replace(b, label=re.sub(r"[^A-Za-z0-9_]", "", b.list_label))
+              if (b.block_type == "paragraph" and not b.label and b.list_label
+                  and _WORD_LABEL.match(b.list_label) and not _QID_RE.match(b.text or ""))
+              else b for b in blocks]
+    out: list[DocumentBlock] = []
+    skip = False
+    for i, block in enumerate(blocks):
+        if skip:
+            skip = False
+            continue
+        nxt = blocks[i + 1] if i + 1 < len(blocks) else None
+        m = _LABEL_ONLY.match(block.text or "") if block.block_type == "paragraph" else None
+        if m and not block.label and nxt is not None and nxt.block_type == "paragraph" \
+                and (nxt.text or "").strip() and not _QID_RE.match(nxt.text):
+            out.append(replace(nxt, text=f"{m.group(1)}. {nxt.text.strip()}",
+                               paragraph_index=block.paragraph_index))
+            skip = True
+            continue
+        out.append(block)
+    for i in range(1, len(out)):
+        opener, line = out[i - 1], out[i]
+        if (line.block_type == "paragraph" and (line.text or "").rstrip().endswith("?")
+                and _OTHER_LANGUAGE.search(line.text or "")
+                and (opener.label or _QID_RE.match(opener.text or ""))
+                and not _QID_RE.match(line.text)
+                and not line.label):
+            out[i] = replace(line, text=f"[PN: also worded as: {line.text.strip()}]")
+    # Number labels become Q1, Q2…: a document already naming its questions Q-
+    # something would get two of each.
+    if sum(1 for b in out if (b.label or "").upper().startswith("Q")
+           or ((m := _QID_RE.match(b.text or "")) and m.group(1).upper() == "Q")) >= 3:
+        return out
+    last, last_sub, marked = 0, "", []
+    for i, block in enumerate(out):
+        if block.block_type != "paragraph" or block.label:
+            continue
+        m = _NUMBER_LABEL.match(block.text or "")
+        if not m:
+            continue
+        n, sub, rest = int(m.group(1)), m.group(2), m.group(3).strip()
+        # The next number, or one past it (a question the rule missed must not
+        # lose every question after it); or a sub-question of the last one.
+        follows = n in (last + 1, last + 2) or (n == last and sub and sub > last_sub)
+        if follows and _ASKS.search(rest):
+            marked.append((i, f"Q{n}{sub}", rest))
+            last, last_sub = n, sub
+    if len(marked) < 3:
+        return out
+    for i, qid, rest in marked:
+        out[i] = replace(out[i], label=qid, text=rest)
+    return out
+
+
 def segment_into_questions(
     blocks: list[DocumentBlock], taught_labels: list[str] | None = None
 ) -> list[QuestionChunk]:
@@ -830,6 +933,7 @@ def segment_into_questions(
     """
     if taught_labels:
         blocks, _marked = taught.apply(blocks, taught_labels)
+    blocks = _normalise_labels(blocks)
     chunks: list[QuestionChunk] = []
     current: list[DocumentBlock] = []
     current_qid: str | None = None
@@ -982,6 +1086,14 @@ def segment_into_questions(
             # no base tag and no question mark. Only the NEXT number: an answer
             # list numbered "1. Yes / 2. No" never continues the question list.
             is_boundary, qid = True, next_qid(block)
+        if (is_boundary and qid is None and current_qid is not None
+                and not current_qid.startswith(("INFO_", "INTRO"))
+                and _INSTRUCTION_RE.match(block.text or "")):
+            # "TERMINATE IF BUFFALO WILD WINGS IS SELECTED" under S11 is S11's
+            # screen-out. As a boundary it became a question of its own and S11
+            # lost the rule that decides who qualifies.
+            current.append(block)
+            continue
         if is_boundary:
             carried = _trailing_routing_directives(current)
             flush()

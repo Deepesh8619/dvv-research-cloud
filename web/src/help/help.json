@@ -316,5 +316,11 @@
     "what": "Whether respondents are asked this question. Switched off, it stays in the questionnaire for the record but is left out of the link, the dry run, the solver and the data file.",
     "why": "Documents carry notes, programmer instructions and questions a client dropped late. Leaving them out keeps the link true to what will be fielded without losing the document's wording.",
     "how": "Untick it. If another question's routing, answer list or piping uses this answer, it is refused and names those questions: change them first. Changing it puts the questionnaire back in review; new links pick it up, links already live keep what they were made with."
+  },
+  "fix-reading": {
+    "title": "A question was read wrong — how to fix it",
+    "what": "Most reading mistakes are fixed here, without code. Questions missing or glued together: ask the Copilot to check how it was read, then teach one label as the document writes it. A marker read wrong everywhere (\"[SA]\"): Correct this → Teach the reader. One question wrong: edit it, or tell the Copilot (\"terminate if QAGE < 18\").",
+    "why": "A taught convention is applied to every later document written the same way, with no AI cost, so the same mistake does not come back.",
+    "how": "If nothing in the app can express it, the reader needs a code change: docs/READER_FIX_GUIDE.md lists each symptom with the file and function to change and the commands that prove the fix broke nothing."
   }
 }
