@@ -388,6 +388,124 @@ Shared rules as before. Each card says whether it may add a dependency.
 - **Checker (new rule):** a sentence that ranks two cited cells ("ahead of", "more than", "higher", "lower", "leads", "outperform") whose intervals overlap, and that has no sig letter between them, gets the problem "These two numbers are within each other's margin of error (28–40% vs 25–37%). Say they are similar, or cite a tested difference." A sentence that says "similar", "in line with" or "no significant difference" is exempt.
 - **Tests:** Wilson values against known references (e.g. 50% of 100 gives 40.4–59.6); the effective base drives the width; the new rule refuses an overlapping ranking and accepts it when sig is present or the sentence says similar; the findings-generated report from the golden path still passes, so the report writer must already avoid this. If it doesn't, adjust `findings` so a lead with overlapping intervals is worded "is level with" rather than "leads", and test it.
 
+## Wave PN: read programmer notes like an analyst
+
+Planned 2026-10-31 by Opus 5.5; each card is built by the model named on it.
+
+**The problem.** Notes are read by separate patterns, and a sentence no pattern
+matches disappears silently. Measured on 7 real questionnaires with AI off: 1,062
+note sentences, of which 475 (45%) match no known kind. Some known kinds are
+strong (terminate, exclusive, range, randomise). Hidden variables are weak (18 of
+44 ready), and re-ask flows, layout, stimulus and quota notes have no field at all.
+
+**The design: one rule, every clause gets an outcome.**
+```
+note → clauses → kind → outcome
+                         applied   a setting on the survey changed
+                         asked     a person must decide ("What a reader would ask")
+                         scripter  cannot be automated; on the scripter's checklist
+                         by_design says nothing new ("Ask all")
+                         unread    nothing understood it, and this is counted
+```
+`unread` is the number this wave drives down. Nothing is dropped silently.
+
+**Rules for every card in this wave**
+- Worktree given by the orchestrator. Builders never commit. Read `.claude/agents/engine-builder.md` (or `ui-builder.md`).
+- Never copy client wording into code or tests: use made-up lines of the same shape.
+- A new form goes in the module named on the card, with a test, not in `extractor.py`.
+- Never guess. If the words do not settle it, the outcome is `asked` or `unread`.
+- Tests: `BEDROCK_API_KEY= GROQ_API_KEY= CEREBRAS_API_KEY= HF_TOKEN= OLLAMA_HOST=http://127.0.0.1:1 .venv/bin/python -m pytest tests/unit tests/integration -q`, and `ruff check src api tests scripts`. Use `~/dev/dvv-research-cloud/.venv/bin/python` if the worktree has no venv.
+- Orchestrator gate before merging: `eval_compare` + `eval_diff` against the last round say no newly wrong, and `scripts/note_census.py` shows `unread` not rising.
+
+### N1: The note ledger and census · sonnet · foundation
+**Files:** new `src/engines/questionnaire/note_ledger.py`, new `scripts/note_census.py`, `src/engines/questionnaire/extractor.py` (one call), new `tests/unit/test_note_ledger.py`.
+- `KINDS`: an ordered tuple of `(kind, compiled regex)` covering number_entry, range, terminate, exclusive, reask, hidden_var, base, mask, randomize, anchor, pipe, limit_select, one_or_many, open_end_limit, sum, quota, layout, stimulus, loop, quality, ask_all.
+- `read_notes(survey) -> list[dict]`: for each question, each sentence from `note_lines.sentences(note_lines(q))`: `{"qid", "said", "kind", "outcome", "detail"}`. Skip blank sentences. A clause matching several kinds gets one record per kind.
+- Outcome is decided by the survey, not by the words: a table `kind -> check(question)` tests the real field (`terminate_if`, `show_if`, `validation["min"]`, option `.exclusive`, `.anchored`, `.show_if`, `randomize_options`, `piping_refs`, `validation["min_select"/"max_select"]`, masks via `validation` techniques as read by `surveyjs_compiler._techniques`). Field set: `applied`; `hidden_var`: `applied` if ready and `asked` if needs_you in `analyst_reading`; `ask_all`: `by_design`; `quota`, `layout`, `stimulus`, `quality`: `scripter`; no kind: `unread`; kind known but field empty: `unread`.
+- `summary(records) -> dict`: counts by outcome and by kind. Store in `survey.metadata["note_ledger"]` (records capped at 2,000) at the end of `extract_survey_definition`, after `note_rules.apply`.
+- `scripts/note_census.py PATH.docx... [--gold-dir DIR] [--examples]`: AI assumed off; prints a table per kind and totals; `--examples` prints unread clauses. It writes no files and is never given client text to commit.
+- **Tests:** a made-up survey producing each outcome; blank sentences skipped; a sentence with two kinds gives two records.
+
+### N2: Split run-together notes · haiku · needs N1
+**Files:** `src/engines/questionnaire/note_lines.py`, `tests/unit/test_note_lines.py`.
+- Word often drops the line breaks. Make `sentences` also split with no space after the stop: `terminate.If respondent` → two. Never split `Q.4`, `e.g.`, `1.5`, `S1.a`.
+- New `split_groups(text) -> list[str]`, used only on what follows `':'` in a "create … variable" note: `18-3435-4950-6465+` → `18-34, 35-49, 50-64, 65+`; `M18-34F18-34M65+F65+` → `M18-34, F18-34, M65+, F65+`. A range is accepted only when low < high, and the next range starts at or after a plausible age (10-120). Otherwise return the text whole.
+- A second `Create … variable` inside one line starts a new note.
+- **Tests:** those lines; each no-split case; text that must come back whole.
+
+### N3: How an answer is entered · sonnet · needs N1
+**Files:** new `src/engines/questionnaire/note_entry.py`, one call in `note_rules.apply`, new `tests/unit/test_note_entry.py`.
+- `apply(q, notes, made)`, run after `_limits`, then range and terminate are re-checked so they apply to a question whose type this just settled.
+- Only where the question's type is unsettled (type `INFO` with `validation["extraction_error"]`) or the text says otherwise: "whole number", "Acceptable range", "numeric" → numeric; "Allow/Accept one response" → single **if it has options**; "Allow/Accept multiple responses" → multi if it has options; "Write response here", "open end response" → open text.
+- "… or check ‘X’ (which cannot be combined with any other response)" on a numeric question with no such answer: add the option `X`, `exclusive=True`, code = the code the document states, else 99 if free, else the highest + 1. The compiler's `_numeric_validators_with_opt_outs` already exempts it: check it in a test on the compiled form.
+- "minimum character count N", "OE: N-character minimum" → `validation["min_length"] = N`, and make `surveyjs_compiler` emit a text validator (check it does not already).
+- "Rank 1,2,3" → `validation["rank_top"] = 3` only if the question is already ranking.
+- Clear `extraction_error` only if the type, plus options where the type needs them, are now settled; record what decided it in `extraction_evidence`.
+- **Tests:** the note in `docs/READER_FIX_GUIDE.md` style, no `[NUMERIC]` tag: numeric, 1-120, under-18 terminate, opt-out answer exclusive; a real single question's type is never overwritten.
+
+### N4: Which answers are shown · sonnet · needs N1
+**Files:** new `src/engines/questionnaire/note_answers.py`, one call in `note_rules.apply`, `tests/unit/test_note_answers.py`.
+- Read first: `_answers` in `note_rules.py`, `_choices_visible_if` and `_techniques` in `surveyjs_compiler.py`, `grid_masks.py`, and the mask dict shape they use. Write the same shape: no new mask format.
+- "Keep punch 9 …", "… at the bottom", "fix/lock punch N" → `anchored`.
+- "Do not randomize" → `randomize_options=False`, and it wins over a general randomise note on the same question. Check the wrongly shuffled ordered-scale case: a frequency or agreement scale with no randomise instruction anywhere must not be shuffled; find where it is set and write a failing test first.
+- "Only show those selected at Q5", "Show brands not selected at Q5", "Hide answers picked at Q5", "Mask: show codes 1-5" → a mask, when Q5 exists earlier and the codes exist. Otherwise leave unread.
+- "Do not show punch 3 if S2=1" → that option's `show_if` through `conditions.compile_condition`.
+- **Tests:** one per form, one where the source is later than the question (nothing set).
+
+### N5: Variables an analyst would build · sonnet · needs N1, N2
+**Files:** `src/engines/questionnaire/reading_questions.py`, new `src/engines/questionnaire/note_groups.py`, `tests/unit/test_reading_questions.py`.
+- Nested groups: `M18-34`, `F65+`, "Male 18-34": find the gender question (a single with answers whose labels are male and female) and the age question (the variable's host, or a numeric with "age" in the wording). The band's rule is gender code AND age range. If either is missing or ambiguous: `needs_you`, and say which is missing.
+- A list that restarts at the same low value, or repeats a group: two lists. Keep the first under the name, offer the second as `<NAME>_2`, status `ready` when all rules compile, and ask one question: "`NAME` lists two breakdowns. Keep both, or only the first?"
+- Count bands: "One service = 1 selected at S2", "Zero services = none selected at S2", when the words say so; otherwise `needs_you`. Do not invent the source question.
+- Options for `needs_you` stay honest; add a third option naming the exact missing piece when known.
+- **Tests:** made-up age/gender document ending `ready`; the same without a gender question `needs_you`; two lists.
+
+### N6: Refuse, warn, ask again · sonnet · needs N3
+**Files:** new `src/engines/questionnaire/note_flows.py`, one call in `note_rules.apply`, `tests/unit/test_note_flows.py`.
+- No new runtime: the second ask is a real question.
+- "If respondent selects ‘X’, show … : MESSAGE … selects ‘X’ a second time, terminate": add `<qid>_REASK` right after the question, same type and options, `show_if` = answered X, its text = MESSAGE then the original wording, range copied, `terminate_if` = X again. Later questions and hidden variables that read the answer need one value: note on the survey that `<qid>_REASK` replaces it where answered; the band rules use it through an "or".
+- "Show warning … but allow to continue" → `validation["soft_message"]`, shown by the compiler with SurveyJS `warning` only if the installed version supports it; otherwise outcome `scripter`.
+- Anything less exact: `asked`.
+- **Tests:** the flow survives `surveyjs_compiler` and `logic_proof`; answering X twice ends the survey; answering 40 the second time continues.
+
+### N7: The scripter's checklist · haiku · needs N1
+**Files:** `src/engines/questionnaire/reading_questions.py` (`_questions` checks only), `tests/unit/test_reading_questions.py`.
+- Every ledger record with outcome `scripter` appears once in `checks`: `{"kind": <kind>, "qid", "said"}`. Keep the existing quality check shape.
+- Add to the ledger's `layout` and `by_design` patterns: "intermediate text only", "show on carousel/carrousel", "respondents can see", "show to all". Grouped display must not ask a person anything.
+- **Tests:** one per kind; repeats of the same sentence on one question appear once.
+
+### N8: A model for what is left · sonnet · needs N1, N3, N4, N5
+**Files:** new `src/engines/questionnaire/note_model.py`, a call at the end of `extract_survey_definition`, `tests/unit/test_note_model.py`.
+- Only `unread` clauses, in one batched call per document, through `src.ai.router.run_private` only. No backend: skip, leave them unread, no error.
+- Closed answer: for each clause `{"index", "kind" (from KINDS or "none"), "qids": [...], "codes": [...], "says": "<one plain line>"}`. Reject and leave unread any record naming a qid or code the document lacks, and any kind outside the list.
+- **The model never sets a field.** Each surviving record becomes a question in "What a reader would ask": "This note seems to say: … Apply it?", with the outcome `asked` and `how: "model"`.
+- **Tests:** a fake backend with valid, invented-qid and invalid-kind records; no backend; no client text in any log line.
+
+### N9: An answer changes the survey · sonnet · needs N5, N6
+**Files:** `api/routes/questionnaire.py`, new `src/engines/questionnaire/reading_decisions.py`, `tests/integration/test_users_and_project_delete.py`.
+- Read first: the existing `POST /studies/{id}/questionnaire/decisions` and `with_decisions`.
+- `apply_decisions(survey, decisions)`: for a ready variable or an option carrying a change, make it through the code the Copilot's existing card uses (find `propose_*` in `api/routes/copilot.py`), audited as the person's decision. "Leave for the scripter" sets outcome `scripter`.
+- Runs on save, and after every re-read, so answers survive. A decision whose question no longer exists stays stored and is reported, never applied to something else.
+- A survey that is live is never changed this way: say so in a plain sentence.
+- **Tests:** answer → survey changed; re-read → still changed; live → refused; stale key → no change.
+
+### N10: See every note on the review page · sonnet (ui-builder) · needs N1
+**Files:** `api/routes/questionnaire.py` (return the ledger), `web/src/api/client.ts`, `web/src/components/DecodingPanel.tsx`, its test.
+- A "Notes" section: "312 notes: 240 applied, 30 need you, 25 for the scripter, 17 not understood", filter by outcome, each row showing question, the note's words and what was done.
+- A row with `unread` has one action, "Explain this to the Copilot", which uses the existing `askCopilot` with the note's words and the existing teaching path. A taught form then counts as applied after the next re-read.
+- Plain sentences, no internal kind names on screen.
+- **Tests:** vitest on counts, filter and the action.
+
+### N11: A ruler for notes · orchestrator (Opus) · needs N1
+Read a sample of about 150 clauses across the real documents by hand and store the correct kind and outcome in `~/dev/DVV/eval/gold/notes/` (never committed). `note_census.py --gold-dir` reports accuracy, including `applied` that should not have been. A ledger that marks everything `applied` must fail this.
+
+| Order | Cards | Model |
+|---|---|---|
+| 1 | N1 | sonnet |
+| 2, in parallel | N2, N3, N4, N7, N10, N11 | haiku, sonnet, sonnet, haiku, sonnet, Opus |
+| 3 | N5, N6 | sonnet |
+| 4 | N8, N9 | sonnet |
+
 ## Wave 5b: (cards to write after 5a)
 - **P3** Replay any deliverable byte for byte from the ledger (needs P2).
 - **P6** Supplier allocation as a bandit.
