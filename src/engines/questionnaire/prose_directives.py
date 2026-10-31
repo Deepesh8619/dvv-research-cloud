@@ -107,7 +107,7 @@ _STEM_CONTINUES_RE = re.compile(r"[?:.!\]]\s*$")
 # scales are routinely written in descending order (5,4,3,2,1) and skip codes
 # entirely (1,2,3,98,99), so counting down the list invents codes that the data
 # file does not use and every one of them becomes a false discrepancy.
-_OPTION_CODE_RE = re.compile(r"^\s*(\d{1,3})\s*[.):]\s+(?=\S)")
+_OPTION_CODE_RE = re.compile(r"^\s*(\d{1,3})\s*[.):=]\s+(?=\S)")
 _TAB_CODE = re.compile(r"^\s*(\d{1,3})\t+(?=\S)")
 # Multi-punch items are as often lettered as numbered ("a. It's cheaper").
 # The letter is an item marker, not a code — strip it from the label, keep the

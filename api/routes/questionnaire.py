@@ -23,11 +23,11 @@ import logging
 import os
 import threading
 from dataclasses import fields as dataclass_fields
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.auth import UserRole, get_current_user, require_role
@@ -41,10 +41,12 @@ from api.db import (
     get_db,
     get_study,
     list_questionnaires_for_study,
+    record_audit,
     set_questionnaire_approved_qids,
     set_questionnaire_definition,
     set_questionnaire_source_archive,
     update_questionnaire_status,
+    update_study_status,
 )
 from api.models import (
     QuestionCreateRequest,
@@ -314,6 +316,17 @@ def _status_response(
         decoding=metadata.get("decoding"),
         second_look=metadata.get("second_look"),
     )
+
+
+def with_decisions(decoding: dict | None, study_metadata: dict) -> dict | None:
+    """The stored reading, with each question a person has already answered marked."""
+    analyst = (decoding or {}).get("analyst")
+    decisions = study_metadata.get("reading_decisions") or {}
+    if not analyst or not decisions:
+        return decoding
+    questions = [{**q, "decided": decisions[q["key"]]} if q.get("key") in decisions else q
+                 for q in analyst.get("questions") or []]
+    return {**decoding, "analyst": {**analyst, "questions": questions}}
 
 
 def _question_payload(question, approved_qids: set[str]) -> dict:
@@ -779,6 +792,8 @@ def get_questionnaire_status(
     if payload is not None:
         survey = SurveyDefinition.from_json(payload)
     response = _status_response(questionnaire, survey, _study_has_datamap(db, study_id))
+    if study := get_study(db, study_id):
+        response.decoding = with_decisions(response.decoding, study.study_metadata or {})
     if _is_stale_processing(questionnaire):
         response.status = "error"
         response.error_detail = (
@@ -2683,6 +2698,38 @@ def questionnaire_workbook(
             "Content-Disposition": f'attachment; filename="{name}_questionnaire.xlsx"'
         },
     )
+
+
+class ReadingDecisionRequest(BaseModel):
+    key: str = Field(min_length=1, max_length=40)
+    ask: str = Field(default="", max_length=600)
+    answer: str = Field(min_length=1, max_length=300)
+
+
+@router.post("/studies/{study_id}/questionnaire/decisions")
+def save_reading_decision(
+    study_id: str,
+    request: ReadingDecisionRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """Keep a person's answer to "What a reader would ask". (Owner/Analyst)
+
+    Stored on the project, not the reading, so reading the document again does
+    not ask it a second time."""
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    decisions = dict((study.study_metadata or {}).get("reading_decisions") or {})
+    decisions[request.key] = {"ask": request.ask, "answer": request.answer,
+                              "by": user.name or user.email,
+                              "at": datetime.now(UTC).isoformat()}
+    update_study_status(db, study_id, study.status, {"reading_decisions": decisions})
+    record_audit(db, entity="reading_decision", entity_id=request.key, action="answered",
+                 actor_id=user.id, study_id=study_id,
+                 summary=f"{request.ask[:120]} → {request.answer[:80]}")
+    db.commit()
+    return decisions[request.key]
 
 
 @router.post("/studies/{study_id}/questionnaire/reextract")

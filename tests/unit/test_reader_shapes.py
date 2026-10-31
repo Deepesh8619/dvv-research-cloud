@@ -135,3 +135,49 @@ def test_shorthand_types_and_bracketed_codes():
     screen = parse_spec_table(_table([["Question ID", "S0"], ["Type", "TEXT SCREEN"],
                                       ["Text", "Thank you for taking part."]]))
     assert screen.qtype is QuestionType.INFO
+
+
+# --- what the document profile learns ---------------------------------------
+
+def test_the_profile_learns_where_routing_sits_and_how_notes_are_marked():
+    from src.intake.document_profile import build_profile
+
+    above = _doc("[BASE: ALL]", "Q1. Are you?", "Yes", "[BASE: Q1=1]", "Q2. Why?",
+                 "[BASE: Q2=1]", "Q3. How?", "[BASE: Q3=1]", "Q4. When?")
+    profile = build_profile(above)
+    assert profile["routing_position"] == "above"
+    assert profile["note_markers"]["[…]"] == 4
+    below = _doc("Q1. Are you?", "Yes", "Ask if S1=1", "No", "Q2. Why?", "Ask if Q1=1", "Yes",
+                 "Q3. How?", "Yes")
+    assert build_profile(below)["routing_position"] == "below"
+
+
+def test_a_rule_above_a_question_governs_the_next_and_never_itself():
+    from src.core.survey_definition import Block, Option, Question, QuestionType, SurveyDefinition
+    from src.engines.questionnaire.note_rules import apply
+
+    def q(qid, tail=""):
+        return Question(qid=qid, text=qid, type=QuestionType.SINGLE,
+                        options=[Option(code=1, label="A"), Option(code=2, label="B")],
+                        source_text=f"{qid}?\n1. A\n2. B" + (f"\nFilter: {tail}" if tail else ""))
+
+    qs = [q("Q1", "Q1 = 1"), q("Q2")]
+    survey = SurveyDefinition(study_id="s", source="x", status="draft",
+                              blocks=[Block(block_id="B", question_ids=["Q1", "Q2"])], questions=qs)
+    survey.metadata["document_profile"] = {"routing_position": "above"}
+    apply(survey)
+    assert qs[0].show_if is None                      # never conditional on itself
+    assert qs[1].show_if.to_dict()["qid"] == "Q1"
+
+
+def test_notes_and_answers_in_the_documents_own_forms():
+    chunks = segment_into_questions(_doc(
+        "Q.1 Are you? [1 answer]", "Male (1), Female (2)", "Q.2 Pets? [1 answer]",
+        "Dog (1), Cat (2)", "(Only show the answers chosen at Q.2)", "Q.3 Which? [1 answer]",
+        "Yes (1), No (2)", "→ Asked if Q.2 includes 1"))
+    assert "1. Male" in chunks[0].chunk_text and "2. Female" in chunks[0].chunk_text
+    assert "[Only show the answers chosen at Q.2]" in chunks[1].chunk_text
+    assert "[Asked if Q.2 includes 1]" in chunks[2].chunk_text
+    blocks = _doc("Q1 <SC> Why?", "Q2. Rate <BRAND> now <MC>", "A <EXCL>", "B <FIX>")
+    text = "\n".join(c.chunk_text for c in segment_into_questions(blocks))
+    assert "<BRAND>" in text and "[MC]" in text and "[EXCL]" in text

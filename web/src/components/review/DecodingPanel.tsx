@@ -90,6 +90,14 @@ function AnalystSection({ analyst, studyId, onGoTo }: {
   onGoTo: (qid: string) => void
 }) {
   const [creating, setCreating] = useState<string | null>(null)
+  const [answered, setAnswered] = useState<Record<string, string>>({})
+  const answer = (q: AnalystReading['questions'][number], option: string) => {
+    if (q.key) {
+      setAnswered((a) => ({ ...a, [q.key as string]: option }))
+      if (studyId) void questionnaireApi.decideReading(studyId, q.key, q.ask, option)
+    }
+    askCopilot(`${q.ask}\nMy answer: ${option}`)
+  }
   const ready = analyst.variables.filter((v) => v.status === 'ready')
   const createReady = async () => {
     if (!studyId) return
@@ -134,8 +142,13 @@ function AnalystSection({ analyst, studyId, onGoTo }: {
                   <button
                     key={o}
                     type="button"
-                    onClick={() => askCopilot(`${q.ask}\nMy answer: ${o}`)}
-                    className="rounded border border-slate-200 bg-white px-2 py-0.5 hover:border-sky-300 hover:bg-sky-50"
+                    onClick={() => answer(q, o)}
+                    aria-pressed={(answered[q.key ?? ''] ?? q.decided?.answer) === o}
+                    className={`rounded border px-2 py-0.5 hover:border-sky-300 hover:bg-sky-50 ${
+                      (answered[q.key ?? ''] ?? q.decided?.answer) === o
+                        ? 'border-sky-500 bg-sky-50 font-medium'
+                        : 'border-slate-200 bg-white'
+                    }`}
                   >
                     {o}
                   </button>
@@ -206,6 +219,16 @@ export default function DecodingPanel({
         </span>
       </summary>
       <div className="mt-3 space-y-4 text-sm text-slate-700">
+        {decoding.profile && (
+          <p className="text-xs text-slate-600" data-testid="document-profile">
+            <span className="font-medium">How this document is written:</span> {decoding.profile.layout}
+            {Object.keys(decoding.profile.note_markers).length > 0 && (
+              <> · notes marked {Object.keys(decoding.profile.note_markers).join(', ')}</>
+            )}
+            {' · '}routing written {decoding.profile.routing_position} each question
+            {decoding.profile.answer_required_by_brief && <> · the brief requires an answer to every question</>}
+          </p>
+        )}
         {decoding.brief && <BriefSection brief={decoding.brief} onGoTo={onGoTo} />}
         {decoding.analyst && <AnalystSection analyst={decoding.analyst} studyId={studyId} onGoTo={onGoTo} />}
         <section>

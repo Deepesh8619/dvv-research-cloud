@@ -21,6 +21,28 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-10-31 — the document profile: learn how a document is written before reading it (branch feat/document-profile)
+
+`src/intake/document_profile.py` runs first and counts the document's own habits:
+layout, note markers, whether routing sits above or below the question, whether
+the brief requires an answer to every question. Adopted only when used repeatedly.
+
+- All note forms read one way (`note_lines.py`): `[PN: …]`, `[…]`, `<…>`,
+  `PROGRAMMER NOTE:`, table note rows, `Filter:`, `Base:`, `→ Asked if`, plain `Ask if`.
+- Position: where routing sits above, a question's base comes from the end of the
+  previous question. **A base may only name earlier questions.**
+- New forms: labels with only a space (repeated, ascending), "Q.4", "in (1,3)",
+  "not in (99)", "includes", "=1/2", "1 = Yes", "Male (1), Female (2)".
+- Brief used while reading: "enforce a response to each question" makes open ends required.
+- Decisions: answers to "What a reader would ask" are stored on the project under a
+  stable key, survive re-reading, and reach the Copilot.
+
+Measured, AI off, 24 documents: 496 → 511 of 995, newly wrong none (`s-claude3` vs
+`p-3`). h04 10% → 34%, d11 6% → 16%, h01 11% → 18%, h03 36% → 43%, d09 38% → 41%.
+Charter unchanged. Vivo's silent share rose 26.8% → 28.0%, not yet explained.
+
+---
+
 ## 2026-10-30 — read like Claude: Charter compared reading-for-reading (branch feat/read-like-claude)
 
 Claude read the Charter NPS tracker from the document and wrote it as a gold

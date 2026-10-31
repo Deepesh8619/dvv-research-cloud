@@ -360,6 +360,8 @@ def make_executor(db: Session, user: UserDB):
         than from anything it composed. Many questionnaires have no overview;
         that is normal and says nothing about the study.
         """
+        from api.routes.questionnaire import with_decisions
+
         _s, _row, definition = current(args)
         brief = (definition.metadata or {}).get("study_overview")
         understood = (definition.metadata or {}).get("study_understanding")
@@ -383,7 +385,10 @@ def make_executor(db: Session, user: UserDB):
             "checklist": checklist,
             # Variables the notes say to create, questions only a person can
             # settle (each with options), and quality checks to add.
-            "analyst": ((definition.metadata or {}).get("decoding") or {}).get("analyst"),
+            "analyst": (with_decisions((definition.metadata or {}).get("decoding"),
+                                       _s.study_metadata or {}) or {}).get("analyst"),
+            # How this document writes things, learned before reading any question.
+            "document_profile": (definition.metadata or {}).get("document_profile"),
             # The QA loop's record — the same one the review page shows.
             "qa": (definition.metadata or {}).get("qa"),
             "markets": brief.get("markets"),

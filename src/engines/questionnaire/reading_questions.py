@@ -20,13 +20,14 @@ in one step; questions are asked, never answered on a guess.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any
 
 from src.core.survey_definition import SurveyDefinition
 from src.engines.questionnaire.conditions import compile_condition
+from src.engines.questionnaire.note_lines import note_lines
 
-_NOTE = re.compile(r"^\s*\[(?:PN|PROG(?:RAMMER)? NOTE|SCRIPTER NOTE)\s*:\s*(.*?)\]?\s*$", re.I)
 _CREATE = re.compile(
     r"\bcreate\s+(?:a\s+|an\s+)?(?:new\s+)?(?:dummy\s+|hold\s+|hidden\s+|programming\s+)*"
     r"variables?\b\s*(?P<rest>.*)$", re.I)
@@ -61,8 +62,7 @@ def _name_in(rest: str) -> str | None:
 
 
 def _notes(question) -> list[str]:
-    return [m.group(1).strip() for line in (question.source_text or "").splitlines()
-            if (m := _NOTE.match(line))]
+    return note_lines(question)
 
 
 _PUNCH_AT = re.compile(r"(?:selected\s+)?punch(?:es)?\s+(\d[\d\s,]*(?:\s*(?:or|and|-|–)\s*\d+)*)"
@@ -238,6 +238,10 @@ def analyst_reading(survey: SurveyDefinition) -> dict[str, Any]:
     """Variables to build, questions to ask, checks to add — from the notes."""
     variables = _variables(survey)
     asks, checks = _questions(survey, variables)
+    for ask in asks:
+        # Stable across re-reads: what is being asked, not where it sits in a list.
+        basis = f"{ask['kind']}|{ask['qid']}|{','.join(ask.get('variables', []))}"
+        ask["key"] = hashlib.sha1(basis.encode()).hexdigest()[:12]
     return {
         "variables": variables,
         "ready": sum(1 for v in variables if v["status"] == "ready"),

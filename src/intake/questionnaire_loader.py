@@ -21,11 +21,12 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from collections import Counter
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
-from src.intake import card_tables
+from src.intake import card_tables, document_profile
 from src.intake import taught_labels as taught
 from src.intake.revisions import live_cell_text, live_text
 
@@ -534,7 +535,6 @@ def _read_cards(
     every card plus the single-column heading/intro tables around them.
     Everything else in the document, and every other document, is untouched.
     """
-    from dataclasses import replace
 
     cards = {i for i, cells in table_cells.items() if card_tables.label_of(cells)}
     if len(cards) < card_tables.MIN_CARDS:
@@ -885,7 +885,6 @@ def _normalise_labels(blocks: list[DocumentBlock]) -> list[DocumentBlock]:
       (a "?" or a bracketed instruction). Answer lists restart at 1 and do
       neither, which is what tells them apart.
     """
-    from dataclasses import replace
 
     # "Q.1 Please write in your age": a dot between the letters and the number.
     # Rewritten to "Q1." when the document writes several labels that way.
@@ -966,9 +965,15 @@ def segment_into_questions(
     Leading content before the first label is emitted as its own chunk with
     `candidate_qid=None` so nothing is silently dropped.
     """
+    # How this document writes things, learned before anything is read as a question.
+    blocks = document_profile.normalise(blocks)
     if taught_labels:
         blocks, _marked = taught.apply(blocks, taught_labels)
     blocks = _normalise_labels(blocks)
+    known = Counter(m.group(1).upper() for b in blocks if b.block_type != "table"
+                    and (m := _QID_RE.match(b.text or "")))
+    for i, (qid, rest) in document_profile.space_labels(blocks, known).items():
+        blocks[i] = replace(blocks[i], label=qid, text=rest)
     chunks: list[QuestionChunk] = []
     current: list[DocumentBlock] = []
     current_qid: str | None = None
