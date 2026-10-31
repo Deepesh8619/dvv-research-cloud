@@ -15,6 +15,7 @@ one measurement. Nothing here needs you to guess.
 | Step | What happens | File · function |
 |---|---|---|
 | 1 Load | Word paragraphs and tables in order; struck-out and deleted text dropped; tabs kept | `src/intake/questionnaire_loader.py` · `load_docx`; `src/intake/revisions.py` · `live_text` |
+| 0 Profile | Learns the document's habits before reading: layout, note markers, routing above or below the question. Rewrites its own forms (`<...>` notes, `→ Asked if`, `Male (1), Female (2)`) to the standard ones | `src/intake/document_profile.py` · `normalise`, `space_labels`, `build_profile` |
 | 1 Load — question cards | A document that puts each question in its own table (name / label / wording, codes \| answers, notes) is rewritten into plain lines | `src/intake/card_tables.py` · `card_lines`, `label_of` |
 | 2 Labels | "Q1." alone on a line joined to its wording; a translated second question line kept as a note; "1." number labels accepted when they run in sequence | `questionnaire_loader.py` · `_normalise_labels` |
 | 2 Labels — taught | Labels an owner taught by example ("QGENDER.", "Question 5:") | `src/intake/taught_labels.py` |
@@ -24,6 +25,7 @@ one measurement. Nothing here needs you to guess.
 | 4 Read — grids | Statements × scale tables, including punch-code grids | `src/engines/questionnaire/table_questions.py` · `grid`, `_punch_codes` |
 | 4 Read — model | ONLY what the text did not state goes to a model; if none is reachable the question is flagged, never guessed | `src/engines/questionnaire/extractor.py` · `extract_question` |
 | 5 Passes | Section bases, loops, list sources, hidden variables, the study brief and its checklist, the "How this questionnaire was read" report | `extractor.py` · `extract_survey_definition`; `section_paths.py`, `study_overview.py`, `brief_checklist.py`, `decoding_report.py` |
+| Notes, one reader | Every note format (`[PN: ]`, `[...]`, `PROGRAMMER NOTE:`, `Filter:`, plain `Ask if`) reaches the rules the same way | `src/engines/questionnaire/note_lines.py`; rules in `note_rules.py` |
 | Conditions people write | "QAGE < 18", "S2 = 1, 2" → a rule the link runs | `src/engines/questionnaire/conditions.py` |
 | Notes read like an analyst | variables the notes say to create (rules compiled where exact), questions only a person can settle, quality checks — "What a reader would ask" on the review page | `src/engines/questionnaire/reading_questions.py` · `analyst_reading` |
 
@@ -55,6 +57,8 @@ If the pieces are right but a question has the wrong type/answers → step 4.
 | Questions not detected, or many glued into one | Copilot: give one label as written → **Teach** (kind `question_label`) | `_QID_RE` or `_normalise_labels` in `questionnaire_loader.py` | `scripts/reader_whatif.py` + eval |
 | One table per question, read as nothing | — | `card_tables.py` (`label_of` decides what is a card) | `tests/unit/test_card_tables.py` |
 | A line that is not an answer shows as one (translation, note, heading) | Edit the question (Copilot or editor) | `_normalise_labels`; card heads in `card_lines` | eval: no newly wrong |
+| A new way of writing notes or routing is ignored | — | add the form to `document_profile.normalise` or the markers in `note_lines.py` | `tests/unit/test_reader_shapes.py` + eval |
+| A base points at the wrong question | — | position handling in `note_rules.py`; a base may only name earlier questions | same |
 | Wrong type (single vs multi, grid…) | Correction box → "Teach the reader" (`type_signal`) | `_TYPE_PATTERNS` in `prose_directives.py` | add a case to `tests/unit/test_prose_directives.py` |
 | A tag on an answer not understood ("[KILL]") | Teach `option_tag` | option tags in `prose_directives.py` | same |
 | Grid with no rows/columns, or wrong codes | Edit the question | `table_questions.py` · `grid`, `_punch_codes`, `_interior_is_empty` | `tests/unit/test_table_questions.py` |

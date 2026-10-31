@@ -39,7 +39,7 @@ the brief requires an answer to every question. Adopted only when used repeatedl
 
 Measured, AI off, 24 documents: 496 → 511 of 995, newly wrong none (`s-claude3` vs
 `p-3`). h04 10% → 34%, d11 6% → 16%, h01 11% → 18%, h03 36% → 43%, d09 38% → 41%.
-Charter unchanged. Vivo's silent share rose 26.8% → 28.0%, not yet explained.
+Charter unchanged. Vivo's silent share rose 26.8% → 28.0%: one question, Q25, whose answers are shuffled when the document did not ask. That error is not new. `1 = Yes` parsing cleaned its wording, which removed the unrelated flag that had been covering it.
 
 ---
 
