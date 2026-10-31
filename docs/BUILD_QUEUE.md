@@ -414,10 +414,10 @@ note → clauses → kind → outcome
 - Never copy client wording into code or tests: use made-up lines of the same shape.
 - A new form goes in the module named on the card, with a test, not in `extractor.py`.
 - Never guess. If the words do not settle it, the outcome is `asked` or `unread`.
-- Tests: `BEDROCK_API_KEY= GROQ_API_KEY= CEREBRAS_API_KEY= HF_TOKEN= OLLAMA_HOST=http://127.0.0.1:1 .venv/bin/python -m pytest tests/unit tests/integration -q`, and `ruff check src api tests scripts`. Use `~/dev/dvv-research-cloud/.venv/bin/python` if the worktree has no venv.
+- Tests: `BEDROCK_API_KEY= GROQ_API_KEY= CEREBRAS_API_KEY= HF_TOKEN= .venv/bin/python -m pytest tests/unit tests/integration -q` (without `OLLAMA_HOST`: the router tests need it unset; the census sets it itself), and `ruff check src api tests scripts`. Use `~/dev/dvv-research-cloud/.venv/bin/python` if the worktree has no venv.
 - Orchestrator gate before merging: `eval_compare` + `eval_diff` against the last round say no newly wrong, and `scripts/note_census.py` shows `unread` not rising.
 
-### N1: The note ledger and census · sonnet · foundation
+### N1: The note ledger and census · sonnet · done
 **Files:** new `src/engines/questionnaire/note_ledger.py`, new `scripts/note_census.py`, `src/engines/questionnaire/extractor.py` (one call), new `tests/unit/test_note_ledger.py`.
 - `KINDS`: an ordered tuple of `(kind, compiled regex)` covering number_entry, range, terminate, exclusive, reask, hidden_var, base, mask, randomize, anchor, pipe, limit_select, one_or_many, open_end_limit, sum, quota, layout, stimulus, loop, quality, ask_all.
 - `read_notes(survey) -> list[dict]`: for each question, each sentence from `note_lines.sentences(note_lines(q))`: `{"qid", "said", "kind", "outcome", "detail"}`. Skip blank sentences. A clause matching several kinds gets one record per kind.

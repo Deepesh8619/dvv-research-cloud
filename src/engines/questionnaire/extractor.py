@@ -76,6 +76,7 @@ from src.engines.questionnaire.loop_bases import (
 )
 from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import Mask, detect_techniques
+from src.engines.questionnaire.note_ledger import ledger as note_ledger
 from src.engines.questionnaire.note_rules import apply as apply_note_rules
 from src.engines.questionnaire.per_item import apply as apply_per_item_grids
 from src.engines.questionnaire.profiles import detect_profile
@@ -1899,6 +1900,7 @@ def extract_survey_definition(
         survey.metadata["document_profile"] = build_profile(
             blocks, cards=sum(1 for b in blocks if b.label))
     survey.metadata["note_rules"] = apply_note_rules(survey)
+    survey.metadata["note_ledger"] = note_ledger(survey)
     if (survey.metadata.get("document_profile") or {}).get("answer_required_by_brief"):
         # "PLEASE ENFORCE A RESPONSE TO EACH QUESTION UNLESS OTHERWISE STATED":
         # the brief settles the open-end default the reader otherwise assumes.
