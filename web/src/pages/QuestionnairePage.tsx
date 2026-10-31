@@ -1089,6 +1089,22 @@ export function QuestionDetail({
                   </button>
                 )}
               </div>
+              <div className="mt-1 ml-[5.5rem] flex flex-wrap gap-3 text-xs text-slate-600">
+                {state.type === 'multi' && (
+                  <label className="inline-flex items-center gap-1"
+                    title="Picking this answer clears every other answer, and the reverse (e.g. None of these)">
+                    <input type="checkbox" checked={!!o.exclusive} disabled={!canWrite}
+                      onChange={(e) => setOption(i, { exclusive: e.target.checked })} />
+                    Exclusive
+                  </label>
+                )}
+                <label className="inline-flex items-center gap-1"
+                  title="Stays in place when the answers are shuffled">
+                  <input type="checkbox" checked={!!o.anchored} disabled={!canWrite}
+                    onChange={(e) => setOption(i, { anchored: e.target.checked })} />
+                  Keep in place
+                </label>
+              </div>
               <OptionCondition
                 condition={o.show_if}
                 onChange={(next) => setOption(i, { show_if: next })}

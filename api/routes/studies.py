@@ -1559,10 +1559,47 @@ def delete_study(
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    update_study_status(db, study_id, "archived")
+    if study.status == "archived":
+        return {"status": "archived", "study_id": study_id}
+    from api.db import list_fielding_links_for_study, record_audit
+
+    live = [ln.id for ln in list_fielding_links_for_study(db, study_id) if ln.status == "open"]
+    if live:
+        # Respondents are answering right now; hiding the project would leave a
+        # survey collecting data nobody is watching.
+        raise HTTPException(
+            status_code=409,
+            detail=f"This project has a live survey link ({', '.join(live)}). Close it first.",
+        )
+    update_study_status(db, study_id, "archived", {"status_before_delete": study.status})
+    record_audit(db, entity="study", entity_id=study_id, action="deleted", actor_id=user.id,
+                 study_id=study_id, summary="Moved to Deleted (can be restored)")
+    db.commit()
     logger.info(f"[{study_id}] Archived by {user.name}")
 
     return {"status": "archived", "study_id": study_id}
+
+
+@router.post("/studies/{study_id}/restore")
+def restore_study(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER)),
+):
+    """Bring a deleted project back in the state it was in. (Owner-only)"""
+    from api.db import record_audit
+
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    if study.status != "archived":
+        raise HTTPException(status_code=409, detail="This project is not deleted.")
+    before = (study.study_metadata or {}).get("status_before_delete") or "draft"
+    update_study_status(db, study_id, before)
+    record_audit(db, entity="study", entity_id=study_id, action="restored", actor_id=user.id,
+                 study_id=study_id, summary=f"Restored as {before}")
+    db.commit()
+    return {"status": before, "study_id": study_id}
 
 
 @router.post("/studies/{study_id}/share", response_model=ShareLinkResponse)
