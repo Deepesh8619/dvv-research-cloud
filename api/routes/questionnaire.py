@@ -314,6 +314,7 @@ def _status_response(
         qa=metadata.get("qa"),
         logic_review=metadata.get("logic_review"),
         decoding=metadata.get("decoding"),
+        note_ledger=metadata.get("note_ledger"),
         second_look=metadata.get("second_look"),
     )
 

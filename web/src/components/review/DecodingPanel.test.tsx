@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import DecodingPanel from './DecodingPanel'
+import type { NoteRecord } from '../../api/client'
 
 vi.mock('../../api/client', () => ({
   questionnaireApi: {
@@ -80,6 +81,30 @@ describe('DecodingPanel', () => {
       qid: 'HID_TENURE', hidden: true, type: 'info',
       options: [{ code: 1, label: '<6M', derive_if: { op: 'in', qid: 'S5d', values: [1] } }],
     }))
+  })
+
+  it('counts distinct notes by best outcome, filters, and explains an unread one', async () => {
+    const { askCopilot } = await import('../CopilotDrawer')
+    const rec = (qid: string, said: string, kind: string, outcome: NoteRecord['outcome']) => ({ qid, said, kind, outcome, detail: '' })
+    const noteLedger = { records: [
+      rec('Q1', 'Ask all', 'ask_all', 'by_design'),
+      rec('Q2', 'Show the first card', 'layout', 'scripter'),
+      rec('Q2', 'Show the first card', 'stimulus', 'unread'), // same note, two kinds: counts once
+      rec('Q3', 'Wibble the answers', 'none', 'unread'),
+      rec('Q4', 'Keep last', 'anchor', 'applied'),
+    ] }
+    render(<DecodingPanel decoding={{ ...report, verdict: 'familiar' }} noteLedger={noteLedger} onGoTo={() => {}} />)
+    expect(screen.getByText('4 notes: 1 applied, 1 for the scripter, 1 need nothing, 1 not understood')).toBeTruthy()
+    expect(screen.getByTestId('note-rows').textContent).not.toMatch(/layout|stimulus|ask_all|anchor/)
+    fireEvent.click(screen.getByText('Not understood (1)'))
+    expect(screen.getByTestId('note-rows').querySelectorAll('li').length).toBe(1)
+    fireEvent.click(screen.getByText('Explain this to the Copilot'))
+    expect(askCopilot).toHaveBeenCalledWith(expect.stringContaining('Wibble the answers'))
+  })
+
+  it('shows no notes section for a project without a ledger', () => {
+    render(<DecodingPanel decoding={{ ...report, verdict: 'familiar' }} noteLedger={null} onGoTo={() => {}} />)
+    expect(screen.queryByText('Notes')).toBeNull()
   })
 
   it('renders nothing before a report exists', () => {

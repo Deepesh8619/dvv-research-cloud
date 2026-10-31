@@ -563,6 +563,8 @@ export interface QuestionnaireStatus {
   qa?: QARecord | null
   logic_review?: LogicReview | null
   decoding?: Decoding | null
+  /** Every programmer-note sentence and what became of it; absent on older projects. */
+  note_ledger?: NoteLedger | null
   second_look?: SecondLookRecord | null
 }
 
@@ -615,6 +617,16 @@ export interface SecondLookRecord {
   needs_you: number
   entries: { qid: string; status: Resolution['status']; summary: string; source: string }[]
 }
+
+/** One sentence of a programmer note and what became of it. A sentence matching two kinds appears twice. */
+export interface NoteRecord {
+  qid: string
+  said: string
+  kind: string
+  outcome: 'applied' | 'asked' | 'scripter' | 'by_design' | 'unread'
+  detail: string
+}
+export interface NoteLedger { summary?: Record<string, unknown>; records: NoteRecord[] }
 
 /** How the document was read: skills used, what none could read, what to teach. */
 export interface Decoding {
