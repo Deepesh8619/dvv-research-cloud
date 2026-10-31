@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Study, studiesApi } from '../api/client'
+import { errorMessage, Study, studiesApi } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { FolderIcon, PlusIcon, SearchIcon } from '../components/Icons'
 import { TableSkeleton } from '../components/Skeleton'
 import StatusPill from '../components/StatusPill'
@@ -15,6 +16,7 @@ const FILTERS = [
   { key: 'approved_for_delivery', label: 'Awaiting sign-off' },
   { key: 'delivered', label: 'Delivered' },
   { key: 'error', label: 'Failed' },
+  { key: 'archived', label: 'Deleted' },
 ]
 
 export default function ProjectsPage() {
@@ -36,8 +38,34 @@ export default function ProjectsPage() {
       .finally(() => setLoading(false))
   }, [])
 
+  const { user } = useAuth()
+  const isOwner = user?.role === 'owner'
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const setStatus = (id: string, status: string) =>
+    setStudies((all) => all.map((s) => (s.id === id ? { ...s, status } as Study : s)))
+  const deleteProject = async (id: string) => {
+    setActionError(null)
+    try {
+      await studiesApi.archive(id)
+      setStatus(id, 'archived')
+    } catch (err) {
+      setActionError(errorMessage(err) || 'Could not delete this project.')
+    } finally {
+      setConfirming(null)
+    }
+  }
+  const restoreProject = async (id: string) => {
+    setActionError(null)
+    try {
+      setStatus(id, (await studiesApi.restore(id)).data.status)
+    } catch (err) {
+      setActionError(errorMessage(err) || 'Could not restore this project.')
+    }
+  }
+
   const visible = useMemo(() => {
-    let out = studies.filter((s) => s.status !== 'archived')
+    let out = studies.filter((s) => (filter === 'archived') === (s.status === 'archived'))
     if (filter === 'active') {
       out = out.filter((s) => !['delivered', 'error', 'archived'].includes(s.status))
     } else if (filter !== 'all') {
@@ -105,6 +133,7 @@ export default function ProjectsPage() {
       </div>
 
       {/* Table */}
+      {actionError && <p role="alert" className="mb-3 text-sm text-red-700">{actionError}</p>}
       <Card padded={false} className="overflow-hidden dvv-rise">
         {visible.length === 0 ? (
           <EmptyState
@@ -130,6 +159,7 @@ export default function ProjectsPage() {
                 <th className="px-5 py-3 font-medium">Deliverables</th>
                 <th className="px-5 py-3 font-medium">Created</th>
                 <th className="px-5 py-3 font-medium">Updated</th>
+                {isOwner && <th className="px-5 py-3"><span className="sr-only">Actions</span></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -157,6 +187,24 @@ export default function ProjectsPage() {
                   <td className="px-5 py-3.5 text-slate-500">
                     {new Date(s.updated_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
                   </td>
+                  {isOwner && (
+                    <td className="px-5 py-3.5 text-right text-xs whitespace-nowrap">
+                      {s.status === 'archived' ? (
+                        <button type="button" className="font-medium text-sky-700 hover:underline"
+                          onClick={() => void restoreProject(s.id)}>Restore</button>
+                      ) : confirming === s.id ? (
+                        <span className="inline-flex items-center gap-2">
+                          <button type="button" className="font-medium text-red-700 hover:underline"
+                            onClick={() => void deleteProject(s.id)}>Delete project</button>
+                          <button type="button" className="text-slate-500 hover:underline"
+                            onClick={() => setConfirming(null)}>Cancel</button>
+                        </span>
+                      ) : (
+                        <button type="button" className="text-slate-500 hover:text-red-700 hover:underline"
+                          onClick={() => setConfirming(s.id)}>Delete</button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

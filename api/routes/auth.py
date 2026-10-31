@@ -24,6 +24,7 @@ from api.db import (
     get_db,
     get_user_by_email,
     list_users,
+    record_audit,
 )
 from api.models import (
     CreateUserRequest,
@@ -223,6 +224,22 @@ def create_new_user(
     """Create a new user (Owner-only)."""
     # Check if user already exists
     existing = get_user_by_email(db, request.email)
+    if existing and not existing.is_active:
+        # Someone removed earlier and added back: the same account, so their
+        # name on past work stays theirs. The new password and role apply.
+        try:
+            UserRole(request.role)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid role") from exc
+        existing.name, existing.role = request.name, request.role
+        existing.password_hash = hash_password(request.password)
+        existing.is_active = True
+        record_audit(db, entity="user", entity_id=existing.id, action="restored",
+                     actor_id=user.id, summary=f"Added back {existing.email}")
+        db.commit()
+        return UserResponse(id=existing.id, email=existing.email, name=existing.name,
+                            role=existing.role, created_at=existing.created_at,
+                            is_active=True)
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -257,3 +274,27 @@ def create_new_user(
         created_at=new_user.created_at,
         is_active=new_user.is_active,
     )
+
+
+@router.delete("/auth/users/{user_id}", status_code=204)
+def remove_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER)),
+):
+    """Remove a user's access (Owner-only). The account is deactivated, not erased:
+    their name stays on what they approved and changed, and every token they hold
+    stops working at once. Adding the same email again restores it."""
+    target = db.get(UserDB, user_id)
+    if target is None or not target.is_active:
+        raise HTTPException(status_code=404, detail="No such user")
+    if target.id == user.id:
+        raise HTTPException(status_code=409, detail="You cannot remove yourself.")
+    if target.role == UserRole.OWNER.value and sum(
+            1 for u in list_users(db) if u.role == UserRole.OWNER.value) <= 1:
+        raise HTTPException(status_code=409, detail="This is the last owner.")
+    target.is_active = False
+    record_audit(db, entity="user", entity_id=target.id, action="removed",
+                 actor_id=user.id, summary=f"Removed {target.email}")
+    db.commit()
+    logger.info(f"User {target.email} removed by {user.email}")

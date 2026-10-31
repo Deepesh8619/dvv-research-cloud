@@ -4,7 +4,7 @@ import WordingPage from './WordingPage'
 import AiUsagePanel from '../components/AiUsagePanel'
 import CopilotAnswersPanel from '../components/CopilotAnswersPanel'
 import { useEffect, useState } from 'react'
-import { authApi, User } from '../api/client'
+import { authApi, errorMessage, User } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { ShieldIcon } from '../components/Icons'
 import PageHeader from '../components/ui/PageHeader'
@@ -43,6 +43,20 @@ function TeamAdmin() {
 
     loadUsers()
   }, [currentUser])
+
+  const [removing, setRemoving] = useState<string | null>(null)
+  const handleRemoveUser = async (id: string) => {
+    setInviteError('')
+    try {
+      await authApi.removeUser(id)
+      setUsers((all) => all.filter((u) => u.id !== id))
+      setInviteSuccess('Access removed. Add the same email again to restore it.')
+    } catch (err) {
+      setInviteError(errorMessage(err) || 'Could not remove this user.')
+    } finally {
+      setRemoving(null)
+    }
+  }
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -147,6 +161,7 @@ function TeamAdmin() {
               <th className="px-5 py-2.5 font-medium">Email</th>
               <th className="px-5 py-2.5 font-medium">Role</th>
               <th className="px-5 py-2.5 font-medium">Status</th>
+              <th className="px-5 py-2.5 font-medium"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -161,7 +176,7 @@ function TeamAdmin() {
               ))
             ) : users.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-5 py-8 text-center text-sm text-slate-500">
+                <td colSpan={5} className="px-5 py-8 text-center text-sm text-slate-500">
                   No users yet
                 </td>
               </tr>
@@ -180,6 +195,20 @@ function TeamAdmin() {
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />{' '}
                       {u.is_active ? 'Active' : 'Inactive'}
                     </span>
+                  </td>
+                  <td className="px-5 py-3 text-right text-xs">
+                    {u.id === currentUser?.id ? null : removing === u.id ? (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="text-slate-600">Remove {u.name}&apos;s access?</span>
+                        <button type="button" className="font-medium text-red-700 hover:underline"
+                          onClick={() => void handleRemoveUser(u.id)}>Remove</button>
+                        <button type="button" className="text-slate-500 hover:underline"
+                          onClick={() => setRemoving(null)}>Cancel</button>
+                      </span>
+                    ) : (
+                      <button type="button" className="text-slate-500 hover:text-red-700 hover:underline"
+                        onClick={() => setRemoving(u.id)}>Remove</button>
+                    )}
                   </td>
                 </tr>
               ))

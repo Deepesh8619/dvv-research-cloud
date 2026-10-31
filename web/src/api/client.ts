@@ -244,6 +244,8 @@ export const authApi = {
   createUser: async (email: string, name: string, role: string, password: string) => {
     return api.post<User>('/auth/users', { email, name, role, password })
   },
+
+  removeUser: async (id: string) => api.delete(`/auth/users/${id}`),
 }
 
 export const shareApi = {
@@ -422,6 +424,8 @@ export const studiesApi = {
   archive: async (id: string) => {
     return api.delete(`/studies/${id}`)
   },
+
+  restore: async (id: string) => api.post<{ status: string }>(`/studies/${id}/restore`),
 
   /** A rendered deck, the data file exactly as it was uploaded, or the
       respondent-level delivery files from a fielded link. */
