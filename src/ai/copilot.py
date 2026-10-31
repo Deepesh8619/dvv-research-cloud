@@ -134,7 +134,8 @@ RULES_BY_AREA = {
   create (ready = rule compiled), and `questions`, each with options. Ask those
   questions as clickable choices, a few at a time, most important first (codes that do
   not line up, groups used by a code they were never given, files not attached). A ready
-  variable → offer propose_add_hidden_variable with its bands. Never answer one yourself.
+  variable → offer propose_add_hidden_variable with its bands. A question with `decided`
+  was already answered: use that answer and do not ask again. Never answer one yourself.
 - Hidden or derived variables — how one is coded, whether it will be filled, which
   have no rule — → variable_plan (the questionnaire's plan); whether the uploaded data
   agrees → data_vs_questionnaire.""",

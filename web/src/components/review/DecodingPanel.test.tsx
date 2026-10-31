@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import DecodingPanel from './DecodingPanel'
 
 vi.mock('../../api/client', () => ({
-  questionnaireApi: { addQuestion: vi.fn().mockResolvedValue({ data: {} }) },
+  questionnaireApi: {
+    addQuestion: vi.fn().mockResolvedValue({ data: {} }),
+    decideReading: vi.fn().mockResolvedValue({ data: {} }),
+  },
 }))
 vi.mock('../CopilotDrawer', () => ({ askCopilot: vi.fn() }))
 
@@ -61,13 +64,16 @@ describe('DecodingPanel', () => {
           why: 'built from a file that is not attached', bands: [] },
       ],
       ready: 1,
-      questions: [{ qid: 'S6', kind: 'codes', ask: "S6's code box does not match its answers.",
+      questions: [{ qid: 'S6', kind: 'codes', key: 'k1', ask: "S6's code box does not match its answers.",
                     options: ['Number the answers in order', 'I will set the codes'] }],
       checks: [{ qid: 'S5', kind: 'quality' as const, said: 'flag if more than 3 responses' }],
     }
     render(<DecodingPanel decoding={{ ...report, verdict: 'familiar', analyst }} onGoTo={() => {}} studyId="s1" />)
     fireEvent.click(screen.getByText('Number the answers in order'))
     expect(askCopilot).toHaveBeenCalledWith("S6's code box does not match its answers.\nMy answer: Number the answers in order")
+    expect(questionnaireApi.decideReading).toHaveBeenCalledWith(
+      's1', 'k1', "S6's code box does not match its answers.", 'Number the answers in order')
+    expect(screen.getByText('Number the answers in order').getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(screen.getByText('Create the 1 ready variables'))
     expect(await screen.findByText(/Created 1/)).toBeTruthy()
     expect(questionnaireApi.addQuestion).toHaveBeenCalledWith('s1', expect.objectContaining({

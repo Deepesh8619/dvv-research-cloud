@@ -126,6 +126,7 @@ from src.engines.questionnaire.verification import (
     verify_against_source,
 )
 from src.engines.questionnaire.write_ins import mark_write_ins
+from src.intake.document_profile import build_profile
 from src.intake.questionnaire_loader import DocumentBlock, QuestionChunk
 
 # Question types whose whole point is a fixed answer list; an empty option list
@@ -1894,7 +1895,17 @@ def extract_survey_definition(
     # SERVICETYPE = 1", "Show module if …", exclusive/anchored answers, ranges,
     # screen-outs. After every question exists, so each rule is checked against
     # the questions and codes it names; nothing already set is overwritten.
+    if blocks is not None:
+        survey.metadata["document_profile"] = build_profile(
+            blocks, cards=sum(1 for b in blocks if b.label))
     survey.metadata["note_rules"] = apply_note_rules(survey)
+    if (survey.metadata.get("document_profile") or {}).get("answer_required_by_brief"):
+        # "PLEASE ENFORCE A RESPONSE TO EACH QUESTION UNLESS OTHERWISE STATED":
+        # the brief settles the open-end default the reader otherwise assumes.
+        for q in survey.questions:
+            if (q.type is QuestionType.OPEN_TEXT
+                    and not _OPTIONAL_WORDING.search(f"{q.text or ''} {q.source_text or ''}")):
+                q.required = True
     # A second opinion over the whole survey, for problems between questions no
     # rule covers. Real documents only (one model call); never blocks anything.
     if blocks is not None:
@@ -1914,6 +1925,7 @@ def extract_survey_definition(
     # rules where the words are exact), questions only a person can settle,
     # quality checks to add.
     survey.metadata["decoding"]["analyst"] = analyst_reading(survey)
+    survey.metadata["decoding"]["profile"] = survey.metadata.get("document_profile")
     return survey
 
 

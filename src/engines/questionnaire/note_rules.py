@@ -22,11 +22,13 @@ import re
 
 from src.core.survey_definition import Expression, QuestionType, SurveyDefinition
 from src.engines.questionnaire.conditions import compile_condition
+from src.engines.questionnaire.note_lines import note_lines, sentences
 
 _PN = re.compile(r"^\s*\[(?:PN|PROG(?:RAMMER)? NOTE|SCRIPTER NOTE)\s*:\s*(.*?)\]?\s*$", re.I)
 _CODES = r"(\d{1,3}(?:\s*(?:-|–|,|&|\band\b|\bor\b)\s*\d{1,3})*)"
-_ASK_IF = re.compile(r"^\s*(?:ask|show)\s+(?:only\s+)?(?:if|is)\s*:?\s*(?P<rule>.+)$",
-                     re.I)
+_ASK_IF = re.compile(
+    r"^\s*(?:(?:route|pn)\s*:\s*)?(?:(?:ask(?:ed)?|show)\s+(?:only\s+)?(?:if|is)\s*:?|"
+    r"base\s*:|filter\s*[:–—-]?|if\b)\s*(?P<rule>.+)$", re.I)
 _BLOCK_ASK = re.compile(
     r"^\s*ask\s+(?P<qids>(?:Q?[A-Z]{1,4}\d+[a-z]?(?:\s*(?:,|\band\b))*\s*)+)(?:in\s+sequence\s+)?"
     r"if\s+(?P<rule>.+?)(?:\.\s*if not, skip\.?)?\s*$", re.I)
@@ -64,12 +66,43 @@ def _codes(text: str) -> list[int]:
 
 
 def _notes(question) -> list[str]:
-    """Every note sentence on a question."""
-    out = []
+    """Every note sentence on a question, however the document marks notes."""
+    return sentences(note_lines(question))
+
+
+def _tail_notes(question) -> list[str]:
+    """The note lines that END a question's text (they sit above the next one)."""
+    if question is None:
+        return []
+    lines = [ln for ln in (question.source_text or "").splitlines() if ln.strip()]
+    tail: list[str] = []
+    for line in reversed(lines):
+        found = _line_note(line)
+        if not found:
+            break
+        tail.insert(0, found)
+    return sentences(tail)
+
+
+def _lead_notes(question) -> list[str]:
+    """The note lines before a question's wording (carried down by the splitter)."""
+    lead: list[str] = []
     for line in (question.source_text or "").splitlines():
-        if m := _PN.match(line):
-            out += [s.strip() for s in re.split(r"(?<=[.!])\s+(?=[A-Z])", m.group(1)) if s.strip()]
-    return out
+        if not line.strip():
+            continue
+        found = _line_note(line)
+        if not found:
+            break
+        lead.append(found)
+    return sentences(lead)
+
+
+def _line_note(line: str) -> str | None:
+    """A source line's note, or None if the line is wording or an answer."""
+    from types import SimpleNamespace
+
+    found = note_lines(SimpleNamespace(source_text=line))
+    return found[0] if found else None
 
 
 def rule_words(rule: str, host: str) -> str:
@@ -80,7 +113,13 @@ def rule_words(rule: str, host: str) -> str:
     "S5a = 9 and S5d != 1, 2"; "C1=1-9 or 98" -> "C1 = 1, …, 9, 98"; "punch 1 is
     not selected at C7" -> "C7 != 1"; "punch 3 … selected at QETHNICITY".
     """
-    text = re.sub(r"\([^)]*\)", "", rule).strip().rstrip(".").replace("≠", "!=")
+    text = re.sub(r"\b(\w+)\s+(?:not\s+in)\s*\(([^)]*)\)", r"\1 != \2", rule)
+    text = re.sub(r"\b(\w+)\s+in\s*\(([^)]*)\)", r"\1 = \2", text)
+    text = re.sub(r"\b(\w+)\s+includes\s+", r"\1 = ", text, flags=re.I)
+    text = re.sub(r"\bselected\s+(\d[\d\s,-]*)\s+at\s+(\w+)", r"\2 = \1", text, flags=re.I)
+    text = re.sub(r"\b([A-Za-z]{1,3})\.(?=\d)", r"\1", text)  # "Q.4" is Q4
+    text = re.sub(r"(\d)\s*/\s*(?=\d)", r"\1, ", text)        # "=1/2"
+    text = re.sub(r"\([^)]*\)", "", text).strip().rstrip(".").replace("≠", "!=")
     text = re.sub(r"[“”\"][^“”\"]*[“”\"]", "", text)
 
     def punch(m: re.Match) -> str:
@@ -200,16 +239,28 @@ def apply(survey: SurveyDefinition) -> list[dict]:
     # A question's OWN "Ask if …" wins over a block or module rule that covers
     # it: S6a's "Ask if punch 1…11 at S6" is narrower than "ASK QS6… if
     # SERVICETYPE = 2", and the block note is written first in the document.
-    for q in survey.questions:
-        for note in _notes(q):
+    above = ((survey.metadata or {}).get("document_profile") or {}).get(
+        "routing_position") == "above"
+    ordered = list(survey.questions)
+    earlier: set[str] = set()
+    for index, q in enumerate(ordered):
+        # Where routing is written ABOVE each question, what ends the previous
+        # question and what opens this one govern this one; below, its own notes.
+        own = ([*_tail_notes(ordered[index - 1] if index else None), *_lead_notes(q)]
+               if above else _notes(q))
+        for note in own:
             m = _ASK_IF.match(note) or _ASK_FOR.match(note)
             if m and not _BLOCK_ASK.match(note) and q.show_if is None \
                     and not q.qid.startswith(("INFO", "INTRO", "END")):
-                if expr := (_compile(m.group("rule"), q.qid, survey)
-                            or _resolve_groups(m.group("rule"), groups)):
+                expr = (_compile(m.group("rule"), q.qid, survey)
+                        or _resolve_groups(m.group("rule"), groups))
+                # Who is asked depends only on what was already answered: a base
+                # naming this question or a later one belongs to another question.
+                if expr and {x.upper() for x in expr.referenced_qids()} <= earlier:
                     expr.verbatim_text = expr.verbatim_text or note
                     q.show_if = expr
                     made.append({"qid": q.qid, "set": "show_if", "said": note, "how": "note"})
+        earlier.add(q.qid.upper())
 
     def set_base(q, expr, said, how):
         if (expr is not None and q.show_if is None
@@ -243,9 +294,6 @@ def apply(survey: SurveyDefinition) -> list[dict]:
                               or by_upper.get(re.sub(r"^Q", "", name.upper())))
                     if target is not None and expr is not None:
                         set_base(target, Expression.from_dict(expr.to_dict()), note, "block")
-            elif m := (_ASK_IF.match(note) or _ASK_FOR.match(note)):
-                set_base(q, _compile(m.group("rule"), q.qid, survey)
-                         or _resolve_groups(m.group("rule"), groups), note, "note")
         if module_base is not None:
             set_base(q, Expression.from_dict(module_base.to_dict()), "module screen", "module")
         _answers(q, notes, made)

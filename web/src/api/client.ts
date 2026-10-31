@@ -630,6 +630,13 @@ export interface Decoding {
   brief?: BriefChecklist
   /** The scripter's notes read like an analyst: variables to build, questions to ask. */
   analyst?: AnalystReading
+  /** How this document writes things, learned before any question was read. */
+  profile?: {
+    layout: string
+    note_markers: Record<string, number>
+    routing_position: 'above' | 'below'
+    answer_required_by_brief: boolean
+  } | null
 }
 
 export interface AnalystReading {
@@ -642,7 +649,15 @@ export interface AnalystReading {
     bands: { label: string; code?: number; condition: Record<string, unknown> | null; line: string }[]
   }[]
   ready: number
-  questions: { qid: string; kind: string; ask: string; options: string[]; variables?: string[] }[]
+  questions: {
+    qid: string
+    kind: string
+    ask: string
+    options: string[]
+    variables?: string[]
+    key?: string
+    decided?: { answer: string; by: string; at: string }
+  }[]
   checks: { qid: string; kind: 'quality' | 'auto_answer'; said: string }[]
 }
 
@@ -1085,6 +1100,9 @@ export const questionnaireApi = {
   // --- Authoring builder (T12) ---
   createAuthored: async (studyId: string, title: string) =>
     api.post<QuestionnaireStatus>(`/studies/${studyId}/questionnaire/authored`, { title }),
+
+  decideReading: async (studyId: string, key: string, ask: string, answer: string) =>
+    api.post(`/studies/${studyId}/questionnaire/decisions`, { key, ask, answer }),
 
   addQuestion: async (studyId: string, question: QuestionCreate) =>
     api.post<Question>(`/studies/${studyId}/questionnaire/questions`, question),

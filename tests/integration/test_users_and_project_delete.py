@@ -69,3 +69,22 @@ def test_only_an_owner_can_remove_or_delete(client):  # noqa: F811
     state["role"] = "analyst"
     assert c.delete("/api/auth/users/u_a").status_code == 403
     assert c.delete("/api/studies/study_f1").status_code == 403
+
+
+def test_a_reading_decision_survives_reading_the_document_again(client):  # noqa: F811
+    from api.routes.questionnaire import with_decisions
+
+    c, sf, _ = client
+    _make_study(sf)
+    saved = c.post("/api/studies/study_f1/questionnaire/decisions",
+                   json={"key": "k1", "ask": "Are they in order?", "answer": "Yes"})
+    assert saved.status_code == 200
+    from api.db import StudyDB
+
+    db = sf()
+    meta = db.get(StudyDB, "study_f1").study_metadata
+    db.close()
+    decoding = {"analyst": {"questions": [{"key": "k1", "ask": "?"}, {"key": "k2", "ask": "?"}]}}
+    merged = with_decisions(decoding, meta)
+    assert merged["analyst"]["questions"][0]["decided"]["answer"] == "Yes"
+    assert "decided" not in merged["analyst"]["questions"][1]
