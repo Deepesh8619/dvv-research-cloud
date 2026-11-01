@@ -554,6 +554,9 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
             element["maxLength"] = max_len
         else:
             element["type"] = "comment"
+        if (min_len := (question.validation or {}).get("min_length")) is not None:
+            element["validators"] = [{"type": "text", "minLength": min_len,
+                                      "text": f"Please write at least {min_len} characters."}]
     else:  # pragma: no cover - defensive; enum is exhaustive above
         raise ValueError(f"unsupported question type: {qtype!r}")
 
