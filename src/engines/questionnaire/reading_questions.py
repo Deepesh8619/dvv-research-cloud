@@ -26,7 +26,13 @@ from typing import Any
 
 from src.core.survey_definition import SurveyDefinition
 from src.engines.questionnaire.conditions import compile_condition
-from src.engines.questionnaire.note_groups import NESTED, band_lines, nested_variable, split_lists
+from src.engines.questionnaire.note_groups import (
+    NESTED,
+    band_lines,
+    nested_variable,
+    split_lists,
+    with_reask,
+)
 from src.engines.questionnaire.note_lines import note_lines, sentences
 
 _CREATE = re.compile(
@@ -169,7 +175,7 @@ def _variable(name, q, rest, lines, survey) -> dict[str, Any]:
             words = None
         if words:
             try:
-                band["condition"] = compile_condition(words, survey).to_dict()
+                band["condition"] = with_reask(compile_condition(words, survey), survey).to_dict()
             except ValueError as exc:
                 band["unread"] = str(exc)
         else:
