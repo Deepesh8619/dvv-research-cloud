@@ -18,7 +18,8 @@ _PREFIXED = re.compile(
 _PLAIN = re.compile(
     r"^\s*(?:→\s*)?(?:ask(?:ed)?\s+(?:only\s+)?(?:if|for|those|everyone)\b|show\s+(?:module\s+)?(?:only\s+)?if\b|"
     r"base\s*(?::|selects?\b)|filter\b|anchor\b|randomi[sz]e\b|must\s+select\b|acceptable\s+range\b|"
-    r"allow\s+|accept\s+|do\s+not\s+allow\b|cannot\s+combine\b|create\s+)", re.I)
+    r"allow\s+|accept\s+|do\s+not\s+allow\b|cannot\s+combine\b|create\s+|continue\s+if\b|"
+    r"ask\s+Q?[A-Z]{1,4}\d)", re.I)
 _NOT_A_NOTE = re.compile(r"^\s*(?:SECTION\s*:|INSERT\b|PIPE\b)", re.I)
 _PAREN = re.compile(r"^\s*\((.+)\)\s*$")
 

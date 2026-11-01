@@ -558,18 +558,30 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
         # A max-length constraint reads as a short single-line answer; otherwise
         # default to a multi-line comment box.
         max_len = (question.validation or {}).get("max_length")
-        if max_len is not None:
+        boxes = (question.validation or {}).get("max_responses")
+        if isinstance(boxes, int) and boxes > 1:
+            # "ALLOW UP TO 10 RESPONSES": that many boxes, answered as {n: text};
+            # only the first is required (the rest are "up to").
+            element["type"] = "multipletext"
+            element["items"] = [{"name": str(n), "title": f"Response {n}", "inputType": "text",
+                                 **({"maxLength": max_len} if max_len is not None else {}),
+                                 **({"isRequired": True} if n == 1 and question.required else {})}
+                                for n in range(1, boxes + 1)]
+        elif max_len is not None:
             element["type"] = "text"
             element["maxLength"] = max_len
         else:
             element["type"] = "comment"
-        if (min_len := (question.validation or {}).get("min_length")) is not None:
+        if (min_len := (question.validation or {}).get("min_length")) is not None \
+                and element["type"] != "multipletext":
             element["validators"] = [{"type": "text", "minLength": min_len,
                                       "text": f"Please write at least {min_len} characters."}]
     else:  # pragma: no cover - defensive; enum is exhaustive above
         raise ValueError(f"unsupported question type: {qtype!r}")
 
     element["isRequired"] = question.required
+    if qtype == QuestionType.OPEN_TEXT and element["type"] == "multipletext":
+        element["isRequired"] = False  # the first box carries it
 
     if question.randomize_options and "choices" in element:
         # Ordered HERE, once per respondent (the survey is compiled per entry),
