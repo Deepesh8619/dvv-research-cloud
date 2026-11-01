@@ -51,6 +51,7 @@ KINDS: tuple[tuple[str, re.Pattern], ...] = (
     _k("stimulus", r"\bstimul|\bconcept\b|\bvideo\b|\bimage\b|\blogo\b|\bmonadic\b|\bscreenshot\b"),
     _k("loop", r"\bloop\b|\bfor\s+each\s+(?:brand|item|product|selected)\b|\biterat"),
     _k("quality", r"\bquality\b|\bflag\s+(?:if|any|respondents?)\b|\bspeeder|\bstraight-?line|\battention\s+check|\bauto-?punch"),  # noqa: E501
+    _k("warning", r"\bshow\s+(?:a\s+)?warning\b"),
     _k("ask_all", r"\b(?:ask|show)\s+(?:all|everyone|everybody)\b|\bshow\s+to\s+all\b|\bto\s+all\s+respondents\b|\brespondents?\s+can\s+see\b"),  # noqa: E501
 )
 
@@ -84,7 +85,12 @@ _CHECKS = {
 }
 
 
-def _outcome(kind: str, said: str, q, variables: list[dict]) -> tuple[str, str]:
+def _outcome(kind: str, said: str, q, variables: list[dict],
+             qids: frozenset[str] = frozenset()) -> tuple[str, str]:
+    if kind == "reask":  # applied once the second ask exists; else a person decides
+        return ("applied", f"{q.qid}_REASK") if f"{q.qid}_REASK" in qids else ("asked", "")
+    if kind == "warning":  # kept as soft_message; the runtime shows no warnings yet
+        return ("scripter", "") if "soft_message" in _validation(q) else ("unread", "")
     if kind in _FIXED:
         return _FIXED[kind], ""
     if kind == "randomize":
@@ -105,13 +111,19 @@ def _outcome(kind: str, said: str, q, variables: list[dict]) -> tuple[str, str]:
 def read_notes(survey: SurveyDefinition) -> list[dict[str, Any]]:
     variables = analyst_reading(survey)["variables"]
     out: list[dict[str, Any]] = []
+    qids = frozenset(q.qid for q in survey.questions)
+    by_qid = {q.qid: q for q in survey.questions}
     for q in survey.questions:
+        # Every sentence of a note turned into a second ask belongs to that flow.
+        second = by_qid.get(q.qid + "_REASK")
+        flow = second.extraction_evidence.get("flow", "") if second else ""
         for said in sentences(note_lines(q)):
             if not re.search(r"\w", said):
                 continue
-            kinds = [k for k, rx in KINDS if rx.search(said)] or ["none"]
+            kinds = (["reask"] if said in flow
+                     else [k for k, rx in KINDS if rx.search(said)] or ["none"])
             for kind in kinds:
-                outcome, detail = ("unread", "") if kind == "none" else _outcome(kind, said, q, variables)  # noqa: E501
+                outcome, detail = ("unread", "") if kind == "none" else _outcome(kind, said, q, variables, qids)  # noqa: E501
                 out.append({"qid": q.qid, "said": said, "kind": kind,
                             "outcome": outcome, "detail": detail})
     return out
