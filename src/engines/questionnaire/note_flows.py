@@ -81,6 +81,7 @@ def _reask(survey: SurveyDefinition, q: Question, text: str, made: list[dict]) -
         extraction_evidence={"flow": m.group(0)})
     second.terminate_if.verbatim_text = m.group(0)
     survey.questions.insert(survey.questions.index(q) + 1, second)
+    survey._rebuild_index()  # the compiler looks questions up here; unindexed means not in the link
     for block in survey.blocks:
         if q.qid in block.question_ids:
             block.question_ids.insert(block.question_ids.index(q.qid) + 1, qid)

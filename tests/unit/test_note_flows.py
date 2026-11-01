@@ -5,6 +5,7 @@ from src.core.survey_definition import Expression, evaluate
 from src.engines.fielding.decisions import terminating_question
 from src.engines.questionnaire import extractor as ex
 from src.engines.questionnaire import note_ledger
+from src.engines.questionnaire.extractor import extract_survey_definition
 from src.engines.questionnaire.logic_proof import prove
 from src.engines.questionnaire.prose_directives import parse_prose_question
 from src.intake.questionnaire_loader import DocumentBlock, segment_into_questions
@@ -98,3 +99,24 @@ def test_a_soft_warning_is_kept_not_enforced(monkeypatch):
     assert survey.questions[0].validation["soft_message"] == "Please check this number"
     kinds = {r["kind"]: r["outcome"] for r in note_ledger.read_notes(survey)}
     assert kinds["warning"] == "scripter"
+
+
+def test_the_whole_note_reaches_the_link_without_ai(monkeypatch):
+    """Read from the document, compiled: the respondent gets both asks and no notes."""
+    monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:1")
+    for key in ("BEDROCK_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "HF_TOKEN"):
+        monkeypatch.setenv(key, "")
+    lines = ["S1. How old are you?",
+             "[PN: Allow a whole number or check ‘Skip’ (which cannot be combined with any "
+             "other response). Acceptable range: 1-120. If less than 18, terminate.]",
+             "[PN: If respondent selects ‘Skip,’ show refusal: Sorry! We need your age. If "
+             "respondent selects ‘Skip’ a second time, terminate.]"]
+    blocks = [DocumentBlock(block_type="paragraph", text=t, paragraph_index=i)
+              for i, t in enumerate(lines)]
+    survey = extract_survey_definition(segment_into_questions(blocks), "s", blocks=blocks)
+    compiled = compile_to_surveyjs(survey)
+    by_name = {e["name"]: e for p in compiled["pages"] for e in p["elements"]}
+    assert by_name["S1"]["title"] == "How old are you?"
+    assert by_name["S1_REASK"]["visibleIf"]
+    assert by_name["S1_REASK"]["title"].startswith("Sorry!")
+    assert "PN" not in by_name["S1_REASK"]["title"]
