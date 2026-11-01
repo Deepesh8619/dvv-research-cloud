@@ -111,6 +111,10 @@ def _outcome(kind: str, said: str, q, variables: list[dict],
         mine = [v for v in variables if v["at"] == q.qid]
         if not mine:
             return "unread", "no variable read from this note"
+        # One question can hold many variables: this clause answers for its own.
+        own = [v for v in mine if (v.get("said") and v["said"].strip() in said)
+               or any(b.get("line") == said for b in v.get("bands", []))]
+        mine = own or mine
         if all(v["status"] == "ready" for v in mine):
             return "applied", ", ".join(v["name"] for v in mine)
         return "asked", "; ".join(v["why"] for v in mine if v["status"] != "ready")
