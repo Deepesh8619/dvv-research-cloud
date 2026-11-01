@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { questionnaireApi, type AnalystReading, type BriefChecklist, type Decoding } from '../../api/client'
+import { questionnaireApi, type AnalystReading, type BriefChecklist, type Decoding, type NoteLedger, type NoteRecord } from '../../api/client'
+import InfoTip from '../ui/InfoTip'
 import { askCopilot } from '../CopilotDrawer'
 
 /**
@@ -198,12 +199,85 @@ function AnalystSection({ analyst, studyId, onGoTo }: {
   )
 }
 
+type Outcome = NoteRecord['outcome']
+// Best first: a sentence read two ways counts once, under its best outcome.
+const OUTCOMES: { key: Outcome; label: string; done: string }[] = [
+  { key: 'applied', label: 'Applied', done: 'Applied to the survey.' },
+  { key: 'asked', label: 'Needs you', done: 'Waiting for your decision.' },
+  { key: 'scripter', label: 'For the scripter', done: 'Cannot be set up here; it is on the scripter’s list.' },
+  { key: 'by_design', label: 'Nothing to do', done: 'Says nothing new; nothing to change.' },
+  { key: 'unread', label: 'Not understood', done: 'Nothing here understood this note.' },
+]
+
+/** One row per distinct (question, note), under its best outcome. */
+export function noteRows(records: NoteRecord[]): NoteRecord[] {
+  const rank = (o: Outcome) => OUTCOMES.findIndex((x) => x.key === o)
+  const best = new Map<string, NoteRecord>()
+  for (const r of records) {
+    const k = JSON.stringify([r.qid, r.said])
+    const cur = best.get(k)
+    if (!cur || rank(r.outcome) < rank(cur.outcome)) best.set(k, r)
+  }
+  return [...best.values()]
+}
+
+/** Every note sentence and what became of it. Nothing is shown for projects read before the ledger existed. */
+function NotesSection({ ledger, onGoTo }: { ledger: NoteLedger; onGoTo: (qid: string) => void }) {
+  const [filter, setFilter] = useState<Outcome | null>(null)
+  const rows = noteRows(ledger.records ?? [])
+  if (!rows.length) return null
+  const count = (o: Outcome) => rows.filter((r) => r.outcome === o).length
+  const shown = filter ? rows.filter((r) => r.outcome === filter) : rows
+  const parts = OUTCOMES.filter((o) => count(o.key) > 0)
+    .map((o) => `${count(o.key)} ${o.key === 'applied' ? 'applied' : o.key === 'asked' ? 'need you' : o.key === 'scripter' ? 'for the scripter' : o.key === 'by_design' ? 'need nothing' : 'not understood'}`)
+  return (
+    <section>
+      <h4 className="font-medium">Notes<InfoTip id="notes" /></h4>
+      <p className="text-xs text-slate-500">{rows.length} notes: {parts.join(', ')}</p>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {OUTCOMES.filter((o) => count(o.key) > 0).map((o) => (
+          <button key={o.key} type="button" aria-pressed={filter === o.key}
+            onClick={() => setFilter(filter === o.key ? null : o.key)}
+            className={`rounded border px-2 py-0.5 text-xs hover:border-sky-300 ${filter === o.key ? 'border-sky-500 bg-sky-50 font-medium' : 'border-slate-200 bg-white'}`}>
+            {o.label} ({count(o.key)})
+          </button>
+        ))}
+      </div>
+      <details className="mt-2 text-xs">
+        <summary className="cursor-pointer text-slate-600">
+          {filter ? `Show the ${shown.length} notes` : `Show all ${shown.length} notes`}
+        </summary>
+        <ul className="mt-1 space-y-1.5" data-testid="note-rows">
+          {shown.map((r, i) => (
+            <li key={i}>
+              <button className="font-mono underline mr-1 hover:text-slate-900" onClick={() => onGoTo(r.qid)}>{r.qid}</button>
+              “{r.said}”
+              <div className="text-slate-500">
+                {OUTCOMES.find((o) => o.key === r.outcome)?.label}: {OUTCOMES.find((o) => o.key === r.outcome)?.done}
+                {r.outcome === 'asked' && r.detail ? ` ${r.detail}` : ''}
+              </div>
+              {r.outcome === 'unread' && (
+                <button type="button" className="mt-0.5 rounded border border-slate-200 bg-white px-2 py-0.5 hover:border-sky-300 hover:bg-sky-50"
+                  onClick={() => askCopilot(`${r.qid} has this programming note that was not understood: “${r.said}”\nWhat does it mean, and how should it be set up?`)}>
+                  Explain this to the Copilot
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </section>
+  )
+}
+
 export default function DecodingPanel({
   decoding,
   onGoTo,
   studyId,
+  noteLedger,
 }: {
   decoding: Decoding | null | undefined
+  noteLedger?: NoteLedger | null
   onGoTo: (qid: string) => void
   studyId?: string
 }) {
@@ -231,6 +305,7 @@ export default function DecodingPanel({
         )}
         {decoding.brief && <BriefSection brief={decoding.brief} onGoTo={onGoTo} />}
         {decoding.analyst && <AnalystSection analyst={decoding.analyst} studyId={studyId} onGoTo={onGoTo} />}
+        {noteLedger && <NotesSection ledger={noteLedger} onGoTo={onGoTo} />}
         <section>
           <h4 className="font-medium">Skills used</h4>
           <ul className="mt-1 flex flex-wrap gap-2">

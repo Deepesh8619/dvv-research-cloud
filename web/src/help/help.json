@@ -322,5 +322,11 @@
     "what": "Most reading mistakes are fixed here, without code. Questions missing or glued together: ask the Copilot to check how it was read, then teach one label as the document writes it. A marker read wrong everywhere (\"[SA]\"): Correct this → Teach the reader. One question wrong: edit it, or tell the Copilot (\"terminate if QAGE < 18\").",
     "why": "A taught convention is applied to every later document written the same way, with no AI cost, so the same mistake does not come back.",
     "how": "If nothing in the app can express it, the reader needs a code change: docs/READER_FIX_GUIDE.md lists each symptom with the file and function to change and the commands that prove the fix broke nothing."
+  },
+  "notes": {
+    "title": "Programmer notes",
+    "what": "Every sentence of the scripter's notes, with what was done about it: applied to the survey, waiting for you, left for the scripter, nothing to do, or not understood.",
+    "why": "A note nothing understood would otherwise vanish without a trace. Listing them all shows what the survey is missing.",
+    "how": "Pick an outcome to filter. For a note that was not understood, press Explain this to the Copilot and say what it means."
   }
 }
