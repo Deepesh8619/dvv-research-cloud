@@ -514,10 +514,15 @@ From reading 155 sampled clauses by hand (N11). Same rules as Wave PN. None star
 - **N13 Answers that cannot go together:** "Do not allow punch 1 and 2 to be selected together" as a link validator.
 - **N14 More masks:** "Show all options EXCEPT the one selected at S6"; "Only show punches 1, 2, 3 if the matching service was selected"; "Mask: show codes 1-5".
 - **N15 Groups kept together:** "keep punch 3-5 together (random order)", "Show 1-3 together". Needs a field and SurveyJS support; until then they stay unread.
-- **N16 Which list a randomise means:** "RANDOMIZE ORDER" beside images shuffles the ads, not the answers (vivo Q25); an ordered scale should be asked about, not shuffled.
+- **N16 (done) Which list a randomise means:** "RANDOMIZE ORDER" beside images shuffles the ads, not the answers (vivo Q25); an ordered scale should be asked about, not shuffled.
 - **N17 Smaller forms:** "CONTINUE IF 13-17" as a terminate; "Allow up to 10 responses" on an open end; "Ask for all brands selected at S5a, S6, S7"; block notes such as "ASK QS5…QS5d if SERVICETYPE = 1".
 - **N18 Ledger accuracy against the sample:** `note_census.py --gold-dir` scores `~/dev/DVV/eval/notes/`. Today "applied" only tests that the field is set anywhere on the question, so a note about the next question can count.
 - **N19 The model's "Yes":** applying N8's suggestions. Later bases reading the first answer should also read a second ask.
+
+## Wave C: learning from corrections
+
+- **C1 Correction store:** every fix a team member makes on the review page is saved as one row: the source text, the reader's answer, the corrected answer, who fixed it, and whether the client allows it to be used for training. Masked on export. Never mixed with the eval set, whose readings Claude wrote.
+- **C2 Examples in the prompt:** when a note is unread, show the model 3 to 5 similar rows from C1. Needs C1.
 
 ## Wave 5b: (cards to write after 5a)
 - **P3** Replay any deliverable byte for byte from the ledger (needs P2).

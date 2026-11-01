@@ -17,6 +17,13 @@ _N = r"\d{1,3}(?:\s*(?:-|–|,|&|\band\b|\bor\b)\s*\d{1,3})*"
 _QID = r"([A-Za-z][A-Za-z0-9_]*\d[A-Za-z0-9_]*)"
 _NO_SHUFFLE = re.compile(r"\b(?:do\s+not|don.t|never)\s+(?:randomi[sz]e|rotate|shuffle)\b"
                          r"|\bnot\s+(?:to\s+)?be\s+(?:randomi[sz]ed|rotated)\b", re.I)
+_RANDOMISE = re.compile(r"\brandomi[sz]|\brotate\b|\bshuffle", re.I)
+_RANDOM_OF = re.compile(r"\bresponse\s+options?\b|\bpunch(?:es)?\b|\banswers?\b|\blist\b", re.I)
+# An ordered scale: frequency, agreement, satisfaction or likelihood words, or numbered ends.
+_SCALE_WORD = re.compile(
+    r"\b(?:always|often|sometimes|rarely|never|several\s+times|once|twice|agree|disagree|satisf\w*"
+    r"|(?:un)?likely|definitely|probably|extremely|very|somewhat)\b", re.I)
+_NUMBERED = re.compile(r"^\s*\d{1,2}\s*(?:[-–=:.)]|$)")
 _FIX = re.compile(rf"\b(?:fix(?:ed)?|lock(?:ed)?)\s+punch(?:es)?\s+({_N}(?:\s*(?:and|&)\s*(?:punch\s+)?{_N})*)", re.I)  # noqa: E501
 _KEEP = re.compile(rf"\bkeep\s+punch(?:es)?\s+({_N})[^.]*?\b(?:at\s+the\s+(?:bottom|top|end)|last|first|in\s+place)\b", re.I)  # noqa: E501
 _PUNCH_AT_END = re.compile(rf"\bpunch(?:es)?\s+({_N})[^.]*?\bat\s+the\s+(?:bottom|top)\b", re.I)
@@ -41,10 +48,29 @@ _TOGETHER = re.compile(r"\b(?:do\s+not|don.t|never)\s+allow\s+punch(?:es)?\s+(\d
 _NOT_IF = re.compile(rf"\b(?:do\s+not|don.t)\s+show\s+punch(?:es)?\s+({_N})\s+if\s+(.+)$", re.I)
 
 
+def is_scale(q) -> bool:
+    """The answers read as an ordered scale (a plain list of names never does)."""
+    labels = [o.label or "" for o in q.options or []]
+    numbered = [bool(_NUMBERED.match(x)) for x in labels]
+    return sum(bool(_SCALE_WORD.search(x)) for x in labels) >= 2 \
+        or (len(labels) >= 3 and numbered[0] and numbered[-1])
+
+
+def _unclear_randomise(q, notes: list[str], made: list[dict]) -> None:
+    """"RANDOMIZE ORDER" that names no list, over a scale: probably the screens, not the answers."""
+    said = [n for n in notes if _RANDOMISE.search(n) and not _NO_SHUFFLE.search(n)]
+    if q.randomize_options and said and not any(_RANDOM_OF.search(n) for n in said) \
+            and is_scale(q):
+        q.randomize_options = False
+        q.validation = {**(q.validation or {}), "randomize_unclear": said[0]}
+        made.append({"qid": q.qid, "set": "randomize unclear", "said": said[0]})
+
+
 def apply(survey: SurveyDefinition, q, notes: list[str], made: list[dict]) -> None:
     from src.engines.questionnaire.note_rules import _codes
 
     by_code = {o.code: o for o in q.options or []}
+    _unclear_randomise(q, notes, made)
     for note in notes:
         # A question-wide "do not randomize"; one about named punches is not.
         if _NO_SHUFFLE.search(note) and not re.search(r"\bpunch", note, re.I) \

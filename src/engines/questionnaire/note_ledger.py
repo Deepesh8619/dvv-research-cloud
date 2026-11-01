@@ -104,6 +104,8 @@ def _outcome(kind: str, said: str, q, variables: list[dict],
             return "unread", "keeping groups together is not built"
         if _NEGATED.search(said):  # honoured when the question is not shuffled
             return ("unread", "still randomised") if q.randomize_options else ("applied", "randomize_options off")  # noqa: E501
+        if _validation(q).get("randomize_unclear") == said:
+            return "asked", "which list the randomise means"
         return ("applied", "randomize_options") if q.randomize_options else ("unread", "")
     if kind == "hidden_var":
         mine = [v for v in variables if v["at"] == q.qid]
