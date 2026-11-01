@@ -25,6 +25,14 @@ from src.engines.questionnaire import note_answers, note_flows
 from src.engines.questionnaire.conditions import compile_condition
 from src.engines.questionnaire.note_entry import apply as entry_apply
 from src.engines.questionnaire.note_lines import note_lines, sentences
+from src.engines.questionnaire.note_small_forms import (
+    BLOCK_OF_ALL,
+    QLIST,
+    block_targets,
+    names_earlier_things,
+    of_all_condition,
+    row_sources,
+)
 
 _PN = re.compile(r"^\s*\[(?:PN|PROG(?:RAMMER)? NOTE|SCRIPTER NOTE)\s*:\s*(.*?)\]?\s*$", re.I)
 _CODES = r"(\d{1,3}(?:\s*(?:-|–|,|&|\band\b|\bor\b)\s*\d{1,3})*)"
@@ -32,7 +40,7 @@ _ASK_IF = re.compile(
     r"^\s*(?:(?:route|pn)\s*:\s*)?(?:(?:ask(?:ed)?|show)\s+(?:only\s+)?(?:if|is)\s*:?|"
     r"base\s*:|filter\s*[:–—-]?|if\b)\s*(?P<rule>.+)$", re.I)
 _BLOCK_ASK = re.compile(
-    r"^\s*ask\s+(?P<qids>(?:Q?[A-Z]{1,4}\d+[a-z]?(?:\s*(?:,|\band\b))*\s*)+)(?:in\s+sequence\s+)?"
+    rf"^\s*ask\s+(?P<qids>{QLIST})\s+(?:in\s+sequence\s+)?"
     r"if\s+(?P<rule>.+?)(?:\.\s*if not, skip\.?)?\s*$", re.I)
 # "Ask for provider brands selected at CSN1=1, 2 or 3": the condition after "at".
 _ASK_FOR = re.compile(r"^\s*ask\s+(?:only\s+)?for\b.*?\b(?:at|in)\s+(?P<rule>[A-Za-z]\w*\s*(?:!=|=).+)$",  # noqa: E501
@@ -53,6 +61,8 @@ _RANGE = re.compile(r"(?:acceptable\s+range|allow\s+only\s+numeric\s+values|rang
 _LESS_THAN_TERM = re.compile(r"\bif\s+(?:less|under|younger)\s+than\s+(\d{1,4}),?\s*terminate", re.I)  # noqa: E501
 _MUST_SELECT = re.compile(rf"\bmust\s+select\s+at\s+least\s+(?:punch(?:es)?\s+)?{_CODES}"
                           r"[^.]*?\botherwise\s+terminate", re.I)
+_CONTINUE_IF = re.compile(r"\bcontinue\s+if\s+(\d{1,4})\s*[-–]\s*(\d{1,4})\b", re.I)
+_MAX_RESPONSES = re.compile(r"\b(?:allow|accept)\s+up\s+to\s+(\d{1,2})\s+responses?\b", re.I)
 _WRITE_IN = re.compile(r"^\s*write\s+(?:in\s+)?(?:a\s+)?response(?:\s+here)?\s*$", re.I)
 _NUMBER_ENTRY = re.compile(r"\bwhole\s+number|\bnumeric\b|\bacceptable\s+range\b|\bnumber\b", re.I)
 
@@ -289,13 +299,18 @@ def apply(survey: SurveyDefinition) -> list[dict]:
             continue
         for note in notes:
             if m := _BLOCK_ASK.match(note):
-                rule = m.group("rule")
-                expr = _resolve_groups(rule, groups) or _compile(rule, q.qid, survey)
-                for name in re.findall(r"Q?[A-Z]{1,4}\d+[a-z]?", m.group("qids"), re.I):
-                    target = (by_upper.get(name.upper())
-                              or by_upper.get(re.sub(r"^Q", "", name.upper())))
-                    if target is not None and expr is not None:
-                        set_base(target, Expression.from_dict(expr.to_dict()), note, "block")
+                expr = _resolve_groups(m.group("rule"), groups) or _compile(m.group("rule"), q.qid, survey)  # noqa: E501
+            elif m := BLOCK_OF_ALL.match(note):
+                expr = of_all_condition(m.group("rule"), survey)
+            else:
+                row_sources(survey, q, note)
+                continue
+            # Every name must resolve and the rule must name only earlier things,
+            # or the note sets nothing.
+            targets = block_targets(m.group("qids"), survey)
+            if expr is not None and targets and names_earlier_things(expr, targets, survey):
+                for target in targets:
+                    set_base(target, Expression.from_dict(expr.to_dict()), note, "block")
         if module_base is not None:
             set_base(q, Expression.from_dict(module_base.to_dict()), "module screen", "module")
         _answers(q, notes, made)
@@ -387,6 +402,11 @@ def _limits(q, notes: list[str], made: list[dict]) -> None:
     if (m := _RANGE.search(text)) and q.type is QuestionType.NUMERIC:
         q.validation = {**(q.validation or {}), "min": int(m.group(1)), "max": int(m.group(2))}
         made.append({"qid": q.qid, "set": "range", "said": m.group(0)})
+    if q.type is QuestionType.OPEN_TEXT and (m := _MAX_RESPONSES.search(text)) \
+            and 1 < int(m.group(1)) <= 20:
+        # "ALLOW UP TO 10 RESPONSES": the compiler gives that many text boxes.
+        q.validation = {**(q.validation or {}), "max_responses": int(m.group(1))}
+        made.append({"qid": q.qid, "set": "max_responses", "said": m.group(0)})
     if q.terminate_if is None:
         if (m := _LESS_THAN_TERM.search(text)) and q.type is QuestionType.NUMERIC:
             q.terminate_if = Expression(op="lt", qid=q.qid, value=int(m.group(1)),
@@ -395,5 +415,13 @@ def _limits(q, notes: list[str], made: list[dict]) -> None:
             q.terminate_if = Expression(op="not", children=[
                 Expression(op="in", qid=q.qid, values=_codes(m.group(1)))],
                 verbatim_text=m.group(0))
+        elif (m := _CONTINUE_IF.search(text)) and q.type is QuestionType.NUMERIC \
+                and int(m.group(1)) <= int(m.group(2)):
+            # "CONTINUE IF 13-17": anyone outside the range is screened out.
+            lo, hi = int(m.group(1)), int(m.group(2))
+            q.terminate_if = Expression(op="not", verbatim_text=m.group(0), children=[
+                Expression(op="and", children=[
+                    Expression(op="not", children=[Expression(op="lt", qid=q.qid, value=lo)]),
+                    Expression(op="not", children=[Expression(op="gt", qid=q.qid, value=hi)])])])
         if q.terminate_if is not None:
             made.append({"qid": q.qid, "set": "terminate_if", "said": q.terminate_if.verbatim_text})

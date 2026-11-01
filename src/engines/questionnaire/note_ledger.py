@@ -37,6 +37,10 @@ KINDS: tuple[tuple[str, re.Pattern], ...] = (
     _k("exclusive", r"\bexclusive\b|\bcannot\s+(?:be\s+)?combine|\bdo\s+not\s+allow\s+(?:any\s+other|multi)|\ballow\s+multiple\s+responses?\s+except"),  # noqa: E501
     _k("reask", r"\bsecond\s+time\b|\bask\s+again\b|\bre-?ask\b|\bre-?show\b"),
     _k("hidden_var", r"\bcreate\b.*\bvariables?\b|\bhidden\s+variable|\bdummy\s+variable|\bhold\s+variable|\brecode\b"),  # noqa: E501
+    _k("continue_if", r"\bcontinue\s+if\s+\d"),
+    _k("max_responses", r"\b(?:allow|accept)\s+up\s+to\s+\d+\s+responses?"),
+    _k("row_sources", r"^\s*ask\s+for\s+all\b.*\bselected\s+(?:at|in)\s+[A-Za-z]{1,4}\d"),
+    _k("block_ask", r"^\s*ask\s+Q?[A-Z]{1,4}\d+[a-z]?\b.*\b(?:if|of\s+all)\b"),
     _k("base", r"\b(?:ask|asked|show)\s+(?:module\s+)?(?:only\s+)?(?:if|for|those)\b|^\s*(?:base|filter)\b|\bonly\s+ask\b"),  # noqa: E501
     _k("mask", r"\bmask\b|\bonly\s+show\s+(?:those\s+)?selected|\bshow\s+(?:only\s+)?(?:those\s+|brands?\s+)?(?:not\s+)?selected\s+at|\bhide\s+answers?|\bcarry[- ]?forward"),  # noqa: E501
     _k("randomize", r"\brandomi[sz]|\brotate\b|\bshuffle"),
@@ -78,19 +82,51 @@ _CHECKS = {
     "range": lambda q, _: "min" in _validation(q) or "max" in _validation(q),
     "terminate": lambda q, _: q.terminate_if is not None,
     "exclusive": lambda q, _: any(o.exclusive for o in q.options or []),
-    "base": lambda q, _: q.show_if is not None or any(o.show_if for o in q.options or []),
+    "base": lambda q, _: q.show_if is not None or any(o.show_if for o in q.options or [])
+    or any(r.show_if for r in q.rows or []),
+    "continue_if": lambda q, said: q.terminate_if is not None and bool(
+        re.search(r"\bcontinue\s+if\b", q.terminate_if.verbatim_text or "", re.I)
+        and q.terminate_if.verbatim_text.lower() in said.lower()),
+    "max_responses": lambda q, said: q.type is QuestionType.OPEN_TEXT and (
+        m := re.search(r"up\s+to\s+(\d+)", said, re.I)) is not None
+    and _validation(q).get("max_responses") == int(m.group(1)),
+    "row_sources": lambda q, said: bool(q.rows) and all(
+        r.show_if is not None and r.show_if.verbatim_text == said for r in q.rows),
     "mask": lambda q, _: bool(_techniques(q).get("masks")),
     "anchor": lambda q, _: any(o.anchored for o in q.options or []),
     "pipe": lambda q, _: bool(q.piping_refs or _techniques(q).get("pipes")),
-    "limit_select": lambda q, _: "min_select" in _validation(q) or "max_select" in _validation(q),
+    "limit_select": lambda q, _: any(k in _validation(q) for k in
+                                     ("min_select", "max_select", "max_responses")),
     "one_or_many": lambda q, _: q.type in (QuestionType.SINGLE, QuestionType.MULTI) and bool(q.options),  # noqa: E501
     "open_end_limit": lambda q, _: "min_length" in _validation(q) or "max_length" in _validation(q),  # noqa: E501
     "sum": lambda q, _: any("sum" in k or "total" in k for k in _validation(q)),
 }
 
 
+_PER_ROW = re.compile(r"\b(?:allow|accept)\s+(?:only\s+)?one\s+response\s+per\b", re.I)
+
+
+def _block_applied(said: str, survey: SurveyDefinition) -> bool:
+    """Every question a block note names got its base from THIS note."""
+    from src.engines.questionnaire.note_rules import _BLOCK_ASK
+    from src.engines.questionnaire.note_small_forms import BLOCK_OF_ALL, block_targets
+
+    m = _BLOCK_ASK.match(said) or BLOCK_OF_ALL.match(said)
+    targets = block_targets(m.group("qids"), survey) if m else None
+    set_by = {(r["qid"], r["said"]) for r in survey.metadata.get("note_rules") or []
+              if r.get("set") == "show_if"}
+    named = [t for t in targets or [] if not t.qid.startswith(("INFO", "INTRO", "END"))]
+    return bool(named) and all((t.qid, said) in set_by for t in named)
+
+
 def _outcome(kind: str, said: str, q, variables: list[dict],
-             qids: frozenset[str] = frozenset()) -> tuple[str, str]:
+             qids: frozenset[str] = frozenset(),
+             survey: SurveyDefinition | None = None) -> tuple[str, str]:
+    if kind == "block_ask":
+        return ("applied", "") if survey is not None and _block_applied(said, survey) \
+            else ("unread", "")
+    if kind == "one_or_many" and q.type is QuestionType.GRID_SINGLE and _PER_ROW.search(said):
+        return "by_design", "a single grid already takes one answer per row"
     if kind == "reask":  # applied once the second ask exists; else a person decides
         return ("applied", f"{q.qid}_REASK") if f"{q.qid}_REASK" in qids else ("asked", "")
     if kind == "warning":  # kept as soft_message; the runtime shows no warnings yet
@@ -135,7 +171,7 @@ def read_notes(survey: SurveyDefinition) -> list[dict[str, Any]]:
             if said in bands.get(q.qid, ()):
                 kinds = ["hidden_var"]
             for kind in kinds:
-                outcome, detail = ("unread", "") if kind == "none" else _outcome(kind, said, q, variables, qids)  # noqa: E501
+                outcome, detail = ("unread", "") if kind == "none" else _outcome(kind, said, q, variables, qids, survey)  # noqa: E501
                 out.append({"qid": q.qid, "said": said, "kind": kind,
                             "outcome": outcome, "detail": detail})
     return out

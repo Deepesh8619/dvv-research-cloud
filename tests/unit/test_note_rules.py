@@ -27,6 +27,7 @@ def test_bases_answers_ranges_and_screen_outs_from_notes():
         _q("S4", ["Ask if selected punch 1-2 at S3",
                   "Anchor punch 98 ‘Other’ and punch 99 at the bottom."]),
         _q("S5", []),
+        _q("S6", []),  # a note naming a question the document lacks sets nothing
         _q("AGE", ["Acceptable range: 1-120. If less than 18, terminate."], QuestionType.NUMERIC,
            codes=(99,)),
     ]

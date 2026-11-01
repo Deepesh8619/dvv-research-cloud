@@ -160,6 +160,10 @@ def _row_answer(value: Any, row_code: int) -> Any:
     return value.get(str(row_code)) if raw is None else raw
 
 
+def _text_or_none(raw: Any) -> str | None:
+    return None if raw is None else str(raw)
+
+
 def _grid_cell(value: Any, row_code: int) -> int | None:
     """The column code a grid row was answered with."""
     return _to_int(_row_answer(value, row_code))
@@ -295,6 +299,18 @@ def _question_specs(question: Question, survey=None) -> list[_ColumnSpec]:
             missing_values=[o.code for o in question.options],
         )
         return [_ColumnSpec(var, lambda a, q=qid: _to_float(a.get(q)))]
+
+    if qtype == QuestionType.OPEN_TEXT and (question.validation or {}).get("max_responses"):
+        # "Allow up to 10 responses": one text column per box.
+        return [
+            _ColumnSpec(
+                Variable(name=f"{qid}r{n}", label=f"{text} — response {n}", type=VarType.TEXT,
+                         question_ref=qid, question_text=text, row=str(n),
+                         provenance="fielding"),
+                lambda a, q=qid, n=n: _text_or_none(_row_answer(a.get(q), n)),
+            )
+            for n in range(1, int(question.validation["max_responses"]) + 1)
+        ]
 
     if qtype == QuestionType.OPEN_TEXT:
         var = Variable(
