@@ -11,12 +11,33 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from src.core.survey_definition import SurveyDefinition
+from src.core.survey_definition import Expression, SurveyDefinition
 from src.engines.questionnaire.conditions import compile_condition
 from src.engines.questionnaire.note_lines import split_groups
 
 _RANGE = re.compile(r"^\s*(\d{1,3})\s*[-–]\s*(\d{1,3})\s*$|^\s*(\d{1,3})\s*\+\s*$")
 NESTED = re.compile(r"^\s*(male|female|m|f)\s*(\d{1,3})\s*(?:[-–]\s*(\d{1,3})|(\+))\s*$", re.I)
+
+
+def with_reask(expr: Expression, survey: SurveyDefinition) -> Expression:
+    """Count the second ask too: a test on S1 becomes
+    (test on S1 and S1 != opt-out) or (the same test on S1_REASK).
+
+    S1_REASK is only answered by those who gave the opt-out, so it must not
+    replace S1 (most respondents never see it)."""
+    again = {r["qid"]: r for r in survey.metadata.get("note_flows", {}).get("reask", [])}
+    if not again:
+        return expr
+    if expr.children is not None:
+        return Expression(op=expr.op, children=[with_reask(c, survey) for c in expr.children],
+                          verbatim_text=expr.verbatim_text)
+    flow = again.get(expr.qid or "")
+    if flow is None:
+        return expr
+    second = Expression.from_dict({**expr.to_dict(), "qid": flow["reask"]})
+    first = Expression(op="and", children=[
+        expr, Expression(op="ne", qid=expr.qid, value=flow["opt_out"])])
+    return Expression(op="or", children=[first, second], verbatim_text=expr.verbatim_text)
 
 
 def band_lines(rest: str) -> list[str]:
@@ -83,7 +104,8 @@ def nested_variable(var: dict[str, Any], lines: list[str], host, survey) -> dict
             span = (f"{age} between {m.group(2)} and {m.group(3)}" if m.group(3)
                     else f"{age} >= {m.group(2)}")
             try:
-                band["condition"] = compile_condition(f"{g} = {code} AND {span}", survey).to_dict()
+                band["condition"] = with_reask(
+                    compile_condition(f"{g} = {code} AND {span}", survey), survey).to_dict()
             except ValueError as exc:
                 band["unread"] = str(exc)
         var["bands"].append(band)

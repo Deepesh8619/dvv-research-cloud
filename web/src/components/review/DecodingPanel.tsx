@@ -92,10 +92,15 @@ function AnalystSection({ analyst, studyId, onGoTo }: {
 }) {
   const [creating, setCreating] = useState<string | null>(null)
   const [answered, setAnswered] = useState<Record<string, string>>({})
+  const [decisionNote, setDecisionNote] = useState<string | null>(null)
   const answer = (q: AnalystReading['questions'][number], option: string) => {
     if (q.key) {
       setAnswered((a) => ({ ...a, [q.key as string]: option }))
-      if (studyId) void questionnaireApi.decideReading(studyId, q.key, q.ask, option)
+      if (studyId) {
+        void questionnaireApi.decideReading(studyId, q.key, q.ask, option)
+          .then((r) => setDecisionNote(r.data?.message ?? null))
+          .catch(() => setDecisionNote('Your answer could not be saved. Try again.'))
+      }
     }
     askCopilot(`${q.ask}\nMy answer: ${option}`)
   }
@@ -130,6 +135,7 @@ function AnalystSection({ analyst, studyId, onGoTo }: {
       <p className="text-xs text-slate-500">
         Read from the scripter&apos;s notes. Pick an answer and the Copilot prepares the change for you to confirm.
       </p>
+      {decisionNote && <p role="status" className="mt-1 text-xs text-amber-800">{decisionNote}</p>}
       {analyst.questions.length > 0 && (
         <ul className="mt-2 space-y-2">
           {analyst.questions.map((q, i) => (

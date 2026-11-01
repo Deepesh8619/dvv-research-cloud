@@ -120,3 +120,19 @@ def test_the_whole_note_reaches_the_link_without_ai(monkeypatch):
     assert by_name["S1_REASK"]["visibleIf"]
     assert by_name["S1_REASK"]["title"].startswith("Sorry!")
     assert "PN" not in by_name["S1_REASK"]["title"]
+
+
+def test_a_band_counts_the_second_ask_without_replacing_the_first(monkeypatch):
+    from src.engines.questionnaire.reading_questions import analyst_reading
+
+    band = "[PN: Create a variable called AGEBANDS for age ranges: 18-34, 35-49, 50-64, 65+]"
+    survey = _survey(monkeypatch, ["S1. How old are you?", _ENTRY, band, _FLOW])
+    opt_out = survey.metadata["note_flows"]["reask"][0]["opt_out"]
+    var = next(v for v in analyst_reading(survey)["variables"] if v["name"] == "AGEBANDS")
+    assert var["status"] == "ready"
+    mid = Expression.from_dict(var["bands"][1]["condition"])  # 35-49
+    assert mid.referenced_qids() == {"S1", "S1_REASK"}
+    assert evaluate(mid, {"S1": 40})                         # typed 40 first time
+    assert evaluate(mid, {"S1": opt_out, "S1_REASK": 40})    # typed 40 at the second ask
+    assert not evaluate(mid, {"S1": opt_out})                # opted out, never answered
+    assert not evaluate(mid, {"S1": 60})                     # outside the band

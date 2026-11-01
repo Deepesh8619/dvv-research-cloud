@@ -79,6 +79,7 @@ from src.engines.questionnaire.logic_review import review as review_logic
 from src.engines.questionnaire.qa_loop import run_qa
 from src.engines.questionnaire.question_agent import revise as question_agent_revise
 from src.engines.questionnaire.question_agent import suggest_repairs
+from src.engines.questionnaire.reading_decisions import LIVE_SENTENCE, apply_decisions, mark_hidden
 from src.engines.questionnaire.second_look import second_look
 from src.engines.rag.store import ensure_index
 from src.intake.questionnaire_loader import (
@@ -493,6 +494,10 @@ def _run_extraction(
         # Title from the original upload name, not the on-disk path (which is
         # renamed to the questionnaire id to avoid collisions).
         survey.title = Path(source_filename).stem
+        # Answers a person already gave survive reading the document again.
+        if study := get_study(job_db, study_id):
+            _apply_saved_decisions(job_db, study, survey)
+            job_db.commit()
 
         payload = survey.to_json()
         # definition_json is authoritative + durable; the on-disk copy is an
@@ -1129,9 +1134,7 @@ def add_question(
             else None,
         )
         if request.hidden:
-            question.type = QuestionType.INFO
-            question.flags = [*question.flags, "DERIVED_VARIABLE"]
-            question.validation = {**(question.validation or {}), "not_in_link": True}
+            mark_hidden(question)
     except (ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid question: {exc}") from exc
 
@@ -2467,6 +2470,35 @@ def _reread_all_with_patterns(
     return updated, n_unchanged
 
 
+def _apply_saved_decisions(
+    db: Session, study, survey: SurveyDefinition, actor_id: str | None = None
+) -> tuple[list[dict], str | None]:
+    """Apply the study's stored answers to `survey` (not saved here; caller saves).
+
+    Never changes a survey with an open fielding link: returns the plain sentence
+    saying so, and the answers stay stored. Each change is audited as the person's
+    decision (the one who answered; `actor_id` only when none is recorded)."""
+    from api.db import list_fielding_links_for_study, record_audit
+
+    decisions = (study.study_metadata or {}).get("reading_decisions") or {}
+    if not decisions:
+        return [], None
+    if any(ln.status == "open" and not ln.is_test
+           for ln in list_fielding_links_for_study(db, study.id)):
+        return [], LIVE_SENTENCE
+    results = apply_decisions(survey, decisions)
+    for r in results:
+        if r["status"] == "applied":
+            record_audit(db, entity="reading_decision", entity_id=r["key"], action="applied",
+                         actor_id=decisions[r["key"]].get("by_id") or actor_id or "system",
+                         study_id=study.id,
+                         summary=f"{r['answer'][:80]}" + (f" → made {', '.join(r['made'])}"
+                                                           if r["made"] else ""))
+    if any(r["status"] == "applied" for r in results):
+        survey.metadata["validation_errors"] = survey.validate()
+    return results, None
+
+
 def _persist_reread(
     db: Session, questionnaire, survey: SurveyDefinition, updated: list[dict]
 ) -> None:
@@ -2474,6 +2506,8 @@ def _persist_reread(
     survey._rebuild_index()
     _rerun_reread_safe_passes(survey)
     survey.metadata["validation_errors"] = survey.validate()
+    if study := get_study(db, questionnaire.study_id):
+        _apply_saved_decisions(db, study, survey)
     _save_definition(db, questionnaire, survey)
     update_questionnaire_status(db, questionnaire.id, "in_review")
     approved = set(questionnaire.approved_qids or []) - {u["qid"] for u in updated}
@@ -2723,14 +2757,28 @@ def save_reading_decision(
         raise HTTPException(status_code=404, detail="Study not found")
     decisions = dict((study.study_metadata or {}).get("reading_decisions") or {})
     decisions[request.key] = {"ask": request.ask, "answer": request.answer,
-                              "by": user.name or user.email,
+                              "by": user.name or user.email, "by_id": user.id,
                               "at": datetime.now(UTC).isoformat()}
     update_study_status(db, study_id, study.status, {"reading_decisions": decisions})
     record_audit(db, entity="reading_decision", entity_id=request.key, action="answered",
                  actor_id=user.id, study_id=study_id,
                  summary=f"{request.ask[:120]} → {request.answer[:80]}")
+    effect, message = None, None
+    questionnaires = list_questionnaires_for_study(db, study_id)
+    if questionnaires:
+        try:
+            survey = _load_definition(db, questionnaires[0])
+        except HTTPException:
+            survey = None  # still being read: it is applied when the reading finishes
+        if survey is not None:
+            study = get_study(db, study_id)
+            results, message = _apply_saved_decisions(db, study, survey, user.id)
+            effect = next((r for r in results if r["key"] == request.key), None)
+            if any(r["status"] == "applied" for r in results):
+                _save_definition(db, questionnaires[0], survey)
+                update_questionnaire_status(db, questionnaires[0].id, "in_review")
     db.commit()
-    return decisions[request.key]
+    return {**decisions[request.key], "effect": effect, "message": message}
 
 
 @router.post("/studies/{study_id}/questionnaire/reextract")
