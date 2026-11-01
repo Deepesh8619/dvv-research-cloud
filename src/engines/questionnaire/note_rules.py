@@ -22,6 +22,7 @@ import re
 
 from src.core.survey_definition import Expression, QuestionType, SurveyDefinition
 from src.engines.questionnaire.conditions import compile_condition
+from src.engines.questionnaire.note_entry import apply as entry_apply
 from src.engines.questionnaire.note_lines import note_lines, sentences
 
 _PN = re.compile(r"^\s*\[(?:PN|PROG(?:RAMMER)? NOTE|SCRIPTER NOTE)\s*:\s*(.*?)\]?\s*$", re.I)
@@ -298,6 +299,7 @@ def apply(survey: SurveyDefinition) -> list[dict]:
             set_base(q, Expression.from_dict(module_base.to_dict()), "module screen", "module")
         _answers(q, notes, made)
         _limits(q, notes, made)
+        entry_apply(q, notes, made)
     return made
 
 
