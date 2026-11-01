@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 
 from src.core.survey_definition import Option, QuestionType
+from src.engines.questionnaire.note_lines import wording_lines
+from src.engines.questionnaire.prose_directives import _strip_label
 
 _NUMBER = re.compile(r"\bwhole\s+number|\bacceptable\s+range\b|\bnumeric\b", re.I)
 _ONE = re.compile(r"\b(?:allow|accept)\s+(?:only\s+)?one\s+response", re.I)
@@ -65,6 +67,10 @@ def apply(q, notes: list[str], made: list[dict]) -> None:
         _limits(q, notes, made)  # range and screen-out, now the type is settled
         if unsettled and (q.type not in (QuestionType.SINGLE, QuestionType.MULTI) or q.options):
             q.required = True  # an unread question defaulted to optional
+            # The unread stand-in holds the raw source, notes included: a respondent
+            # must never read those.
+            if words := wording_lines(q):
+                q.text = _strip_label(" ".join(words))
             q.validation.pop("extraction_error")
             q.flags = [f for f in q.flags if not f.startswith("EXTRACTION_")]
             if "could not be fully read" in str((q.validation.get("resolution") or {}).get("summary")):  # noqa: E501

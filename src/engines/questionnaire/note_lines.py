@@ -52,6 +52,18 @@ def _create_parts(line: str) -> list[str]:
     return [line[a:b] for a, b in pairwise(bounds)]
 
 
+def wording_lines(question) -> list[str]:
+    """The lines on a question that are not notes: what a respondent would read."""
+    out = []
+    for line in (question.source_text or "").splitlines():
+        if not line.strip() or _WRAPPED.match(line) or _PREFIXED.match(line) or _PLAIN.match(line):
+            continue
+        if (m := _PAREN.match(line)) and _PLAIN.match(m.group(1)):
+            continue
+        out.append(line.strip())
+    return out
+
+
 def sentences(lines: list[str]) -> list[str]:
     return [s.strip() for line in lines for part in _create_parts(line)
             for s in _STOP.split(part) if s.strip()]

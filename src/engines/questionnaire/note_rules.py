@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 
 from src.core.survey_definition import Expression, QuestionType, SurveyDefinition
-from src.engines.questionnaire import note_answers
+from src.engines.questionnaire import note_answers, note_flows
 from src.engines.questionnaire.conditions import compile_condition
 from src.engines.questionnaire.note_entry import apply as entry_apply
 from src.engines.questionnaire.note_lines import note_lines, sentences
@@ -302,6 +302,7 @@ def apply(survey: SurveyDefinition) -> list[dict]:
         note_answers.apply(survey, q, notes, made)
         _limits(q, notes, made)
         entry_apply(q, notes, made)
+    note_flows.apply(survey, made)
     return made
 
 

@@ -210,8 +210,11 @@ _BORROWED_OPTIONS_RE = re.compile(
 _GRID_DIRECTIVE_RE = re.compile(r"\bIN ROWS\b|\bROWS\b|\bSTATEMENTS\b", re.I)
 
 # Tags carried by an individual option.
-_BARE_TERMINATE_RE = re.compile(r"\s(TERMINATE|SCREEN\s*-?\s*OUT)\s*$")
+_BARE_TERMINATE_RE = re.compile(r"\s(TERMINATE|SCREEN\s*-?\s*OUT)(?:\s*\([^()]*\))?\s*$")
 _TERMINATE_TAG = re.compile(r"\bTERMINATE\b|\bSCREEN\s*-?\s*OUT\b", re.I)
+# "TERMINATE (IF SELECTED TWICE)": the SECOND ask ends the survey, not this one.
+# note_flows adds that second ask; this answer must not end the survey itself.
+_SECOND_ASK_TAG = re.compile(r"\b(?:twice|second|2nd|two\s+times)\b", re.I)
 _EXCLUSIVE_TAG = re.compile(r"\bEXCLUSIVE\b", re.I)
 _ANCHOR_TAG = re.compile(r"\bANCHOR\b", re.I)
 _ENTRY_PROMPT = re.compile(r"^\s*(?:Fill\s+in|Enter|Record)\b", re.I)
@@ -1072,7 +1075,7 @@ def parse_prose_question(
         line = _EMPTY_CELLS.sub("", line)
         bare = _BARE_TERMINATE_RE.search(line)
         if bare and not _OPTION_TAG_RE.search(line):
-            line = f"{line[: bare.start()].rstrip()} [{bare.group(1)}]"
+            line = f"{line[: bare.start()].rstrip()} [{bare.group(0).strip()}]"
         tags = _OPTION_TAG_RE.search(line)
         label = _OPTION_TAG_RE.sub("", line).strip() if tags else line
         written = _OPTION_CODE_RE.match(label)
@@ -1108,7 +1111,9 @@ def parse_prose_question(
                 option.exclusive = True
             if _ANCHOR_TAG.search(tag_text) or "anchor" in taught_meanings:
                 option.anchored = True
-            if _TERMINATE_TAG.search(tag_text) or "terminate" in taught_meanings:
+            if _TERMINATE_TAG.search(tag_text) and _SECOND_ASK_TAG.search(tag_text):
+                pass  # not a screen-out of this answer, and not a base either
+            elif _TERMINATE_TAG.search(tag_text) or "terminate" in taught_meanings:
                 terminate_codes.append(option.code)
                 terminate_lines.append(f"{option.label} [{tag_text.strip()}]")
             else:
