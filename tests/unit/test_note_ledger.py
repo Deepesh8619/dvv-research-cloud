@@ -53,3 +53,41 @@ def test_summary_and_cap():
     assert out["summary"]["total"] == 2
     assert out["summary"]["by_outcome"] == {"by_design": 1, "unread": 1}
     assert summary([])["total"] == 0
+
+
+def test_checklist_has_one_entry_per_scripter_kind():
+    # Made-up lines of the same shape; one per kind that resolves to scripter.
+    lines = {
+        "quota": "Quota check by region.",
+        "layout": "Show on carousel, two per screen.",
+        "stimulus": "Stimulus video for the concept.",
+        "quality": "Flag if the respondent speeds.",
+    }
+    s = _survey(*[_q(f"Q{i}", [text]) for i, text in enumerate(lines.values(), start=1)])
+    checks = ledger(s)["checks"]
+    assert [c["kind"] for c in checks] == list(lines)
+    assert all(set(c) == {"kind", "qid", "said"} for c in checks)
+    assert checks[0] == {"kind": "quota", "qid": "Q1", "said": "Quota check by region."}
+
+
+def test_layout_and_by_design_patterns_are_grouped_not_asked():
+    s = _survey(
+        _q("Q1", ["Show intermediate text only before this screen."]),
+        _q("Q2", ["Show on carrousel."]),
+        _q("Q3", ["Respondents can see the total."]),
+        _q("Q4", ["Show to all."]),
+    )
+    records = read_notes(s)
+    outcomes = {r["qid"]: (r["kind"], r["outcome"]) for r in records}
+    assert outcomes["Q1"] == ("layout", "scripter")
+    assert outcomes["Q2"] == ("layout", "scripter")
+    assert outcomes["Q3"] == ("ask_all", "by_design")
+    assert outcomes["Q4"] == ("ask_all", "by_design")
+    assert not [r for r in records if r["outcome"] == "asked"]
+    assert [c["qid"] for c in ledger(s)["checks"]] == ["Q1", "Q2"]
+
+
+def test_repeats_of_one_sentence_on_one_question_appear_once():
+    s = _survey(_q("Q1", ["Quota by region.", "Quota by region.", "Quota by region."]))
+    assert len(read_notes(s)) == 3
+    assert len(ledger(s)["checks"]) == 1

@@ -246,6 +246,8 @@ class QuestionnaireStatusResponse(BaseModel):
     # Which reading skills decoded the document, what none could read, and the
     # recurring conventions worth teaching (decoding_report.py).
     decoding: dict | None = None
+    # Every programmer-note sentence and what became of it (note_ledger.py); None on older projects.
+    note_ledger: dict | None = None
     # The second look: flagged questions fixed, ready to apply, explained, or left to a person.
     second_look: dict | None = None
 

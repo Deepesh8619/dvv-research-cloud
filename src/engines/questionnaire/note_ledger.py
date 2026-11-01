@@ -47,11 +47,11 @@ KINDS: tuple[tuple[str, re.Pattern], ...] = (
     _k("open_end_limit", r"\bcharacter|\bOE\s*:|\bopen[- ]end|\bminimum\s+\d+\s+words?"),
     _k("sum", r"\bsum\b|\btotals?\s+(?:to|must|=|equals?)|\badd\s+up\s+to|\bconstant\s+sum"),
     _k("quota", r"\bquotas?\b"),
-    _k("layout", r"\blayout\b|\bcarou?rr?el\b|\bside[- ]by[- ]side\b|\bper\s+(?:screen|page)\b|\bsame\s+(?:screen|page)\b|\bdrop-?down\b|\bslider\b|\bhorizontal\b|\bvertical\b"),  # noqa: E501
+    _k("layout", r"\blayout\b|\bcarr?ousel\b|\bintermediate\s+text\s+only\b|\bside[- ]by[- ]side\b|\bper\s+(?:screen|page)\b|\bsame\s+(?:screen|page)\b|\bdrop-?down\b|\bslider\b|\bhorizontal\b|\bvertical\b"),  # noqa: E501
     _k("stimulus", r"\bstimul|\bconcept\b|\bvideo\b|\bimage\b|\blogo\b|\bmonadic\b|\bscreenshot\b"),
     _k("loop", r"\bloop\b|\bfor\s+each\s+(?:brand|item|product|selected)\b|\biterat"),
     _k("quality", r"\bquality\b|\bflag\s+(?:if|any|respondents?)\b|\bspeeder|\bstraight-?line|\battention\s+check|\bauto-?punch"),  # noqa: E501
-    _k("ask_all", r"\b(?:ask|show)\s+(?:all|everyone|everybody)\b|\bto\s+all\s+respondents\b"),
+    _k("ask_all", r"\b(?:ask|show)\s+(?:all|everyone|everybody)\b|\bshow\s+to\s+all\b|\bto\s+all\s+respondents\b|\brespondents?\s+can\s+see\b"),  # noqa: E501
 )
 
 _NEGATED = re.compile(r"\b(?:do\s+not|don'?t|no|not)\b", re.I)
@@ -88,9 +88,8 @@ def _outcome(kind: str, said: str, q, variables: list[dict]) -> tuple[str, str]:
     if kind in _FIXED:
         return _FIXED[kind], ""
     if kind == "randomize":
-        # "Do not randomize" is the default, so the field cannot show it was read.
-        if _NEGATED.search(said):
-            return "unread", "negated; the setting cannot show it was read"
+        if _NEGATED.search(said):  # honoured when the question is not shuffled
+            return ("unread", "still randomised") if q.randomize_options else ("applied", "randomize_options off")  # noqa: E501
         return ("applied", "randomize_options") if q.randomize_options else ("unread", "")
     if kind == "hidden_var":
         mine = [v for v in variables if v["at"] == q.qid]
@@ -127,6 +126,20 @@ def summary(records: list[dict]) -> dict[str, Any]:
             "by_kind": {k: dict(v) for k, v in by_kind.items()}}
 
 
+def checklist(records: list[dict]) -> list[dict[str, str]]:
+    """The scripter's checklist: each distinct scripter record once, uncapped."""
+    seen: set[tuple[str, str, str]] = set()
+    out: list[dict[str, str]] = []
+    for r in records:
+        key = (r["kind"], r["qid"], r["said"])
+        if r["outcome"] != "scripter" or key in seen:
+            continue
+        seen.add(key)
+        out.append({"kind": r["kind"], "qid": r["qid"], "said": r["said"]})
+    return out
+
+
 def ledger(survey: SurveyDefinition) -> dict[str, Any]:
     records = read_notes(survey)
-    return {"summary": summary(records), "records": records[:CAP]}
+    return {"summary": summary(records), "records": records[:CAP],
+            "checks": checklist(records)}
