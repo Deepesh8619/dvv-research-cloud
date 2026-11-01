@@ -104,8 +104,50 @@ def _together_outcome(said: str, q) -> tuple[str, str]:
     return "applied", "keep_together"
 
 
+_MADE_SET = {"base": "show_if", "anchor": "anchored", "exclusive": "exclusive",
+             "terminate": "terminate_if", "range": "range"}
+_QIDS = re.compile(r"\b[A-Z]{1,4}\d+[a-z]?\b")
+_CODES = re.compile(r"\b(?:punch(?:es)?|codes?)\s+((?:\d+\s*(?:[-–,&]|and|or)?\s*)+)", re.I)
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _made_this(kind: str, said: str, q, made: list[dict]) -> bool:
+    """A reader recorded setting this field from words overlapping this clause."""
+    a = _norm(said)
+    return any(m["qid"] == q.qid and m["set"].startswith(_MADE_SET[kind])
+               and (b := _norm(m["said"])) and (a in b or b in a) for m in made)
+
+
+def _named_codes(said: str) -> set[int]:
+    out: set[int] = set()
+    for m in _CODES.finditer(said):
+        for lo, _, hi in re.findall(r"(\d+)(\s*[-–]\s*(\d+))?", m.group(1)):
+            out |= set(range(int(lo), int(hi) + 1)) if hi and int(hi) - int(lo) < 50 else {int(lo)}
+    return out
+
+
+def _consistent(kind: str, said: str, q) -> bool:
+    """The note's own words agree with the field another reader set."""
+    if kind == "base":
+        refs = {r.upper() for e in [q.show_if, *(o.show_if for o in q.options or [])] if e
+                for r in e.referenced_qids()}
+        named = {n.upper() for n in _QIDS.findall(said)}
+        return bool(named) and named <= refs
+    if kind in ("anchor", "exclusive"):
+        flagged = {o.code for o in q.options or []
+                   if (o.anchored if kind == "anchor" else o.exclusive)}
+        return _named_codes(said) <= flagged
+    if kind == "range":
+        v = _validation(q)
+        return {int(n) for n in re.findall(r"\d+", said)} <= {v.get("min"), v.get("max")}
+    return True
+
+
 def _outcome(kind: str, said: str, q, variables: list[dict],
-             qids: frozenset[str] = frozenset()) -> tuple[str, str]:
+             qids: frozenset[str] = frozenset(), made: list[dict] = ()) -> tuple[str, str]:
     if kind == "reask":  # applied once the second ask exists; else a person decides
         return ("applied", f"{q.qid}_REASK") if f"{q.qid}_REASK" in qids else ("asked", "")
     if kind == "warning":  # kept as soft_message; the runtime shows no warnings yet
@@ -132,6 +174,13 @@ def _outcome(kind: str, said: str, q, variables: list[dict],
             return "applied", ", ".join(v["name"] for v in mine)
         return "asked", "; ".join(v["why"] for v in mine if v["status"] != "ready")
     check = _CHECKS.get(kind)
+    if kind in _MADE_SET:  # applied only if this note did it, or says what the field says
+        if not (check and check(q, said)):
+            return "unread", ""
+        if _made_this(kind, said, q, list(made)):
+            return "applied", ""
+        ok = _consistent(kind, said, q)
+        return ("applied", "set by the question's own reading") if ok else ("unread", "")
     return ("applied", "") if check and check(q, said) else ("unread", "")
 
 
@@ -139,6 +188,7 @@ def read_notes(survey: SurveyDefinition) -> list[dict[str, Any]]:
     variables = analyst_reading(survey)["variables"]
     out: list[dict[str, Any]] = []
     qids = frozenset(q.qid for q in survey.questions)
+    made = (survey.metadata or {}).get("note_rules") or []
     by_qid = {q.qid: q for q in survey.questions}
     bands: dict[str, set[str]] = {}
     for v in variables:
@@ -157,7 +207,7 @@ def read_notes(survey: SurveyDefinition) -> list[dict[str, Any]]:
             if said in bands.get(q.qid, ()):
                 kinds = ["hidden_var"]
             for kind in kinds:
-                outcome, detail = ("unread", "") if kind == "none" else _outcome(kind, said, q, variables, qids)  # noqa: E501
+                outcome, detail = ("unread", "") if kind == "none" else _outcome(kind, said, q, variables, qids, made)  # noqa: E501
                 out.append({"qid": q.qid, "said": said, "kind": kind,
                             "outcome": outcome, "detail": detail})
     return out

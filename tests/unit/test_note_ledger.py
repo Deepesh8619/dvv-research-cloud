@@ -119,3 +119,50 @@ def test_what_a_hand_check_found():
     # "not" in an answer's label is not "do not randomise".
     done = _one("Randomize, anchor ‘Prefer not to answer’.", randomize_options=True)
     assert {r["outcome"] for r in done if r["kind"] == "randomize"} == {"applied"}
+
+
+def _kind_outcome(note, **kw):
+    return {(r["kind"]): r["outcome"] for r in _one(note, **kw)}
+
+
+def test_applied_means_this_note_did_it():
+    # Anchor set on code 1, but the note names code 2: another reader's work.
+    assert _kind_outcome("Anchor punch 2 at the bottom.")["anchor"] == "unread"
+    assert _kind_outcome("Anchor punch 1 at the bottom.")["anchor"] == "applied"
+    # A made record overlapping the clause settles it.
+    q = _one("Anchor punch 2 at the bottom.")
+    assert q[0]["outcome"] == "unread"
+    s = SurveyDefinition(study_id="s", questions=[Question(
+        qid="Q1", text="?", type=QuestionType.MULTI, options=[Option(2, "B", anchored=True)],
+        source_text="[PN: Anchor punch 2 at the bottom.]")])
+    s.metadata["note_rules"] = [{"qid": "Q1", "set": "anchored 2", "said": "Anchor punch 2"}]
+    assert read_notes(s)[0]["outcome"] == "applied"
+
+
+def test_base_must_name_a_question_the_base_reads():
+    from src.core.survey_definition import Expression
+    base = Expression(op="in", qid="S5", values=[1])
+    q = Question(qid="Q2", text="?", type=QuestionType.SINGLE, show_if=base,
+                 source_text="[PN: Ask if punch 1 at S5.]\n[PN: Ask if punch 1 at S9.]")
+    got = [r["outcome"] for r in read_notes(SurveyDefinition(study_id="s", questions=[q]))]
+    assert got == ["applied", "unread"]
+
+
+def test_gold_report(tmp_path, capsys):
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "note_census", Path(__file__).parents[2] / "scripts" / "note_census.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    recs = [{"doc": "d", "qid": "Q1", "said": "a", "outcome": "applied"},
+            {"doc": "d", "qid": "Q2", "said": "b", "outcome": "applied"},
+            {"doc": "d", "qid": "Q3", "said": "c", "outcome": "unread"}]
+    gold = tmp_path / "g.json"
+    gold.write_text('[{"doc":"d","qid":"Q1","said":"a","outcome":"applied"},'
+                    '{"doc":"d","qid":"Q2","said":"b","outcome":"unread"},'
+                    '{"doc":"d","qid":"Q3","said":"c","outcome":"unread"}]')
+    assert mod.gold_report(recs, gold, None) == 0
+    assert "false applied 1" in capsys.readouterr().out
+    assert mod.gold_report(recs, gold, 0) == 1
+    assert mod.gold_report(recs, gold, 1) == 0
