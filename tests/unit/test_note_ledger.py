@@ -1,6 +1,6 @@
 """The note ledger, on made-up questions."""
 
-from src.core.survey_definition import Option, Question, QuestionType, SurveyDefinition
+from src.core.survey_definition import Block, Option, Question, QuestionType, SurveyDefinition
 from src.engines.questionnaire.note_ledger import ledger, read_notes, summary
 
 
@@ -91,3 +91,26 @@ def test_repeats_of_one_sentence_on_one_question_appear_once():
     s = _survey(_q("Q1", ["Quota by region.", "Quota by region.", "Quota by region."]))
     assert len(read_notes(s)) == 3
     assert len(ledger(s)["checks"]) == 1
+
+
+def _one(note, **kw):
+    q = Question(qid="Q1", text="Q1?", type=QuestionType.MULTI,
+                 options=[Option(code=1, label="A", anchored=True), Option(code=2, label="B")],
+                 source_text=f"[PN: {note}]", **kw)
+    survey = SurveyDefinition(study_id="s", source="x", status="draft",
+                              blocks=[Block(block_id="B", question_ids=["Q1"])], questions=[q])
+    return read_notes(survey)
+
+
+def test_what_a_hand_check_found():
+    assert _one("(blank)") == []
+    assert _one("End screen.") == []
+    # A mask, not "ask all".
+    assert all(r["kind"] != "ask_all" for r in _one("Show all response options EXCEPT Q5."))
+    # Another answer being anchored says nothing about keeping two together.
+    assert all(r["outcome"] != "applied" for r in _one("Keep punch 1 and 2 together."))
+    shuffled = _one("Randomize, keep 1 and 2 together.", randomize_options=True)
+    assert shuffled[0]["outcome"] == "unread"
+    # "not" in an answer's label is not "do not randomise".
+    done = _one("Randomize, anchor ‘Prefer not to answer’.", randomize_options=True)
+    assert {r["outcome"] for r in done if r["kind"] == "randomize"} == {"applied"}
