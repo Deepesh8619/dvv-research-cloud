@@ -26,7 +26,8 @@ from typing import Any
 
 from src.core.survey_definition import SurveyDefinition
 from src.engines.questionnaire.conditions import compile_condition
-from src.engines.questionnaire.note_lines import note_lines
+from src.engines.questionnaire.note_groups import NESTED, band_lines, nested_variable, split_lists
+from src.engines.questionnaire.note_lines import note_lines, sentences
 
 _CREATE = re.compile(
     r"\bcreate\s+(?:a\s+|an\s+)?(?:new\s+)?(?:dummy\s+|hold\s+|hidden\s+|programming\s+)*"
@@ -62,7 +63,7 @@ def _name_in(rest: str) -> str | None:
 
 
 def _notes(question) -> list[str]:
-    return note_lines(question)
+    return sentences(note_lines(question))
 
 
 _PUNCH_AT = re.compile(r"(?:selected\s+)?punch(?:es)?\s+(\d[\d\s,]*(?:\s*(?:or|and|-|–)\s*\d+)*)"
@@ -118,8 +119,8 @@ def _variables(survey: SurveyDefinition) -> list[dict[str, Any]]:
                 i += 1
                 continue
             rest = m.group("rest")
-            name = _name_in(rest) or f"{q.qid}_VAR"
-            bands, i = [], i + 1
+            name = _name_in(rest.partition(":")[0]) or _name_in(rest) or f"{q.qid}_VAR"
+            bands, i = band_lines(rest), i + 1
             # The list ends at the first line not shaped like a group: "Allow
             # multiple response except punch 99." after the groups is a rule.
             while i < len(notes) and not _CREATE.search(notes[i]) and _band_like(notes[i]):
@@ -134,7 +135,12 @@ def _variables(survey: SurveyDefinition) -> list[dict[str, Any]]:
                     found.append(_variable(bands[start].strip(), q, rest,
                                            bands[start + 1:end], survey))
                 continue
-            found.append(_variable(name, q, rest, bands, survey))
+            lists = split_lists(bands)
+            names = [name] + [f"{name}_{k}" for k in range(2, len(lists) + 1)]
+            for k, (nm, lines) in enumerate(zip(names, lists, strict=True)):
+                found.append(_variable(nm, q, rest, lines, survey))
+                if k == 0 and len(lists) > 1:
+                    found[-1]["also"] = names[1:]
     return found
 
 
@@ -144,6 +150,8 @@ def _variable(name, q, rest, lines, survey) -> dict[str, Any]:
     if _FILE.search(rest):
         var.update(status="needs_you", why="built from a file that is not attached")
         return var
+    if any(NESTED.match(line) for line in lines):
+        return nested_variable(var, lines, q, survey)
     # "based on responses at S2." heads a list; the band lines carry the rules.
     for line in lines:
         band = {"line": line, "label": line, "condition": None}
@@ -223,6 +231,11 @@ def _questions(survey, variables) -> tuple[list[dict], list[dict]]:
         if var["status"] == "needs_you":
             key = re.sub(r"\b[A-Z]{2,}(?=SERVICES\b)", "", var["why"])
             groups.setdefault(f"{var['at']}|{key}", []).append(var)
+    for var in variables:
+        if var.get("also"):
+            asks.append({"qid": var["at"], "kind": "two_lists", "variables": [var["name"]],
+                         "ask": f"{var['name']} lists two breakdowns. Keep both, or only the "
+                                "first?", "options": ["Keep both", "Only the first"]})
     for grouped in groups.values():
         first, names = grouped[0], [v["name"] for v in grouped]
         listed = ", ".join(names[:6]) + (f" and {len(names) - 6} more" if len(names) > 6 else "")
@@ -230,7 +243,9 @@ def _questions(survey, variables) -> tuple[list[dict], list[dict]]:
                      "ask": f"{listed} ({first['at']}): {first['why']}. How should "
                             f"{'they' if len(names) > 1 else 'it'} be built?",
                      "options": ["Leave for the scripter", "I will write the rule"]
-                     + (["I will upload the file"] if "file" in first["why"] else [])})
+                     + (["I will upload the file"] if "file" in first["why"] else [])
+                     + ([f"I will point to the {first['missing']}"] if first.get("missing")
+                        else [])})
     return asks, checks
 
 

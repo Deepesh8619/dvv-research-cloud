@@ -61,3 +61,46 @@ def test_what_only_a_person_can_settle_is_asked_with_options():
     assert "1 2 9899" in kinds["codes"]["ask"]
     assert kinds["variable"]["variables"] == ["PARENTBRAND"]
     assert [c["kind"] for c in read["checks"]] == ["quality"]
+
+
+_AGES = "18-34, 35-49, 50-64, 65+, 18-24, 25-34, 35-44, 45-54, 55-64, 65+"
+_NEST = "M18-34, F18-34, M35-49, F35-49, M50-64, F50-64, M65+, F65+"
+
+
+def _nested_survey(form, gender=True):
+    if form == "stuck":
+        notes = [f"Create a variable called AGEBANDS for age ranges: {_AGES.replace(', ', '')}"
+                 f"Create a variable called GENAGE for nested gender and age: "
+                 f"{_NEST.replace(', ', '')}"]
+    else:
+        notes = ["Create a variable called AGEBANDS for age ranges:",
+                 *_AGES.split(", "),
+                 "Create a variable called GENAGE for nested gender and age:",
+                 *_NEST.split(", ")]
+    qs = [_q("S1", notes, QuestionType.NUMERIC)]
+    if gender:
+        qs.append(_q("S2", [], options=[Option(code=1, label="Male"),
+                                        Option(code=2, label="Female")]))
+    return SurveyDefinition(study_id="s", source="x", status="draft",
+                            blocks=[Block(block_id="B", question_ids=[q.qid for q in qs])],
+                            questions=qs)
+
+
+def test_two_lists_and_nested_bands_in_either_form():
+    for form in ("stuck", "lines"):
+        read = analyst_reading(_nested_survey(form))
+        by = {v["name"]: v for v in read["variables"]}
+        assert set(by) == {"AGEBANDS", "AGEBANDS_2", "GENAGE"}, form
+        assert [len(by[n]["bands"]) for n in ("AGEBANDS", "AGEBANDS_2", "GENAGE")] == [4, 6, 8]
+        assert all(v["status"] == "ready" for v in by.values()), form
+        asks = [a for a in read["questions"] if a["kind"] == "two_lists"]
+        assert len(asks) == 1 and "Keep both" in asks[0]["options"]
+        assert by["GENAGE"]["bands"][0]["condition"]["verbatim_text"] == (
+            "S2 = 1 AND S1 between 18 and 34")
+
+
+def test_nested_bands_without_a_gender_question_need_you():
+    read = analyst_reading(_nested_survey("lines", gender=False))
+    nested = next(v for v in read["variables"] if v["name"] == "GENAGE")
+    assert nested["status"] == "needs_you"
+    assert "gender question is missing" in nested["why"]
