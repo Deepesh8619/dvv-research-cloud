@@ -60,3 +60,11 @@ def test_multiple_responses_need_options_and_min_length_is_kept():
     assert rk.validation["rank_top"] == 3
     element = compile_survey(_survey(oe))["pages"][0]["elements"][0]
     assert element["validators"][0]["minLength"] == 20
+
+
+def test_an_answer_already_listed_is_not_added_twice():
+    q = Question(qid="QA", text="Age?", type=QuestionType.NUMERIC,
+                 options=[Option(code=99, label="Prefer not to answer TERMINATE (IF SELECTED)")])
+    apply_entry(q, ["Allow a whole number or check ‘Prefer not to answer’ (which cannot be combined "
+              "with any other response)."], [])
+    assert [o.code for o in q.options] == [99]

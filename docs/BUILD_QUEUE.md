@@ -426,14 +426,14 @@ note → clauses → kind → outcome
 - `scripts/note_census.py PATH.docx... [--gold-dir DIR] [--examples]`: AI assumed off; prints a table per kind and totals; `--examples` prints unread clauses. It writes no files and is never given client text to commit.
 - **Tests:** a made-up survey producing each outcome; blank sentences skipped; a sentence with two kinds gives two records.
 
-### N2: Split run-together notes · haiku · needs N1
+### N2: Split run-together notes · haiku · done (`split_groups` is called from N5)
 **Files:** `src/engines/questionnaire/note_lines.py`, `tests/unit/test_note_lines.py`.
 - Word often drops the line breaks. Make `sentences` also split with no space after the stop: `terminate.If respondent` → two. Never split `Q.4`, `e.g.`, `1.5`, `S1.a`.
 - New `split_groups(text) -> list[str]`, used only on what follows `':'` in a "create … variable" note: `18-3435-4950-6465+` → `18-34, 35-49, 50-64, 65+`; `M18-34F18-34M65+F65+` → `M18-34, F18-34, M65+, F65+`. A range is accepted only when low < high, and the next range starts at or after a plausible age (10-120). Otherwise return the text whole.
 - A second `Create … variable` inside one line starts a new note.
 - **Tests:** those lines; each no-split case; text that must come back whole.
 
-### N3: How an answer is entered · sonnet · needs N1
+### N3: How an answer is entered · sonnet · done
 **Files:** new `src/engines/questionnaire/note_entry.py`, one call in `note_rules.apply`, new `tests/unit/test_note_entry.py`.
 - `apply(q, notes, made)`, run after `_limits`, then range and terminate are re-checked so they apply to a question whose type this just settled.
 - Only where the question's type is unsettled (type `INFO` with `validation["extraction_error"]`) or the text says otherwise: "whole number", "Acceptable range", "numeric" → numeric; "Allow/Accept one response" → single **if it has options**; "Allow/Accept multiple responses" → multi if it has options; "Write response here", "open end response" → open text.
@@ -443,7 +443,7 @@ note → clauses → kind → outcome
 - Clear `extraction_error` only if the type, plus options where the type needs them, are now settled; record what decided it in `extraction_evidence`.
 - **Tests:** the note in `docs/READER_FIX_GUIDE.md` style, no `[NUMERIC]` tag: numeric, 1-120, under-18 terminate, opt-out answer exclusive; a real single question's type is never overwritten.
 
-### N4: Which answers are shown · sonnet · needs N1
+### N4: Which answers are shown · sonnet · done (#243; "Mask: show codes" not done)
 **Files:** new `src/engines/questionnaire/note_answers.py`, one call in `note_rules.apply`, `tests/unit/test_note_answers.py`.
 - Read first: `_answers` in `note_rules.py`, `_choices_visible_if` and `_techniques` in `surveyjs_compiler.py`, `grid_masks.py`, and the mask dict shape they use. Write the same shape: no new mask format.
 - "Keep punch 9 …", "… at the bottom", "fix/lock punch N" → `anchored`.
@@ -468,7 +468,7 @@ note → clauses → kind → outcome
 - Anything less exact: `asked`.
 - **Tests:** the flow survives `surveyjs_compiler` and `logic_proof`; answering X twice ends the survey; answering 40 the second time continues.
 
-### N7: The scripter's checklist · haiku · needs N1
+### N7: The scripter's checklist · haiku · done (#242; not yet on the review page)
 **Files:** `src/engines/questionnaire/reading_questions.py` (`_questions` checks only), `tests/unit/test_reading_questions.py`.
 - Every ledger record with outcome `scripter` appears once in `checks`: `{"kind": <kind>, "qid", "said"}`. Keep the existing quality check shape.
 - Add to the ledger's `layout` and `by_design` patterns: "intermediate text only", "show on carousel/carrousel", "respondents can see", "show to all". Grouped display must not ask a person anything.
@@ -489,7 +489,7 @@ note → clauses → kind → outcome
 - A survey that is live is never changed this way: say so in a plain sentence.
 - **Tests:** answer → survey changed; re-read → still changed; live → refused; stale key → no change.
 
-### N10: See every note on the review page · sonnet (ui-builder) · needs N1
+### N10: See every note on the review page · sonnet (ui-builder) · done (#241; browser check pending)
 **Files:** `api/routes/questionnaire.py` (return the ledger), `web/src/api/client.ts`, `web/src/components/DecodingPanel.tsx`, its test.
 - A "Notes" section: "312 notes: 240 applied, 30 need you, 25 for the scripter, 17 not understood", filter by outcome, each row showing question, the note's words and what was done.
 - A row with `unread` has one action, "Explain this to the Copilot", which uses the existing `askCopilot` with the note's words and the existing teaching path. A taught form then counts as applied after the next re-read.

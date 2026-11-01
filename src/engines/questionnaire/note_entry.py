@@ -46,7 +46,8 @@ def apply(q, notes: list[str], made: list[dict]) -> None:
             q.type = QuestionType.SINGLE
     if opted and q.type is QuestionType.NUMERIC:
         label = opted.group(1).strip()
-        if not any(o.label.strip().lower() == label.lower() for o in q.options or []):
+        # The answer may already be listed, with its own note after the label.
+        if not any(o.label.strip().lower().startswith(label.lower()) for o in q.options or []):
             codes = [o.code for o in q.options or []]
             code = 99 if 99 not in codes else max(codes) + 1
             stated = re.search(rf"\b(\d{{1,3}})\s*[.:)=-]?\s*{re.escape(label)}", text, re.I)
@@ -63,6 +64,7 @@ def apply(q, notes: list[str], made: list[dict]) -> None:
         made.append({"qid": q.qid, "set": f"type {q.type.value}", "said": text[:80]})
         _limits(q, notes, made)  # range and screen-out, now the type is settled
         if unsettled and (q.type not in (QuestionType.SINGLE, QuestionType.MULTI) or q.options):
+            q.required = True  # an unread question defaulted to optional
             q.validation.pop("extraction_error")
             q.flags = [f for f in q.flags if not f.startswith("EXTRACTION_")]
             if "could not be fully read" in str((q.validation.get("resolution") or {}).get("summary")):  # noqa: E501
