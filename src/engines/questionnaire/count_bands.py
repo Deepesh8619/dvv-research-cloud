@@ -22,14 +22,45 @@ _COUNT = re.compile(
     r"^\s*(?:(?:did\s+)?select(?:ed)?\s+)?(?P<only>only\s+)?(?P<k>none|\d{1,2}|"
     + "|".join(_WORDS[1:]) + r")\s+of\s+punch(?:es)?\s+"
     r"(?P<codes>\d+(?:\s*(?:,|\bor\b|\band\b)\s*\d+)*)\s+(?:at|in)\s+(?P<qs>.+?)\s*\.?\s*$", re.I)
+# Several answers at ONE question: "selected ONLY TWO of the following at S2: punch 1, 2, 4".
+_OF_ANSWERS = re.compile(
+    r"^\s*(?:(?:did\s+)?select(?:ed)?\s+)?(?P<only>only\s+|all\s+)?(?P<k>\d{1,2}|"
+    + "|".join(_WORDS[1:]) + r")\s+of\s+the\s+following\s+(?:at|in)\s+(?P<q>[^:]+?)\s*:\s*"
+    r"punch(?:es)?\s+(?P<codes>\d+(?:\s*(?:,|\bor\b|\band\b)\s*\d+)*)\s*\.?\s*$", re.I)
 
 
 def is_count_form(rule: str) -> bool:
-    return bool(_COUNT.match(rule))
+    return bool(_COUNT.match(rule) or _OF_ANSWERS.match(rule))
+
+
+def _of_answers(m: re.Match, survey: SurveyDefinition) -> tuple[Expression, str]:
+    word = m.group("k").lower()
+    k = int(word) if word.isdigit() else _WORDS.index(word)
+    codes = [int(c) for c in re.findall(r"\d+", m.group("codes"))]
+    qid = _known_qid(m.group("q"), survey)
+    options = {o.code for o in next(q for q in survey.questions if q.qid == qid).options or []}
+    if options and not set(codes) <= options:
+        raise ValueError(f"punch {', '.join(map(str, sorted(set(codes) - options)))} "
+                         f"is not an answer at {qid}")
+    if k > len(codes):
+        raise ValueError(f"needs {k} answers but lists {len(codes)}")
+    if not m.group("only") and k != len(codes):
+        raise ValueError(f"says selected {word} of {len(codes)} without \"only\": "
+                         "at least or exactly?")
+
+    def has(code: int) -> Expression:
+        return Expression(op="in", qid=qid, values=[code])
+
+    ways = [Expression(op="and", children=[
+        has(c) if c in chosen else Expression(op="not", children=[has(c)]) for c in codes])
+        for chosen in combinations(codes, k)]
+    return (ways[0] if len(ways) == 1 else Expression(op="or", children=ways)), ""
 
 
 def count_condition(rule: str, survey: SurveyDefinition) -> tuple[Expression, str]:
     """(the rule, a note on sources skipped), or ValueError saying why a person must decide."""
+    if each := _OF_ANSWERS.match(rule):
+        return _of_answers(each, survey)
     m = _COUNT.match(rule)
     if not m:
         raise ValueError(f"cannot read the count in {rule.strip()!r}")

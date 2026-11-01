@@ -11,6 +11,7 @@ from src.core.survey_definition import (
     evaluate,
 )
 from src.engines.questionnaire import extractor as ex
+from src.engines.questionnaire.count_bands import count_condition
 from src.engines.questionnaire.derived import derived_values
 from src.engines.questionnaire.reading_questions import analyst_reading
 from src.intake.questionnaire_loader import DocumentBlock, segment_into_questions
@@ -102,3 +103,16 @@ def test_what_a_person_must_decide_is_named(monkeypatch):
     assert "more than 8" in why("selected ONLY ONE of punch 2 at "
                                 + ", ".join(["T1"] * 9))
     assert "only T1" in why("selected ONLY TWO of punch 2 at T1, T4")
+
+
+def test_counting_answers_at_one_question():
+    multi = Question(qid="S2", text="S2?", type=QuestionType.MULTI, options=[
+        Option(code=c, label=str(c)) for c in (1, 2, 4)])
+    survey = SurveyDefinition(study_id="s", source="x", status="draft",
+                              blocks=[Block(block_id="B", question_ids=["S2"])], questions=[multi])
+    expr, _ = count_condition("selected ONLY TWO of the following at S2: punch 1, 2, 4", survey)
+    assert evaluate(expr, {"S2": [1, 4]})
+    assert not evaluate(expr, {"S2": [1]})
+    assert not evaluate(expr, {"S2": [1, 2, 4]})
+    every, _ = count_condition("selected ALL THREE of the following at S2: punch 1, 2, 4", survey)
+    assert evaluate(every, {"S2": [1, 2, 4]})
