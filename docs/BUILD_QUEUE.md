@@ -508,7 +508,7 @@ Read a sample of about 150 clauses across the real documents by hand and store t
 
 ## Wave PN2: note forms a hand-read sample found missing
 
-From reading 155 sampled clauses by hand (N11). Same rules as Wave PN. None started.
+From reading 155 sampled clauses by hand (N11). Same rules as Wave PN. All built (#250-#253).
 
 - **N12 Count bands:** "One service = selected only one of punch 2 at S5a, S6, S7". Conditions need a count operator. Most common genuine unread form on Charter.
 - **N13 Answers that cannot go together:** "Do not allow punch 1 and 2 to be selected together" as a link validator.

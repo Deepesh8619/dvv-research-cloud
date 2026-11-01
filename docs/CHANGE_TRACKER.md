@@ -21,6 +21,14 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-11-01 — Wave PN2: the note forms a hand check found missing (#250-#253)
+
+Count bands without a new operator, answers that cannot go together, more masks, groups kept together in the link, "RANDOMIZE ORDER" on a scale is asked rather than shuffled, CONTINUE IF, up to N open-end boxes, block asks, the model's "Yes", later bases read a second ask, and "applied" now needs the note itself to have done it.
+
+Measured, AI off, 24 documents: 511 → 513 of 995, newly wrong none. Census, 7 real documents: 663 applied, 34 asked, 40 scripter, 25 nothing to do, 307 unread, of 1,069. Not exercised on real Bedrock or in a browser; the multi-box open end has not been through a live submit.
+
+---
+
 ## 2026-11-01 — every programmer note gets an outcome (Wave PN, #240-#249)
 
 Each sentence in a note is now recorded as applied, asked, for the scripter, nothing to do, or unread, and shown in a Notes section on the review page. New forms: note-settled types, opt-out answers, masks, anchors, nested gender and age groups, two lists under one name, refuse-and-ask-again as a real second question. Answers to reading questions can create variables. A model suggests readings for what is left, never setting anything itself.

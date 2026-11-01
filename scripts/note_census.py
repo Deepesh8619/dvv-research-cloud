@@ -18,9 +18,10 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-for key in ("BEDROCK_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "HF_TOKEN"):
-    os.environ[key] = ""
-os.environ["OLLAMA_HOST"] = "http://127.0.0.1:1"
+if __name__ == "__main__":  # never when a test imports this: it would leak into later tests
+    for key in ("BEDROCK_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "HF_TOKEN"):
+        os.environ[key] = ""
+    os.environ["OLLAMA_HOST"] = "http://127.0.0.1:1"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.engines.questionnaire.extractor import extract_survey_definition  # noqa: E402
