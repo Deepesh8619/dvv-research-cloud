@@ -77,6 +77,7 @@ from src.engines.questionnaire.loop_bases import (
 from src.engines.questionnaire.loops import expand_loops
 from src.engines.questionnaire.mr_techniques import Mask, detect_techniques
 from src.engines.questionnaire.note_ledger import ledger as note_ledger
+from src.engines.questionnaire.note_model import apply as ask_model_about_notes
 from src.engines.questionnaire.note_rules import apply as apply_note_rules
 from src.engines.questionnaire.per_item import apply as apply_per_item_grids
 from src.engines.questionnaire.profiles import detect_profile
@@ -1929,6 +1930,8 @@ def extract_survey_definition(
     # rules where the words are exact), questions only a person can settle,
     # quality checks to add.
     survey.metadata["decoding"]["analyst"] = analyst_reading(survey)
+    if blocks is not None and not _MODEL_OFF.get():
+        ask_model_about_notes(survey)  # what no reader understood; suggestions only
     survey.metadata["decoding"]["profile"] = survey.metadata.get("document_profile")
     return survey
 
