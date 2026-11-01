@@ -219,6 +219,11 @@ def _questions(survey, variables) -> tuple[list[dict], list[dict]]:
     defined = {v["name"]: v for v in variables}
     seen_refs: set[str] = set()
     for q in survey.questions:
+        if said := (q.validation or {}).get("randomize_unclear"):
+            asks.append({"qid": q.qid, "kind": "randomize",
+                         "ask": f"{q.qid} says \"{said.strip(' .')}\" but its answers are a "
+                                "scale. What is randomised?",
+                         "options": ["The questions or images in this series", "The answers"]})
         for note in _notes(q):
             if m := _CODE_MISMATCH.search(note):
                 asks.append({"qid": q.qid, "kind": "codes",

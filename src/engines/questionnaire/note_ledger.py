@@ -38,7 +38,8 @@ KINDS: tuple[tuple[str, re.Pattern], ...] = (
     _k("reask", r"\bsecond\s+time\b|\bask\s+again\b|\bre-?ask\b|\bre-?show\b"),
     _k("hidden_var", r"\bcreate\b.*\bvariables?\b|\bhidden\s+variable|\bdummy\s+variable|\bhold\s+variable|\brecode\b"),  # noqa: E501
     _k("base", r"\b(?:ask|asked|show)\s+(?:module\s+)?(?:only\s+)?(?:if|for|those)\b|^\s*(?:base|filter)\b|\bonly\s+ask\b"),  # noqa: E501
-    _k("mask", r"\bmask\b|\bonly\s+show\s+(?:those\s+)?selected|\bshow\s+(?:only\s+)?(?:those\s+|brands?\s+)?(?:not\s+)?selected\s+at|\bhide\s+answers?|\bcarry[- ]?forward"),  # noqa: E501
+    _k("mask", r"\bmask\b|\bonly\s+show\s+(?:those\s+)?selected|\bshow\s+(?:only\s+)?(?:those\s+|brands?\s+)?(?:not\s+)?selected\s+at|\bhide\s+answers?|\bcarry[- ]?forward|\bshow\s+all\b.*\bexcept\b.*\bselected\s+at|\bonly\s+show\s+punch|\bshow\s+codes?\b"),  # noqa: E501
+    _k("not_together", r"\b(?:do\s+not|don.t|never)\s+allow\s+punch(?:es)?\s+\d+.*\btogether\b"),
     _k("randomize", r"\brandomi[sz]|\brotate\b|\bshuffle"),
     _k("anchor", r"^(?!.*\btogether\b).*(?:\banchor|\b(?:keep|lock|fix(?:ed)?)\s+punch|\bat\s+the\s+(?:bottom|top)\b)"),  # noqa: E501
     _k("pipe", r"\bpipe[ds]?\b|\bpiping\b|\binsert\s+(?:the\s+)?(?:response|answer|text)"),
@@ -79,7 +80,8 @@ _CHECKS = {
     "terminate": lambda q, _: q.terminate_if is not None,
     "exclusive": lambda q, _: any(o.exclusive for o in q.options or []),
     "base": lambda q, _: q.show_if is not None or any(o.show_if for o in q.options or []),
-    "mask": lambda q, _: bool(_techniques(q).get("masks")),
+    "mask": lambda q, _: bool(_techniques(q).get("masks")) or any(o.show_if for o in q.options or []),  # noqa: E501
+    "not_together": lambda q, _: bool(_validation(q).get("never_together")),
     "anchor": lambda q, _: any(o.anchored for o in q.options or []),
     "pipe": lambda q, _: bool(q.piping_refs or _techniques(q).get("pipes")),
     "limit_select": lambda q, _: "min_select" in _validation(q) or "max_select" in _validation(q),
@@ -102,6 +104,8 @@ def _outcome(kind: str, said: str, q, variables: list[dict],
             return "unread", "keeping groups together is not built"
         if _NEGATED.search(said):  # honoured when the question is not shuffled
             return ("unread", "still randomised") if q.randomize_options else ("applied", "randomize_options off")  # noqa: E501
+        if _validation(q).get("randomize_unclear") == said:
+            return "asked", "which list the randomise means"
         return ("applied", "randomize_options") if q.randomize_options else ("unread", "")
     if kind == "hidden_var":
         mine = [v for v in variables if v["at"] == q.qid]
