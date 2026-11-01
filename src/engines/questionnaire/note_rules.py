@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 
 from src.core.survey_definition import Expression, QuestionType, SurveyDefinition
+from src.engines.questionnaire import note_answers
 from src.engines.questionnaire.conditions import compile_condition
 from src.engines.questionnaire.note_lines import note_lines, sentences
 
@@ -297,6 +298,7 @@ def apply(survey: SurveyDefinition) -> list[dict]:
         if module_base is not None:
             set_base(q, Expression.from_dict(module_base.to_dict()), "module screen", "module")
         _answers(q, notes, made)
+        note_answers.apply(survey, q, notes, made)
         _limits(q, notes, made)
     return made
 

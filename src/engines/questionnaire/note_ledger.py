@@ -88,9 +88,8 @@ def _outcome(kind: str, said: str, q, variables: list[dict]) -> tuple[str, str]:
     if kind in _FIXED:
         return _FIXED[kind], ""
     if kind == "randomize":
-        # "Do not randomize" is the default, so the field cannot show it was read.
-        if _NEGATED.search(said):
-            return "unread", "negated; the setting cannot show it was read"
+        if _NEGATED.search(said):  # honoured when the question is not shuffled
+            return ("unread", "still randomised") if q.randomize_options else ("applied", "randomize_options off")  # noqa: E501
         return ("applied", "randomize_options") if q.randomize_options else ("unread", "")
     if kind == "hidden_var":
         mine = [v for v in variables if v["at"] == q.qid]
