@@ -1,4 +1,5 @@
 import 'survey-core/defaultV2.min.css'
+import { applyKeepTogether } from '../components/respondent/keepTogether'
 import QuestionSymbol from '../components/respondent/symbols'
 
 import { useEffect, useRef, useState } from 'react'
@@ -232,6 +233,7 @@ export default function RespondentPage() {
         const surveyTemplate = templateSlug(res.data.template)
         loadTemplateFont(surveyTemplate)
         const survey = new Model(res.data.surveyjs_json)
+        applyKeepTogether(survey, res.data.surveyjs_json)
         const pipeVariables = (res.data.surveyjs_json as { pipeVariables?: PipeVariable[] })
           .pipeVariables ?? []
         setSymbols(

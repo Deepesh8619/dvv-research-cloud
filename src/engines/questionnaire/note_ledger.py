@@ -89,6 +89,19 @@ _CHECKS = {
 }
 
 
+def _together_outcome(said: str, q) -> tuple[str, str]:
+    """Applied when the question carries groups that hold the codes the note names."""
+    from src.engines.questionnaire.note_answers import groups_in
+
+    held = [set(g["codes"]) for g in _validation(q).get("keep_together") or []]
+    if not held or not q.randomize_options:
+        return "unread", "keeping groups together is not applied"
+    named = groups_in(said)
+    if named and not all(any(set(n) <= h for h in held) for n in named):
+        return "unread", "the groups named are not the ones stored"
+    return "applied", "keep_together"
+
+
 def _outcome(kind: str, said: str, q, variables: list[dict],
              qids: frozenset[str] = frozenset()) -> tuple[str, str]:
     if kind == "reask":  # applied once the second ask exists; else a person decides
@@ -99,7 +112,7 @@ def _outcome(kind: str, said: str, q, variables: list[dict],
         return _FIXED[kind], ""
     if kind == "randomize":
         if _TOGETHER.search(said):
-            return "unread", "keeping groups together is not built"
+            return _together_outcome(said, q)
         if _NEGATED.search(said):  # honoured when the question is not shuffled
             return ("unread", "still randomised") if q.randomize_options else ("applied", "randomize_options off")  # noqa: E501
         return ("applied", "randomize_options") if q.randomize_options else ("unread", "")
@@ -129,8 +142,9 @@ def read_notes(survey: SurveyDefinition) -> list[dict[str, Any]]:
         for said in sentences(note_lines(q)):
             if not re.search(r"\w", said) or _NOT_A_NOTE.search(said):
                 continue
+            unmatched = ["randomize"] if _TOGETHER.search(said) else ["none"]
             kinds = (["reask"] if said in flow
-                     else [k for k, rx in KINDS if rx.search(said)] or ["none"])
+                     else [k for k, rx in KINDS if rx.search(said)] or unmatched)
             # A line listed under a "create … variable" note is that variable's group.
             if said in bands.get(q.qid, ()):
                 kinds = ["hidden_var"]

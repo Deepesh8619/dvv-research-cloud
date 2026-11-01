@@ -20,6 +20,9 @@ _NO_SHUFFLE = re.compile(r"\b(?:do\s+not|don.t|never)\s+(?:randomi[sz]e|rotate|s
 _FIX = re.compile(rf"\b(?:fix(?:ed)?|lock(?:ed)?)\s+punch(?:es)?\s+({_N}(?:\s*(?:and|&)\s*(?:punch\s+)?{_N})*)", re.I)  # noqa: E501
 _KEEP = re.compile(rf"\bkeep\s+punch(?:es)?\s+({_N})[^.]*?\b(?:at\s+the\s+(?:bottom|top|end)|last|first|in\s+place)\b", re.I)  # noqa: E501
 _PUNCH_AT_END = re.compile(rf"\bpunch(?:es)?\s+({_N})[^.]*?\bat\s+the\s+(?:bottom|top)\b", re.I)
+_GROUP = re.compile(rf"(?:punch(?:es)?\s+)?({_N})\s*(?:\([^)]*\)\s*)?together", re.I)
+_IN_ORDER = re.compile(r"\b(?:in|same|fixed)\s+(?:the\s+)?(?:given\s+)?(?:order|sequence)\b"
+                       r"|\bdo\s+not\s+(?:randomi[sz]e|shuffle)\s+within\b", re.I)
 _WHAT = r"(?:those|brands?|answers?|options?|items?|codes?)"
 _SHOWN = re.compile(rf"\b(?:only\s+show|show\s+only|display\s+only|show|display)\s+(?:{_WHAT}\s+)*"
                     rf"(?:that\s+were\s+)?(?P<neg>not\s+)?(?:selected|picked|chosen)\s+(?:at|in|from)\s+{_QID}", re.I)  # noqa: E501
@@ -38,9 +41,10 @@ def apply(survey: SurveyDefinition, q, notes: list[str], made: list[dict]) -> No
                 and q.randomize_options:
             q.randomize_options = False
             made.append({"qid": q.qid, "set": "randomize off", "said": note})
-        if _KEEP.search(note) and re.search(r"\btogether\b", note, re.I):
-            pass  # "keep punch 9 and 10 together" shuffles as a pair; it pins nothing
-        else:
+        together = re.search(r"\btogether\b", note, re.I)
+        if together:
+            _together(q, note, by_code, made)  # pins nothing: the group moves as one
+        if not (together and _KEEP.search(note)):
             found = [m for rx in (_FIX, _KEEP, _PUNCH_AT_END) for m in rx.finditer(note)]
             for code in [c for m in found for c in _codes(m.group(1))]:
                 if (o := by_code.get(code)) is not None and not o.anchored:
@@ -48,6 +52,30 @@ def apply(survey: SurveyDefinition, q, notes: list[str], made: list[dict]) -> No
                     made.append({"qid": q.qid, "set": f"anchored {code}", "said": note})
         _mask(survey, q, note, made)
         _hide_if(survey, q, note, by_code, made)
+
+
+def groups_in(note: str) -> list[list[int]]:
+    """Every run of punches the note says to keep together (two or more codes)."""
+    from src.engines.questionnaire.note_rules import _codes
+
+    found = [list(dict.fromkeys(_codes(m.group(1)))) for m in _GROUP.finditer(note)]
+    return [g for g in found if len(g) > 1]
+
+
+def _together(q, note: str, by_code: dict, made: list[dict]) -> None:
+    """Store `keep_together` only when every group is real, whole and disjoint."""
+    groups = groups_in(note)
+    kept = (q.validation or {}).get("keep_together") or []
+    taken = [c for g in kept for c in g["codes"]]
+    flat = [c for g in groups for c in g]
+    if not groups or len(set(flat)) != len(flat) or set(flat) & set(taken):
+        return
+    if any(c not in by_code or by_code[c].anchored for c in flat):
+        return
+    within = not _IN_ORDER.search(note)
+    new = [{"codes": g, "shuffle_within": within} for g in groups]
+    q.validation = {**(q.validation or {}), "keep_together": [*kept, *new]}
+    made.append({"qid": q.qid, "set": f"keep together {flat}", "said": note})
 
 
 def _earlier(survey: SurveyDefinition, q, qid: str):

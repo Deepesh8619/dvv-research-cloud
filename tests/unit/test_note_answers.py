@@ -80,3 +80,42 @@ def test_option_hidden_by_condition():
     assert shown[3].op == "not" and shown[3].children[0].qid == "S2"
     assert shown[1] is None and shown[98] is None
     assert all(o.show_if is None for o in qs["Q2"].options)   # S9 does not exist
+
+
+def _kt(note, codes=None, **kw):
+    codes = codes or tuple(range(1, 13))
+    q = _run(_q("Q1", [note], codes=codes, randomize_options=True, **kw))["Q1"]
+    return (q.validation or {}).get("keep_together"), q
+
+
+def test_groups_kept_together_four_forms():
+    got, _ = _kt("Randomize punch 1-11, keep punch 3-5 together (random order), punch 6-7 together")
+    assert got == [{"codes": [3, 4, 5], "shuffle_within": True},
+                   {"codes": [6, 7], "shuffle_within": True}]
+    assert _kt("Show 1-3 together; randomize order within 1-3")[0] == [
+        {"codes": [1, 2, 3], "shuffle_within": True}]
+    assert _kt("Keep punch 9 and 10 together")[0] == [{"codes": [9, 10], "shuffle_within": True}]
+    assert _kt("Show 4-5 together, randomize order within pair")[0][0]["codes"] == [4, 5]
+    assert _kt("Show 4-5 together, in the same order")[0][0]["shuffle_within"] is False
+
+
+def test_groups_with_missing_overlapping_or_anchored_codes_set_nothing():
+    assert _kt("Keep punch 9 and 99 together")[0] is None
+    assert _kt("Keep punch 3-5 together, punch 5-6 together")[0] is None
+    _, q = _kt("Randomize, anchor punch 12. Keep punch 11 and 12 together")
+    assert (q.validation or {}).get("keep_together") is None
+
+
+def test_groups_reach_the_compiled_element_without_a_plain_shuffle():
+    from src.renderers.surveyjs_compiler import compile_to_surveyjs
+
+    q = _run(_q("Q1", ["Randomize, anchor punch 12. Keep punch 3-5 together."],
+                codes=tuple(range(1, 13)), randomize_options=True))["Q1"]
+    survey = SurveyDefinition(study_id="s", source="x", status="draft",
+                              blocks=[Block(block_id="B", question_ids=["Q1"])], questions=[q])
+    el = compile_to_surveyjs(survey)["pages"][0]["elements"][0]
+    assert el["keepTogether"] == [{"codes": [3, 4, 5], "shuffle_within": True}]
+    assert el["anchoredValues"] == [12]
+    assert "choicesOrder" not in el
+    assert [c["value"] for c in el["choices"]] == list(range(1, 13))
+    assert [r["outcome"] for r in read_notes(survey) if "together" in r["said"]] == ["applied"]

@@ -568,7 +568,15 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
         # its place. "None of the above [ANCHOR]" shuffled into the middle of
         # the list is a scripting error a client would reject the data for, and
         # the library has no way to pin one choice.
-        element["choices"] = _shuffled_choices(question, element["choices"])
+        groups = (question.validation or {}).get("keep_together")
+        if groups:
+            # Groups can't be kept together by SurveyJS or a flat shuffle here:
+            # the respondent page deals the order once per respondent
+            # (keepTogether.ts), so no choicesOrder and no shuffle on this side.
+            element["keepTogether"] = groups
+            element["anchoredValues"] = [o.code for o in question.options if o.anchored]
+        else:
+            element["choices"] = _shuffled_choices(question, element["choices"])
     if question.randomize_options and element.get("type") in ("matrix", "matrixdropdown"):
         # A grid's randomisation is its ROWS. Only choices were ever shuffled,
         # so every "[ROWS, RANDOMIZE]" grid reached respondents in one order.

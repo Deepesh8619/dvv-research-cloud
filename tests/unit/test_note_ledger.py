@@ -111,6 +111,11 @@ def test_what_a_hand_check_found():
     assert all(r["outcome"] != "applied" for r in _one("Keep punch 1 and 2 together."))
     shuffled = _one("Randomize, keep 1 and 2 together.", randomize_options=True)
     assert shuffled[0]["outcome"] == "unread"
+    held = {"keep_together": [{"codes": [1, 2], "shuffle_within": True}]}
+    held_for = _one("Randomize, keep 1 and 2 together.", randomize_options=True, validation=held)
+    assert held_for[0]["outcome"] == "applied"
+    other = _one("Randomize, keep 1 and 3 together.", randomize_options=True, validation=held)
+    assert other[0]["outcome"] == "unread"
     # "not" in an answer's label is not "do not randomise".
     done = _one("Randomize, anchor ‘Prefer not to answer’.", randomize_options=True)
     assert {r["outcome"] for r in done if r["kind"] == "randomize"} == {"applied"}
