@@ -8,6 +8,7 @@ rule is applied the same way however it was marked.
 from __future__ import annotations
 
 import re
+from itertools import pairwise
 
 _WRAPPED = re.compile(r"^\s*\[\s*(?:(?:PN|PROG(?:RAMMER)?\s+NOTE|SCRIPTER\s+NOTE)\s*:\s*)?(.*?)\s*\]\s*$", re.I)  # noqa: E501
 _PREFIXED = re.compile(
@@ -38,6 +39,68 @@ def note_lines(question) -> list[str]:
     return out
 
 
+_STOP = re.compile(r"(?<=[.!])\s+(?=[A-Z])|(?<=[a-z]{2}[.!])(?=[A-Z])")  # no space: "terminate.If"
+_CREATE = re.compile(r"\bCreate\b(?=[^.]*\bvariable\b)")
+
+
+def _create_parts(line: str) -> list[str]:
+    """A second "Create … variable" on one line starts a new note."""
+    cuts = [m.start() for m in _CREATE.finditer(line)][1:]
+    if not cuts:
+        return [line]
+    bounds = [0, *cuts, len(line)]
+    return [line[a:b] for a, b in pairwise(bounds)]
+
+
 def sentences(lines: list[str]) -> list[str]:
-    return [s.strip() for line in lines
-            for s in re.split(r"(?<=[.!])\s+(?=[A-Z])", line) if s.strip()]
+    return [s.strip() for line in lines for part in _create_parts(line)
+            for s in _STOP.split(part) if s.strip()]
+
+
+def _tokens_at(text: str, pos: int):
+    """Every reading of one band starting at pos: (letter, low, high or None, end)."""
+    letter = text[pos] if pos < len(text) and text[pos].isalpha() else ""
+    start = pos + len(letter)
+    for lo_len in (1, 2, 3):
+        low_txt = text[start:start + lo_len]
+        if len(low_txt) != lo_len or not low_txt.isdigit():
+            continue
+        after = start + lo_len
+        if after < len(text) and text[after] == "+":
+            yield letter, int(low_txt), None, after + 1
+        elif after < len(text) and text[after] == "-":
+            for hi_len in (1, 2, 3):
+                hi_txt = text[after + 1:after + 1 + hi_len]
+                if len(hi_txt) == hi_len and hi_txt.isdigit():
+                    yield letter, int(low_txt), int(hi_txt), after + 1 + hi_len
+
+
+def _parse_groups(text: str, pos: int = 0, prev_high: int | None = None):
+    """Every band from pos to the end, or None. Ranges rise; a letter-led band restarts."""
+    if pos == len(text):
+        return []
+    for letter, low, hi, end in _tokens_at(text, pos):
+        if not (10 <= low <= 120) or (hi is not None and not (low < hi and 10 <= hi <= 120)):
+            continue
+        if not letter and prev_high is not None and low < prev_high:
+            continue
+        rest = _parse_groups(text, end, None if letter or hi is None else hi)
+        if rest is not None:
+            return [(letter, low, hi), *rest]
+    return None
+
+
+def split_groups(text: str) -> list[str]:
+    """Run-together age or gender bands, split: "18-3435-4950-6465+" -> four bands.
+
+    Only for the text after ':' in a "create … variable" note. Anything that
+    does not parse cleanly comes back whole, as a one-item list.
+    """
+    stripped = re.sub(r"\s+", "", text)
+    groups = _parse_groups(stripped) if stripped else None
+    if not groups or len(groups) < 2:
+        return [text.strip()]
+    out = []
+    for letter, low, hi in groups:
+        out.append(f"{letter}{low}+" if hi is None else f"{letter}{low}-{hi}")
+    return out
