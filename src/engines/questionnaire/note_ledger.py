@@ -37,6 +37,10 @@ KINDS: tuple[tuple[str, re.Pattern], ...] = (
     _k("exclusive", r"\bexclusive\b|\bcannot\s+(?:be\s+)?combine|\bdo\s+not\s+allow\s+(?:any\s+other|multi)|\ballow\s+multiple\s+responses?\s+except"),  # noqa: E501
     _k("reask", r"\bsecond\s+time\b|\bask\s+again\b|\bre-?ask\b|\bre-?show\b"),
     _k("hidden_var", r"\bcreate\b.*\bvariables?\b|\bhidden\s+variable|\bdummy\s+variable|\bhold\s+variable|\brecode\b"),  # noqa: E501
+    _k("continue_if", r"\bcontinue\s+if\s+\d"),
+    _k("max_responses", r"\b(?:allow|accept)\s+up\s+to\s+\d+\s+responses?"),
+    _k("row_sources", r"^\s*ask\s+for\s+all\b.*\bselected\s+(?:at|in)\s+[A-Za-z]{1,4}\d"),
+    _k("block_ask", r"^\s*ask\s+Q?[A-Z]{1,4}\d+[a-z]?\b.*\b(?:if|of\s+all)\b"),
     _k("base", r"\b(?:ask|asked|show)\s+(?:module\s+)?(?:only\s+)?(?:if|for|those)\b|^\s*(?:base|filter)\b|\bonly\s+ask\b"),  # noqa: E501
     _k("mask", r"\bmask\b|\bonly\s+show\s+(?:those\s+)?selected|\bshow\s+(?:only\s+)?(?:those\s+|brands?\s+)?(?:not\s+)?selected\s+at|\bhide\s+answers?|\bcarry[- ]?forward|\bshow\s+all\b.*\bexcept\b.*\bselected\s+at|\bonly\s+show\s+punch|\bshow\s+codes?\b"),  # noqa: E501
     _k("not_together", r"\b(?:do\s+not|don.t|never)\s+allow\s+punch(?:es)?\s+\d+.*\btogether\b"),
@@ -79,20 +83,107 @@ _CHECKS = {
     "range": lambda q, _: "min" in _validation(q) or "max" in _validation(q),
     "terminate": lambda q, _: q.terminate_if is not None,
     "exclusive": lambda q, _: any(o.exclusive for o in q.options or []),
-    "base": lambda q, _: q.show_if is not None or any(o.show_if for o in q.options or []),
+    "base": lambda q, _: q.show_if is not None or any(o.show_if for o in q.options or [])
+    or any(r.show_if for r in q.rows or []),
     "mask": lambda q, _: bool(_techniques(q).get("masks")) or any(o.show_if for o in q.options or []),  # noqa: E501
     "not_together": lambda q, _: bool(_validation(q).get("never_together")),
+    "continue_if": lambda q, said: q.terminate_if is not None and bool(
+        re.search(r"\bcontinue\s+if\b", q.terminate_if.verbatim_text or "", re.I)
+        and q.terminate_if.verbatim_text.lower() in said.lower()),
+    "max_responses": lambda q, said: q.type is QuestionType.OPEN_TEXT and (
+        m := re.search(r"up\s+to\s+(\d+)", said, re.I)) is not None
+    and _validation(q).get("max_responses") == int(m.group(1)),
+    "row_sources": lambda q, said: bool(q.rows) and all(
+        r.show_if is not None and r.show_if.verbatim_text == said for r in q.rows),
     "anchor": lambda q, _: any(o.anchored for o in q.options or []),
     "pipe": lambda q, _: bool(q.piping_refs or _techniques(q).get("pipes")),
-    "limit_select": lambda q, _: "min_select" in _validation(q) or "max_select" in _validation(q),
+    "limit_select": lambda q, _: any(k in _validation(q) for k in
+                                     ("min_select", "max_select", "max_responses")),
     "one_or_many": lambda q, _: q.type in (QuestionType.SINGLE, QuestionType.MULTI) and bool(q.options),  # noqa: E501
     "open_end_limit": lambda q, _: "min_length" in _validation(q) or "max_length" in _validation(q),  # noqa: E501
     "sum": lambda q, _: any("sum" in k or "total" in k for k in _validation(q)),
 }
 
 
+def _together_outcome(said: str, q) -> tuple[str, str]:
+    """Applied when the question carries groups that hold the codes the note names."""
+    from src.engines.questionnaire.note_answers import groups_in
+
+    held = [set(g["codes"]) for g in _validation(q).get("keep_together") or []]
+    if not held or not q.randomize_options:
+        return "unread", "keeping groups together is not applied"
+    named = groups_in(said)
+    if named and not all(any(set(n) <= h for h in held) for n in named):
+        return "unread", "the groups named are not the ones stored"
+    return "applied", "keep_together"
+
+
+_MADE_SET = {"base": "show_if", "anchor": "anchored", "exclusive": "exclusive",
+             "terminate": "terminate_if", "range": "range"}
+_QIDS = re.compile(r"\b[A-Z]{1,4}\d+[a-z]?\b")
+_CODES = re.compile(r"\b(?:punch(?:es)?|codes?)\s+((?:\d+\s*(?:[-–,&]|and|or)?\s*)+)", re.I)
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _made_this(kind: str, said: str, q, made: list[dict]) -> bool:
+    """A reader recorded setting this field from words overlapping this clause."""
+    a = _norm(said)
+    return any(m["qid"] == q.qid and m["set"].startswith(_MADE_SET[kind])
+               and (b := _norm(m["said"])) and (a in b or b in a) for m in made)
+
+
+def _named_codes(said: str) -> set[int]:
+    out: set[int] = set()
+    for m in _CODES.finditer(said):
+        for lo, _, hi in re.findall(r"(\d+)(\s*[-–]\s*(\d+))?", m.group(1)):
+            out |= set(range(int(lo), int(hi) + 1)) if hi and int(hi) - int(lo) < 50 else {int(lo)}
+    return out
+
+
+def _consistent(kind: str, said: str, q) -> bool:
+    """The note's own words agree with the field another reader set."""
+    if kind == "base":
+        refs = {r.upper() for e in [q.show_if, *(o.show_if for o in q.options or [])] if e
+                for r in e.referenced_qids()}
+        named = {n.upper() for n in _QIDS.findall(said)}
+        return bool(named) and named <= refs
+    if kind in ("anchor", "exclusive"):
+        flagged = {o.code for o in q.options or []
+                   if (o.anchored if kind == "anchor" else o.exclusive)}
+        return _named_codes(said) <= flagged
+    if kind == "range":
+        v = _validation(q)
+        return {int(n) for n in re.findall(r"\d+", said)} <= {v.get("min"), v.get("max")}
+    return True
+
+
+_PER_ROW = re.compile(r"\b(?:allow|accept)\s+(?:only\s+)?one\s+response\s+per\b", re.I)
+
+
+def _block_applied(said: str, survey: SurveyDefinition) -> bool:
+    """Every question a block note names got its base from THIS note."""
+    from src.engines.questionnaire.note_rules import _BLOCK_ASK
+    from src.engines.questionnaire.note_small_forms import BLOCK_OF_ALL, block_targets
+
+    m = _BLOCK_ASK.match(said) or BLOCK_OF_ALL.match(said)
+    targets = block_targets(m.group("qids"), survey) if m else None
+    set_by = {(r["qid"], r["said"]) for r in survey.metadata.get("note_rules") or []
+              if r.get("set") == "show_if"}
+    named = [t for t in targets or [] if not t.qid.startswith(("INFO", "INTRO", "END"))]
+    return bool(named) and all((t.qid, said) in set_by for t in named)
+
+
 def _outcome(kind: str, said: str, q, variables: list[dict],
-             qids: frozenset[str] = frozenset()) -> tuple[str, str]:
+             qids: frozenset[str] = frozenset(), made: list[dict] = (),
+             survey: SurveyDefinition | None = None) -> tuple[str, str]:
+    if kind == "block_ask":
+        return ("applied", "") if survey is not None and _block_applied(said, survey) \
+            else ("unread", "")
+    if kind == "one_or_many" and q.type is QuestionType.GRID_SINGLE and _PER_ROW.search(said):
+        return "by_design", "a single grid already takes one answer per row"
     if kind == "reask":  # applied once the second ask exists; else a person decides
         return ("applied", f"{q.qid}_REASK") if f"{q.qid}_REASK" in qids else ("asked", "")
     if kind == "warning":  # kept as soft_message; the runtime shows no warnings yet
@@ -101,7 +192,7 @@ def _outcome(kind: str, said: str, q, variables: list[dict],
         return _FIXED[kind], ""
     if kind == "randomize":
         if _TOGETHER.search(said):
-            return "unread", "keeping groups together is not built"
+            return _together_outcome(said, q)
         if _NEGATED.search(said):  # honoured when the question is not shuffled
             return ("unread", "still randomised") if q.randomize_options else ("applied", "randomize_options off")  # noqa: E501
         if _validation(q).get("randomize_unclear") == said:
@@ -119,6 +210,13 @@ def _outcome(kind: str, said: str, q, variables: list[dict],
             return "applied", ", ".join(v["name"] for v in mine)
         return "asked", "; ".join(v["why"] for v in mine if v["status"] != "ready")
     check = _CHECKS.get(kind)
+    if kind in _MADE_SET:  # applied only if this note did it, or says what the field says
+        if not (check and check(q, said)):
+            return "unread", ""
+        if _made_this(kind, said, q, list(made)):
+            return "applied", ""
+        ok = _consistent(kind, said, q)
+        return ("applied", "set by the question's own reading") if ok else ("unread", "")
     return ("applied", "") if check and check(q, said) else ("unread", "")
 
 
@@ -126,6 +224,7 @@ def read_notes(survey: SurveyDefinition) -> list[dict[str, Any]]:
     variables = analyst_reading(survey)["variables"]
     out: list[dict[str, Any]] = []
     qids = frozenset(q.qid for q in survey.questions)
+    made = (survey.metadata or {}).get("note_rules") or []
     by_qid = {q.qid: q for q in survey.questions}
     bands: dict[str, set[str]] = {}
     for v in variables:
@@ -137,13 +236,14 @@ def read_notes(survey: SurveyDefinition) -> list[dict[str, Any]]:
         for said in sentences(note_lines(q)):
             if not re.search(r"\w", said) or _NOT_A_NOTE.search(said):
                 continue
+            unmatched = ["randomize"] if _TOGETHER.search(said) else ["none"]
             kinds = (["reask"] if said in flow
-                     else [k for k, rx in KINDS if rx.search(said)] or ["none"])
+                     else [k for k, rx in KINDS if rx.search(said)] or unmatched)
             # A line listed under a "create … variable" note is that variable's group.
             if said in bands.get(q.qid, ()):
                 kinds = ["hidden_var"]
             for kind in kinds:
-                outcome, detail = ("unread", "") if kind == "none" else _outcome(kind, said, q, variables, qids)  # noqa: E501
+                outcome, detail = ("unread", "") if kind == "none" else _outcome(kind, said, q, variables, qids, made, survey)  # noqa: E501
                 out.append({"qid": q.qid, "said": said, "kind": kind,
                             "outcome": outcome, "detail": detail})
     return out

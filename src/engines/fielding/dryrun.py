@@ -200,6 +200,8 @@ def _answer(
         high = int(validation.get("max", 100) or 100)
         return rng.randint(low, high) if low <= high else low
     if question.type == QuestionType.OPEN_TEXT:
+        if (boxes := (question.validation or {}).get("max_responses")):
+            return {str(n): "it was fine" for n in range(1, rng.randint(1, boxes) + 1)}
         return rng.choice(
             ["it was fine", "nothing to add", "too expensive", "good value", "not sure"]
         )

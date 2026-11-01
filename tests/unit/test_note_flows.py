@@ -136,3 +136,53 @@ def test_a_band_counts_the_second_ask_without_replacing_the_first(monkeypatch):
     assert evaluate(mid, {"S1": opt_out, "S1_REASK": 40})    # typed 40 at the second ask
     assert not evaluate(mid, {"S1": opt_out})                # opted out, never answered
     assert not evaluate(mid, {"S1": 60})                     # outside the band
+
+
+_LATER = "[PN: Ask if S1 under 30]"
+
+
+def _later_survey(monkeypatch):
+    survey = _survey(monkeypatch, ["S1. How old are you?", _ENTRY, _FLOW,
+                                   "S2. Which region do you live in?", _LATER])
+    return survey, survey.metadata["note_flows"]["reask"][0]["opt_out"]
+
+
+def test_a_later_base_reads_the_second_ask(monkeypatch):
+    survey, refused = _later_survey(monkeypatch)
+    s1, again, s2 = survey.questions
+    base = s2.show_if
+    assert base.referenced_qids() == {"S1", "S1_REASK"}
+    assert evaluate(base, {"S1": 25})                          # typed 25 first time
+    assert evaluate(base, {"S1": refused, "S1_REASK": 25})     # refused, then 25
+    assert not evaluate(base, {"S1": refused, "S1_REASK": 40})  # refused, then 40
+    assert not evaluate(base, {"S1": refused})                 # refused, never answered
+    assert not evaluate(base, {"S1": 40})
+    # S1's own screen-out and the second ask's own base are left as they were
+    assert s1.terminate_if.op == "lt" and again.show_if.qid == "S1"
+    assert again.show_if.referenced_qids() == {"S1"}
+    assert prove(survey)["unreachable"] == []
+    import json
+    import re
+
+    from src.core.survey_definition import Option, QuestionType
+
+    s2.type, s2.options = QuestionType.SINGLE, [Option(code=1, label="North")]
+    shown = re.findall(r'"visibleIf": "([^"]*)"', json.dumps(compile_to_surveyjs(survey)))
+    assert any("S1_REASK" in v and "{S1}" in v for v in shown if "anyof" not in v)
+
+
+def test_the_second_ask_pass_is_idempotent_and_covers_other_reads(monkeypatch):
+    from src.engines.questionnaire import note_flows
+
+    survey, refused = _later_survey(monkeypatch)
+    s2 = survey.questions[2]
+    s2.terminate_if = Expression(op="gt", qid="S1", value=90)
+    s2.options = [type(survey.questions[0].options[0])(code=1, label="x")]
+    s2.options[0].show_if = Expression(op="lt", qid="S1", value=50)
+    assert note_flows.read_second_ask(survey) == 2  # terminate and option; base was done
+    before = survey.to_json()
+    assert note_flows.read_second_ask(survey) == 0
+    assert survey.to_json() == before
+    assert evaluate(s2.terminate_if, {"S1": refused, "S1_REASK": 95})
+    assert evaluate(s2.options[0].show_if, {"S1": refused, "S1_REASK": 45})
+    assert not evaluate(s2.options[0].show_if, {"S1": refused, "S1_REASK": 55})

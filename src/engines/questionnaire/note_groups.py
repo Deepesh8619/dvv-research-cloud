@@ -19,17 +19,21 @@ _RANGE = re.compile(r"^\s*(\d{1,3})\s*[-–]\s*(\d{1,3})\s*$|^\s*(\d{1,3})\s*\+\
 NESTED = re.compile(r"^\s*(male|female|m|f)\s*(\d{1,3})\s*(?:[-–]\s*(\d{1,3})|(\+))\s*$", re.I)
 
 
-def with_reask(expr: Expression, survey: SurveyDefinition) -> Expression:
+def with_reask(expr: Expression, survey: SurveyDefinition,
+               own: frozenset[str] = frozenset()) -> Expression:
     """Count the second ask too: a test on S1 becomes
     (test on S1 and S1 != opt-out) or (the same test on S1_REASK).
 
     S1_REASK is only answered by those who gave the opt-out, so it must not
-    replace S1 (most respondents never see it)."""
-    again = {r["qid"]: r for r in survey.metadata.get("note_flows", {}).get("reask", [])}
+    replace S1 (most respondents never see it). `own` are the qids of the question
+    holding the expression: a flow it belongs to (its source or its second ask) is
+    left alone."""
+    again = {r["qid"]: r for r in survey.metadata.get("note_flows", {}).get("reask", [])
+             if not {r["qid"], r["reask"]} & own}
     if not again:
         return expr
     if expr.children is not None:
-        return Expression(op=expr.op, children=[with_reask(c, survey) for c in expr.children],
+        return Expression(op=expr.op, children=[with_reask(c, survey, own) for c in expr.children],
                           verbatim_text=expr.verbatim_text)
     flow = again.get(expr.qid or "")
     if flow is None:

@@ -13,6 +13,7 @@ import copy
 import re
 
 from src.core.survey_definition import Expression, Question, SurveyDefinition
+from src.engines.questionnaire.note_groups import with_reask
 from src.engines.questionnaire.note_lines import note_lines
 
 _QUOTE = r"[‘'“\"]([^’'”\"]{2,60})[’'”\"]"
@@ -92,7 +93,40 @@ def _reask(survey: SurveyDefinition, q: Question, text: str, made: list[dict]) -
     made.append({"qid": qid, "set": "reask question", "said": m.group(0), "how": "note_flow"})
 
 
+def read_second_ask(survey: SurveyDefinition) -> int:
+    """Later bases that read a refused first ask also read the second ask.
+
+    Run once, after every other rule has set its bases. A question's own flow
+    (its first ask and its second ask) is left alone, and an expression that
+    already reads a second ask is not wrapped again. Returns how many changed."""
+    flows = survey.metadata.get("note_flows", {}).get("reask", [])
+    if not flows:
+        return 0
+    done = {f["reask"] for f in flows}
+    changed = 0
+
+    def fix(expr: Expression | None, own: frozenset[str]) -> Expression | None:
+        nonlocal changed
+        if expr is None or expr.referenced_qids() & done:
+            return expr
+        new = with_reask(expr, survey, own)
+        changed += bool(new.referenced_qids() & done)
+        return new
+
+    for q in survey.questions:
+        own = frozenset({q.qid})
+        q.show_if, q.terminate_if = fix(q.show_if, own), fix(q.terminate_if, own)
+        for o in q.options or []:
+            o.show_if = fix(o.show_if, own)
+    return changed
+
+
 def apply(survey: SurveyDefinition, made: list[dict]) -> None:
+    _apply(survey, made)
+    read_second_ask(survey)
+
+
+def _apply(survey: SurveyDefinition, made: list[dict]) -> None:
     for q in list(survey.questions):
         if q.qid.endswith(SUFFIX):
             continue
