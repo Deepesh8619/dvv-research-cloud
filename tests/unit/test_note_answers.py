@@ -80,3 +80,65 @@ def test_option_hidden_by_condition():
     assert shown[3].op == "not" and shown[3].children[0].qid == "S2"
     assert shown[1] is None and shown[98] is None
     assert all(o.show_if is None for o in qs["Q2"].options)   # S9 does not exist
+
+
+def _labelled(qid, labels, notes, **kw):
+    return Question(qid=qid, text=f"{qid}?", type=QuestionType.SINGLE,
+                    options=[Option(code=i, label=x) for i, x in enumerate(labels, 1)],
+                    source_text="\n".join(f"[PN: {n}]" for n in notes), randomize_options=True,
+                    **kw)
+
+
+_FREQ = ["Several times before", "Once or twice before", "I have not seen this before"]
+_BRANDS = ["Acme", "Bolt", "Cirrus"]
+
+
+def test_randomise_that_names_no_list_over_a_scale_is_asked_not_applied():
+    from src.engines.questionnaire.reading_questions import analyst_reading
+
+    q = _labelled("Q25", _FREQ, ["RANDOMIZE ORDER. ENABLE ZOOM ON IMAGES."])
+    qs = _run(q)
+    assert qs["Q25"].randomize_options is False
+    assert qs["Q25"].validation["randomize_unclear"] == "RANDOMIZE ORDER."
+    s = SurveyDefinition(study_id="s", questions=[q])
+    rec = next(r for r in read_notes(s) if r["kind"] == "randomize")
+    assert (rec["outcome"], rec["detail"]) == ("asked", "which list the randomise means")
+    ask = next(a for a in analyst_reading(s)["questions"] if a["kind"] == "randomize")
+    assert ask["ask"] == ('Q25 says "RANDOMIZE ORDER" but its answers are a scale. '
+                          'What is randomised?')
+    assert ask["options"] == ["The questions or images in this series", "The answers"]
+    assert ask["key"] == next(a for a in analyst_reading(s)["questions"]
+                              if a["kind"] == "randomize")["key"]
+
+
+def test_randomise_still_shuffles_a_brand_list_a_named_list_and_numbered_scales():
+    qs = _run(_labelled("Q1", _BRANDS, ["RANDOMIZE ORDER."]),
+              _labelled("Q2", _FREQ, ["Randomize response options."]),
+              _labelled("Q3", ["1 - Poor", "2", "3", "4", "5 - Great"], ["RANDOMIZE ORDER."]))
+    assert qs["Q1"].randomize_options is True
+    assert qs["Q2"].randomize_options is True
+    assert qs["Q3"].randomize_options is False
+
+
+def test_extracted_document_keeps_a_scale_in_order(monkeypatch):
+    from src.ai.router import BackendUnavailable
+    from src.engines.questionnaire import extractor as ex
+    from src.intake.questionnaire_loader import DocumentBlock, segment_into_questions
+    from src.renderers.surveyjs_compiler import compile_to_surveyjs
+
+    def off(*a, **k):
+        raise BackendUnavailable("AI off")
+
+    monkeypatch.setattr(ex, "run_task", off)
+    monkeypatch.setattr(ex, "verify_question", lambda chunk, result: result)
+    lines = ["Q25. Please indicate if you have seen this ad.", "[PN: RANDOMIZE ORDER.]",
+             "1. Several times before", "2. Once or twice before",
+             "3. I have not seen this before"]
+    blocks = [DocumentBlock(block_type="paragraph", text=t, paragraph_index=i)
+              for i, t in enumerate(lines, 1)]
+    survey = ex.extract_survey_definition(segment_into_questions(blocks), "t")
+    q = survey.questions[0]
+    assert q.randomize_options is False and q.validation["randomize_unclear"]
+    element = compile_to_surveyjs(survey)["pages"][0]["elements"][0]
+    assert [c["value"] for c in element["choices"]] == [1, 2, 3]
+    assert "choicesOrder" not in element
