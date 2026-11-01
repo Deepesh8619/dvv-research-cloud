@@ -1,11 +1,13 @@
 """What an answer to "What a reader would ask" does to the survey.
 
-Only three answers change anything, and only on the survey passed in:
+Only these answers change anything, and only on the survey passed in:
 
 - "Keep both" / "Only the first" on a two-lists question creates those hidden
   variables (a variable is created the way the Copilot's add-hidden-variable card
   does: type info, not asked, one derive_if per band);
-- "Leave for the scripter" marks the matching ledger records `scripter`.
+- "Yes" to a model suggestion re-applies it deterministically (note_model_yes);
+- "Leave for the scripter" / "No, leave it for the scripter" marks the matching
+  ledger records `scripter`.
 
 Every other answer stays stored and is reported as not applied. A decision whose
 question or variable is gone is reported `stale` and applied to nothing else.
@@ -25,7 +27,7 @@ from src.core.survey_definition import (
     QuestionType,
     SurveyDefinition,
 )
-from src.engines.questionnaire.note_ledger import checklist
+from src.engines.questionnaire import note_model_yes
 
 METHOD = "reading_decision"
 LIVE_SENTENCE = ("This survey is live, so your answer is saved but the survey is not changed. "
@@ -80,21 +82,42 @@ def _create(survey: SurveyDefinition, var: dict[str, Any]) -> tuple[str, str]:
 
 def _scripter(survey: SurveyDefinition, ask: dict) -> tuple[str, str]:
     ledger = survey.metadata.get("note_ledger") or {}
-    mine = [r for r in ledger.get("records") or []
-            if r["qid"] == ask["qid"] and r["kind"] == "hidden_var"]
+    if ask["kind"] == "note_model":
+        sugg = _suggestion(survey, ask)
+        if sugg is None:
+            return "stale", "that suggestion is no longer in the reading"
+        mine = [r for r in ledger.get("records") or []
+                if r["qid"] == sugg["qid"] and r["said"] == sugg["said"]]
+    else:
+        mine = [r for r in ledger.get("records") or []
+                if r["qid"] == ask["qid"] and r["kind"] == "hidden_var"]
     todo = [r for r in mine if r["outcome"] != "scripter"]
     if not mine:
         return "not_applied", "no note on that question is in the ledger"
     if not todo:
         return "already", ""
     for r in todo:
-        for bucket in (ledger["summary"]["by_outcome"],
-                       ledger["summary"]["by_kind"].setdefault(r["kind"], {})):
-            bucket[r["outcome"]] = max(bucket.get(r["outcome"], 0) - 1, 0)
-            bucket["scripter"] = bucket.get("scripter", 0) + 1
-        r["outcome"] = "scripter"
-    ledger["checks"] = checklist(ledger["records"])
+        note_model_yes.move_record(
+            ledger, r, "scripter", sugg["kind"] if ask["kind"] == "note_model" and
+            r["kind"] == "none" else None)
     return "applied", ""
+
+
+def _suggestion(survey: SurveyDefinition, ask: dict) -> dict | None:
+    return next((s for s in survey.metadata.get("note_model") or []
+                 if s.get("key") == ask.get("key")), None)
+
+
+def _yes(survey: SurveyDefinition, ask: dict) -> tuple[str, str, list[str]]:
+    sugg = _suggestion(survey, ask)
+    if sugg is None:
+        return "stale", "that suggestion is no longer in the reading", []
+    status, why, made = note_model_yes.apply(survey, sugg)
+    if status in ("applied", "already"):
+        note_model_yes.mark_ledger(survey, sugg, "applied")
+        if status == "applied":
+            survey.metadata["validation_errors"] = survey.validate()
+    return status, why, made
 
 
 def apply_decisions(survey: SurveyDefinition, decisions: dict[str, dict]) -> list[dict]:
@@ -109,7 +132,9 @@ def apply_decisions(survey: SurveyDefinition, decisions: dict[str, dict]) -> lis
         ask, made = asks.get(key), []
         if ask is None:
             status, why = "stale", "that question is no longer asked of this document"
-        elif said == "leave for the scripter":
+        elif ask["kind"] == "note_model" and said == "yes":
+            status, why, made = _yes(survey, ask)
+        elif said in ("leave for the scripter", "no, leave it for the scripter"):
             status, why = _scripter(survey, ask)
         elif ask["kind"] == "two_lists" and said in ("keep both", "only the first"):
             first = variables.get((ask.get("variables") or [""])[0])
