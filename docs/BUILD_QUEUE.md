@@ -452,7 +452,7 @@ note → clauses → kind → outcome
 - "Do not show punch 3 if S2=1" → that option's `show_if` through `conditions.compile_condition`.
 - **Tests:** one per form, one where the source is later than the question (nothing set).
 
-### N5: Variables an analyst would build · sonnet · needs N1, N2
+### N5: Variables an analyst would build · sonnet · done (#245; count bands not built)
 **Files:** `src/engines/questionnaire/reading_questions.py`, new `src/engines/questionnaire/note_groups.py`, `tests/unit/test_reading_questions.py`.
 - Nested groups: `M18-34`, `F65+`, "Male 18-34": find the gender question (a single with answers whose labels are male and female) and the age question (the variable's host, or a numeric with "age" in the wording). The band's rule is gender code AND age range. If either is missing or ambiguous: `needs_you`, and say which is missing.
 - A list that restarts at the same low value, or repeats a group: two lists. Keep the first under the name, offer the second as `<NAME>_2`, status `ready` when all rules compile, and ask one question: "`NAME` lists two breakdowns. Keep both, or only the first?"
@@ -460,7 +460,7 @@ note → clauses → kind → outcome
 - Options for `needs_you` stay honest; add a third option naming the exact missing piece when known.
 - **Tests:** made-up age/gender document ending `ready`; the same without a gender question `needs_you`; two lists.
 
-### N6: Refuse, warn, ask again · sonnet · needs N3
+### N6: Refuse, warn, ask again · sonnet · done (#246)
 **Files:** new `src/engines/questionnaire/note_flows.py`, one call in `note_rules.apply`, `tests/unit/test_note_flows.py`.
 - No new runtime: the second ask is a real question.
 - "If respondent selects ‘X’, show … : MESSAGE … selects ‘X’ a second time, terminate": add `<qid>_REASK` right after the question, same type and options, `show_if` = answered X, its text = MESSAGE then the original wording, range copied, `terminate_if` = X again. Later questions and hidden variables that read the answer need one value: note on the survey that `<qid>_REASK` replaces it where answered; the band rules use it through an "or".
@@ -474,14 +474,14 @@ note → clauses → kind → outcome
 - Add to the ledger's `layout` and `by_design` patterns: "intermediate text only", "show on carousel/carrousel", "respondents can see", "show to all". Grouped display must not ask a person anything.
 - **Tests:** one per kind; repeats of the same sentence on one question appear once.
 
-### N8: A model for what is left · sonnet · needs N1, N3, N4, N5
+### N8: A model for what is left · sonnet · done (#247; not run on real Bedrock)
 **Files:** new `src/engines/questionnaire/note_model.py`, a call at the end of `extract_survey_definition`, `tests/unit/test_note_model.py`.
 - Only `unread` clauses, in one batched call per document, through `src.ai.router.run_private` only. No backend: skip, leave them unread, no error.
 - Closed answer: for each clause `{"index", "kind" (from KINDS or "none"), "qids": [...], "codes": [...], "says": "<one plain line>"}`. Reject and leave unread any record naming a qid or code the document lacks, and any kind outside the list.
 - **The model never sets a field.** Each surviving record becomes a question in "What a reader would ask": "This note seems to say: … Apply it?", with the outcome `asked` and `how: "model"`.
 - **Tests:** a fake backend with valid, invented-qid and invalid-kind records; no backend; no client text in any log line.
 
-### N9: An answer changes the survey · sonnet · needs N5, N6
+### N9: An answer changes the survey · sonnet · done (#248)
 **Files:** `api/routes/questionnaire.py`, new `src/engines/questionnaire/reading_decisions.py`, `tests/integration/test_users_and_project_delete.py`.
 - Read first: the existing `POST /studies/{id}/questionnaire/decisions` and `with_decisions`.
 - `apply_decisions(survey, decisions)`: for a ready variable or an option carrying a change, make it through the code the Copilot's existing card uses (find `propose_*` in `api/routes/copilot.py`), audited as the person's decision. "Leave for the scripter" sets outcome `scripter`.
@@ -496,7 +496,7 @@ note → clauses → kind → outcome
 - Plain sentences, no internal kind names on screen.
 - **Tests:** vitest on counts, filter and the action.
 
-### N11: A ruler for notes · orchestrator (Opus) · needs N1
+### N11: A ruler for notes · orchestrator (Opus) · done once by hand, 155 clauses; `--gold-dir` accuracy not built
 Read a sample of about 150 clauses across the real documents by hand and store the correct kind and outcome in `~/dev/DVV/eval/gold/notes/` (never committed). `note_census.py --gold-dir` reports accuracy, including `applied` that should not have been. A ledger that marks everything `applied` must fail this.
 
 | Order | Cards | Model |
@@ -505,6 +505,19 @@ Read a sample of about 150 clauses across the real documents by hand and store t
 | 2, in parallel | N2, N3, N4, N7, N10, N11 | haiku, sonnet, sonnet, haiku, sonnet, Opus |
 | 3 | N5, N6 | sonnet |
 | 4 | N8, N9 | sonnet |
+
+## Wave PN2: note forms a hand-read sample found missing
+
+From reading 155 sampled clauses by hand (N11). Same rules as Wave PN. None started.
+
+- **N12 Count bands:** "One service = selected only one of punch 2 at S5a, S6, S7". Conditions need a count operator. Most common genuine unread form on Charter.
+- **N13 Answers that cannot go together:** "Do not allow punch 1 and 2 to be selected together" as a link validator.
+- **N14 More masks:** "Show all options EXCEPT the one selected at S6"; "Only show punches 1, 2, 3 if the matching service was selected"; "Mask: show codes 1-5".
+- **N15 Groups kept together:** "keep punch 3-5 together (random order)", "Show 1-3 together". Needs a field and SurveyJS support; until then they stay unread.
+- **N16 Which list a randomise means:** "RANDOMIZE ORDER" beside images shuffles the ads, not the answers (vivo Q25); an ordered scale should be asked about, not shuffled.
+- **N17 Smaller forms:** "CONTINUE IF 13-17" as a terminate; "Allow up to 10 responses" on an open end; "Ask for all brands selected at S5a, S6, S7"; block notes such as "ASK QS5…QS5d if SERVICETYPE = 1".
+- **N18 Ledger accuracy against the sample:** `note_census.py --gold-dir` scores `~/dev/DVV/eval/notes/`. Today "applied" only tests that the field is set anywhere on the question, so a note about the next question can count.
+- **N19 The model's "Yes":** applying N8's suggestions. Later bases reading the first answer should also read a second ask.
 
 ## Wave 5b: (cards to write after 5a)
 - **P3** Replay any deliverable byte for byte from the ledger (needs P2).

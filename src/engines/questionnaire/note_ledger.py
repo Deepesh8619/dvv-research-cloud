@@ -40,7 +40,7 @@ KINDS: tuple[tuple[str, re.Pattern], ...] = (
     _k("base", r"\b(?:ask|asked|show)\s+(?:module\s+)?(?:only\s+)?(?:if|for|those)\b|^\s*(?:base|filter)\b|\bonly\s+ask\b"),  # noqa: E501
     _k("mask", r"\bmask\b|\bonly\s+show\s+(?:those\s+)?selected|\bshow\s+(?:only\s+)?(?:those\s+|brands?\s+)?(?:not\s+)?selected\s+at|\bhide\s+answers?|\bcarry[- ]?forward"),  # noqa: E501
     _k("randomize", r"\brandomi[sz]|\brotate\b|\bshuffle"),
-    _k("anchor", r"\banchor|\b(?:keep|lock|fix(?:ed)?)\s+punch|\bat\s+the\s+(?:bottom|top)\b"),
+    _k("anchor", r"^(?!.*\btogether\b).*(?:\banchor|\b(?:keep|lock|fix(?:ed)?)\s+punch|\bat\s+the\s+(?:bottom|top)\b)"),
     _k("pipe", r"\bpipe[ds]?\b|\bpiping\b|\binsert\s+(?:the\s+)?(?:response|answer|text)"),
     _k("limit_select", r"\bselect\s+(?:at\s+least|up\s+to|at\s+most|exactly)\b|\b(?:up\s+to|max(?:imum)?\s+of)\s+\d+\s+(?:responses?|selections?|answers?)"),  # noqa: E501
     _k("one_or_many", r"\b(?:allow|accept)\s+(?:only\s+)?(?:one|a\s+single|single|multiple|more\s+than\s+one)\b|\bselect\s+(?:only\s+)?one\b|\bselect\s+all\s+that\s+apply"),  # noqa: E501
@@ -52,10 +52,14 @@ KINDS: tuple[tuple[str, re.Pattern], ...] = (
     _k("loop", r"\bloop\b|\bfor\s+each\s+(?:brand|item|product|selected)\b|\biterat"),
     _k("quality", r"\bquality\b|\bflag\s+(?:if|any|respondents?)\b|\bspeeder|\bstraight-?line|\battention\s+check|\bauto-?punch"),  # noqa: E501
     _k("warning", r"\bshow\s+(?:a\s+)?warning\b"),
-    _k("ask_all", r"\b(?:ask|show)\s+(?:all|everyone|everybody)\b|\bshow\s+to\s+all\b|\bto\s+all\s+respondents\b|\brespondents?\s+can\s+see\b"),  # noqa: E501
+    _k("ask_all", r"^(?!.*\bexcept\b).*(?:\b(?:ask|show)\s+(?:all|everyone|everybody)\b|\bshow\s+to\s+all\b|\bto\s+all\s+respondents\b|\brespondents?\s+can\s+see\b)"),  # noqa: E501
 )
 
-_NEGATED = re.compile(r"\b(?:do\s+not|don'?t|no|not)\b", re.I)
+# "Prefer not to answer" in the same sentence does not negate the randomising.
+_NEGATED = re.compile(
+    r"\b(?:do\s+not|don'?t|never)\s+(?:randomi[sz]|rotate|shuffle)|:\s*no\b", re.I)
+_TOGETHER = re.compile(r"\btogether\b|\bwithin\s+(?:pair|\d)", re.I)
+_NOT_A_NOTE = re.compile(r"^\W*blank\W*$|^end\s+screen\W*$|^also\s+worded\s+as\b", re.I)
 _FIXED = {"quota": "scripter", "layout": "scripter", "stimulus": "scripter",
           "quality": "scripter", "ask_all": "by_design"}
 
@@ -94,6 +98,8 @@ def _outcome(kind: str, said: str, q, variables: list[dict],
     if kind in _FIXED:
         return _FIXED[kind], ""
     if kind == "randomize":
+        if _TOGETHER.search(said):
+            return "unread", "keeping groups together is not built"
         if _NEGATED.search(said):  # honoured when the question is not shuffled
             return ("unread", "still randomised") if q.randomize_options else ("applied", "randomize_options off")  # noqa: E501
         return ("applied", "randomize_options") if q.randomize_options else ("unread", "")
@@ -113,15 +119,21 @@ def read_notes(survey: SurveyDefinition) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     qids = frozenset(q.qid for q in survey.questions)
     by_qid = {q.qid: q for q in survey.questions}
+    bands: dict[str, set[str]] = {}
+    for v in variables:
+        bands.setdefault(v["at"], set()).update(b["line"] for b in v.get("bands", []))
     for q in survey.questions:
         # Every sentence of a note turned into a second ask belongs to that flow.
         second = by_qid.get(q.qid + "_REASK")
         flow = second.extraction_evidence.get("flow", "") if second else ""
         for said in sentences(note_lines(q)):
-            if not re.search(r"\w", said):
+            if not re.search(r"\w", said) or _NOT_A_NOTE.search(said):
                 continue
             kinds = (["reask"] if said in flow
                      else [k for k, rx in KINDS if rx.search(said)] or ["none"])
+            # A line listed under a "create … variable" note is that variable's group.
+            if said in bands.get(q.qid, ()):
+                kinds = ["hidden_var"]
             for kind in kinds:
                 outcome, detail = ("unread", "") if kind == "none" else _outcome(kind, said, q, variables, qids)  # noqa: E501
                 out.append({"qid": q.qid, "said": said, "kind": kind,

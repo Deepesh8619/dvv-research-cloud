@@ -21,6 +21,16 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-11-01 — every programmer note gets an outcome (Wave PN, #240-#249)
+
+Each sentence in a note is now recorded as applied, asked, for the scripter, nothing to do, or unread, and shown in a Notes section on the review page. New forms: note-settled types, opt-out answers, masks, anchors, nested gender and age groups, two lists under one name, refuse-and-ask-again as a real second question. Answers to reading questions can create variables. A model suggests readings for what is left, never setting anything itself.
+
+Measured, AI off, 24 documents: 511 of 995 throughout, newly wrong none; the gold does not score second asks or computed variables. Census, 7 real documents, after correcting the ledger: 1,065 records, 572 applied, 111 asked, 40 scripter, 15 nothing to do, 327 unread.
+
+Hand check of 155 clauses: about 5 to 7 of 70 "applied" were wrong, and half of the unread were not real gaps (table blanks, group lines). Fixed in the ledger. Open forms are in Wave PN2 of `BUILD_QUEUE.md`. The model path has not run on real Bedrock.
+
+---
+
 ## 2026-10-31 — the document profile: learn how a document is written before reading it (branch feat/document-profile)
 
 `src/intake/document_profile.py` runs first and counts the document's own habits:
