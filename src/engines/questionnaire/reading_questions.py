@@ -26,6 +26,11 @@ from typing import Any
 
 from src.core.survey_definition import SurveyDefinition
 from src.engines.questionnaire.conditions import compile_condition
+from src.engines.questionnaire.count_bands import (
+    NOT_APPLICABLE,
+    count_condition,
+    is_count_form,
+)
 from src.engines.questionnaire.note_groups import (
     NESTED,
     band_lines,
@@ -170,6 +175,17 @@ def _variable(name, q, rest, lines, survey) -> dict[str, Any]:
             words = None
         elif b := _BAND.match(line):
             band["label"] = b.group("label").strip()
+            if NOT_APPLICABLE.match(b.group("rule")):
+                continue  # "= N/A": no respondent is in it; not part of the variable
+            if is_count_form(b.group("rule")):
+                band["count"] = True
+                try:
+                    expr, band["detail"] = count_condition(b.group("rule"), survey)
+                    band["condition"] = with_reask(expr, survey).to_dict()
+                except ValueError as exc:
+                    band["unread"] = str(exc)
+                var["bands"].append(band)
+                continue
             words = _rule_words(b.group("rule"), q.qid)
         else:
             words = None
@@ -192,6 +208,8 @@ def _variable(name, q, rest, lines, survey) -> dict[str, Any]:
         var.update(status="needs_you",
                    why=f"no exact rule for {', '.join(unread[:4])}"
                    + ("…" if len(unread) > 4 else ""))
+        if counted := [b for b in var["bands"] if b.get("count") and b.get("unread")]:
+            var["why"] += f" ({counted[0]['label']}: {counted[0]['unread']})"
     return var
 
 
@@ -201,6 +219,11 @@ def _questions(survey, variables) -> tuple[list[dict], list[dict]]:
     defined = {v["name"]: v for v in variables}
     seen_refs: set[str] = set()
     for q in survey.questions:
+        if said := (q.validation or {}).get("randomize_unclear"):
+            asks.append({"qid": q.qid, "kind": "randomize",
+                         "ask": f"{q.qid} says \"{said.strip(' .')}\" but its answers are a "
+                                "scale. What is randomised?",
+                         "options": ["The questions or images in this series", "The answers"]})
         for note in _notes(q):
             if m := _CODE_MISMATCH.search(note):
                 asks.append({"qid": q.qid, "kind": "codes",

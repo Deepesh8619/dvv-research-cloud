@@ -459,6 +459,15 @@ def _compile_question(question: Question, by_qid: dict[str, Question]) -> dict[s
             element["maxSelectedChoices"] = limits["max_select"]
         if isinstance(limits.get("min_select"), int) and limits["min_select"] > 0:
             element["minSelectedChoices"] = limits["min_select"]
+        labels = {o.code: _for_respondent(o.label, [], by_qid) for o in question.options}
+        for a, b in limits.get("never_together") or []:
+            if a in labels and b in labels:
+                element.setdefault("validators", []).append({
+                    "type": "expression",
+                    "expression": f"({{{question.qid}}} notcontains {a}) or "
+                                  f"({{{question.qid}}} notcontains {b})",
+                    "text": f"Please do not choose both {labels[a]} and {labels[b]}.",
+                })
     elif qtype == QuestionType.DROPDOWN:
         element["type"] = "dropdown"
         element["choices"] = _choices(question.options, by_qid)
