@@ -40,7 +40,7 @@ KINDS: tuple[tuple[str, re.Pattern], ...] = (
     _k("base", r"\b(?:ask|asked|show)\s+(?:module\s+)?(?:only\s+)?(?:if|for|those)\b|^\s*(?:base|filter)\b|\bonly\s+ask\b"),  # noqa: E501
     _k("mask", r"\bmask\b|\bonly\s+show\s+(?:those\s+)?selected|\bshow\s+(?:only\s+)?(?:those\s+|brands?\s+)?(?:not\s+)?selected\s+at|\bhide\s+answers?|\bcarry[- ]?forward"),  # noqa: E501
     _k("randomize", r"\brandomi[sz]|\brotate\b|\bshuffle"),
-    _k("anchor", r"^(?!.*\btogether\b).*(?:\banchor|\b(?:keep|lock|fix(?:ed)?)\s+punch|\bat\s+the\s+(?:bottom|top)\b)"),
+    _k("anchor", r"^(?!.*\btogether\b).*(?:\banchor|\b(?:keep|lock|fix(?:ed)?)\s+punch|\bat\s+the\s+(?:bottom|top)\b)"),  # noqa: E501
     _k("pipe", r"\bpipe[ds]?\b|\bpiping\b|\binsert\s+(?:the\s+)?(?:response|answer|text)"),
     _k("limit_select", r"\bselect\s+(?:at\s+least|up\s+to|at\s+most|exactly)\b|\b(?:up\s+to|max(?:imum)?\s+of)\s+\d+\s+(?:responses?|selections?|answers?)"),  # noqa: E501
     _k("one_or_many", r"\b(?:allow|accept)\s+(?:only\s+)?(?:one|a\s+single|single|multiple|more\s+than\s+one)\b|\bselect\s+(?:only\s+)?one\b|\bselect\s+all\s+that\s+apply"),  # noqa: E501
