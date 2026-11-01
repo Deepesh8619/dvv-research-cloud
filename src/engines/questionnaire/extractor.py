@@ -502,7 +502,9 @@ def _spec_table_fields(
 # value leaves it off and stays visible in `validation` for a reviewer, because
 # randomising when the document did not ask is a data error, not a nicety.
 _RANDOMIZE_YES = re.compile(r"\byes\b|\brandomi[sz]e\b|\brotate\b|\bscramble\b", re.I)
-_RANDOMIZE_NO = re.compile(r"\bno\b|\bnone\b|\bkeep order\b|\bdo not\b|\(blank\)", re.I)
+_RANDOMIZE_NO = re.compile(
+    r"\bno\b|\bnone\b|\bnever\b|\bkeep order\b|\bdo(?:es)?\s*not\b|\b(?:do|don|doesn)['’]t\b"
+    r"|\bnot\s+(?:to\s+)?(?:be\s+)?(?:randomi|rotat)|\(blank\)", re.I)
 
 
 def _randomize_from_cell(stated: str | None) -> bool:
