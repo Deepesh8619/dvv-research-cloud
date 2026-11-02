@@ -21,6 +21,14 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-11-02 — the Clean survey look, built from a respondent's recording
+
+A new `clean` template, now the default for any link with no template chosen: pinned question, white answer cards, Next grey until answered (still pressable, so a wrong guess explains itself), the Other box directly under its answer, bold piped answers, a thin progress line. Every template now starts a new question at its top, and the Other box takes its words as a placeholder.
+
+Checked by filling a real link on a local backend at phone and desktop sizes, with all answers in the database. That found five faults tests had not: the first question opening scrolled, a floating Next covering answers, an 8px sideways shift on phones, a stalled fade, and Next going dark after one grid row.
+
+---
+
 ## 2026-11-02 — Wave C: corrections are kept and shown to the model (#254, C2)
 
 A person's edit keeps what the reader said and what they settled on. When a model is asked about something unread, it sees a few similar settled cases as advice; validation is unchanged. Examples come from every project in the deployment, are unrelated to the training consent, and `DVV_CORRECTION_EXAMPLES=off` turns them off. AI off, 24 documents: 513 of 995, newly wrong none. Not measured on real Bedrock.
