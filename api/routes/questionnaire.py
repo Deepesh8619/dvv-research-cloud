@@ -34,6 +34,7 @@ from api.auth import UserRole, get_current_user, require_role
 from api.config import STUDIES_DIR
 from api.db import (
     MAX_ARCHIVED_SOURCE_BYTES,
+    ReadingCorrectionDB,
     UserDB,
     compress_for_archive,
     create_questionnaire,
@@ -72,6 +73,8 @@ from src.core.survey_definition import (
     has_nothing_to_answer,
 )
 from src.engines.fielding.materialize import plan_datamap
+from src.engines.questionnaire.corrections_store import reading_of
+from src.engines.questionnaire.corrections_store import record as record_correction
 from src.engines.questionnaire.extraction_diagnosis import completeness_problems, diagnose
 from src.engines.questionnaire.extractor import extract_survey_definition, reread_question
 from src.engines.questionnaire.flag_reasons import flag_reasons
@@ -1050,6 +1053,7 @@ def update_question(
 
     problems_before = survey.validate()
     approved = set(questionnaire.approved_qids or [])
+    reading_before = reading_of(survey[qid])  # C1: what the reader said, before this edit
 
     # qid rename is applied first (and separately) because it mutates the whole
     # survey, not just this question, and shifts which qid the payload key maps to.
@@ -1092,10 +1096,58 @@ def update_question(
     second_look(survey, use_model=False, locked=approved, only={new_qid})
     survey.metadata["validation_errors"] = problems_after
     _save_definition(db, questionnaire, survey)
+    try:  # C1: keeping the lesson must never cost the person their save
+        record_correction(db, study_id, new_qid, reading_before, reading_of(survey[new_qid]),
+                          survey[new_qid].source_text, user.id, old_qid=qid)
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"[{study_id}] correction not recorded ({type(exc).__name__})")
     if new_qid != qid:
         set_questionnaire_approved_qids(db, questionnaire.id, sorted(approved))
     update_questionnaire_status(db, questionnaire.id, "in_review")
     return _question_payload(survey[new_qid], approved)
+
+
+@router.get("/studies/{study_id}/questionnaire/corrections")
+def corrections_count(
+    study_id: str,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER, UserRole.ANALYST)),
+):
+    """How many fixes are saved on this project, and whether training may use them."""
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Project not found")
+    count = db.query(ReadingCorrectionDB).filter_by(study_id=study_id).count()
+    return {"count": count,
+            "allowed": bool((study.study_metadata or {}).get("corrections_for_training"))}
+
+
+class CorrectionsTrainingRequest(BaseModel):
+    allowed: bool
+
+
+@router.put("/studies/{study_id}/questionnaire/corrections-training")
+def set_corrections_training(
+    study_id: str,
+    request: CorrectionsTrainingRequest,
+    db: Session = Depends(get_db),
+    user: UserDB = Depends(require_role(UserRole.OWNER)),
+):
+    """Whether this client allows its saved fixes to be used for training. (Owner)
+
+    Use inside this deployment (prompt examples) does not depend on it."""
+    study = get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Project not found")
+    update_study_status(db, study_id, study.status,
+                        {"corrections_for_training": request.allowed})
+    record_audit(db, entity="study", entity_id=study_id, action="corrections_training",
+                 actor_id=user.id, study_id=study_id,
+                 summary="Saved corrections " + ("may" if request.allowed else "may not")
+                         + " be used for training")
+    db.commit()
+    return {"allowed": request.allowed}
 
 
 @router.post("/studies/{study_id}/questionnaire/questions")

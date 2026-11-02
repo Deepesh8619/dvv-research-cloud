@@ -1113,6 +1113,11 @@ export const questionnaireApi = {
   createAuthored: async (studyId: string, title: string) =>
     api.post<QuestionnaireStatus>(`/studies/${studyId}/questionnaire/authored`, { title }),
 
+  correctionsSaved: async (studyId: string) =>
+    api.get<{ count: number; allowed: boolean }>(`/studies/${studyId}/questionnaire/corrections`),
+  allowCorrectionsForTraining: async (studyId: string, allowed: boolean) =>
+    api.put(`/studies/${studyId}/questionnaire/corrections-training`, { allowed }),
+
   decideReading: async (studyId: string, key: string, ask: string, answer: string) =>
     api.post(`/studies/${studyId}/questionnaire/decisions`, { key, ask, answer }),
 

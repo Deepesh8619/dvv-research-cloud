@@ -43,7 +43,7 @@ import { BucketBar, ConnectionsPanel, IssuesPanel, ProgressRing } from '../compo
 import { bucketInfo } from '../lib/buckets'
 import { askCopilot, focusQuestion } from '../components/CopilotDrawer'
 import { isConstantSumQuestion, TYPE_CHOICES, typeHint, typeLabel } from '../labels/questionTypes'
-import { canCorrect as hasCorrectRole, canWrite as hasWriteRole } from '../auth/roles'
+import { canCorrect as hasCorrectRole, canWrite as hasWriteRole, isOwner } from '../auth/roles'
 import { DocChartIcon } from '../components/Icons'
 import PageHeader from '../components/ui/PageHeader'
 
@@ -1872,7 +1872,7 @@ export default function QuestionnairePage() {
       {status && !notFound && !['processing', 'error'].includes(status.status) && (
         <>
           <StudyUnderstandingPanel understanding={status.study_understanding} onGoTo={goTo} />
-          <DecodingPanel decoding={status.decoding} noteLedger={status.note_ledger} onGoTo={goTo} studyId={studyId} />
+          <DecodingPanel decoding={status.decoding} noteLedger={status.note_ledger} onGoTo={goTo} studyId={studyId} isOwner={isOwner(user?.role)} />
           <SecondLookSummary record={status.second_look} />
           <QAPanel
             qa={status.qa}

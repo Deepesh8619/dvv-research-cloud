@@ -1,5 +1,6 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { questionnaireApi } from '../../api/client'
 import DecodingPanel from './DecodingPanel'
 import type { NoteRecord } from '../../api/client'
 
@@ -7,6 +8,8 @@ vi.mock('../../api/client', () => ({
   questionnaireApi: {
     addQuestion: vi.fn().mockResolvedValue({ data: {} }),
     decideReading: vi.fn().mockResolvedValue({ data: {} }),
+    correctionsSaved: vi.fn().mockResolvedValue({ data: { count: 12, allowed: false } }),
+    allowCorrectionsForTraining: vi.fn().mockResolvedValue({ data: {} }),
   },
 }))
 vi.mock('../CopilotDrawer', () => ({ askCopilot: vi.fn() }))
@@ -110,5 +113,15 @@ describe('DecodingPanel', () => {
   it('renders nothing before a report exists', () => {
     const { container } = render(<DecodingPanel decoding={null} onGoTo={() => {}} />)
     expect(container.innerHTML).toBe('')
+  })
+
+  it('lets only the owner say whether saved corrections may be used for training', async () => {
+    const { unmount } = render(<DecodingPanel decoding={report} onGoTo={() => {}} studyId="s1" />)
+    expect(screen.queryByText(/saved on this project/)).toBeNull()
+    unmount()
+    render(<DecodingPanel decoding={report} onGoTo={() => {}} studyId="s1" isOwner />)
+    expect(await screen.findByText(/12 corrections saved on this project/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('checkbox'))
+    await waitFor(() => expect(questionnaireApi.allowCorrectionsForTraining).toHaveBeenCalledWith('s1', true))
   })
 })
