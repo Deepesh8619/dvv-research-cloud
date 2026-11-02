@@ -143,3 +143,25 @@ def test_a_merged_cell_is_merged_not_repeated(tmp_path: Path):
     assert 'colspan="3"' in html
     # The unmerged row keeps all three of its own cells.
     assert html.count("<td>") == 3
+
+
+def test_a_contents_page_does_not_shift_the_anchors(tmp_path):
+    """The loader skips contents lines; numbering them sent every question too far on."""
+    from docx import Document
+
+    from src.intake.document_html import render_docx
+    from src.intake.questionnaire_loader import load_docx
+
+    doc = Document()
+    doc.add_paragraph("Contents")
+    doc.add_paragraph("Screener section")
+    doc.add_paragraph("Q1. First question?")
+    doc.add_paragraph("Q2. Second question?")
+    path = tmp_path / "toc.docx"
+    doc.save(path)
+    blocks = load_docx(path)
+    html = render_docx(path).html
+    for block in blocks:
+        anchored = html.split(f'id="b{block.paragraph_index}"')[1].split("</p>")[0]
+        assert block.text in anchored
+    assert "Contents" in html

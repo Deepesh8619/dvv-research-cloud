@@ -41,6 +41,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.intake.questionnaire_loader import _is_contents_entry
 from src.intake.revisions import W, _is_deleted, _is_struck
 
 #: Word writes colours as RRGGBB, and "auto" for the default.
@@ -195,6 +196,11 @@ def render_docx(path: str | Path) -> RenderedDocument:
             paragraph: Paragraph = para_map[child]
             inner, live = _paragraph_html(paragraph)
             if not inner.strip():
+                continue
+            if _is_contents_entry(paragraph):
+                # The loader skips a contents line and does not count it, so it is
+                # shown unanchored; numbered, every later anchor pointed too far on.
+                out.append(f'<p class="dvv-blk">{inner}</p>')
                 continue
             heading = (paragraph.style.name or "").lower().startswith("heading")
             tag = "h3" if heading else "p"
