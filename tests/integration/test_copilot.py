@@ -2115,3 +2115,25 @@ def test_a_condition_on_an_answer_that_does_not_exist_is_refused_with_the_real_o
     test_client.post("/api/copilot", json={"message": "show Q3 if Q2 is 7"})
     error = _tool_results(seen)[0]["error"]
     assert "Q2 has no answer coded 7" in error and "1=Yes" in error
+
+
+def test_another_projects_turns_stay_out_of_this_projects_answer(client, monkeypatch):  # noqa: F811
+    """One conversation crosses projects; a follow-up here must not read what was said there."""
+    from api.db import StudyDB
+
+    test_client, sf, _ = client
+    with sf() as db:
+        for sid in ("study_a", "study_b"):
+            db.add(StudyDB(id=sid, client_name=sid, status="created"))
+        db.commit()
+    seen = _script(monkeypatch, ("text", "Said on A."), ("text", "Said on B."), ("text", "Back."))
+    first = test_client.post("/api/copilot", json={"message": "asked on A", "study_id": "study_a"})
+    cid = first.json()["conversation_id"]
+    test_client.post("/api/copilot", json={"message": "asked on B", "study_id": "study_b",
+                                           "conversation_id": cid})
+    on_b = " ".join(str(m.get("content")) for m in seen[1])
+    assert "asked on B" in on_b and "asked on A" not in on_b and "Said on A" not in on_b
+    test_client.post("/api/copilot", json={"message": "back on A", "study_id": "study_a",
+                                           "conversation_id": cid})
+    on_a = " ".join(str(m.get("content")) for m in seen[2])
+    assert "asked on A" in on_a and "asked on B" not in on_a
