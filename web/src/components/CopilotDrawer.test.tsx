@@ -67,6 +67,21 @@ describe('CopilotDrawer', () => {
     localStorage.clear()
   })
 
+  it('typing yes under one card confirms that card, without asking the model', async () => {
+    const card = { id: 'c1', kind: 'reextract', title: 'Read it again', detail: 'd', method: 'POST', path: '/x', body: {}, diff: [] }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const api = (await ask('Prepared.', [card] as any)) as any
+    await screen.findByText('Read it again')
+    api.askStreaming.mockClear()
+    api.confirm.mockResolvedValue({ data: {} })
+    fireEvent.change(screen.getByPlaceholderText('Ask about any project, or paste a screenshot…'), {
+      target: { value: 'yes do it' },
+    })
+    fireEvent.click(screen.getByText('Ask'))
+    await waitFor(() => expect(api.confirm).toHaveBeenCalledWith(card))
+    expect(api.askStreaming).not.toHaveBeenCalled()
+  })
+
   it('reopens the last conversation, and its old cards cannot be confirmed', async () => {
     const { copilotApi } = await import('../api/client')
     localStorage.setItem('dvv.copilot.conversation', 'conv_1')
