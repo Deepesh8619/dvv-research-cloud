@@ -21,10 +21,12 @@ import { registerRespondentControls } from '../components/respondent/controls'
 import { PROBE, askFollowUp } from '../components/respondent/probes'
 import {
   canContinue,
+  choiceWords,
   emphasisePipes,
   groupWriteIns,
   isWriteInBox,
   onScreen,
+  pipeTypedAnswer,
   pipedBold,
 } from '../components/respondent/writeIn'
 import { applySurveyTheme, gradientBar } from '../components/respondent/surveyLook'
@@ -150,7 +152,7 @@ export function applyPipeVariables(survey: Model, variables: PipeVariable[]): vo
     const choices = (question as unknown as { visibleChoices?: Array<{ value: unknown; text: string }> })
       ?.visibleChoices
     const label = choices?.find((c) => String(c.value) === String(code))?.text
-    survey.setVariable(v.name, label ?? '')
+    survey.setVariable(v.name, label ? choiceWords(survey, v.qid, code, label) : '')
   }
 }
 
@@ -255,6 +257,7 @@ export default function RespondentPage() {
             ? emphasisePipes(groupWriteIns(res.data.surveyjs_json))
             : groupWriteIns(res.data.surveyjs_json),
         )
+        survey.onGetQuestionDisplayValue.add(pipeTypedAnswer)
         if (surveyTemplate === 'clean') {
           survey.onTextMarkdown.add(pipedBold)
           // Next turns dark as they type, not when they leave the box.
