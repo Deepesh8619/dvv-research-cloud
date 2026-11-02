@@ -669,6 +669,28 @@ class ProjectChunkDB(Base):
     created_at = Column(String)
 
 
+# --- C1 ---
+class ReadingCorrectionDB(Base):
+    """What the reader said about one question, and what a person settled on.
+
+    One row per study + qid; `before` is never overwritten. Distinct from
+    `CorrectionDB` (plain-language lessons)."""
+
+    __tablename__ = "reading_corrections"
+
+    id = Column(String, primary_key=True, index=True)
+    study_id = Column(String, index=True)
+    qid = Column(String, index=True)
+    source_text = Column(Text, nullable=True)
+    before = Column(Text)
+    after = Column(Text)
+    changed_fields = Column(Text)
+    by_id = Column(String)
+    how = Column(String, default="edit")
+    created_at = Column(String)
+    updated_at = Column(String)
+
+
 # --- P2 ---
 class LedgerHeadDB(Base):
     """The last entry of one study's audit chain ("_global" for entries with no study)."""

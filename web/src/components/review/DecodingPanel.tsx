@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { questionnaireApi, type AnalystReading, type BriefChecklist, type Decoding, type NoteLedger, type NoteRecord } from '../../api/client'
 import InfoTip from '../ui/InfoTip'
 import { askCopilot } from '../CopilotDrawer'
@@ -276,16 +276,42 @@ function NotesSection({ ledger, onGoTo }: { ledger: NoteLedger; onGoTo: (qid: st
   )
 }
 
+/** How many fixes are saved on this project, and whether the client lets them train. */
+function CorrectionsLine({ studyId }: { studyId: string }) {
+  const [saved, setSaved] = useState<{ count: number; allowed: boolean } | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    questionnaireApi.correctionsSaved(studyId).then((r) => setSaved(r.data)).catch(() => {})
+  }, [studyId])
+  if (!saved) return null
+  const toggle = (allowed: boolean) =>
+    questionnaireApi.allowCorrectionsForTraining(studyId, allowed)
+      .then(() => { setSaved({ ...saved, allowed }); setFailed(false) })
+      .catch(() => setFailed(true))
+  return (
+    <p className="text-xs text-slate-600">
+      {failed && <span role="alert" className="text-red-700">That choice was not saved. Try again. </span>}
+      {saved.count} {saved.count === 1 ? 'correction' : 'corrections'} saved on this project.{' '}
+      <label>
+        <input type="checkbox" checked={saved.allowed} onChange={(e) => toggle(e.target.checked)} />{' '}
+        This client allows them to be used for training.
+      </label>
+    </p>
+  )
+}
+
 export default function DecodingPanel({
   decoding,
   onGoTo,
   studyId,
   noteLedger,
+  isOwner = false,
 }: {
   decoding: Decoding | null | undefined
   noteLedger?: NoteLedger | null
   onGoTo: (qid: string) => void
   studyId?: string
+  isOwner?: boolean
 }) {
   if (!decoding) return null
   const unfamiliar = decoding.verdict === 'unfamiliar'
@@ -311,6 +337,7 @@ export default function DecodingPanel({
         )}
         {decoding.brief && <BriefSection brief={decoding.brief} onGoTo={onGoTo} />}
         {decoding.analyst && <AnalystSection analyst={decoding.analyst} studyId={studyId} onGoTo={onGoTo} />}
+        {isOwner && studyId && <CorrectionsLine studyId={studyId} />}
         {noteLedger && <NotesSection ledger={noteLedger} onGoTo={onGoTo} />}
         <section>
           <h4 className="font-medium">Skills used</h4>
