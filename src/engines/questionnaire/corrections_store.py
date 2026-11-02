@@ -80,3 +80,13 @@ def rows_for_examples(db, limit: int = 50) -> list[ReadingCorrectionDB]:
             .join(StudyDB, StudyDB.id == ReadingCorrectionDB.study_id)
             .filter(StudyDB.status != "archived")
             .order_by(ReadingCorrectionDB.updated_at.desc()).limit(limit).all())
+
+
+def example_dicts(db, limit: int = 200) -> list[dict]:
+    """`rows_for_examples` as the plain dicts `correction_examples` reads."""
+    if os.environ.get("DVV_CORRECTION_EXAMPLES", "on").lower() == "off":
+        return []  # one deployment holding several clients can keep them apart
+    return [{"study_id": r.study_id, "source_text": r.source_text or "",
+             "before": json.loads(r.before or "{}"), "after": json.loads(r.after or "{}"),
+             "changed_fields": json.loads(r.changed_fields or "[]")}
+            for r in rows_for_examples(db, limit=limit)]

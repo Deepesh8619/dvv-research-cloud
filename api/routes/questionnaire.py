@@ -73,6 +73,7 @@ from src.core.survey_definition import (
     has_nothing_to_answer,
 )
 from src.engines.fielding.materialize import plan_datamap
+from src.engines.questionnaire import corrections_store
 from src.engines.questionnaire.corrections_store import reading_of
 from src.engines.questionnaire.corrections_store import record as record_correction
 from src.engines.questionnaire.extraction_diagnosis import completeness_problems, diagnose
@@ -478,6 +479,8 @@ def _run_extraction(
             study_id=study_id,
             blocks=blocks,
             rules_for_profile=lambda slug: active_rules_for_profile(job_db, slug),
+            # Settled cases for the model's prompts (C2). Same session, same thread.
+            correction_rows=lambda: corrections_store.example_dicts(job_db, limit=200),
             # The machine-applicable half of the same corrections. This is the
             # line that makes a correction CHEAPER as well as more accurate:
             # a convention taught on an earlier document is now read by the

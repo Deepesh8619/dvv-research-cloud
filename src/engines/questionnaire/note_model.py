@@ -10,10 +10,12 @@ Anything doubtful leaves the clause `unread`. No client text is logged.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from typing import Any
 
 from src.ai.router import BackendUnavailable, ModelOutputError, run_private
 from src.core.survey_definition import SurveyDefinition
+from src.engines.questionnaire import correction_examples
 from src.engines.questionnaire.note_ledger import CAP, KINDS, checklist, read_notes, summary
 
 MAX_CLAUSES = 80
@@ -43,7 +45,7 @@ def _codes(survey: SurveyDefinition) -> dict[str, set[str]]:
             for q in survey.questions}
 
 
-def _prompt(clauses: list[str], survey: SurveyDefinition) -> str:
+def _prompt(clauses: list[str], survey: SurveyDefinition, examples: str = "") -> str:
     known = "\n".join(
         f"{q.qid}: " + ", ".join(sorted(c)[:_CODES_SHOWN])
         for q, c in ((q, _codes(survey)[q.qid]) for q in survey.questions))[:_QID_LIST_LIMIT]
@@ -54,7 +56,8 @@ def _prompt(clauses: list[str], survey: SurveyDefinition) -> str:
         f"is (one of: {', '.join(_KIND_NAMES)}; or none), which questions it names, which "
         "answer codes it names, and what it says in one plain line. Use only question ids "
         "and codes from the list. Skip a clause you are unsure of.\n\n"
-        f"=== QUESTIONS (id: codes) ===\n{known}\n\n=== CLAUSES ===\n{numbered}")
+        f"=== QUESTIONS (id: codes) ===\n{known}\n\n=== CLAUSES ===\n{numbered}"
+        + (f"\n\n{examples}" if examples else ""))
 
 
 def _valid(item: Any, n: int, known: dict[str, set[str]]) -> dict | None:
@@ -78,15 +81,36 @@ def _valid(item: Any, n: int, known: dict[str, set[str]]) -> dict | None:
             "says": " ".join(says.split())[:240]}
 
 
-def apply(survey: SurveyDefinition) -> None:
-    """Ask the model about unread clauses. No backend or no valid answer: no change."""
+def _examples(clauses: list[str], rows: list[dict], study_id: str) -> list[dict]:
+    """The most similar settled cases across the batch: top 2 per clause, at most 8."""
+    chosen: list[dict] = []
+    for c in clauses:
+        for r in correction_examples.similar(c, rows, 2, study_id):
+            if not any(r is x for x in chosen):
+                chosen.append(r)
+    return correction_examples.fit(chosen[:8])
+
+
+def apply(survey: SurveyDefinition,
+          rows: list[dict] | Callable[[], list[dict]] | None = None) -> None:
+    """Ask the model about unread clauses. No backend or no valid answer: no change.
+
+    `rows` (or a function returning them, called only if a clause is unread) are settled
+    cases from this deployment, shown as advice. They never change what is accepted."""
     records = read_notes(survey)
     clauses = list(dict.fromkeys(r["said"] for r in records if r["outcome"] == "unread"))
     clauses = clauses[:MAX_CLAUSES]
     if not clauses:
         return
+    shown: list[dict] = []
+    if rows is not None:
+        shown = _examples(clauses, rows() if callable(rows) else rows, survey.study_id)
+        used = survey.metadata.setdefault("examples_used", {"note_model": 0, "questions": 0})
+        used["note_model"] = len(shown)
     try:
-        response = run_private(_prompt(clauses, survey), SCHEMA, timeout=300)
+        response = run_private(
+            _prompt(clauses, survey, correction_examples.prompt_block(shown)), SCHEMA,
+            timeout=300)
     except (BackendUnavailable, ModelOutputError):
         return
     items = response.content.get("records") if isinstance(response.content, dict) else None

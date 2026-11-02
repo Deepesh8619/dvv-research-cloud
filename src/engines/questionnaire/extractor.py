@@ -47,7 +47,7 @@ from src.core.survey_definition import (
     QuestionType,
     SurveyDefinition,
 )
-from src.engines.questionnaire import schema
+from src.engines.questionnaire import correction_examples, schema
 from src.engines.questionnaire.block_notes import apply as apply_block_notes
 from src.engines.questionnaire.brief_checklist import brief_checklist
 from src.engines.questionnaire.carousel import apply as apply_carousels
@@ -1153,6 +1153,7 @@ def extract_question(
     patterns: list[LearnedPattern] | None = None,
     datamap_question: DatamapQuestion | None = None,
     study_context: str | None = None,
+    examples_for: Callable[[str], str] | None = None,
 ) -> ExtractionResult:
     """Extract one chunk into a structured Question + confidence + flags.
 
@@ -1162,6 +1163,9 @@ def extract_question(
 
     `learned_rules` are founder-taught rules for that profile (correction loop).
     None/empty keeps the prompt byte-identical to the pre-loop one.
+
+    `examples_for(chunk_text)` returns a block of similar settled cases (C2), asked for
+    only when the model is about to be consulted. None keeps the prompt byte-identical.
 
     `patterns` are the machine-applicable half of the same corrections: the
     parsers consult them directly, so a taught convention costs nothing on
@@ -1231,8 +1235,10 @@ def extract_question(
         if via_prose is not None:
             return via_prose
 
+    examples = examples_for(chunk.chunk_text) if examples_for and not _MODEL_OFF.get() else ""
     prompt = schema.build_extraction_prompt(
-        chunk.chunk_text, chunk.candidate_qid, profile_hint, learned_rules, study_context
+        chunk.chunk_text, chunk.candidate_qid, profile_hint, learned_rules, study_context,
+        examples,
     )
     try:
         response: AIResponse = _ask_model(
@@ -1582,6 +1588,7 @@ def extract_survey_definition(
     on_progress: Callable[[int, int], None] | None = None,
     on_checkpoint: Callable[[int, int, SurveyDefinition], None] | None = None,
     checkpoint_every: int = 5,
+    correction_rows: Callable[[], list[dict]] | None = None,
 ) -> SurveyDefinition:
     """Extract + verify every chunk and assemble one draft SurveyDefinition.
 
@@ -1601,7 +1608,9 @@ def extract_survey_definition(
 
     `on_checkpoint(done, total, partial_survey)` fires every `checkpoint_every`
     chunks with a REAL SurveyDefinition covering the work done so far, so the
-    caller can persist it. This is the difference between a run killed at
+    caller can persist it. `correction_rows()` returns settled cases from this deployment
+    (C2); it is called once, only when a model is about to be consulted, and a failure
+    just means no examples. This is the difference between a run killed at
     question 70 of 75 leaving seventy usable questions and leaving nothing —
     which is exactly what happened in production: a 15-minute run persisted
     ZERO. Both callbacks keep this engine free of the database.
@@ -1665,6 +1674,26 @@ def extract_survey_definition(
     # was ever asked.
     datamap_not_asked = non_answerable_qids(datamap) if datamap is not None else {}
 
+    # Settled cases for the prompts (C2): loaded on first need, once. Counts only.
+    shown = {"note_model": 0, "questions": 0}
+    cache: list[list[dict]] = []
+
+    def load_rows() -> list[dict]:
+        if not cache:
+            try:
+                cache.append(list(correction_rows() or []))  # type: ignore[misc]
+            except Exception as exc:  # advice only: never stops a reading
+                print(f"[{study_id}] correction examples unavailable: {type(exc).__name__}",
+                      file=sys.stderr)
+                cache.append([])
+        return cache[0]
+
+    def examples_for(text: str) -> str:
+        kept = correction_examples.fit(
+            correction_examples.similar(text, load_rows(), 3, study_id))
+        shown["questions"] += len(kept)
+        return correction_examples.prompt_block(kept)
+
     results: list[ExtractionResult] = []
     consecutive_backend_failures = 0
     tripped: BackendUnavailable | None = None
@@ -1690,6 +1719,7 @@ def extract_survey_definition(
         result = extract_question(
             chunk, profile_hint, learned_rules, patterns, known,
             study_context=context_for(understanding, chunk.candidate_qid),
+            examples_for=examples_for if correction_rows is not None else None,
         )
 
         if _is_backend_unavailable_result(result):
@@ -1931,7 +1961,10 @@ def extract_survey_definition(
     # quality checks to add.
     survey.metadata["decoding"]["analyst"] = analyst_reading(survey)
     if blocks is not None and not _MODEL_OFF.get():
-        ask_model_about_notes(survey)  # what no reader understood; suggestions only
+        if correction_rows is not None:
+            survey.metadata["examples_used"] = shown
+        # what no reader understood; suggestions only
+        ask_model_about_notes(survey, load_rows if correction_rows is not None else None)
     survey.metadata["decoding"]["profile"] = survey.metadata.get("document_profile")
     return survey
 
