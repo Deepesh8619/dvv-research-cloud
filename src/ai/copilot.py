@@ -499,6 +499,27 @@ _NUDGE = (
     "call in your reply. Call the tools you need now. If nothing here can answer "
     "the question, say that plainly instead of estimating."
 )
+# "The re-read has completed": said with no tool called, while the project on screen
+# stayed as it was. Nothing changes here without a confirmed card, so nothing done
+# can be reported from a reply that called nothing.
+_CLAIMS_DONE = re.compile(
+    r"\b(?:has|have|had|was|were)\s+(?:already\s+|now\s+|been\s+|successfully\s+)*"
+    r"(?:completed|finished|done|re-?read|re-?extracted|updated|applied|saved|created|"
+    r"deleted|changed|fixed)\b"
+    r"|\bI(?:'ve| have)\s+(?:already\s+)?(?:re-?read|updated|applied|changed|created|deleted|"
+    r"fixed|saved)\b", re.I)
+_UNDONE = (
+    "You said something was done, but you called no tool, and nothing changes here "
+    "without a card the user confirms. Check it with a tool now. If they asked for an "
+    "action, prepare its card: propose_reextract to read the whole document again, "
+    "propose_reread_question for one question. Work only on the project they are looking "
+    "at, and never report an action as finished unless a tool shows it."
+)
+_NOT_DONE = (
+    "I have not done that, and nothing has changed: the step did not run. Ask again and "
+    "I will prepare it for you to confirm. To read the whole document again, say "
+    "\"read the document again\"."
+)
 _UNGROUNDED = (
     "I could not look that up, so I am not going to guess at it. The figures I "
     "would need come from this project's own records and the lookup did not run. "
@@ -664,6 +685,16 @@ def run_copilot(
                 if not results and _asserts_data(reply, today, said):
                     # Twice asked, twice invented. Say so rather than pass it on.
                     return _UNGROUNDED, [], label
+            if not results and _CLAIMS_DONE.search(reply or ""):
+                reply, results = _run_agent_loop(
+                    chat, label, message, "", execute,
+                    [*(history or []), {"role": "assistant", "content": reply},
+                     {"role": "user", "content": _UNDONE}],
+                    timeout, None, None, system_prompt=prompt,
+                    max_turns=MAX_TURNS, known_tools=TOOL_NAMES, result_limit=RESULT_LIMIT,
+                )
+                if not results and _CLAIMS_DONE.search(reply or ""):
+                    return _NOT_DONE, [], label
             # A card refused and never retried: seen on Bedrock, the model read
             # an error listing the real questions and passed the list to the
             # user. Once, it is handed the error back and told to correct it.

@@ -155,3 +155,28 @@ def test_a_new_figure_beside_the_users_own_is_still_checked():
         {"content": "412 were screened out."},
     ), message="QAGE terminates if less than 18 — how many did?")
     assert "412" not in reply and "not going to guess" in reply
+
+
+def test_a_finished_action_with_no_tool_behind_it_is_sent_back():
+    """"The re-read has completed", while nothing had run and the project was unchanged."""
+    reply, results, _ = _call(
+        _model({"content": "The re-extraction has already completed. You can now review it."},
+               _tool_call("propose_reextract"),
+               {"content": "Confirm the card and I will read it again."}),
+        message="re read with original document",
+    )
+    assert [r.get("tool") for r in results] == ["propose_reextract"]
+    assert "Confirm" in reply
+
+
+def test_a_claim_that_survives_the_correction_is_not_passed_on():
+    claim = {"content": "The system has re-read the document."}
+    reply, results, _ = _call(_model(claim, claim), message="read it again")
+    assert results == []
+    assert "have not done that" in reply
+
+
+def test_an_explanation_of_what_a_step_will_do_is_not_a_claim():
+    reply, _, _ = _call(_model({"content": "Reading again keeps your approvals."}),
+                        message="what does reading again do?")
+    assert reply.startswith("Reading again")

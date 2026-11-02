@@ -1775,10 +1775,28 @@ _RECENT = 6
 _EARLIER = 40
 
 
-def _history(db: Session, conversation_id: str) -> list[dict]:
+def _same_project(rows: list, study_id: str | None) -> list:
+    """Leave out turns asked on another project's page.
+
+    One conversation follows the user across projects, so "re read with original
+    document" on one project was answered from what was said about the last one.
+    """
+    if not study_id:
+        return rows
+    kept = []
+    for i, m in enumerate(rows):
+        answer = m if m.role != "user" else (rows[i + 1] if i + 1 < len(rows) else None)
+        page = ((answer.trace if answer is not None else None) or {}).get("page")
+        if not page or page == study_id:
+            kept.append(m)
+    return kept
+
+
+def _history(db: Session, conversation_id: str, study_id: str | None = None) -> list[dict]:
     """The recent turns verbatim, and what came before as one compact summary —
     a long session no longer sends twelve full answers with every question."""
-    rows = list_copilot_messages(db, conversation_id)[-(_RECENT + _EARLIER):]
+    rows = _same_project(list_copilot_messages(db, conversation_id), study_id)
+    rows = rows[-(_RECENT + _EARLIER):]
     older, recent = rows[:-_RECENT], rows[-_RECENT:]
     out = []
     if older:
@@ -1980,7 +1998,7 @@ def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> Co
         conversation = get_copilot_conversation(db, body.conversation_id, user.id)
         if conversation is None:
             raise HTTPException(status_code=404, detail="No such conversation")
-        history = _history(db, conversation.id)
+        history = _history(db, conversation.id, body.study_id)
     else:
         history = [t.model_dump() for t in body.history]
     execute_tool, proposals = make_executor(db, user)
