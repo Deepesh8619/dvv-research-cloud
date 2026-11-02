@@ -99,3 +99,39 @@ export function pipedBold(_: unknown, options: { text: string; html?: string }):
     .replace(/\*\*\s*\*\*/g, '')
     .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
 }
+
+const boxOf = (survey: Model, qid: string, code: unknown): string => {
+  const typed = survey.getValue(`${qid}r${String(code)}oe`)
+  return typeof typed === 'string' ? typed.trim() : ''
+}
+
+/** The words a choice stands for: what they typed behind "Other", else its label. */
+export function choiceWords(survey: Model, qid: string, code: unknown, label: string): string {
+  return boxOf(survey, qid, code) || label
+}
+
+/**
+ * `onGetQuestionDisplayValue`: a later question quoting this answer quotes what
+ * they typed. "You first heard through Other (Specify)" tells them nothing.
+ */
+export function pipeTypedAnswer(
+  survey: Model,
+  options: { question: Question; displayValue: unknown },
+): void {
+  const q = options.question
+  const value = q.value
+  const codes = Array.isArray(value) ? value : [value]
+  if (value == null || !codes.some((c) => boxOf(survey, q.name, c))) return
+  const choices =
+    (q as unknown as { visibleChoices?: Array<{ value: unknown; text: string }> }).visibleChoices ?? []
+  options.displayValue = codes
+    .map((code) =>
+      choiceWords(
+        survey,
+        q.name,
+        code,
+        choices.find((c) => String(c.value) === String(code))?.text ?? String(code),
+      ),
+    )
+    .join(', ')
+}

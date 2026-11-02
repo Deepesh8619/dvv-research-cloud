@@ -1,7 +1,14 @@
 import { Model } from 'survey-core'
 import { describe, expect, it } from 'vitest'
 
-import { canContinue, emphasisePipes, groupWriteIns, onScreen, pipedBold } from './writeIn'
+import {
+  canContinue,
+  emphasisePipes,
+  groupWriteIns,
+  onScreen,
+  pipeTypedAnswer,
+  pipedBold,
+} from './writeIn'
 
 // The "Other (specify)" box the compiler emits after a question. The respondent
 // page renders it with SurveyJS's own text question, so what matters is that the
@@ -157,5 +164,53 @@ describe('the clean look', () => {
     const plain: { text: string; html?: string } = { text: 'Nothing here' }
     pipedBold(null, plain)
     expect(plain.html).toBeUndefined()
+  })
+})
+
+describe('quoting an Other answer', () => {
+  const survey = (type: string) => {
+    const model = new Model({ pages: [{ elements: [
+      { type, name: 'Q1', choices: [{ value: 1, text: 'Xing' }, { value: 2, text: 'LinkedIn' }, { value: 98, text: 'Other (Specify)' }] },
+      { type: 'text', name: 'Q1r98oe', visibleIf: type === 'checkbox' ? '{Q1} contains 98' : '{Q1} = 98' },
+      { type: 'text', name: 'Q2', title: 'You said {Q1}.' },
+    ] }] })
+    model.onGetQuestionDisplayValue.add(pipeTypedAnswer)
+    return model
+  }
+  const said = (m: Model) => m.getQuestionByName('Q2').locTitle.textOrHtml
+
+  it('quotes what they typed on a single answer', () => {
+    const m = survey('radiogroup')
+    m.setValue('Q1', 98)
+    m.setValue('Q1r98oe', 'Campus event')
+    expect(said(m)).toBe('You said Campus event.')
+  })
+
+  it('keeps the label for a closed answer', () => {
+    const m = survey('radiogroup')
+    m.setValue('Q1', 1)
+    expect(said(m)).toBe('You said Xing.')
+  })
+
+  it('mixes labels and typed text on a multi answer', () => {
+    const m = survey('checkbox')
+    m.setValue('Q1', [1, 98])
+    m.setValue('Q1r98oe', 'Glassdoor')
+    expect(said(m)).toBe('You said Xing, Glassdoor.')
+  })
+
+  it('falls back to the label when nothing was typed', () => {
+    const m = survey('radiogroup')
+    m.setValue('Q1', 98)
+    expect(said(m)).toBe('You said Other (Specify).')
+  })
+
+  it('changing the typed text changes the sentence, and braces stay text', () => {
+    const m = survey('radiogroup')
+    m.setValue('Q1', 98)
+    m.setValue('Q1r98oe', 'First')
+    expect(said(m)).toBe('You said First.')
+    m.setValue('Q1r98oe', '{Q1}')
+    expect(said(m)).toBe('You said {Q1}.')
   })
 })
