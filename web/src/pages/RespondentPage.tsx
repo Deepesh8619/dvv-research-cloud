@@ -19,6 +19,7 @@ import {
 import LoadingSpinner from '../components/LoadingSpinner'
 import { registerRespondentControls } from '../components/respondent/controls'
 import { PROBE, askFollowUp } from '../components/respondent/probes'
+import { groupWriteIns, isWriteInBox, onScreen } from '../components/respondent/writeIn'
 import { applySurveyTheme, gradientBar } from '../components/respondent/surveyLook'
 import { TemplateHeader, Transcript } from '../components/respondent/TemplateChrome'
 import { TEMPLATES, loadTemplateFont, templateCss, templateSlug } from '../components/respondent/templates'
@@ -142,11 +143,14 @@ export function applyPipeVariables(survey: Model, variables: PipeVariable[]): vo
 
 function positionOf(survey: Model): { at: number; of: number; qid: string } {
   const info = survey.getProgressInfo()
-  const of = info.questionCount || 1
+  const boxes = survey.getAllQuestions(true).filter((q) => isWriteInBox(q.name)).length
+  const of = info.questionCount - boxes || 1
   // The question ON SCREEN. Counting answers instead said "2 of 7" the moment
   // one statement of a six-row grid was answered, while still on question 1.
-  const current = survey.currentSingleQuestion
-  const answerable = survey.getAllQuestions(true).filter((q) => q.getType() !== 'html')
+  const current = onScreen(survey)
+  const answerable = survey
+    .getAllQuestions(true)
+    .filter((q) => q.getType() !== 'html' && !isWriteInBox(q.name))
   const qid = current?.name ?? ''
   const index = current ? answerable.indexOf(current) : -1
   if (index >= 0) return { at: Math.min(index + 1, of), of, qid }
@@ -232,7 +236,7 @@ export default function RespondentPage() {
         const surveyTheme = themeFor(res.data.theme)
         const surveyTemplate = templateSlug(res.data.template)
         loadTemplateFont(surveyTemplate)
-        const survey = new Model(res.data.surveyjs_json)
+        const survey = new Model(groupWriteIns(res.data.surveyjs_json))
         applyKeepTogether(survey, res.data.surveyjs_json)
         const pipeVariables = (res.data.surveyjs_json as { pipeVariables?: PipeVariable[] })
           .pipeVariables ?? []
@@ -421,7 +425,11 @@ export default function RespondentPage() {
       const { answers, kept_your_answers } = res.data
       for (const [k, v] of Object.entries(answers)) model.setValue(k, v)
       const target = model.getQuestionByName(qid)
-      if (target) model.currentSingleQuestion = target
+      if (target) {
+        const holder = model as unknown as { currentSingleElement: unknown }
+        const panel = target.parent as unknown as { isPanel?: boolean }
+        holder.currentSingleElement = panel?.isPanel ? panel : target
+      }
       setPosition(positionOf(model))
       const n = Object.keys(answers).length
       setJumpNote(
@@ -472,7 +480,7 @@ export default function RespondentPage() {
 
   if (phase === 'welcome') {
     // A follow-up box is asked only after a thin answer: not one of the questions.
-    const questionCount = model?.getAllQuestions().filter((q) => !q.name.endsWith(PROBE) && q.getType() !== 'html').length ?? 0  // as the progress bar counts
+    const questionCount = model?.getAllQuestions().filter((q) => !q.name.endsWith(PROBE) && !isWriteInBox(q.name) && q.getType() !== 'html').length ?? 0  // as the progress bar counts
     const minutes = Math.max(1, Math.ceil(questionCount / 4))
     return (
       <Centered theme={theme} template={template}>
