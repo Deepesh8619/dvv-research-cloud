@@ -396,6 +396,7 @@ def build_extraction_prompt(
     profile_hint: str | None = None,
     learned_rules: list[str] | None = None,
     study_context: str | None = None,
+    examples: str | None = None,
 ) -> str:
     """Prompt for the single-chunk extraction pass.
 
@@ -431,6 +432,7 @@ def build_extraction_prompt(
         f"{block_for('extract')}\n"
         f"{spec}"
         f"{_study_block(study_context)}"
+        f"{examples + chr(10) if examples else ''}"
         f"{hint}"
         "----- SOURCE CHUNK -----\n"
         f"{chunk_text}\n"

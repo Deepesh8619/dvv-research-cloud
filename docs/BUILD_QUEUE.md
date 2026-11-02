@@ -522,7 +522,7 @@ From reading 155 sampled clauses by hand (N11). Same rules as Wave PN. All built
 ## Wave C: learning from corrections
 
 - **C1 (done) Correction store:** every fix a team member makes on the review page is saved as one row: the source text, the reader's answer, the corrected answer, who fixed it, and whether the client allows it to be used for training. Masked on export. Never mixed with the eval set, whose readings Claude wrote.
-- **C2 Examples in the prompt:** when a note is unread, show the model 3 to 5 similar rows from C1. Needs C1.
+- **C2 (done) Examples in the prompt:** when a note is unread, show the model 3 to 5 similar rows from C1. Needs C1.
 
 ## Wave 5b: (cards to write after 5a)
 - **P3** Replay any deliverable byte for byte from the ledger (needs P2).

@@ -21,6 +21,12 @@ lists, not just the percentages: a removed flag can turn a known miss into a
 
 ---
 
+## 2026-11-02 — Wave C: corrections are kept and shown to the model (#254, C2)
+
+A person's edit keeps what the reader said and what they settled on. When a model is asked about something unread, it sees a few similar settled cases as advice; validation is unchanged. Examples come from every project in the deployment, are unrelated to the training consent, and `DVV_CORRECTION_EXAMPLES=off` turns them off. AI off, 24 documents: 513 of 995, newly wrong none. Not measured on real Bedrock.
+
+---
+
 ## 2026-11-01 — Wave PN2: the note forms a hand check found missing (#250-#253)
 
 Count bands without a new operator, answers that cannot go together, more masks, groups kept together in the link, "RANDOMIZE ORDER" on a scale is asked rather than shuffled, CONTINUE IF, up to N open-end boxes, block asks, the model's "Yes", later bases read a second ask, and "applied" now needs the note itself to have done it.
