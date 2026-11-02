@@ -180,3 +180,25 @@ def test_an_explanation_of_what_a_step_will_do_is_not_a_claim():
     reply, _, _ = _call(_model({"content": "Reading again keeps your approvals."}),
                         message="what does reading again do?")
     assert reply.startswith("Reading again")
+
+
+def test_a_card_only_claimed_is_sent_back_then_refused():
+    claim = {"content": "I have prepared a card to re-extract the questionnaire."}
+    reply, results, _ = _call(_model(claim, claim), message="fix it")
+    assert not any(r.get("proposed") for r in results)
+    assert "have not done that" in reply
+
+
+def test_confirmed_with_nothing_run_is_a_claim():
+    claim = {"content": "Re-extraction has been confirmed. The system will now re-read it."}
+    reply, _, _ = _call(_model(claim, claim), message="yes do it")
+    assert "have not done that" in reply
+
+
+def test_a_real_card_may_be_mentioned():
+    reply, results, _ = _call(
+        _model(_tool_call("propose_reextract"),
+               {"content": "I have prepared a card. Press Confirm to start."}),
+        message="fix it", execute=lambda n, a: {"proposed": True, "card": "Read again"})
+    assert any(r.get("proposed") for r in results)
+    assert "prepared a card" in reply

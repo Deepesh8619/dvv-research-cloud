@@ -2137,3 +2137,50 @@ def test_another_projects_turns_stay_out_of_this_projects_answer(client, monkeyp
                                            "conversation_id": cid})
     on_a = " ".join(str(m.get("content")) for m in seen[2])
     assert "asked on A" in on_a and "asked on B" not in on_a
+
+
+def test_reading_the_document_again_gets_its_card_without_a_model(client, monkeypatch, tmp_path):  # noqa: F811, E501
+    import json
+
+    from docx import Document
+
+    from api.db import QuestionnaireDB, StudyDB, compress_for_archive
+    from api.routes.copilot import _wants_document_read as wants
+    from src.core.survey_definition import Block, Question, SurveyDefinition
+
+    assert wants("read the document again", "")
+    assert wants("re read with original document", "")
+    assert wants("please re-extract the questionnaire", "")
+    assert not wants("why did the re-read of the document fail?", "")
+    assert not wants("read Q5 again", "")
+    assert wants("yes do it", "I can re-extract the questionnaire document.")
+    assert not wants("yes do it", "Shall I change Q5's wording?")
+
+    test_client, sf, _ = client
+    with sf() as db:
+        db.add(StudyDB(id="study_r", client_name="Acme", status="created"))
+        doc, raw = Document(), tmp_path / "x.docx"
+        doc.add_paragraph("Q1. How old are you?")
+        doc.save(raw)
+        survey = SurveyDefinition(study_id="study_r", source="x", status="draft",
+                                  blocks=[Block(block_id="B", question_ids=["Q1"])],
+                                  questions=[Question(qid="Q1", text="Age?")])
+        db.add(QuestionnaireDB(id="qn_r", study_id="study_r", status="in_review", version=1,
+                               source_filename="x.docx",
+                               definition_json=json.dumps(survey.to_dict()),
+                               source_file_b64=compress_for_archive(raw)))
+        db.commit()
+    seen = _script(monkeypatch, ("text", "should not be asked"))
+    resp = test_client.post("/api/copilot", json={"message": "read the document again",
+                                                  "study_id": "study_r"}).json()
+    assert seen == [], "no model call"
+    assert [c["path"] for c in resp["proposals"]] == [
+        "/studies/study_r/questionnaire/reextract"]
+    assert "Press Confirm" in resp["reply"]
+    assert resp["answered_by"] == "DVV"
+    # And the card does what it says: a new version is made from the document.
+    card = resp["proposals"][0]
+    done = test_client.request(card["method"], f"/api{card['path']}", json=card["body"])
+    assert done.status_code in (200, 202), done.text
+    with sf() as db:
+        assert db.query(QuestionnaireDB).filter_by(study_id="study_r", version=2).count() == 1

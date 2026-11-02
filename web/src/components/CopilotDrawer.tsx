@@ -33,6 +33,8 @@ type CardState = 'pending' | 'working' | 'done' | 'dismissed' | 'failed' | 'expi
 export function askCopilot(prefill?: string) {
   window.dispatchEvent(new CustomEvent('dvv:copilot-open', { detail: { prefill } }))
 }
+const YES = /^\s*(?:yes(?: please)?|yes,? do it|ok(?:ay)?|sure|go ahead|do it|proceed|please do|confirm)\s*[.!]*\s*$/i
+
 export function focusQuestion(studyId: string, qid: string | null) {
   window.dispatchEvent(new CustomEvent('dvv:question-focus', { detail: { studyId, qid } }))
 }
@@ -690,6 +692,23 @@ export default function CopilotDrawer({ open, onClose }: { open: boolean; onClos
   const submit = async (message: string) => {
     if (!message || busy) return
     const images = shots
+    // "yes do it" under a card is the person confirming it. Answering in words did
+    // nothing while sounding as though it had. One card only: with several, "yes"
+    // does not say which.
+    const open = [...turns].reverse().find((t) => t.role === 'assistant')?.cards
+      ?.filter((c) => (cardState[c.id] ?? 'pending') === 'pending') ?? []
+    if (YES.test(message) && open.length && !images.length) {
+      setTurns((t) => [
+        ...t,
+        { role: 'user', content: message },
+        ...(open.length > 1
+          ? [{ role: 'assistant' as const, content: 'There are several cards above. Press Confirm on the one you want.' }]
+          : []),
+      ])
+      setInput('')
+      if (open.length === 1) await confirm(open[0])
+      return
+    }
     setTurns((t) => [...t, { role: 'user', content: message, images }])
     setInput('')
     setShots([])

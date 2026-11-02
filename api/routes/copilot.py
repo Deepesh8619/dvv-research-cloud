@@ -1775,6 +1775,27 @@ _RECENT = 6
 _EARLIER = 40
 
 
+# An explicit request to read the document again is not a judgement call. It gets
+# its card from code: a model could, and did, write "I have prepared a card" with none.
+_READ_AGAIN = re.compile(
+    r"(?:\bre-?\s?read\b|\bre-?\s?extract\b|\bread\b.*\bagain\b|\bread again\b)"
+    r".*(?:\bdoc(?:ument)?\b|\bfile\b|\boriginal\b|\bquestionnaire\b|\bqnre\b)"
+    r"|(?:\bdoc(?:ument)?\b|\bquestionnaire\b|\bqnre\b).*\b(?:again|re-?\s?read|re-?\s?extract)\b",
+    re.I)
+_NOT_A_REQUEST = re.compile(
+    r"\?\s*$|^\s*(?:why|how|what|when|did|does|has|is|was|can you explain)\b", re.I)
+_YES = re.compile(r"^\s*(?:yes(?: please)?|yes,? do it|ok(?:ay)?|sure|go ahead|do it|proceed|"
+                  r"please do|confirm)\s*[.!]*\s*$", re.I)
+_OFFERED_READ = re.compile(r"\bre-?\s?extract|\bread\b[^.\n]{0,40}\bdocument\b[^.\n]{0,20}\bagain\b"
+                           r"|\bre-?\s?read\b[^.\n]{0,30}\bdocument\b", re.I)
+
+
+def _wants_document_read(message: str, last_reply: str) -> bool:
+    if _YES.match(message):
+        return bool(_OFFERED_READ.search(last_reply))
+    return bool(_READ_AGAIN.search(message)) and not _NOT_A_REQUEST.search(message)
+
+
 def _same_project(rows: list, study_id: str | None) -> list:
     """Leave out turns asked on another project's page.
 
@@ -2065,10 +2086,21 @@ def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> Co
     started = time.perf_counter()
     try:
         usage.count_question()
-        reply, results, answered_by = run_copilot(
-            body.message, history, execute,
-            user=user.name or user.email, role=user.role, page=page, offered=offered,
-            areas=areas, heavy=heavy)
+        last_reply = next((m.content or "" for m in reversed(
+            _same_project(list_copilot_messages(db, conversation.id), body.study_id)
+            if conversation else []) if m.role != "user"), "")
+        if body.study_id and not body.images and _wants_document_read(body.message, last_reply):
+            done = execute("propose_reextract", {"study_id": body.study_id})
+            results = [{"tool": "propose_reextract", "args": {"study_id": body.study_id}, **done}]
+            answered_by = "DVV"
+            reply = (f"{proposals[-1].detail} Press Confirm below to start."
+                     if done.get("success") is not False and proposals
+                     else f"I could not prepare that: {done.get('error')}.")
+        else:
+            reply, results, answered_by = run_copilot(
+                body.message, history, execute,
+                user=user.name or user.email, role=user.role, page=page, offered=offered,
+                areas=areas, heavy=heavy)
     except BackendUnavailable as exc:
         logger.warning(f"copilot: no backend ({exc})")
         raise HTTPException(status_code=503,
@@ -2083,6 +2115,8 @@ def _answer(body: CopilotRequest, db: Session, user: UserDB, on_step=None) -> Co
     # The history shows the model "[Looked up for this answer: …]" after each
     # earlier reply; it sometimes copies that line into its own. Not for the user.
     reply = re.sub(r"\n*\[Looked up for this answer:[^\]]*\]", "", reply).strip()
+    # The summary of older turns says "[looked up: …]"; copied, it can drag a stub with it.
+    reply = re.sub(r"[ \t]*(?:-\s*)?(?:\*\*\w{0,3}\s*)?\[looked up:[^\]]*\]", "", reply).strip()
     # A provider that fails mid-answer is retried on the next one from the top,
     # which re-prepares the same cards: keep one card per distinct action.
     unique = list({(c.method, c.path, json.dumps(c.body, sort_keys=True)): c
