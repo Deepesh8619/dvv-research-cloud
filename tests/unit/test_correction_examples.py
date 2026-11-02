@@ -165,3 +165,9 @@ def test_example_naming_q99_does_not_make_q99_acceptable(monkeypatch):
     assert "Q99" in seen[0]
     assert s.metadata.get("note_model") is None
     assert s.metadata["decoding"]["analyst"]["questions"] == []
+
+
+def test_a_deployment_can_turn_examples_off(monkeypatch):
+    from src.engines.questionnaire.corrections_store import example_dicts
+    monkeypatch.setenv("DVV_CORRECTION_EXAMPLES", "off")
+    assert example_dicts(None) == []
