@@ -19,7 +19,12 @@ export function groupWriteIns<T>(json: T): T {
   if (!source.pages) return json
   const pages = source.pages.map((page) => {
     const out: Element[] = []
-    for (const el of page.elements ?? []) {
+    for (const raw of page.elements ?? []) {
+      // The answer above already says what the box is for: its words become the
+      // placeholder, not a second question title.
+      const el: Element = isWriteInBox(String(raw.name ?? ''))
+        ? { ...raw, titleLocation: 'hidden', placeholder: raw.title }
+        : raw
       const last = out[out.length - 1]
       const name = String(el.name ?? '')
       if (!isWriteInBox(name) || !last) {
@@ -48,4 +53,49 @@ export function onScreen(survey: Model): Question | null {
   const element = (survey as unknown as { currentSingleElement?: { questions?: Question[] } })
     .currentSingleElement
   return element?.questions?.[0] ?? null
+}
+
+function answered(q: Question): boolean {
+  if (q.isEmpty()) return false
+  if (q.getType() !== 'matrix') return true
+  // A grid is answered when every statement shown has an answer.
+  const rows = (q as unknown as { visibleRows?: Array<{ name: unknown }> }).visibleRows ?? []
+  const value = q.value as Record<string, unknown>
+  return rows.every((r) => value[String(r.name)] != null)
+}
+
+/** Whether what is on screen has been answered. Advisory: see `.dvv-t-clean[data-ready]`. */
+export function canContinue(survey: Model): boolean {
+  const element = (survey as unknown as { currentSingleElement?: { questions?: Question[] } })
+    .currentSingleElement
+  const questions = element?.questions ?? (survey.currentSingleQuestion ? [survey.currentSingleQuestion] : [])
+  return questions.every((q) => !q.isVisible || !q.isRequired || answered(q))
+}
+
+/** A piped answer stands out in its sentence: `{Q1}` is wrapped here, drawn by `pipedBold`. */
+export function emphasisePipes<T>(json: T): T {
+  const source = json as { pages?: Array<{ elements?: Element[] }> }
+  if (!source.pages) return json
+  const mark = (el: Element): Element => ({
+    ...el,
+    ...(typeof el.title === 'string'
+      ? { title: el.title.replace(/\{[^{}\s]+\}/g, (m) => `**${m}**`) }
+      : {}),
+    ...(Array.isArray(el.elements) ? { elements: (el.elements as Element[]).map(mark) } : {}),
+  })
+  return {
+    ...source,
+    pages: source.pages.map((p) => ({ ...p, elements: (p.elements ?? []).map(mark) })),
+  } as T
+}
+
+const escapeHtml = (text: string) =>
+  text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+
+/** `onTextMarkdown`: **answer** to bold. Everything is escaped: the answer may be typed text. */
+export function pipedBold(_: unknown, options: { text: string; html?: string }): void {
+  if (!options.text.includes('**')) return
+  options.html = escapeHtml(options.text)
+    .replace(/\*\*\s*\*\*/g, '')
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
 }

@@ -1,7 +1,7 @@
 import { Model } from 'survey-core'
 import { describe, expect, it } from 'vitest'
 
-import { groupWriteIns, onScreen } from './writeIn'
+import { canContinue, emphasisePipes, groupWriteIns, onScreen, pipedBold } from './writeIn'
 
 // The "Other (specify)" box the compiler emits after a question. The respondent
 // page renders it with SurveyJS's own text question, so what matters is that the
@@ -101,5 +101,61 @@ describe('the box on the same screen', () => {
     model.setValue('Q0', 'no')
     expect(model.nextPage()).toBe(true)
     expect(onScreen(model)?.name).toBe('Q2')
+  })
+})
+
+describe('the clean look', () => {
+  it('the box takes its words as a placeholder, not a title', () => {
+    const json = { pages: [{ elements: [
+      { type: 'radiogroup', name: 'Q1', choices: [98] },
+      { type: 'text', name: 'Q1r98oe', title: 'Please specify' },
+    ] }] }
+    const panel = groupWriteIns(json).pages[0].elements[0] as unknown as { elements: Record<string, unknown>[] }
+    expect(panel.elements[1].titleLocation).toBe('hidden')
+    expect(panel.elements[1].placeholder).toBe('Please specify')
+  })
+
+  it('is ready only when what is on screen is answered, the Other box included', () => {
+    const model = new Model(groupWriteIns({ pages: [{ elements: [
+      { type: 'radiogroup', name: 'Q1', isRequired: true, choices: [1, 98] },
+      { type: 'text', name: 'Q1r98oe', isRequired: true, visibleIf: '{Q1} = 98' },
+      { type: 'text', name: 'Q2' },
+    ] }] }))
+    model.questionsOnPageMode = 'questionPerPage'
+    expect(canContinue(model)).toBe(false)
+    model.setValue('Q1', 1)
+    expect(canContinue(model)).toBe(true)
+    model.setValue('Q1', 98)
+    expect(canContinue(model)).toBe(false)
+    model.setValue('Q1r98oe', 'typed')
+    expect(canContinue(model)).toBe(true)
+    model.nextPage()
+    expect(canContinue(model)).toBe(true) // optional
+  })
+
+  it('a grid waits for every statement', () => {
+    const model = new Model({ pages: [{ elements: [{
+      type: 'matrix', name: 'G', isRequired: true, columns: [1, 2], rows: ['a', 'b'],
+    }] }] })
+    model.questionsOnPageMode = 'questionPerPage'
+    expect(canContinue(model)).toBe(false)
+    model.setValue('G', { a: 1 })
+    expect(canContinue(model)).toBe(false)
+    model.setValue('G', { a: 1, b: 2 })
+    expect(canContinue(model)).toBe(true)
+  })
+
+  it('bolds a piped answer and never lets typed text become markup', () => {
+    const json = emphasisePipes({ pages: [{ elements: [{ type: 'text', name: 'Q2', title: 'You said {Q1}.' }] }] })
+    expect(json.pages[0].elements[0].title).toBe('You said **{Q1}**.')
+    const o: { text: string; html?: string } = { text: 'You said **<img src=x>**.' }
+    pipedBold(null, o)
+    expect(o.html).toBe('You said <b>&#60;img src=x&#62;</b>.')
+    const empty: { text: string; html?: string } = { text: 'You said ****.' }
+    pipedBold(null, empty)
+    expect(empty.html).toBe('You said .')
+    const plain: { text: string; html?: string } = { text: 'Nothing here' }
+    pipedBold(null, plain)
+    expect(plain.html).toBeUndefined()
   })
 })

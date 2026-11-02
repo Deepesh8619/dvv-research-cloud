@@ -19,10 +19,23 @@ import {
 import LoadingSpinner from '../components/LoadingSpinner'
 import { registerRespondentControls } from '../components/respondent/controls'
 import { PROBE, askFollowUp } from '../components/respondent/probes'
-import { groupWriteIns, isWriteInBox, onScreen } from '../components/respondent/writeIn'
+import {
+  canContinue,
+  emphasisePipes,
+  groupWriteIns,
+  isWriteInBox,
+  onScreen,
+  pipedBold,
+} from '../components/respondent/writeIn'
 import { applySurveyTheme, gradientBar } from '../components/respondent/surveyLook'
 import { TemplateHeader, Transcript } from '../components/respondent/TemplateChrome'
-import { TEMPLATES, loadTemplateFont, templateCss, templateSlug } from '../components/respondent/templates'
+import {
+  DEFAULT_TEMPLATE_SLUG,
+  TEMPLATES,
+  loadTemplateFont,
+  templateCss,
+  templateSlug,
+} from '../components/respondent/templates'
 
 // Grid, rank and number questions are drawn by us — see controls.tsx.
 registerRespondentControls()
@@ -78,7 +91,7 @@ function Emblem({ theme, children }: { theme: Theme; children: React.ReactNode }
 }
 
 function PoweredBy() {
-  return <p className="mt-8 text-xs font-medium tracking-wide text-slate-400">Powered by DVV Research Cloud</p>
+  return <p className="dvv-powered mt-8 text-xs font-medium tracking-wide text-slate-400">Powered by DVV Research Cloud</p>
 }
 
 // Where the respondent is, from the survey's OWN counters. `currentPageNo` does
@@ -164,7 +177,8 @@ export default function RespondentPage() {
   const [model, setModel] = useState<Model | null>(null)
   const [title, setTitle] = useState('')
   const [theme, setTheme] = useState<Theme>(DEFAULT_THEME)
-  const [template, setTemplate] = useState('classic')
+  const [template, setTemplate] = useState(DEFAULT_TEMPLATE_SLUG)
+  const [ready, setReady] = useState(true)
   // Clear template: the respondent's own larger-text switch.
   const [big, setBig] = useState(false)
   // Where the respondent is, kept in state because SurveyJS mutates its model
@@ -236,7 +250,16 @@ export default function RespondentPage() {
         const surveyTheme = themeFor(res.data.theme)
         const surveyTemplate = templateSlug(res.data.template)
         loadTemplateFont(surveyTemplate)
-        const survey = new Model(groupWriteIns(res.data.surveyjs_json))
+        const survey = new Model(
+          surveyTemplate === 'clean'
+            ? emphasisePipes(groupWriteIns(res.data.surveyjs_json))
+            : groupWriteIns(res.data.surveyjs_json),
+        )
+        if (surveyTemplate === 'clean') {
+          survey.onTextMarkdown.add(pipedBold)
+          // Next turns dark as they type, not when they leave the box.
+          survey.textUpdateMode = 'onTyping'
+        }
         applyKeepTogether(survey, res.data.surveyjs_json)
         const pipeVariables = (res.data.surveyjs_json as { pipeVariables?: PipeVariable[] })
           .pipeVariables ?? []
@@ -262,7 +285,8 @@ export default function RespondentPage() {
         survey.showProgressBar = 'top'
         survey.progressBarType = 'questions'
         survey.showQuestionNumbers = 'off'
-        survey.focusFirstQuestionAutomatic = true
+        // In Clean the ring on the first answer reads as already selected.
+        survey.focusFirstQuestionAutomatic = surveyTemplate !== 'clean'
         // We swap to our own warm thank-you view on complete, so suppress SurveyJS's.
         survey.showCompletedPage = false
         applySurveyTheme(survey, surveyTheme)
@@ -304,8 +328,12 @@ export default function RespondentPage() {
           setSection((was) => ({ label, fresh: !!label && label !== was.label }))
         }
         trackSection(survey)
+        setReady(canContinue(survey))
         survey.onCurrentPageChanged.add(async (sender) => {
+          // A new question starts at its top, not wherever the last list was scrolled to.
+          window.scrollTo(0, 0)
           setPosition(positionOf(sender))
+          setReady(canContinue(sender))
           trackSection(sender)
           void askFollowUp(sender, async (qid, answer) =>
             (await fieldingApi.probe(token, sessionIdRef.current, qid, answer)).data.probe)
@@ -315,6 +343,7 @@ export default function RespondentPage() {
         // A multi-punch or text answer changes the count without changing page.
         survey.onValueChanged.add((sender) => {
           setPosition(positionOf(sender))
+          setReady(canContinue(sender))
           applyPipeVariables(sender, pipeVariables)
           applyGridMaskVariables(sender, gridMasks)
         })
@@ -563,7 +592,9 @@ export default function RespondentPage() {
   return (
     <div
       className={`dvv-t-${template} min-h-screen pb-32`}
+      data-ready={ready}
       style={{
+        ['--dvv-top' as string]: isTest ? '34px' : '3px',
         background: TEMPLATES[template].ground(theme),
         fontFamily: TEMPLATES[template].family,
         ['--dvv-fs' as string]: big ? '24px' : '20px',
@@ -722,7 +753,14 @@ export default function RespondentPage() {
 
       {/* Progress first: how much is left is the single thing a respondent most
           wants to know, and the commonest reason they abandon. */}
-      {template !== 'classic' && template !== 'pulse' ? (
+      {template === 'clean' ? (
+        <div className="sticky z-20 h-[3px]" style={{ top: isTest ? 31 : 0, background: '#D5D9DF' }} aria-hidden>
+          <div
+            className="dvv-progress__fill h-full"
+            style={{ width: `${progress}%`, background: theme.accent, transition: 'width 280ms ease-out' }}
+          />
+        </div>
+      ) : template !== 'classic' && template !== 'pulse' ? (
         <TemplateHeader
           template={template}
           theme={theme}
@@ -796,10 +834,10 @@ export default function RespondentPage() {
               {String(position.at).padStart(2, '0')}
             </p>
           )}
-          <QuestionSymbol name={symbols[position.qid]} accent={theme.accent} />
+          {template !== 'clean' && <QuestionSymbol name={symbols[position.qid]} accent={theme.accent} />}
           {model && <Survey model={model} />}
         </div>
-        <p className="mt-6 text-center text-xs font-medium tracking-wide text-slate-400">
+        <p className="dvv-powered mt-6 text-center text-xs font-medium tracking-wide text-slate-400">
           Powered by DVV Research Cloud
         </p>
       </div>

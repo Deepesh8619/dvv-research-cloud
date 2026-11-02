@@ -20,6 +20,13 @@ export interface Template {
 }
 
 export const TEMPLATES: Record<string, Template> = {
+  clean: {
+    name: 'Clean',
+    blurb: 'Quiet, nothing but the question',
+    font: 'Inter:wght@400;500;600;800',
+    family: 'Inter, system-ui, sans-serif',
+    ground: () => '#E7EAEE',
+  },
   classic: {
     name: 'Classic',
     blurb: 'One card, segmented progress',
@@ -70,7 +77,7 @@ export const TEMPLATES: Record<string, Template> = {
   },
 }
 
-export const DEFAULT_TEMPLATE_SLUG = 'classic'
+export const DEFAULT_TEMPLATE_SLUG = 'clean'
 export const TEMPLATE_SLUGS = Object.keys(TEMPLATES)
 
 export function templateSlug(slug?: string | null): string {
@@ -89,6 +96,7 @@ export function loadTemplateFont(slug: string): void {
 }
 
 const INK = '#1F2333'
+const CLEAN_INK = '#1F2430'
 
 /** Every template's rules, scoped by class, recoloured by the theme. Layered
  * after the base `.dvv-survey` block, so only what differs is said here. */
@@ -97,15 +105,15 @@ export function templateCss(theme: Theme): string {
   const D = theme.accentDeep
   return `
 /* ---------- shared: templates other than Classic drop the white card */
-.dvv-t-pulse .dvv-card, .dvv-t-ledger .dvv-card, .dvv-t-chat .dvv-card, .dvv-t-clear .dvv-card {
+.dvv-t-clean .dvv-card, .dvv-t-pulse .dvv-card, .dvv-t-ledger .dvv-card, .dvv-t-chat .dvv-card, .dvv-t-clear .dvv-card {
   background: transparent; border: 0; box-shadow: none; padding: 0;
 }
 .dvv-face { display: none; }
 /* SurveyJS's empty title toolbar: invisible, but 8px past a phone's edge. */
 .dvv-survey .sd-action-title-bar--empty { display: none !important; }
 /* SurveyJS sets its own face (Open Sans) inside the survey; the template's wins. */
-:is(.dvv-t-pulse, .dvv-t-ledger, .dvv-t-chat, .dvv-t-brand, .dvv-t-play, .dvv-t-clear) .sd-root-modern,
-:is(.dvv-t-pulse, .dvv-t-ledger, .dvv-t-chat, .dvv-t-brand, .dvv-t-play, .dvv-t-clear) .sd-root-modern * {
+:is(.dvv-t-clean, .dvv-t-pulse, .dvv-t-ledger, .dvv-t-chat, .dvv-t-brand, .dvv-t-play, .dvv-t-clear) .sd-root-modern,
+:is(.dvv-t-clean, .dvv-t-pulse, .dvv-t-ledger, .dvv-t-chat, .dvv-t-brand, .dvv-t-play, .dvv-t-clear) .sd-root-modern * {
   font-family: inherit !important;
 }
 /* SurveyJS sizes the title's text node itself (16px, under a 0px wrapper), so a
@@ -122,8 +130,8 @@ export function templateCss(theme: Theme): string {
 .dvv-t-ledger .dvv-card { padding-top: 28px; }
 
 /* ---------- welcome / thank-you / screen-out screens */
-:is(.dvv-t-pulse, .dvv-t-ledger, .dvv-t-chat, .dvv-t-play, .dvv-t-clear) .dvv-bar { display: none; }
-:is(.dvv-t-ledger, .dvv-t-clear) .dvv-emblem { display: none; }
+:is(.dvv-t-clean, .dvv-t-pulse, .dvv-t-ledger, .dvv-t-chat, .dvv-t-play, .dvv-t-clear) .dvv-bar { display: none; }
+:is(.dvv-t-clean, .dvv-t-ledger, .dvv-t-clear) .dvv-emblem { display: none; }
 .dvv-t-pulse .dvv-centered { border: 0; border-radius: 28px; box-shadow: 0 24px 48px -28px ${A}66; }
 .dvv-t-pulse .dvv-centered h1 { font-weight: 800; letter-spacing: -0.02em; }
 .dvv-t-ledger .dvv-centered { background: transparent; border: 0; box-shadow: none; text-align: left; }
@@ -267,5 +275,73 @@ export function templateCss(theme: Theme): string {
 }
 .dvv-t-clear .dvv-survey .sd-body__navigation .sd-btn { min-height: 60px; border-radius: 10px; background: ${D}; color: #fff; font-weight: 700; }
 .dvv-t-clear .dvv-survey .sd-body__navigation .sd-navigation__prev-btn { min-height: 52px; background: #fff; color: #111; border: 2px solid #111; }
+/* ---------- Clean: the question, its answers, and one way forward */
+.dvv-t-clean .dvv-powered { display: none; }
+/* SurveyJS's unseen Clear / More toolbar hangs past a phone's edge and shifts the page. */
+.dvv-t-clean .dvv-survey .sd-action-title-bar { display: none !important; }
+.dvv-t-clean { overflow-x: clip; }
+/* No entrance: a stalled fade once left a question at a third of its opacity. */
+.dvv-t-clean .dvv-survey .sd-question { animation: none; }
+.dvv-t-clean .dvv-centered { border: 0; border-radius: 6px; box-shadow: 0 1px 2px rgba(16,24,40,.08); }
+.dvv-t-clean .dvv-centered h1 { font-size: 1.125rem; font-weight: 600; }
+.dvv-t-clean .dvv-centered button { background: ${CLEAN_INK} !important; border-radius: 6px; }
+.dvv-t-clean .dvv-survey .sd-question__required-text { display: none; }
+/* The question stays in view while a long list scrolls under it. */
+.dvv-t-clean .dvv-survey .sd-question__header {
+  position: sticky; top: var(--dvv-top, 3px); z-index: 10; background: #fff;
+  padding: 18px 0 14px; margin-bottom: 20px;
+  box-shadow: 0 0 0 100vmax #fff; clip-path: inset(0 -100vmax);
+}
+/* A grid's question clips to its own box otherwise, cutting the bar at the card. */
+.dvv-t-clean .dvv-survey :is(.sd-question, .sd-question--table, .sd-panel) { overflow: visible; }
+.dvv-t-clean .dvv-survey .sd-panel__content { padding-top: 0; }
+.dvv-t-clean .dvv-survey .sd-question__title b { font-weight: 800; }
+.dvv-t-clean .dvv-survey .sd-question__title { margin-bottom: 0; color: #1A1D23; font-weight: 600; }
+.dvv-t-clean .dvv-survey .sd-question__title .sv-string-viewer { font-size: 1.0625rem; line-height: 1.45; }
+.dvv-t-clean .dvv-survey .sd-question__description { color: #6B7280; font-size: .8125rem; margin-top: 4px; }
+.dvv-t-clean .dvv-survey .sd-item {
+  min-height: 46px; padding: .625rem .875rem; margin-bottom: 8px;
+  border: 1px solid transparent; border-radius: 6px; background: #fff;
+  box-shadow: 0 1px 2px rgba(16,24,40,.07);
+}
+.dvv-t-clean .dvv-survey .sd-item:hover { border-color: transparent; background: #fff; box-shadow: 0 2px 8px rgba(16,24,40,.14); }
+.dvv-t-clean .dvv-survey .sd-item--checked,
+.dvv-t-clean .dvv-survey .sd-item--checked:hover { border-color: ${A}; background: ${A}1F; box-shadow: none; }
+.dvv-t-clean .dvv-survey .sd-item__control-label { font-size: .9375rem; color: #1A1D23; }
+.dvv-t-clean .dvv-survey .sd-input { min-height: 46px; border: 1px solid #C9CED6; border-radius: 6px; font-size: .9375rem; box-shadow: none; }
+.dvv-t-clean .dvv-survey .sd-input:focus { border-color: ${A}; box-shadow: 0 0 0 1px ${A}; }
+.dvv-t-clean .dvv-survey .sd-comment { min-height: 96px; }
+/* The "Other" box reads as part of the answer it belongs to. */
+.dvv-t-clean .dvv-survey .sd-panel .sd-row + .sd-row { margin-top: 0; }
+.dvv-t-clean .dvv-survey .sd-panel { padding: 0; box-shadow: none; background: transparent; }
+.dvv-t-clean .dvv-survey .sd-panel .sd-row + .sd-row .sd-question { margin-top: -2px; padding-left: 34px; }
+.dvv-t-clean .dvv-choice { border-radius: 6px !important; }
+/* Back is an arrow; the way forward is one button at the right. */
+/* In the page's flow, not floating: on a long list a floating bar covers answers. */
+.dvv-t-clean .dvv-survey .sd-action-bar.sd-body__navigation {
+  position: static; transform: none; width: 100%; margin-top: 24px; padding: 0 !important;
+  background: transparent; box-shadow: none; border-radius: 0; justify-content: space-between;
+}
+.dvv-t-clean .dvv-survey .sd-body__navigation .sv-action { flex: 0 0 auto; }
+.dvv-t-clean .dvv-survey .sd-body__navigation .sv-action:has(:is(.sd-navigation__next-btn, .sd-navigation__complete-btn)) { margin-left: auto; }
+.dvv-t-clean .dvv-survey.dvv-survey { padding-top: 0; }
+.dvv-t-clean .dvv-card.dvv-card { padding: 0; }
+.dvv-t-clean .dvv-survey .sd-body__navigation .sd-btn {
+  min-height: 44px; min-width: 120px; border-radius: 6px; background: ${CLEAN_INK}; font-size: .9375rem;
+}
+.dvv-t-clean .dvv-survey .sd-body__navigation .sd-navigation__prev-btn {
+  width: 44px; min-width: 44px; padding: 0; font-size: 0; color: transparent; border: 0;
+  box-shadow: 0 1px 2px rgba(16,24,40,.1); background: #fff center / 18px no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231A1D23' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19 12H5M12 19l-7-7 7-7'/%3E%3C/svg%3E");
+}
+/* Grey until answered. Still pressable: if our reading of "answered" is ever
+   wrong the respondent is told why, never stranded. */
+.dvv-t-clean[data-ready="false"] .dvv-survey :is(.sd-navigation__next-btn, .sd-navigation__complete-btn) {
+  background: #A3A9B3;
+}
+@media (max-width: 640px) {
+  .dvv-t-clean .dvv-survey .sd-body__navigation .sv-action:has(:is(.sd-navigation__next-btn, .sd-navigation__complete-btn)) { flex: 1 1 auto; margin-left: 8px; }
+  .dvv-t-clean .dvv-survey .sd-body__navigation .sd-btn:not(.sd-navigation__prev-btn) { width: 100%; }
+}
 `
 }
